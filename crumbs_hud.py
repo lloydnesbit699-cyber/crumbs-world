@@ -29,6 +29,8 @@ phone's Wi-Fi address.
 v2.0 (2026-09-18): map-first phone layout — the map owns the whole screen;
 tile palette and tools live in sliding edge trays, actions in a top-bar
 dropdown menu, setup in a bottom sheet; zoom controls float over the map.
+v2.1 (2026-09-18): two-finger gestures on the map — drag with two fingers
+to pan, pinch to zoom, both at once; one finger keeps painting.
 
 Run:   python3 crumbs_hud.py
 Open:  http://127.0.0.1:8778   (same phone's browser)
@@ -476,7 +478,7 @@ if __name__ == "__main__":
     srv = ThreadingHTTPServer((host, PORT), Handler)
     threading.Thread(target=_autosave_loop, daemon=True).start()
     print("=" * 52)
-    print("  Crumbs HUD v2.0 — map-first layout + wifi sharing")
+    print("  Crumbs HUD v2.1 — gestures + map-first layout + wifi sharing")
     if public:
         ip = _lan_ip()
         print("  PUBLIC mode: anyone on your Wi-Fi can open the HUD.")

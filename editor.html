@@ -124,7 +124,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v2.0</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v2.1</small></span>
 </div>
 
 <div id="menu-dropdown">
@@ -262,6 +262,8 @@ function fitTiles() {
 window.addEventListener("resize", () => { fitTiles(); render(); });
 let stroke = null;                  // {cells:Map, layer}
 let panMode = false, panStart = null;   // v1.7 camera: pan instead of paint
+const ptrs = new Map();                 // v2.1: active pointers for gestures
+let gesture = null;                     // v2.1: two-finger pan/pinch state
 let playMode = false, hero = null, heroTimer = null;
 
 async function api(path, body) {
@@ -382,19 +384,52 @@ function strokeAdd(cell) {
 }
 canvas.addEventListener("pointerdown", e => {
   e.preventDefault();
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+  if (ptrs.size === 2) {
+    // v2.1: second finger down — drop any in-progress paint, gesture takes over
+    gesture = null;
+    if (stroke) { stroke = null; refresh(); }
+    panStart = null;
+    return;
+  }
+  if (ptrs.size > 2) return;
   if (panMode) {  // v1.7 camera: drag pans the map instead of painting
     panStart = { x: e.clientX, y: e.clientY,
                  sl: stage.scrollLeft, st: stage.scrollTop };
-    canvas.setPointerCapture(e.pointerId);
     return;
   }
   const cell = evCell(e); if (!cell) return;
   if (playMode) { playTap(cell); return; }
-  canvas.setPointerCapture(e.pointerId);
   stroke = { cells: new Map(), layer };
   strokeAdd(cell);
 });
+// v2.1: two fingers on the map — drag pans, pinch zooms, at the same time
+function onGestureMove() {
+  const p = [...ptrs.values()];
+  if (p.length < 2) return;
+  const dist = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+  const mid = { x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2 };
+  if (!gesture) { gesture = { startDist: dist, startPx: tilePx, lastMid: mid }; return; }
+  const newPx = Math.max(8, Math.min(64, gesture.startPx * dist / gesture.startDist));
+  if (newPx !== tilePx) {
+    // zoom, keeping the view anchored proportionally
+    const rx = stage.scrollWidth > stage.clientWidth
+      ? stage.scrollLeft / (stage.scrollWidth - stage.clientWidth) : 0.5;
+    const ry = stage.scrollHeight > stage.clientHeight
+      ? stage.scrollTop / (stage.scrollHeight - stage.clientHeight) : 0.5;
+    manualZoom = true;
+    tilePx = newPx; render();
+    stage.scrollLeft = rx * (stage.scrollWidth - stage.clientWidth);
+    stage.scrollTop = ry * (stage.scrollHeight - stage.clientHeight);
+  }
+  stage.scrollLeft -= (mid.x - gesture.lastMid.x);
+  stage.scrollTop -= (mid.y - gesture.lastMid.y);
+  gesture.lastMid = mid;
+}
 canvas.addEventListener("pointermove", e => {
+  if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (ptrs.size >= 2) { e.preventDefault(); onGestureMove(); return; }
   if (panMode) {
     if (!panStart) return;
     e.preventDefault();
@@ -416,8 +451,15 @@ async function endStroke() {
   // server is source of truth; light re-sync keeps undo/redo exact
   await refresh();
 }
-canvas.addEventListener("pointerup", endStroke);
-canvas.addEventListener("pointercancel", () => { stroke = null; panStart = null; refresh(); });
+canvas.addEventListener("pointerup", e => {
+  ptrs.delete(e.pointerId);
+  if (ptrs.size < 2) gesture = null;
+  if (ptrs.size === 0) endStroke();
+});
+canvas.addEventListener("pointercancel", e => {
+  ptrs.delete(e.pointerId);
+  gesture = null; stroke = null; panStart = null; refresh();
+});
 
 // v1.7 camera: Move toggles pan mode, -/+ zoom, Fit re-fits the screen
 $("btn-pan").onclick = () => {

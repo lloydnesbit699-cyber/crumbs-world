@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 hud_map.json
 .DS_Store
+custom_tiles.json
+hud_patrols.json
+custom_tiles/

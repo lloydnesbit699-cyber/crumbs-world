@@ -139,6 +139,9 @@
   #tile-edit-presets button { flex: 1 1 28%; margin: 0; padding: 8px 4px; font-size: 12px; }
   #tile-edit-presets button.on { border-color: #4da3ff; color: #4da3ff; }
   #tile-edit-delete { background: #5c2b2b; border-color: #d76d6d; }
+  /* v3.4: patrol tool */
+  #btn-patrol.on { border-color: #8a6dd7; color: #c9b8ff; }
+  #btn-patrol-done { background: #2b4a2b; border-color: #6dd76d; margin-top: 6px; }
   .row2 { display: flex; gap: 8px; }
   .row2 button { flex: 1; margin: 0; }
   #collide-palette { display: none; gap: 8px; }
@@ -166,7 +169,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v3.3</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v3.4</small></span>
 </div>
 
 <div id="menu-dropdown">
@@ -208,7 +211,7 @@
     <input id="import-name" maxlength="24" placeholder="tile name">
     <div id="import-presets"></div>
     <div id="import-speed" hidden>frame <input id="import-ms" type="number" value="400" min="80" max="2000" step="40"> ms</div>
-    <button id="import-animate" class="widebtn" hidden>✨ Make it move</button>
+    <button id="import-animate" class="widebtn" hidden>✨ Bring to life</button>
     <div class="row2">
       <button id="import-add">Add tile</button>
       <button id="import-cancel" class="ghost">Cancel</button>
@@ -234,6 +237,8 @@
 <aside class="tray" id="tray-right">
   <div class="tray-head">Tools</div>
   <button id="btn-eraser" title="Eraser">Eraser</button>
+  <button id="btn-patrol" title="Make a character walk a route">Patrol</button>
+  <button id="btn-patrol-done" hidden title="Finish this patrol route">Done ✓</button>
   <button id="btn-link" title="Stamp the selected collision under painted tiles">Stamp collision: off</button>
   <button id="btn-clear" class="danger" title="Clear current layer">Clear layer</button>
 </aside>
@@ -385,6 +390,8 @@ let panX = 0, panY = 0;                 // v2.2: canvas offset in px, relative t
 const ptrs = new Map();                 // v2.1: active pointers for gestures
 let gesture = null;                     // v2.1: two-finger pan/pinch state
 let playMode = false, hero = null, heroTimer = null, heroSwimming = false;   // v3.2: swim state
+// v3.4: patrol NPCs — routes from the server, live walkers in play mode
+let patrolTool = false, draftPoints = [], patrols = [], npcs = [], npcTimer = null;
 
 async function api(path, body) {
   // v1.4: iOS freezes the server when a-Shell backgrounds; a fetch that dies
@@ -525,6 +532,34 @@ function render() {
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     }
   }
+  // v3.4: patrol NPCs — moving walkers in play mode, standing figures + routes
+  // while editing
+  if (playMode) {
+    npcs.forEach(drawNpc);
+  } else {
+    patrols.forEach(p => drawNpc({ tile_id: p.tile_id,
+      x: p.points[0][0], y: p.points[0][1], flip: false }));
+    if (patrolTool) {
+      patrols.forEach(p => {
+        ctx.strokeStyle = "rgba(150,140,255,0.5)"; ctx.lineWidth = 2;
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        p.points.forEach(([x, y], i) => {
+          const cx = x * tilePx + tilePx / 2, cy = y * tilePx + tilePx / 2;
+          i ? ctx.lineTo(cx, cy) : ctx.moveTo(cx, cy);
+        });
+        ctx.closePath(); ctx.stroke(); ctx.setLineDash([]);
+      });
+      draftPoints.forEach(([x, y], i) => {
+        const cx = x * tilePx + tilePx / 2, cy = y * tilePx + tilePx / 2, r = tilePx * 0.3;
+        ctx.fillStyle = "#8a6dd7"; ctx.strokeStyle = "#fff"; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = "#fff"; ctx.font = "bold " + Math.round(tilePx * 0.32) + "px sans-serif";
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(String(i + 1), cx, cy);
+      });
+    }
+  }
   // object markers
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const oid = objects[y][x];
@@ -621,6 +656,7 @@ canvas.addEventListener("pointerdown", e => {
   }
   const cell = evCell(e); if (!cell) return;
   if (playMode) { playTap(cell); return; }
+  if (patrolTool) { patrolTap(cell); return; }   // v3.4: patrol stops, not paint
   stroke = { cells: new Map(), linkCells: new Map(), layer };
   strokeAdd(cell);
 });
@@ -712,6 +748,11 @@ $("btn-play").onclick = async () => {
     if (!r.ok) { toast("play failed"); return; }
     playMode = true; hero = { x: r.x, y: r.y };
     erasing = false; $("btn-eraser").classList.remove("on");   // v3.1: the eraser
+    // v3.4: patrol tool rests during play; NPCs start walking their routes
+    patrolTool = false; $("btn-patrol").classList.remove("on");
+    draftPoints = []; $("btn-patrol-done").hidden = true;
+    await buildNpcs();
+    if (npcs.length) npcTimer = setInterval(() => npcTick(0.1), 100);
     // "can't reach" confusion was play mode intercepting taps — paint tools rest now
     $("btn-play").classList.add("on");
     toast("play mode — tap a tile to walk there");
@@ -719,6 +760,8 @@ $("btn-play").onclick = async () => {
     await api("/api/play/stop", {});
     playMode = false; hero = null; heroSwimming = false;
     if (heroTimer) { clearInterval(heroTimer); heroTimer = null; }
+    if (npcTimer) { clearInterval(npcTimer); npcTimer = null; }   // v3.4: walkers rest
+    npcs = [];
     $("btn-play").classList.remove("on");
     toast("back to editing");
   }
@@ -730,6 +773,122 @@ $("btn-light").onclick = () => {
   $("btn-light").textContent = "Lighting: " + (lightingOn ? "on" : "off");
   render();
 };
+
+// ---- v3.4: patrol NPCs -------------------------------------------------------
+// Pick a character tile, tap Patrol, tap the stops in order, Done. In play
+// mode he walks the route on his own — flipping to face his direction.
+async function loadPatrols() {
+  const r = await api("/api/patrols");
+  patrols = r.patrols || [];
+}
+$("btn-patrol").onclick = () => {
+  if (playMode) return;
+  patrolTool = !patrolTool;
+  $("btn-patrol").classList.toggle("on", patrolTool);
+  draftPoints = []; $("btn-patrol-done").hidden = true;
+  erasing = false; $("btn-eraser").classList.remove("on");
+  toast(patrolTool ? "patrol — tap the stops he should walk, then Done" : "patrol off");
+  render();
+};
+function patrolTap(cell) {
+  if (!draftPoints.length) {
+    const hit = patrols.find(p => p.points[0][0] === cell.x && p.points[0][1] === cell.y);
+    if (hit && confirm("Remove this patrol?")) { removePatrol(hit.id); return; }
+  }
+  if (draftPoints.length >= 8) { toast("that's enough stops — tap Done"); return; }
+  draftPoints.push([cell.x, cell.y]);
+  $("btn-patrol-done").hidden = draftPoints.length < 2;
+  render();
+}
+$("btn-patrol-done").onclick = async () => {
+  if (draftPoints.length < 2 || selTile == null) return;
+  const r = await api("/api/patrols/create", { tile_id: selTile, points: draftPoints });
+  if (!r.ok) { toast("patrol failed: " + (r.error || "unknown")); return; }
+  draftPoints = []; $("btn-patrol-done").hidden = true;
+  await loadPatrols(); render();
+  toast("he's on patrol — hit Play to watch him walk it");
+};
+async function removePatrol(id) {
+  await api("/api/patrols/delete", { id });
+  await loadPatrols(); render();
+  toast("patrol removed");
+};
+// NPC walkers: legs ride the server pathfinder, concatenated into a loop
+async function buildNpcs() {
+  npcs = [];
+  if (!patrols.length) return;
+  const legs = [];
+  patrols.forEach((p, pi) => {
+    for (let i = 0; i < p.points.length; i++)
+      legs.push({ pi, from: p.points[i], to: p.points[(i + 1) % p.points.length] });
+  });
+  const r = await api("/api/patrol-paths", { legs: legs.map(l => [l.from, l.to]) });
+  const paths = (r && r.paths) || [];
+  patrols.forEach((p, pi) => {
+    const loop = [];
+    legs.forEach((l, li) => { if (l.pi === pi && paths[li] && paths[li].length) loop.push(...paths[li]); });
+    if (loop.length) npcs.push({ tile_id: p.tile_id, loop, seg: 0,
+      x: p.points[0][0], y: p.points[0][1], flip: false, away: false });
+  });
+}
+function npcTick(dt) {
+  const SPEED = 2.4;   // tiles per second
+  let moved = false;
+  npcs.forEach(n => {
+    if (!n.loop.length) return;
+    let rem = dt * SPEED, guard = 0;
+    while (rem > 0 && guard++ < 10) {
+      const t = n.loop[n.seg];
+      const dx = t[0] - n.x, dy = t[1] - n.y;
+      const d = Math.hypot(dx, dy);
+      if (d < 1e-6) { n.seg = (n.seg + 1) % n.loop.length; continue; }
+      if (Math.abs(dx) > 1e-3) n.flip = dx < 0;
+      // v3.4: walking away from the camera (up-screen) -> back-of-the-hood
+      if (Math.abs(dx) > 1e-3 || Math.abs(dy) > 1e-3)
+        n.away = Math.abs(dy) > Math.abs(dx) && dy < 0;
+      const step = Math.min(d, rem);
+      n.x += dx / d * step; n.y += dy / d * step; rem -= step; moved = true;
+      if (step >= d - 1e-9) n.seg = (n.seg + 1) % n.loop.length;
+    }
+  });
+  if (moved) render();
+}
+function drawNpc(n) {
+  const im = n.away ? npcSilhouette(n.tile_id) : tileFrameImage(n.tile_id);
+  if (!im) return;
+  const px = n.x * tilePx, py = n.y * tilePx;
+  ctx.fillStyle = "rgba(0,0,0,0.30)";
+  ctx.beginPath();
+  ctx.ellipse(px + tilePx / 2, py + tilePx * 0.88, tilePx * 0.34, tilePx * 0.13, 0, 0, Math.PI * 2);
+  ctx.fill();
+  if (!n.away && n.flip) {   // walking left — mirror him (no flip needed for a back view)
+    ctx.save(); ctx.translate(px + tilePx, py); ctx.scale(-1, 1);
+    ctx.drawImage(im, 0, 0, tilePx, tilePx); ctx.restore();
+  } else {
+    ctx.drawImage(im, px, py, tilePx, tilePx);
+  }
+}
+// v3.4: the "silo" trick — a back view faked from the front picture. The
+// silhouette of the current frame, filled dark: the back of a hooded guy
+// is basically just hood. Pure canvas compositing, no server smarts.
+const silCache = {};
+function npcSilhouette(tile_id) {
+  const im = tileFrameImage(tile_id);
+  if (!im) return null;
+  const t = customById[tile_id];
+  const key = tile_id + ":" + (t ? frameIdx(t) : 0);
+  if (silCache[key]) return silCache[key];
+  const c = document.createElement("canvas");
+  c.width = im.naturalWidth || 48; c.height = im.naturalHeight || 48;
+  const g = c.getContext("2d");
+  g.imageSmoothingEnabled = false;
+  g.drawImage(im, 0, 0);
+  g.globalCompositeOperation = "source-in";
+  g.fillStyle = "#23232f";
+  g.fillRect(0, 0, c.width, c.height);
+  silCache[key] = c;
+  return c;
+}
 
 // ---- palette ---------------------------------------------------------------
 const BIOME_ORDER = ["dungeon", "grassland", "desert", "arctic", "forest", "ocean"];
@@ -866,9 +1025,13 @@ setInterval(() => {
       c.drawImage(im, 0, 0, 48, 48);
     }
   });
-  if (!animOnMap.size) return;
   let sig = "";
   animOnMap.forEach(id => { const t = customById[id]; if (t) sig += frameIdx(t) + ","; });
+  if (!playMode) patrols.forEach(p => {   // v3.4: standing NPCs animate too
+    const t = customById[p.tile_id];
+    if (t && t.frames > 1) sig += "p" + frameIdx(t) + ",";
+  });
+  if (!sig) return;
   if (sig !== lastAnimSig) { lastAnimSig = sig; render(); }
 }, 150);
 
@@ -940,21 +1103,23 @@ $("import-files").onchange = async e => {
 $("import-cancel").onclick = () => { $("import-form").hidden = true; importFiles = []; };
 // v3.3: one button = animation. The server finds the poses in the picture —
 // no slicing talk, no grid talk.
+// v3.4: "Bring to life" — a sheet gets sliced, a single pose gets a walk
+// faked for it. Either way one tap makes a living character.
 $("import-animate").onclick = async () => {
-  const r = await api("/api/autoslice", {
+  const r = await api("/api/bring-to-life", {
     name: $("import-name").value.trim().slice(0, 24) || "custom",
     preset: importPreset,
     frame_ms: +$("import-ms").value || 400,
     image: importFiles[0].dataUrl,
   });
-  if (!r.ok) { toast("couldn't make it move: " + (r.error || "unknown")); return; }
+  if (!r.ok) { toast("couldn't bring it to life: " + (r.error || "unknown")); return; }
   $("import-form").hidden = true; importFiles = [];
   await loadCustomTiles();
   selTile = r.tile.id;
   buildPalette();
-  toast(r.single
-    ? "That's one picture, so I added it as-is. For movement, pick a picture with several poses side by side."
-    : "Made it move — " + r.frames + " pictures! Tap the map to place it");
+  toast(r.method === "sliced"
+    ? "Found " + r.frames + " poses — he's alive! Tap the map to place him"
+    : "One picture, no problem — I made him walk! Tap the map to place him");
 };
 $("import-add").onclick = async () => {
   const r = await api("/api/custom-tiles", {
@@ -1041,6 +1206,9 @@ document.querySelectorAll("#layer-seg button").forEach(b => {
 $("btn-eraser").onclick = () => {
   erasing = !erasing;
   $("btn-eraser").classList.toggle("on", erasing);
+  // v3.4: patrol tool rests when the eraser takes over
+  patrolTool = false; $("btn-patrol").classList.remove("on");
+  draftPoints = []; $("btn-patrol-done").hidden = true;
   toast(erasing ? "eraser on" : "eraser off");
 };
 $("btn-undo").onclick = async () => { const r = await api("/api/undo", {}); if (!r.ok) toast("nothing to undo"); await refresh(); };
@@ -1198,6 +1366,7 @@ async function pollStatus() {
     const ht = spriteTiles.find(t => /hero/i.test(t.name));
     if (ht) heroTileId = ht.id;   // v3.0: play-mode hero walks as a sprite
     await loadCustomTiles();      // v3.0: imported tiles before first render
+    await loadPatrols();          // v3.4: patrol routes back
     document.querySelector('#collide-palette .sw[data-cv="1"]').classList.add("sel");
     // v3.1: theme selector — the palette follows the map's theme
     ["dungeon", ...BIOME_ORDER.filter(b => b !== "dungeon"), "core"].forEach(th => {

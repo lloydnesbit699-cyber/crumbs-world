@@ -235,6 +235,23 @@ def _autoslice_pil(img):
     return frames or _divisor_frames(img)
 
 
+def _walkbob_frames(img):
+    """v3.4: fake a walk from one front-facing picture — bob + sway offsets.
+    Four frames: plant, lift+lean, plant, lift+lean the other way."""
+    img = img.convert("RGBA")
+    if max(img.size) > 256:
+        img.thumbnail((256, 256), core.Image.Resampling.NEAREST)
+    w, h = img.size
+    bob = max(2, h // 16)     # ~6% vertical bounce — reads at any draw size
+    sway = max(1, w // 32)    # ~3% side sway
+    frames = []
+    for dx, dy in ((0, 0), (sway, -bob), (0, 0), (-sway, -(bob // 2))):
+        cell = core.Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        cell.paste(img, (dx, dy), img)
+        frames.append(cell)
+    return frames
+
+
 def _store_custom_tile(name, preset, frame_ms, pil_images):
     """Write PIL frames to custom_tiles/, register the tile, save registry.
     Returns the registry entry. Rolls back partial writes on failure."""
@@ -265,6 +282,41 @@ def _store_custom_tile(name, preset, frame_ms, pil_images):
     _save_custom_registry()
     return entry
 
+# ---- v3.4: patrol routes ----------------------------------------------------
+PATROL_SAVE = os.path.join(SCRIPT_DIR, "hud_patrols.json")
+_patrols = []          # [{id, tile_id, points: [[x, y], ...]}]
+_patrol_seq = {"next": 1}
+
+
+def _save_patrols():
+    try:
+        with open(PATROL_SAVE, "w") as f:
+            json.dump({"patrols": _patrols, "next": _patrol_seq["next"]}, f)
+    except Exception as e:
+        print(f"[hud] could not save patrols: {e}")
+
+
+def _load_patrols():
+    if not os.path.exists(PATROL_SAVE):
+        return
+    try:
+        reg = json.load(open(PATROL_SAVE))
+    except Exception as e:
+        print(f"[hud] patrol registry unreadable: {e}")
+        return
+    for p in reg.get("patrols", []):
+        try:
+            pts = [[int(a), int(b)] for a, b in p["points"]]
+            tid = int(p["tile_id"])
+            if len(pts) >= 2 and tid in assets.tiles:
+                _patrols.append({"id": int(p["id"]), "tile_id": tid, "points": pts})
+        except (KeyError, TypeError, ValueError):
+            continue
+    _patrol_seq["next"] = max([p["id"] for p in _patrols] + [0]) + 1
+    if _patrols:
+        print(f"[hud] loaded {len(_patrols)} patrol(s)")
+
+
 # ---- in-memory session state ---------------------------------------------
 assets = core.AssetManager()
 world = core.WorldMap(25, 15, assets)
@@ -280,6 +332,7 @@ else:
     print(f"[hud] fresh map {world.width}x{world.height}")
 
 _load_custom_tiles()  # v3.0: imported tiles back into the asset manager
+_load_patrols()       # v3.4: patrol routes back (needs tiles loaded first)
 
 # v3.2: built-in water/ocean colors are swimmable — slow the hero, don't block
 for _tid, _t in assets.tiles.items():
@@ -507,6 +560,9 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/custom-tiles":
             # v3.0: imported tiles with animation metadata
             self._send_json({"tiles": [_custom_public(e) for e in _custom_tiles]})
+        elif path == "/api/patrols":
+            # v3.4: patrol routes — [{id, tile_id, points}]
+            self._send_json({"patrols": _patrols})
         elif path.startswith("/api/thumb/"):
             try:
                 tid = int(path.rsplit("/", 1)[1])
@@ -661,6 +717,95 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"ok": True, "tile": _custom_public(entry),
                                     "frames": len(frames), "single": len(frames) == 1})
 
+        if path == "/api/bring-to-life":
+            # v3.4: one picture -> living character. If it's a sheet, slice the
+            # poses; if it's a single pose, fake the walk with a bob.
+            # Body: {name, preset, frame_ms, image: dataURL}.
+            if not core.PIL_AVAILABLE:
+                return self._send_json({"ok": False, "error": "image support unavailable"}, 500)
+            name = str(body.get("name", "")).strip()[:24] or "custom"
+            preset = body.get("preset", "decor")
+            if preset not in TILE_PRESETS:
+                return self._send_json({"ok": False, "error": "unknown preset"}, 400)
+            try:
+                frame_ms = max(80, min(2000, int(body.get("frame_ms", 400))))
+            except (TypeError, ValueError):
+                frame_ms = 400
+            durl = body.get("image", "")
+            try:
+                if not isinstance(durl, str) or not durl.startswith("data:image/"):
+                    raise ValueError("not an image")
+                if len(durl) > CUSTOM_MAX_FILE_CHARS:
+                    raise ValueError("too large (keep under ~1MB)")
+                raw = base64.b64decode(durl.split(",", 1)[1])
+                img = core.Image.open(io.BytesIO(raw))
+                frames = _autoslice_pil(img)
+                method = "sliced"
+                if len(frames) == 1:
+                    frames = _walkbob_frames(img)
+                    method = "walk"
+                entry = _store_custom_tile(name, preset, frame_ms, frames)
+            except Exception as e:
+                return self._send_json({"ok": False, "error": str(e)}, 400)
+            return self._send_json({"ok": True, "tile": _custom_public(entry),
+                                    "frames": len(frames), "method": method})
+
+        if path == "/api/patrols/create":
+            # v3.4: {tile_id, points: [[x,y], ...]} — 2-8 walkable stops.
+            try:
+                tid = int(body.get("tile_id"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "bad tile"}, 400)
+            if tid not in assets.tiles:
+                return self._send_json({"ok": False, "error": "unknown tile"}, 400)
+            pts_in = body.get("points", [])
+            try:
+                pts = [[int(a), int(b)] for a, b in pts_in]
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "bad points"}, 400)
+            if not (2 <= len(pts) <= 8):
+                return self._send_json({"ok": False, "error": "tap 2-8 stops"}, 400)
+            for x, y in pts:
+                if not (0 <= x < world.width and 0 <= y < world.height):
+                    return self._send_json({"ok": False, "error": "stop off the map"}, 400)
+                if not _walkable(x, y):
+                    return self._send_json({"ok": False, "error": "a stop is blocked"}, 400)
+            p = {"id": _patrol_seq["next"], "tile_id": tid, "points": pts}
+            _patrol_seq["next"] += 1
+            _patrols.append(p)
+            _save_patrols()
+            return self._send_json({"ok": True, "patrol": p})
+
+        if path == "/api/patrols/delete":
+            # v3.4: {id}
+            try:
+                pid = int(body.get("id"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "bad id"}, 400)
+            before = len(_patrols)
+            _patrols[:] = [p for p in _patrols if p["id"] != pid]
+            if len(_patrols) == before:
+                return self._send_json({"ok": False, "error": "not found"}, 404)
+            _save_patrols()
+            return self._send_json({"ok": True})
+
+        if path == "/api/patrol-paths":
+            # v3.4: {legs: [[[x1,y1],[x2,y2]], ...]} -> {paths: [[[x,y],...]]}.
+            # NPC legs ride the same Dijkstra the hero uses (walls avoided,
+            # water swimmable).
+            legs = body.get("legs", [])
+            if not isinstance(legs, list) or len(legs) > 64:
+                return self._send_json({"ok": False, "error": "bad legs"}, 400)
+            paths = []
+            for leg in legs:
+                try:
+                    (x1, y1), (x2, y2) = leg
+                    cells, _swim = _find_path(int(x1), int(y1), int(x2), int(y2))
+                except (TypeError, ValueError):
+                    cells = []
+                paths.append([list(c) for c in cells])
+            return self._send_json({"ok": True, "paths": paths})
+
         if path == "/api/custom/update":
             # v3.3: rename / re-designate an imported tile — {id, name?, preset?}
             try:
@@ -705,6 +850,10 @@ class Handler(BaseHTTPRequestHandler):
                 except OSError:
                     pass
             assets.tiles.pop(tid, None)
+            # v3.4: patrols riding a deleted tile go with it
+            if any(p["tile_id"] == tid for p in _patrols):
+                _patrols[:] = [p for p in _patrols if p["tile_id"] != tid]
+                _save_patrols()
             for y in range(world.height):
                 for x in range(world.width):
                     if world.data[y][x] == tid:
@@ -854,7 +1003,7 @@ if __name__ == "__main__":
     srv = ThreadingHTTPServer((host, PORT), Handler)
     threading.Thread(target=_autosave_loop, daemon=True).start()
     print("=" * 52)
-    print("  Crumbs HUD v3.3 — one-button animation, custom tile manager")
+    print("  Crumbs HUD v3.4 — bring to life, patrol NPCs")
     if public:
         ip = _lan_ip()
         print("  PUBLIC mode: anyone on your Wi-Fi can open the HUD.")

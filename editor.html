@@ -132,7 +132,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v2.3</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v2.4</small></span>
 </div>
 
 <div id="menu-dropdown">
@@ -452,7 +452,10 @@ function onGestureMove() {
   const dist = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
   const mid = { x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2 };
   if (!gesture) { gesture = { startDist: dist, startPx: tilePx, lastMid: mid }; return; }
-  const newPx = Math.max(8, Math.min(64, gesture.startPx * dist / gesture.startDist));
+  // v2.4: quantize zoom to whole px — at 64x64 a redraw paints 4096 tiles, so
+  // only re-render when the integer size actually changes. Finger tremor no
+  // longer spams redraws; panning stays cheap (layout only, no redraw).
+  const newPx = Math.max(8, Math.min(64, Math.round(gesture.startPx * dist / gesture.startDist)));
   if (newPx !== tilePx) { manualZoom = true; zoomAt(mid.x, mid.y, newPx); }
   panX += mid.x - gesture.lastMid.x;
   panY += mid.y - gesture.lastMid.y;

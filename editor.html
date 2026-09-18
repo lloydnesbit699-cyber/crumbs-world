@@ -241,7 +241,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v4.4</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v4.5</small></span>
 </div>
 
 <div id="menu-dropdown">
@@ -463,9 +463,9 @@
 
 <div id="dpad" aria-label="On-screen movement controls">
   <div id="dpad-grip" title="drag to move the controls">&#10247;</div>
-  <span class="spacer"></span><button data-dx="0" data-dy="-1" title="Up">&#9650;</button><span class="spacer"></span>
-  <button data-dx="-1" data-dy="0" title="Left">&#9664;</button><span class="spacer"></span><button data-dx="1" data-dy="0" title="Right">&#9654;</button>
-  <span class="spacer"></span><button data-dx="0" data-dy="1" title="Down">&#9660;</button><span class="spacer"></span>
+  <span class="spacer"></span><button data-dx="0" data-dy="-1" title="Up — double-tap &amp; hold to run">&#9650;</button><span class="spacer"></span>
+  <button data-dx="-1" data-dy="0" title="Left — double-tap &amp; hold to run">&#9664;</button><span class="spacer"></span><button data-dx="1" data-dy="0" title="Right — double-tap &amp; hold to run">&#9654;</button>
+  <span class="spacer"></span><button data-dx="0" data-dy="1" title="Down — double-tap &amp; hold to run">&#9660;</button><span class="spacer"></span>
 </div>
 
 <div id="toast"></div>
@@ -1030,6 +1030,7 @@ $("btn-play").onclick = async () => {
     natureTimer = setInterval(natureTick, 2000);   // v4.0: ambient nature
     wxStart();   // v4.1: the sky performs
     playOver = false; $("end-overlay").hidden = true;
+    runHintShown = false;   // v4.5: the run hint teaches once per run
     await buildNpcs();
     if (npcs.length) npcTimer = setInterval(() => npcTick(0.1), 100);
     // "can't reach" confusion was play mode intercepting taps — paint tools rest now
@@ -1667,15 +1668,25 @@ $("dpad-grip").addEventListener("pointerdown", e => {
   window.addEventListener("pointerup", up);
   window.addEventListener("pointercancel", up);
 });
+// v4.5: touch = go, release = halt, double-tap-hold the same arrow = run.
+let runMode = false, lastTap = { t: 0, btn: null }, runHintShown = false;
 dpad.querySelectorAll("button").forEach(b => {
   const dx = +b.dataset.dx, dy = +b.dataset.dy;
   b.addEventListener("pointerdown", e => {
     if (!playMode) return;
     e.preventDefault();
-    doStep(dx, dy, true);   // tap steps once; hold repeats
+    const now = performance.now();
+    runMode = (lastTap.btn === b && now - lastTap.t < 320);
+    lastTap = { t: 0, btn: null };   // the tap is spent
+    if (runMode && !runHintShown) { runHintShown = true; toast("running — release to stop"); }
+    doStep(dx, dy, true);   // tap steps once; hold walks; double-tap-hold runs
   });
   ["pointerup", "pointercancel", "pointerleave"].forEach(ev =>
-    b.addEventListener(ev, () => { clearTimeout(stepTimer); stepTimer = null; }));
+    b.addEventListener(ev, () => {
+      lastTap = { t: performance.now(), btn: b };
+      runMode = false;
+      clearTimeout(stepTimer); stepTimer = null;   // release = halt
+    }));
 });
 async function doStep(dx, dy, repeat) {
   if (!playMode || playOver) return;   // v3.9: a win/lose freezes movement
@@ -1690,9 +1701,10 @@ async function doStep(dx, dy, repeat) {
   clearTimeout(stepTimer); stepTimer = null;
   if (await playEvents(r.events)) return;   // v3.9: win/lose ends the walk
   if (repeat && !r.blocked) {
-    const wms = RULES.walk_ms;
-    const delay = Math.max((r.swim || r.deep) ? wms * RULES.swim_mult : wms, 120);
-    stepTimer = setTimeout(() => doStep(dx, dy, true), delay);
+    // v4.5: run gear — half the walk delay, floored so the server keeps up
+    let stepMs = runMode ? Math.max(Math.round(RULES.walk_ms / 2), 60) : RULES.walk_ms;
+    if (r.swim || r.deep) stepMs *= RULES.swim_mult;
+    stepTimer = setTimeout(() => doStep(dx, dy, true), Math.max(stepMs, runMode ? 60 : 120));
   }
 }
 

@@ -221,7 +221,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v4.0</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v4.1</small></span>
 </div>
 
 <div id="menu-dropdown">
@@ -397,6 +397,15 @@
   </div>
   <div><small>Health drains from sharp things, freezing, and starving. Warmth falls on cold ground — gather 2 🪵 and build a fire to get it back. Belly empties over time — eat 🍖. Toggle what this world tracks; the rest is ignored.</small></div>
   <div><small>Stamp nature traits with the <b>Traits</b> tool. Traits and meters save with this map.</small></div>
+  <div class="lbl" style="margin-top:8px">What the sky is doing:</div>
+  <div class="opt-row" id="world-weather" style="flex-wrap:wrap">
+    <button data-w="clear" title="Nothing falls from the sky">&#9728;&#65039; Clear</button>
+    <button data-w="rain" title="Rain is cold and puts out built fires">&#127783;&#65039; Rain</button>
+    <button data-w="fog" title="Thick fog — hard to see far">&#127787;&#65039; Fog</button>
+    <button data-w="snow" title="Snow piles cold onto empty ground">&#10052;&#65039; Snow</button>
+    <button data-w="storm" title="Angry rain — fires die fast, lightning flashes">&#9968;&#65039; Storm</button>
+  </div>
+  <div><small>Rain chills you and hisses out fires. Snow slowly turns empty ground cold. Fog and storms are mostly for the eyes — and the nerves.</small></div>
 </div>
 
 <div id="sheet-traits" class="sheet">
@@ -779,6 +788,7 @@ function render() {
     ctx.beginPath(); ctx.arc(hx, hy, lr, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
   }
+  if (playMode && worldWeather !== "clear") drawWeather();  // v4.1: the sky performs
   layout();   // v2.2: re-center + apply pan offset after every draw
 }
 
@@ -984,6 +994,7 @@ $("btn-play").onclick = async () => {
     traitTool = false; $("btn-traits").classList.remove("on");  // v4.0: stamping rests
     syncNature(r);   // v4.0: meters + inventory onto the HUD
     natureTimer = setInterval(natureTick, 2000);   // v4.0: ambient nature
+    wxStart();   // v4.1: the sky performs
     playOver = false; $("end-overlay").hidden = true;
     await buildNpcs();
     if (npcs.length) npcTimer = setInterval(() => npcTick(0.1), 100);
@@ -998,6 +1009,7 @@ $("btn-play").onclick = async () => {
     if (heroTimer) { clearInterval(heroTimer); heroTimer = null; }
     if (npcTimer) { clearInterval(npcTimer); npcTimer = null; }   // v3.4: walkers rest
     if (natureTimer) { clearInterval(natureTimer); natureTimer = null; }  // v4.0: nature rests
+    wxStop();   // v4.1: the sky rests
     npcs = [];
     clearTimeout(stepTimer); stepTimer = null;   // v3.7: D-pad repeat stops
     dpadDrag = false; dpad.classList.remove("dragging");
@@ -1130,6 +1142,50 @@ let traitTool = false, traitBrush = "hot", traitGrid = [], traitLegend = {};
 let meters = { health: 10, warmth: 10, belly: 10 }, woodCount = 0;
 let meterProfile = { health: true, warmth: false, belly: false };
 let natureTimer = null;
+let wxFrame = 0, wxTimer = null;   // v4.1: weather animation in play mode
+// v4.1: the sky performs — rain streaks, snowfall, fog wash, lightning.
+// Positions are a pure function of (i, wxFrame) so no state to clean up.
+function wxRand(i, s) {
+  let h = ((i * 2654435761 + s * 40503) >>> 0);
+  h ^= h >> 15; h = (h * 0x9e3779b1) >>> 0;
+  return (h % 1000) / 1000;
+}
+function drawWeather() {
+  const wpx = canvas.width, hpx = canvas.height;
+  if (worldWeather === "fog") {
+    ctx.fillStyle = "rgba(150,160,175,0.30)";
+    ctx.fillRect(0, 0, wpx, hpx);
+    return;
+  }
+  if (worldWeather === "storm" && wxFrame % 45 < 2) {
+    ctx.fillStyle = "rgba(240,245,255,0.45)";   // lightning
+    ctx.fillRect(0, 0, wpx, hpx);
+  }
+  if (worldWeather === "rain" || worldWeather === "storm") {
+    ctx.strokeStyle = "rgba(150,190,230,0.55)"; ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 0; i < 60; i++) {
+      const x = (wxRand(i, 1) * wpx + wxFrame * 9) % wpx;
+      const y = (wxRand(i, 7) * hpx + wxFrame * 22) % hpx;
+      ctx.moveTo(x, y); ctx.lineTo(x - 4, y + 12);
+    }
+    ctx.stroke();
+  }
+  if (worldWeather === "snow") {
+    ctx.fillStyle = "rgba(245,248,255,0.85)";
+    for (let i = 0; i < 60; i++) {
+      const x = (wxRand(i, 3) * wpx + wxFrame * 2 + Math.sin(wxFrame * 0.12 + i) * 10 + wpx * 2) % wpx;
+      const y = (wxRand(i, 11) * hpx + wxFrame * 6) % hpx;
+      ctx.beginPath(); ctx.arc(x, y, 2.2, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+}
+function wxStart() {
+  wxStop();
+  if (worldWeather === "clear") return;
+  wxTimer = setInterval(() => { wxFrame++; render(); }, 150);
+}
+function wxStop() { if (wxTimer) { clearInterval(wxTimer); wxTimer = null; } }
 
 async function loadTraits() {
   try {
@@ -1174,15 +1230,23 @@ $("trait-clear").onclick = () => {
   traitBrush = null; buildTraitList();
   toast("tap tiles to clear their traits");
 };
+let worldWeather = "clear";   // v4.1: what the sky is doing
 async function loadWorld() {
   try {
     const r = await api("/api/world");
-    if (r.ok && r.world && r.world.meters) { meterProfile = r.world.meters; paintWorld(); }
+    if (r.ok && r.world) {
+      if (r.world.meters) { meterProfile = r.world.meters; }
+      if (r.world.weather) { worldWeather = r.world.weather; }
+      paintWorld();
+    }
   } catch (e) {}
 }
 function paintWorld() {
   document.querySelectorAll("#world-meters button").forEach(b => {
     b.classList.toggle("on", !!meterProfile[b.dataset.m]);
+  });
+  document.querySelectorAll("#world-weather button").forEach(b => {
+    b.classList.toggle("on", b.dataset.w === worldWeather);
   });
 }
 document.querySelectorAll("#world-meters button").forEach(b => {
@@ -1193,6 +1257,13 @@ document.querySelectorAll("#world-meters button").forEach(b => {
     paintMeters();
   };
 });
+document.querySelectorAll("#world-weather button").forEach(b => {
+  b.onclick = async () => {
+    worldWeather = b.dataset.w;
+    paintWorld();
+    await api("/api/world", { weather: worldWeather });
+  };
+});
 $("menu-world").onclick = () => { loadWorld(); toggleOverlay("sheet-world"); };
 function syncNature(r) {
   const n = r && r.nature;
@@ -1200,6 +1271,7 @@ function syncNature(r) {
   meters = n.meters || meters;
   woodCount = (n.inv && n.inv.wood) || 0;
   if (n.profile && n.profile.meters) meterProfile = n.profile.meters;
+  if (n.profile && n.profile.weather) worldWeather = n.profile.weather;  // v4.1
   paintMeters();
 }
 function paintMeters() {

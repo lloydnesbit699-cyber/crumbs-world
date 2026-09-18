@@ -56,6 +56,7 @@ import json
 import io
 import os
 import base64
+import random
 import socket
 import sys
 import threading
@@ -461,15 +462,27 @@ TRAITS = {
 }
 traits_grid = []  # [y][x] -> trait id or None
 
-# The builder's selectors for this world's nature: which meters exist.
-DEFAULT_WORLD = {"meters": {"health": True, "warmth": False, "belly": False}}
-world_profile = {"meters": dict(DEFAULT_WORLD["meters"])}
+# The builder's selectors for this world's nature: which meters exist,
+# and what the sky is doing. Weather is physics, not a mind: rain is cold
+# and kills fire, snow is cold that stays, fog is for the eyes (the client
+# draws it thicker), storm is angry rain. Clear skies do nothing.
+WEATHERS = ("clear", "rain", "fog", "snow", "storm")
+DEFAULT_WORLD = {"meters": {"health": True, "warmth": False, "belly": False},
+                 "weather": "clear"}
+world_profile = {"meters": dict(DEFAULT_WORLD["meters"]),
+                 "weather": DEFAULT_WORLD["weather"]}
+# MIND HOOK: when a mind (Melody) is present, it can set WEATHER_MIND to a
+# callable taking no arguments and drive the sky itself — pick the weather,
+# aim the lightning, whatever it fancies. Until then, the script below is
+# the weather. False intelligence now, true intelligence later.
+WEATHER_MIND = None
 
 # Per-play-run nature state: meters, gathered wood, trait edits made during
 # play (reverted afterwards, like keys/doors in v3.9).
 _meters = {"health": 10, "warmth": 10, "belly": 10}
 _inv = {"wood": 0}
-_nature_mods = []  # [(x, y, previous_trait)]
+_nature_mods = []  # [(x, y, previous_trait, kind)] — kind is "gather",
+# "fire", or "snow" so the sky can tell its own work apart on revert.
 _tick_n = 0
 
 def _traits_path(name):
@@ -514,7 +527,7 @@ def _trait_at(x, y):
     return None
 
 def _revert_nature_mods():
-    for (x, y, old) in _nature_mods:
+    for (x, y, old, _kind) in _nature_mods:
         if 0 <= y < len(traits_grid) and 0 <= x < len(traits_grid[y]):
             traits_grid[y][x] = old
     _nature_mods.clear()
@@ -553,16 +566,49 @@ def _apply_nature(x, y):
         notes.append({"t": "toast", "text": "Ouch — sharp!"})
     elif t == "wood":
         _inv["wood"] += 1
-        _nature_mods.append((x, y, "wood"))
+        _nature_mods.append((x, y, "wood", "gather"))
         traits_grid[y][x] = None
         notes.append({"t": "toast",
                       "text": "Wood gathered (%d)" % _inv["wood"]})
     elif t == "food" and m["belly"]:
         if _meters["belly"] < 10:
             bump("belly", 1)
-            _nature_mods.append((x, y, "food"))
+            _nature_mods.append((x, y, "food", "gather"))
             traits_grid[y][x] = None
             notes.append({"t": "toast", "text": "Tasty."})
+    # v4.1: the sky has its nature too. If a mind is driving (WEATHER_MIND),
+    # it gets the sky; otherwise this script is the weather. Rain is cold
+    # and kills built fires; snow is cold that stays and piles up; fog is
+    # for the eyes (the client draws it thicker); storm is angry rain.
+    w = world_profile.get("weather", "clear")
+    if WEATHER_MIND is not None:
+        try:
+            WEATHER_MIND()
+        except Exception as e:
+            print(f"[hud] weather mind stumbled: {e}")
+    if w in ("rain", "storm") and _tick_n % (2 if w == "storm" else 4) == 0:
+        for i, (fx, fy, _old, kind) in enumerate(_nature_mods):
+            if kind == "fire":
+                traits_grid[fy][fx] = None
+                del _nature_mods[i]
+                notes.append({"t": "toast",
+                              "text": "The rain put out your fire…"})
+                break
+    if w in ("rain", "storm") and m["warmth"] and t != "hot" \
+            and _tick_n % 8 == 0:
+        bump("warmth", -1)
+        if _meters["warmth"] <= 3:
+            notes.append({"t": "toast",
+                          "text": "You're soaked and shivering…"})
+    if w == "snow" and _tick_n % 12 == 0:
+        if sum(1 for _, _, _, k in _nature_mods if k == "snow") < 12:
+            for _ in range(20):  # snowfall: an empty tile turns cold
+                rx = random.randrange(len(traits_grid[0]))
+                ry = random.randrange(len(traits_grid))
+                if traits_grid[ry][rx] is None:
+                    _nature_mods.append((rx, ry, None, "snow"))
+                    traits_grid[ry][rx] = "cold"
+                    break
     # the slow truths: belly empties over time; freezing and starving
     # wear health down
     if m["belly"] and _tick_n % 6 == 0:
@@ -586,17 +632,20 @@ def _apply_nature(x, y):
 def _nature_state():
     # meter + inventory snapshot for the play HUD
     return {"meters": dict(_meters), "inv": dict(_inv),
-            "profile": {"meters": dict(world_profile["meters"])}}
+            "profile": {"meters": dict(world_profile["meters"]),
+                        "weather": world_profile.get("weather", "clear")}}
 
 def _load_rules(name):
     """v3.7: read this map's rules sidecar; fall back to defaults.
     v3.9: sidecar v2 is {"tweaks": {...}, "game": [...]}; the old flat
     {"walk_ms": ...} shape still loads. v4.0 adds "world" (meter selectors);
-    missing keys simply fall back to defaults."""
+    missing keys simply fall back to defaults. v4.1: world also carries
+    "weather"; old sidecars without it get clear skies."""
     global rules, _current_map
     _current_map = name
     rules = dict(DEFAULT_RULES)
     world_profile["meters"] = dict(DEFAULT_WORLD["meters"])
+    world_profile["weather"] = DEFAULT_WORLD["weather"]  # v4.1
     try:
         saved = json.load(open(_rules_path(name)))
     except (OSError, ValueError):
@@ -606,9 +655,10 @@ def _load_rules(name):
     if "tweaks" in saved or "game" in saved or "world" in saved:
         tweaks = saved.get("tweaks") or {}
         game = saved.get("game") or []
-        wm = (saved.get("world") or {}).get("meters") or {}
+        wblk = saved.get("world") or {}
+        wm = wblk.get("meters") or {}
     else:
-        tweaks, game, wm = saved, [], {}
+        tweaks, game, wblk, wm = saved, [], {}, {}
     for k, v in tweaks.items():
         if k == "walk_ms" and v in (90, 140, 220):
             rules[k] = v
@@ -619,6 +669,8 @@ def _load_rules(name):
     for k in DEFAULT_WORLD["meters"]:
         if isinstance(wm.get(k), bool):
             world_profile["meters"][k] = wm[k]
+    if isinstance(wblk.get("weather"), str) and wblk["weather"] in WEATHERS:
+        world_profile["weather"] = wblk["weather"]  # v4.1
     _load_game_rules(game)
 
 
@@ -1039,7 +1091,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"ok": True, "traits": traits_grid,
                              "legend": TRAITS})
         elif path == "/api/world":
-            # v4.0: this build's world profile (meter selectors)
+            # v4.0: this build's world profile (meter selectors, v4.1: sky)
             self._send_json({"ok": True, "world": world_profile})
         elif path == "/api/status":
             self._send_json({"dirty": _save_state["dirty"],
@@ -1374,6 +1426,7 @@ class Handler(BaseHTTPRequestHandler):
             rules.clear()
             rules.update(DEFAULT_RULES)  # v3.7: fresh build, fresh rules
             world_profile["meters"] = dict(DEFAULT_WORLD["meters"])  # v4.0
+            world_profile["weather"] = DEFAULT_WORLD["weather"]  # v4.1: fresh sky
             traits_grid[:] = _blank_traits()  # v4.0: fresh build, fresh nature
             return self._send_json({"ok": True, "biome": biome, "rules": rules})
 
@@ -1557,12 +1610,17 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/world":
             # v4.0: this build's world profile — which meters exist.
             # POST {meters: {health: bool, warmth: bool, belly: bool}}.
+            # v4.1: also {weather: "clear"|"rain"|"fog"|"snow"|"storm"}.
             changed = False
             m = body.get("meters", {})
             for k in DEFAULT_WORLD["meters"]:
                 if isinstance(m.get(k), bool):
                     world_profile["meters"][k] = m[k]
                     changed = True
+            if isinstance(body.get("weather"), str) \
+                    and body["weather"] in WEATHERS:
+                world_profile["weather"] = body["weather"]
+                changed = True
             if changed:
                 _save_rules(_current_map)
                 _mark_dirty()
@@ -1599,7 +1657,7 @@ class Handler(BaseHTTPRequestHandler):
                     x, y = hx + dx, hy + dy
                     if 0 <= x < world.width and 0 <= y < world.height \
                             and traits_grid[y][x] is None:
-                        _nature_mods.append((x, y, None))
+                        _nature_mods.append((x, y, None, "fire"))  # v4.1
                         traits_grid[y][x] = "hot"
                         lit += 1
             return self._send_json({"ok": True, "lit": lit,

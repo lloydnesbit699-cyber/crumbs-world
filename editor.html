@@ -221,7 +221,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v4.1</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v4.2</small></span>
 </div>
 
 <div id="menu-dropdown">
@@ -773,12 +773,15 @@ function render() {
   for (let y = 0; y <= H; y++) { ctx.moveTo(0, y * tilePx + .5); ctx.lineTo(W * tilePx, y * tilePx + .5); }
   ctx.stroke();
   // v3.1: fog/lighting — darkness over the map with a pool of light around
-  // the hero, so dungeons feel like dungeons
+  // the hero, so dungeons feel like dungeons.
+  // v4.2: the dark listens to the sky — a clear day stays bright, a storm
+  // broods. (Fog gets its wash from drawWeather instead.)
+  const darkFor = { clear: 0.12, rain: 0.35, snow: 0.25, storm: 0.45, fog: 0.20 };
   if (playMode && lightingOn && hero) {
     const hx = hero.x * tilePx + tilePx / 2, hy = hero.y * tilePx + tilePx / 2;
     const lr = tilePx * 4;
     ctx.save();
-    ctx.fillStyle = "rgba(3,3,14,0.62)";
+    ctx.fillStyle = "rgba(3,3,14," + (darkFor[worldWeather] ?? 0.62) + ")";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.globalCompositeOperation = "destination-out";
     const g = ctx.createRadialGradient(hx, hy, tilePx * 0.6, hx, hy, lr);

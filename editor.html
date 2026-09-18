@@ -146,6 +146,15 @@
                  display: flex; align-items: center; justify-content: center;
                  z-index: 90; }
   #end-overlay[hidden] { display: none; }
+  /* v4.0: nature HUD — hero meters + build-fire button, play mode only */
+  #meters { position: fixed; top: 52px; left: 10px; z-index: 60; display: none;
+            background: rgba(10,14,20,.78); border: 1px solid #2a3340;
+            border-radius: 10px; padding: 6px 10px; font-size: 15px; }
+  #meters.show { display: block; }
+  #btn-fire { position: fixed; right: 12px; bottom: 170px; z-index: 60; display: none;
+              background: #3a2410; border: 1px solid #e08a2d; color: #ffd9a0;
+              border-radius: 10px; padding: 8px 12px; font-size: 14px; }
+  #btn-fire.show { display: block; }
   #end-card { background: #1c1c22; border: 1px solid #ffd75f; border-radius: 14px;
               padding: 26px 30px; text-align: center; max-width: 78vw; }
   #end-emoji { font-size: 44px; margin-bottom: 10px; }
@@ -212,13 +221,14 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v3.8</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v4.0</small></span>
 </div>
 
 <div id="menu-dropdown">
   <button id="btn-play" title="Walk the map">&#9654; Play</button>
   <button id="btn-record" title="Record the screen as a video">&#9679; Record</button>
   <button id="menu-rules" title="Game rules for this build">Rules&hellip;</button>
+  <button id="menu-world" title="This world's nature: meters and traits">World&hellip;</button>
   <button id="btn-light" title="Fog/lighting overlay in play mode">Lighting: on</button>
   <button id="btn-undo" title="Undo">Undo</button>
   <button id="btn-redo" title="Redo">Redo</button>
@@ -289,6 +299,7 @@
   <button id="btn-eraser" title="Eraser">Eraser</button>
   <button id="btn-patrol" title="Make a character walk a route">Patrol</button>
   <button id="btn-patrol-done" hidden title="Finish this patrol route">Done ✓</button>
+  <button id="btn-traits" title="Stamp nature traits: hot, cold, sharp, wood, food">Traits</button>
   <button id="btn-link" title="Stamp the selected collision under painted tiles">Stamp collision: off</button>
   <button id="btn-clear" class="danger" title="Clear current layer">Clear layer</button>
 </aside>
@@ -375,6 +386,27 @@
   </div>
 </div>
 
+<div id="sheet-world" class="sheet">
+  <div class="grab"></div>
+  <div class="tray-head">World — this build's nature</div>
+  <div class="lbl">What the hero has to live inside:</div>
+  <div class="opt-row" id="world-meters">
+    <button data-m="health" title="Sharp things, freezing, and starving hurt">&#10084;&#65039; Health</button>
+    <button data-m="warmth" title="Cold tiles chill you; hot tiles and fires warm you">&#128293; Warmth</button>
+    <button data-m="belly" title="Eat food tiles; an empty belly drains health">&#127838; Belly</button>
+  </div>
+  <div><small>Health drains from sharp things, freezing, and starving. Warmth falls on cold ground — gather 2 🪵 and build a fire to get it back. Belly empties over time — eat 🍖. Toggle what this world tracks; the rest is ignored.</small></div>
+  <div><small>Stamp nature traits with the <b>Traits</b> tool. Traits and meters save with this map.</small></div>
+</div>
+
+<div id="sheet-traits" class="sheet">
+  <div class="grab"></div>
+  <div class="tray-head">Traits — the nature of things</div>
+  <div class="lbl">Pick a trait, then tap tiles to stamp it.</div>
+  <div id="trait-list"></div>
+  <div class="opt-row"><button id="trait-clear" class="ghost">Clear traits instead</button></div>
+</div>
+
 <div id="end-overlay" hidden>
   <div id="end-card">
     <div id="end-emoji">&#127937;</div>
@@ -399,6 +431,8 @@
 </div>
 
 <div id="toast"></div>
+<div id="meters"></div>
+<button id="btn-fire" title="Spend 2 wood to build a warming fire">&#128293; Build fire (2 &#129717;)</button>
 <div id="dbg"></div>
 
 <script>
@@ -637,6 +671,16 @@ function render() {
       }
     }
   }
+  // v4.0: nature traits — a small emoji in the cell corner, edit + play
+  // alike (a fire you built should be visible while you warm by it).
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const t = traitGrid[y] && traitGrid[y][x];
+    if (!t || !traitLegend[t]) continue;
+    ctx.font = Math.round(tilePx * 0.42) + "px sans-serif";
+    ctx.fillText(traitLegend[t].emoji,
+                 x * tilePx + tilePx * 0.78, y * tilePx + tilePx * 0.72);
+  }
   // hero marker in play mode — v3.0: hero sprite when available
   if (playMode && hero) {
     const hx = hero.x * tilePx, hy = hero.y * tilePx;
@@ -789,6 +833,7 @@ canvas.addEventListener("pointerdown", e => {
   if (playMode) { playTap(cell); return; }
   if (patrolTool) { patrolTap(cell); return; }   // v3.4: patrol stops, not paint
   if (ruleDraft) { ruleTap(cell); return; }      // v3.9: binding a game rule
+  if (traitTool) { traitTap(cell); return; }    // v4.0: stamping nature
   stroke = { cells: new Map(), linkCells: new Map(), layer };
   strokeAdd(cell);
 });
@@ -861,18 +906,19 @@ let playOver = false;   // v3.9: a win/lose freezes movement until Play again
 async function syncMap() {
   // v3.9: re-pull the tile grids without touching zoom — game rules (keys,
   // doors) change the map server-side during play and the cache goes stale.
+  // v4.0: traits can change during play too (gathered wood, built fires).
   try {
     const m = await api("/api/map");
     tiles = m.tiles; objects = m.objects; coll = m.collision;
   } catch (e) {}
-  render();
+  await loadTraits();
 }
 // v3.9: run the per-step events the server attached — messages toast, unlocks
 // re-sync the map, a win/lose ends the walk and shows the overlay.
 async function playEvents(evs) {
   let over = false;
   for (const e of evs || []) {
-    if (e.t === "message" || e.t === "unlock") {
+    if (e.t === "message" || e.t === "unlock" || e.t === "toast") {  // v4.0: nature toasts
       toast(e.text);
       if (e.t === "unlock") await syncMap();
     } else if (e.t === "win" || e.t === "lose") {
@@ -897,6 +943,7 @@ $("end-again").onclick = async () => {
   $("end-overlay").hidden = true;
   playOver = false;
   if (r.ok) hero = { x: r.x, y: r.y };
+  syncNature(r);   // v4.0: fresh meters for the new run
   await syncMap();   // picked-up keys and opened doors come back
   toast("back to the start — go again");
 };
@@ -904,6 +951,7 @@ async function playTap(cell) {
   if (heroTimer || playOver) return;  // let the current walk finish first
   const r = await api("/api/play/move", { x: cell.x, y: cell.y });
   if (!r.ok) { toast("play failed"); return; }
+  syncNature(r);   // v4.0: the walk may change meters / inventory
   const path = r.path || [];
   if (!path.length) { toast("can't reach that tile"); return; }
   const swim = r.swim || [];   // v3.2: per-step water flags from the server
@@ -933,6 +981,9 @@ $("btn-play").onclick = async () => {
     patrolTool = false; $("btn-patrol").classList.remove("on");
     draftPoints = []; $("btn-patrol-done").hidden = true;
     grCancel();   // v3.9: a half-drafted rule doesn't follow you into play
+    traitTool = false; $("btn-traits").classList.remove("on");  // v4.0: stamping rests
+    syncNature(r);   // v4.0: meters + inventory onto the HUD
+    natureTimer = setInterval(natureTick, 2000);   // v4.0: ambient nature
     playOver = false; $("end-overlay").hidden = true;
     await buildNpcs();
     if (npcs.length) npcTimer = setInterval(() => npcTick(0.1), 100);
@@ -946,6 +997,7 @@ $("btn-play").onclick = async () => {
     playMode = false; hero = null; heroSwimming = false; heroInDeep = false;
     if (heroTimer) { clearInterval(heroTimer); heroTimer = null; }
     if (npcTimer) { clearInterval(npcTimer); npcTimer = null; }   // v3.4: walkers rest
+    if (natureTimer) { clearInterval(natureTimer); natureTimer = null; }  // v4.0: nature rests
     npcs = [];
     clearTimeout(stepTimer); stepTimer = null;   // v3.7: D-pad repeat stops
     dpadDrag = false; dpad.classList.remove("dragging");
@@ -1072,6 +1124,114 @@ function myDefaults() {
 // ---- v3.9: game rules — goals, hazards, keys & doors, messages --------------
 // The deeper "rules" drawer: what makes a build a *game*. Builders tap the map
 // to bind rules; play mode evaluates them server-side on every hero step.
+// ---- v4.0: nature of the world ----------------------------------------------
+// Traits stamped on tiles; meters the hero lives inside. Plain words only.
+let traitTool = false, traitBrush = "hot", traitGrid = [], traitLegend = {};
+let meters = { health: 10, warmth: 10, belly: 10 }, woodCount = 0;
+let meterProfile = { health: true, warmth: false, belly: false };
+let natureTimer = null;
+
+async function loadTraits() {
+  try {
+    const r = await api("/api/traits");
+    if (r.ok) { traitGrid = r.traits || []; traitLegend = r.legend || {}; buildTraitList(); }
+  } catch (e) {}
+  render();
+}
+function buildTraitList() {
+  const el = $("trait-list"); if (!el) return; el.innerHTML = "";
+  const row = document.createElement("div");
+  row.className = "opt-row"; row.style.flexWrap = "wrap";
+  for (const id of Object.keys(traitLegend)) {
+    const t = traitLegend[id];
+    const b = document.createElement("button");
+    b.textContent = t.emoji + " " + id; b.title = t.words;
+    if (id === traitBrush) b.classList.add("on");
+    b.onclick = () => { traitBrush = id; buildTraitList(); };
+    row.appendChild(b);
+  }
+  el.appendChild(row);
+  $("trait-clear").classList.toggle("on", traitBrush === null);
+}
+async function traitTap(cell) {
+  const r = await api("/api/traits", { x: cell.x, y: cell.y, trait: traitBrush });
+  if (!r.ok) { toast(r.error || "couldn't stamp that"); return; }
+  if (!traitGrid[cell.y]) traitGrid[cell.y] = [];
+  traitGrid[cell.y][cell.x] = traitBrush;
+  render();
+}
+$("btn-traits").onclick = () => {
+  traitTool = !traitTool;
+  $("btn-traits").classList.toggle("on", traitTool);
+  if (traitTool) {
+    // one nature tool at a time — the patrol tool rests
+    patrolTool = false; $("btn-patrol").classList.remove("on");
+    draftPoints = []; $("btn-patrol-done").hidden = true;
+    toggleOverlay("sheet-traits");
+  }
+};
+$("trait-clear").onclick = () => {
+  traitBrush = null; buildTraitList();
+  toast("tap tiles to clear their traits");
+};
+async function loadWorld() {
+  try {
+    const r = await api("/api/world");
+    if (r.ok && r.world && r.world.meters) { meterProfile = r.world.meters; paintWorld(); }
+  } catch (e) {}
+}
+function paintWorld() {
+  document.querySelectorAll("#world-meters button").forEach(b => {
+    b.classList.toggle("on", !!meterProfile[b.dataset.m]);
+  });
+}
+document.querySelectorAll("#world-meters button").forEach(b => {
+  b.onclick = async () => {
+    meterProfile[b.dataset.m] = !meterProfile[b.dataset.m];
+    paintWorld();
+    await api("/api/world", { meters: meterProfile });
+    paintMeters();
+  };
+});
+$("menu-world").onclick = () => { loadWorld(); toggleOverlay("sheet-world"); };
+function syncNature(r) {
+  const n = r && r.nature;
+  if (!n) return;
+  meters = n.meters || meters;
+  woodCount = (n.inv && n.inv.wood) || 0;
+  if (n.profile && n.profile.meters) meterProfile = n.profile.meters;
+  paintMeters();
+}
+function paintMeters() {
+  const el = $("meters"), fb = $("btn-fire");
+  if (!playMode) { el.classList.remove("show"); fb.classList.remove("show"); return; }
+  const parts = [];
+  if (meterProfile.health) parts.push("❤️ " + meters.health);
+  if (meterProfile.warmth) parts.push("🔥 " + meters.warmth);
+  if (meterProfile.belly) parts.push("🍖 " + meters.belly);
+  if (woodCount > 0) parts.push("🪵 " + woodCount);
+  el.textContent = parts.join("   ");
+  el.classList.toggle("show", parts.length > 0);
+  fb.classList.toggle("show", woodCount >= 2);
+}
+async function natureTick() {
+  // v4.0: ambient nature — cold bites even when the hero stands still
+  if (!playMode || playOver) return;
+  try {
+    const r = await api("/api/play/tick", {});
+    if (!r.ok) return;
+    syncNature(r);
+    await playEvents(r.events);
+  } catch (e) {}
+}
+$("btn-fire").onclick = async () => {
+  const r = await api("/api/play/fire", {});
+  if (!r.ok) { toast(r.error || "no fire yet"); return; }
+  syncNature(r);
+  await playEvents(r.events);
+  await loadTraits();   // the new hot tiles show immediately
+};
+
 let gameRules = [], grNames = {}, ruleDraft = null;
 
 function rulesTab(which) {
@@ -1259,6 +1419,7 @@ async function doStep(dx, dy, repeat) {
   if (!r.ok) return;
   hero = { x: r.x, y: r.y };
   heroSwimming = !!r.swim; heroInDeep = !!r.deep;
+  syncNature(r);   // v4.0: meters move on every step
   render();
   clearTimeout(stepTimer); stepTimer = null;
   if (await playEvents(r.events)) return;   // v3.9: win/lose ends the walk
@@ -1800,6 +1961,8 @@ $("btn-gen").onclick = async () => {
   const r = await api("/api/generate", { biome: $("biome").value, seed: seedRaw === "" ? null : parseInt(seedRaw, 10) });
   if (r.ok) {
     await refresh();
+    await loadTraits();   // v4.0: fresh build, fresh nature
+    await loadWorld();    // v4.0: fresh build, default meters
     // v3.1: the palette follows the generated biome
     currentTheme = r.biome || "dungeon"; $("theme-sel").value = currentTheme;
     if (layer === "tiles") { selTile = defaultBrush("tiles"); selByLayer.tiles = selTile; }
@@ -1840,7 +2003,7 @@ async function renderLoadList() {
       if (f === currentFile) b.classList.add("cur");
       b.onclick = async () => {
         const r = await api("/api/load", { filename: f });
-        if (r.ok) { setFile(f); panX = 0; panY = 0; await refresh(); await refreshRules(); closeOverlays(); toast("loaded " + f); }
+        if (r.ok) { setFile(f); panX = 0; panY = 0; await refresh(); await refreshRules(); await loadWorld(); closeOverlays(); toast("loaded " + f); }
         else toast("load failed: " + (r.error || ""));
       };
       list.appendChild(b);
@@ -1940,6 +2103,7 @@ async function pollStatus() {
     if (ht) heroTileId = ht.id;   // v3.0: play-mode hero walks as a sprite
     await loadCustomTiles();      // v3.0: imported tiles before first render
     await loadPatrols();          // v3.4: patrol routes back
+    await loadTraits();           // v4.0: nature traits before first render
     document.querySelector('#collide-palette .sw[data-cv="1"]').classList.add("sel");
     // v3.1: theme selector — the palette follows the map's theme
     ["dungeon", ...BIOME_ORDER.filter(b => b !== "dungeon"), "core"].forEach(th => {

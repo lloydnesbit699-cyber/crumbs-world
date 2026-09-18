@@ -449,23 +449,166 @@ def _rules_path(name):
     return os.path.join(SCRIPT_DIR, base + ".rules.json")
 
 
+# ---- v4.0: the nature of the world -----------------------------------------
+# Plain-word traits stamped on tiles; the hero lives inside their mixing.
+# One trait per cell; a parallel grid so crumbs_core stays untouched.
+TRAITS = {
+    "hot":   {"emoji": "🔥", "words": "warms you up"},
+    "cold":  {"emoji": "❄️", "words": "chills you to the bone"},
+    "sharp": {"emoji": "🗡️", "words": "hurts to step on"},
+    "wood":  {"emoji": "🪵", "words": "pick it up by walking over"},
+    "food":  {"emoji": "🍖", "words": "eat it by walking over"},
+}
+traits_grid = []  # [y][x] -> trait id or None
+
+# The builder's selectors for this world's nature: which meters exist.
+DEFAULT_WORLD = {"meters": {"health": True, "warmth": False, "belly": False}}
+world_profile = {"meters": dict(DEFAULT_WORLD["meters"])}
+
+# Per-play-run nature state: meters, gathered wood, trait edits made during
+# play (reverted afterwards, like keys/doors in v3.9).
+_meters = {"health": 10, "warmth": 10, "belly": 10}
+_inv = {"wood": 0}
+_nature_mods = []  # [(x, y, previous_trait)]
+_tick_n = 0
+
+def _traits_path(name):
+    base = name[:-5] if name.endswith(".json") else name
+    return os.path.join(SCRIPT_DIR, base + ".traits.json")
+
+def _blank_traits():
+    return [[None] * world.width for _ in range(world.height)]
+
+def _fit_traits():
+    # keep the trait grid matched to the map after resize/generate
+    global traits_grid
+    ng = _blank_traits()
+    for y in range(min(world.height, len(traits_grid))):
+        for x in range(min(world.width, len(traits_grid[y]))):
+            ng[y][x] = traits_grid[y][x]
+    traits_grid = ng
+
+def _load_traits(name):
+    global traits_grid
+    traits_grid = _blank_traits()
+    try:
+        saved = json.load(open(_traits_path(name)))
+    except (OSError, ValueError):
+        return
+    rows = (saved or {}).get("traits", [])
+    for y in range(min(world.height, len(rows))):
+        for x in range(min(world.width, len(rows[y]))):
+            t = rows[y][x]
+            traits_grid[y][x] = t if t in TRAITS else None
+
+def _save_traits(name):
+    try:
+        with open(_traits_path(name), "w") as f:
+            json.dump({"traits": traits_grid}, f)
+    except OSError as e:
+        print(f"[hud] could not save traits: {e}")
+
+def _trait_at(x, y):
+    if 0 <= y < len(traits_grid) and 0 <= x < len(traits_grid[y]):
+        return traits_grid[y][x]
+    return None
+
+def _revert_nature_mods():
+    for (x, y, old) in _nature_mods:
+        if 0 <= y < len(traits_grid) and 0 <= x < len(traits_grid[y]):
+            traits_grid[y][x] = old
+    _nature_mods.clear()
+
+def _reset_nature_session():
+    # fresh meters + inventory; undo trait changes made during this run
+    global _tick_n
+    _revert_nature_mods()
+    _meters.update({"health": 10, "warmth": 10, "belly": 10})
+    _inv["wood"] = 0
+    _tick_n = 0
+
+def _apply_nature(x, y):
+    """The world's nature touches the hero at (x, y). Returns toast events.
+    Runs per hero step AND on the ambient tick, so cold bites even when the
+    hero stands still."""
+    global _tick_n, _rule_over
+    notes = []
+    if not play["active"] or _rule_over:
+        return notes
+    _tick_n += 1
+    m = world_profile["meters"]
+    def bump(k, d):
+        _meters[k] = max(0, min(10, _meters[k] + d))
+    t = _trait_at(x, y)
+    if t == "hot" and m["warmth"]:
+        if _meters["warmth"] < 10:
+            bump("warmth", 1)
+            notes.append({"t": "toast", "text": "The warmth soaks in…"})
+    elif t == "cold" and m["warmth"]:
+        bump("warmth", -1)
+        if _meters["warmth"] <= 3:
+            notes.append({"t": "toast", "text": "You're shivering…"})
+    elif t == "sharp" and m["health"]:
+        bump("health", -1)
+        notes.append({"t": "toast", "text": "Ouch — sharp!"})
+    elif t == "wood":
+        _inv["wood"] += 1
+        _nature_mods.append((x, y, "wood"))
+        traits_grid[y][x] = None
+        notes.append({"t": "toast",
+                      "text": "Wood gathered (%d)" % _inv["wood"]})
+    elif t == "food" and m["belly"]:
+        if _meters["belly"] < 10:
+            bump("belly", 1)
+            _nature_mods.append((x, y, "food"))
+            traits_grid[y][x] = None
+            notes.append({"t": "toast", "text": "Tasty."})
+    # the slow truths: belly empties over time; freezing and starving
+    # wear health down
+    if m["belly"] and _tick_n % 6 == 0:
+        bump("belly", -1)
+        if _meters["belly"] <= 2:
+            notes.append({"t": "toast", "text": "Your belly rumbles…"})
+    if m["warmth"] and _meters["warmth"] <= 0 and _tick_n % 2 == 0 \
+            and m["health"]:
+        bump("health", -1)
+        notes.append({"t": "toast",
+                      "text": "You're freezing — build a fire!"})
+    if m["belly"] and _meters["belly"] <= 0 and _tick_n % 4 == 0 \
+            and m["health"]:
+        bump("health", -1)
+        notes.append({"t": "toast", "text": "Starving… eat something!"})
+    if m["health"] and _meters["health"] <= 0:
+        _rule_over = "lose"
+        notes.append({"t": "lose", "text": "You didn't make it…"})
+    return notes
+
+def _nature_state():
+    # meter + inventory snapshot for the play HUD
+    return {"meters": dict(_meters), "inv": dict(_inv),
+            "profile": {"meters": dict(world_profile["meters"])}}
+
 def _load_rules(name):
     """v3.7: read this map's rules sidecar; fall back to defaults.
     v3.9: sidecar v2 is {"tweaks": {...}, "game": [...]}; the old flat
-    {"walk_ms": ...} shape still loads."""
+    {"walk_ms": ...} shape still loads. v4.0 adds "world" (meter selectors);
+    missing keys simply fall back to defaults."""
     global rules, _current_map
     _current_map = name
     rules = dict(DEFAULT_RULES)
+    world_profile["meters"] = dict(DEFAULT_WORLD["meters"])
     try:
         saved = json.load(open(_rules_path(name)))
     except (OSError, ValueError):
         _load_game_rules([])
         return
     saved = saved or {}
-    if "tweaks" in saved or "game" in saved:
-        tweaks, game = saved.get("tweaks") or {}, saved.get("game") or []
+    if "tweaks" in saved or "game" in saved or "world" in saved:
+        tweaks = saved.get("tweaks") or {}
+        game = saved.get("game") or []
+        wm = (saved.get("world") or {}).get("meters") or {}
     else:
-        tweaks, game = saved, []
+        tweaks, game, wm = saved, [], {}
     for k, v in tweaks.items():
         if k == "walk_ms" and v in (90, 140, 220):
             rules[k] = v
@@ -473,13 +616,17 @@ def _load_rules(name):
             rules[k] = v
         elif k in ("ghost", "touch") and isinstance(v, bool):
             rules[k] = v
+    for k in DEFAULT_WORLD["meters"]:
+        if isinstance(wm.get(k), bool):
+            world_profile["meters"][k] = wm[k]
     _load_game_rules(game)
 
 
 def _save_rules(name):
     try:
         with open(_rules_path(name), "w") as f:
-            json.dump({"tweaks": rules, "game": game_rules}, f)
+            json.dump({"tweaks": rules, "game": game_rules,
+                       "world": world_profile}, f)
     except OSError as e:
         print(f"[hud] could not save rules: {e}")
 
@@ -496,6 +643,7 @@ else:
 _load_custom_tiles()  # v3.0: imported tiles back into the asset manager
 _load_patrols()       # v3.4: patrol routes back (needs tiles loaded first)
 _load_rules(DEFAULT_SAVE)  # v3.7: this build's rules (or defaults)
+_load_traits(DEFAULT_SAVE)  # v4.0: this build's nature traits (or blank)
 
 # v3.2: built-in water/ocean colors are swimmable — slow the hero, don't block
 for _tid, _t in assets.tiles.items():
@@ -530,6 +678,7 @@ def _reset_rule_session():
     _revert_rule_mods()
     _rule_shown.clear()
     _rule_keys.clear()
+    _reset_nature_session()  # v4.0: meters fresh, gathered traits restored
     global _rule_over
     _rule_over = None
 
@@ -885,6 +1034,13 @@ class Handler(BaseHTTPRequestHandler):
             names = {str(t): assets.tiles[t]["name"]
                      for t in tids if t in assets.tiles}
             self._send_json({"ok": True, "rules": game_rules, "names": names})
+        elif path == "/api/traits":
+            # v4.0: this build's nature traits + the plain-words legend
+            self._send_json({"ok": True, "traits": traits_grid,
+                             "legend": TRAITS})
+        elif path == "/api/world":
+            # v4.0: this build's world profile (meter selectors)
+            self._send_json({"ok": True, "world": world_profile})
         elif path == "/api/status":
             self._send_json({"dirty": _save_state["dirty"],
                              "last_save": _save_state["last"],
@@ -1217,6 +1373,8 @@ class Handler(BaseHTTPRequestHandler):
             _mark_dirty()
             rules.clear()
             rules.update(DEFAULT_RULES)  # v3.7: fresh build, fresh rules
+            world_profile["meters"] = dict(DEFAULT_WORLD["meters"])  # v4.0
+            traits_grid[:] = _blank_traits()  # v4.0: fresh build, fresh nature
             return self._send_json({"ok": True, "biome": biome, "rules": rules})
 
         if path == "/api/clear_layer":
@@ -1240,6 +1398,7 @@ class Handler(BaseHTTPRequestHandler):
             w, h = max(4, min(64, w)), max(4, min(64, h))
             old = _snapshot()
             world.resize(w, h)
+            _fit_traits()  # v4.0: keep the nature grid matched to the map
             history.push(core.MapSnapshotCommand(world, old, _snapshot()))
             _mark_dirty()
             return self._send_json({"ok": True, "width": w, "height": h})
@@ -1249,6 +1408,7 @@ class Handler(BaseHTTPRequestHandler):
             if not name.endswith(".json"):
                 name += ".json"
             _revert_rule_mods()  # v3.9: a playtest never permanently edits the build
+            _revert_nature_mods()  # v4.0: gathered wood / built fires neither
             ok = world.save(os.path.join(SCRIPT_DIR, name))
             if ok:
                 _save_rules(name)  # v3.7
@@ -1266,6 +1426,7 @@ class Handler(BaseHTTPRequestHandler):
                 history.undo_stack.clear()
                 history.redo_stack.clear()
                 _load_rules(name)  # v3.7: this build's rules come with it
+                _load_traits(name)  # v4.0: this build's nature comes with it
             return self._send_json({"ok": ok, "width": world.width,
                                     "height": world.height, "rules": rules})
 
@@ -1274,7 +1435,9 @@ class Handler(BaseHTTPRequestHandler):
             play["active"] = True
             play["tx"], play["ty"] = sx, sy
             _reset_rule_session()  # v3.9: fresh keys, messages, win/lose
-            return self._send_json({"ok": True, "x": sx, "y": sy})
+                                   # v4.0: fresh meters + inventory
+            return self._send_json({"ok": True, "x": sx, "y": sy,
+                                    "nature": _nature_state()})
 
         if path == "/api/play/move":
             if not play["active"]:
@@ -1290,6 +1453,7 @@ class Handler(BaseHTTPRequestHandler):
             kept = 0
             for i, (cx, cy) in enumerate(cells):
                 ev = _check_rules(cx, cy)
+                ev += _apply_nature(cx, cy)  # v4.0: the world's nature
                 events.append(ev)
                 kept = i + 1
                 if _rule_over:
@@ -1299,7 +1463,7 @@ class Handler(BaseHTTPRequestHandler):
                 play["tx"], play["ty"] = cells[-1]
             return self._send_json({"ok": True, "path": [list(c) for c in cells],
                                     "swim": swim[:kept], "deep": deep[:kept],
-                                    "events": events,
+                                    "events": events, "nature": _nature_state(),
                                     "x": play["tx"], "y": play["ty"]})
 
         if path == "/api/play/step":
@@ -1317,10 +1481,12 @@ class Handler(BaseHTTPRequestHandler):
                 play["tx"], play["ty"] = nx, ny
             # v3.9: game rules fire when the hero actually arrives
             events = _check_rules(play["tx"], play["ty"]) if can else []
+            if can:
+                events += _apply_nature(play["tx"], play["ty"])  # v4.0
             return self._send_json({"ok": True, "x": play["tx"], "y": play["ty"],
                                     "swim": _swim_at(play["tx"], play["ty"]),
                                     "deep": _deep_at(play["tx"], play["ty"]),
-                                    "events": events,
+                                    "events": events, "nature": _nature_state(),
                                     "blocked": not can})
 
         if path == "/api/rules":
@@ -1369,6 +1535,77 @@ class Handler(BaseHTTPRequestHandler):
                 _mark_dirty()
                 return self._send_json({"ok": True, "rules": game_rules})
             return self._send_json({"ok": False, "error": "action?"}, 400)
+
+        if path == "/api/traits":
+            # v4.0: stamp a nature trait on one tile — {x, y, trait}
+            # (trait id, or null to clear). Stamping saves the sidecar.
+            if play["active"]:
+                return self._send_json({"ok": False,
+                                        "error": "leave play mode first"}, 400)
+            x, y, t = body.get("x"), body.get("y"), body.get("trait")
+            if not isinstance(x, int) or not isinstance(y, int):
+                return self._send_json({"ok": False,
+                                        "error": "x/y ints required"}, 400)
+            if not (0 <= x < world.width and 0 <= y < world.height):
+                return self._send_json({"ok": False, "error": "off the map"}, 400)
+            if t is not None and t not in TRAITS:
+                return self._send_json({"ok": False, "error": "unknown trait"}, 400)
+            traits_grid[y][x] = t
+            _save_traits(_current_map)
+            return self._send_json({"ok": True})
+
+        if path == "/api/world":
+            # v4.0: this build's world profile — which meters exist.
+            # POST {meters: {health: bool, warmth: bool, belly: bool}}.
+            changed = False
+            m = body.get("meters", {})
+            for k in DEFAULT_WORLD["meters"]:
+                if isinstance(m.get(k), bool):
+                    world_profile["meters"][k] = m[k]
+                    changed = True
+            if changed:
+                _save_rules(_current_map)
+                _mark_dirty()
+            return self._send_json({"ok": True, "world": world_profile})
+
+        if path == "/api/play/tick":
+            # v4.0: ambient nature — the client pings this every couple of
+            # seconds in play mode so cold bites even standing still.
+            if not play["active"]:
+                return self._send_json({"ok": False,
+                                        "error": "play mode not active"}, 400)
+            events = _apply_nature(play["tx"], play["ty"])
+            return self._send_json({"ok": True, "events": events,
+                                    "nature": _nature_state(),
+                                    "over": bool(_rule_over)})
+
+        if path == "/api/play/fire":
+            # v4.0: spend 2 gathered wood to build a fire — the 8 tiles
+            # around the hero turn hot for the rest of the run.
+            if not play["active"]:
+                return self._send_json({"ok": False,
+                                        "error": "play mode not active"}, 400)
+            if _inv["wood"] < 2:
+                return self._send_json({"ok": False, "error":
+                                        "need 2 wood — walk over some 🪵 first"},
+                                       400)
+            _inv["wood"] -= 2
+            hx, hy = play["tx"], play["ty"]
+            lit = 0
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    if dx == 0 and dy == 0:
+                        continue
+                    x, y = hx + dx, hy + dy
+                    if 0 <= x < world.width and 0 <= y < world.height \
+                            and traits_grid[y][x] is None:
+                        _nature_mods.append((x, y, None))
+                        traits_grid[y][x] = "hot"
+                        lit += 1
+            return self._send_json({"ok": True, "lit": lit,
+                                    "events": [{"t": "toast",
+                                                "text": "Fire built — stay warm."}],
+                                    "nature": _nature_state()})
 
         if path == "/api/play/stop":
             play["active"] = False

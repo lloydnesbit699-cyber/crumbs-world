@@ -23,6 +23,9 @@ v1.7 (2026-09-18): camera — Move button toggles pan mode (drag moves the
 map instead of painting); -/+ zoom, Fit re-fits the screen.
 v1.8 (2026-09-18): Stop server button in the Setup drawer — saves dirty
 work, shuts the server down, and returns the a-Shell prompt.
+v1.9 (2026-09-18): --public flag — serve on the Wi-Fi network so a friend
+can open the HUD in their browser with no downloads; banner prints the
+phone's Wi-Fi address.
 
 Run:   python3 crumbs_hud.py
 Open:  http://127.0.0.1:8778   (same phone's browser)
@@ -30,6 +33,8 @@ Open:  http://127.0.0.1:8778   (same phone's browser)
 import json
 import io
 import os
+import socket
+import sys
 import threading
 import time
 from collections import deque
@@ -176,7 +181,7 @@ def _map_state():
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "CrumbsHUD/1.8"
+    server_version = "CrumbsHUD/1.9"
 
     def log_message(self, *a):  # keep the console quiet
         pass
@@ -448,12 +453,38 @@ class Handler(BaseHTTPRequestHandler):
         return self._send_json({"ok": False, "error": "not found"}, 404)
 
 
+def _lan_ip():
+    # v1.9: the phone's Wi-Fi address, so a friend can open the page.
+    # Opens a UDP socket without sending anything — just asks the OS
+    # which interface would carry the traffic.
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return None
+
+
 if __name__ == "__main__":
-    srv = ThreadingHTTPServer((HOST, PORT), Handler)
+    public = "--public" in sys.argv[1:]  # v1.9: serve the Wi-Fi network
+    host = "0.0.0.0" if public else HOST
+    srv = ThreadingHTTPServer((host, PORT), Handler)
     threading.Thread(target=_autosave_loop, daemon=True).start()
     print("=" * 52)
-    print("  Crumbs HUD v1.8 — touch tile painter + stop button")
-    print(f"  Open this on the phone:  http://{HOST}:{PORT}")
+    print("  Crumbs HUD v1.9 — touch tile painter + wifi sharing")
+    if public:
+        ip = _lan_ip()
+        print("  PUBLIC mode: anyone on your Wi-Fi can open the HUD.")
+        if ip:
+            print(f"  Friend opens:  http://{ip}:{PORT}")
+        else:
+            print(f"  Friend opens:  http://<this-device's-WiFi-IP>:{PORT}")
+        print(f"  You open:      http://{HOST}:{PORT}")
+    else:
+        print(f"  Open this on the phone:  http://{HOST}:{PORT}")
+        print("  Share on Wi-Fi with:  python3 crumbs_hud.py --public")
     print("  Autosave: every 30s to hud_map.json when dirty")
     print("=" * 52)
     try:

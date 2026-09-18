@@ -35,6 +35,18 @@ ON AN IPHONE (needs the free a-Shell app):
      The Setup drawer has a Stop server button that ends the server
      cleanly and returns your terminal prompt.
 
+SHARE FROM YOUR PHONE (your friend needs nothing installed):
+
+  1. On your phone, in this folder, run:
+       python3 crumbs_hud.py --public
+     The server prints an address like http://192.168.1.5:8778
+  2. Both devices on the same Wi-Fi.
+  3. Your friend opens that address in any browser. That's it —
+     the whole HUD runs in their browser, painting and all.
+  Notes: iOS may ask a-Shell for Local Network permission — allow it.
+  Keep a-Shell in the foreground while sharing. Anyone on the Wi-Fi
+  can open it, so only use --public on networks you trust.
+
 WHAT'S INSIDE:
 
   crumbs_hud.py      the server (this is what you run)

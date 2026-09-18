@@ -50,4 +50,4 @@ exposeLocalhost = true
 
 [deployment]
 deploymentTarget = "cloudrun"
-run = "python3 crumbs_hud.py --public"
+run = "PORT=5000 python3 crumbs_hud.py --public"

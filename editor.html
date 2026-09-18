@@ -377,6 +377,7 @@ function strokeAdd(cell) {
   if (stroke.cells.has(key)) return;
   stroke.cells.set(key, { x: cell.x, y: cell.y, tile_id: brushValue() });
   localGrid()[cell.y][cell.x] = brushValue();   // optimistic preview
+  dirtyFlag = true;   // v2.0: assume unsaved until the server says otherwise
   render();
 }
 canvas.addEventListener("pointerdown", e => {
@@ -589,6 +590,14 @@ $("menu-dropdown").addEventListener("click", e => {
   if (b && b.id !== "menu-setup" && b.id !== "menu-save") setTimeout(closeOverlays, 60);
 });
 
+// ---- v2.0: catch unsaved work before the tab closes ---------------------------
+// If the map is dirty and the tab gets closed or refreshed, the browser pops
+// its "leave site?" prompt instead of silently dropping the player's work.
+let dirtyFlag = false;
+window.addEventListener("beforeunload", e => {
+  if (dirtyFlag) { e.preventDefault(); e.returnValue = ""; }
+});
+
 // ---- map picker + save status -------------------------------------------------
 async function refreshMaps() {
   try {
@@ -608,6 +617,7 @@ $("map-picker").onchange = () => { $("filename").value = $("map-picker").value; 
 async function pollStatus() {
   try {
     const s = await api("/api/status");
+    dirtyFlag = !!s.dirty;   // v2.0: server is the source of truth
     $("save-status").textContent = s.dirty ? "● unsaved changes"
       : (s.last_save ? "saved " + s.last_save : "no changes yet");
   } catch (e) { /* server away */ }

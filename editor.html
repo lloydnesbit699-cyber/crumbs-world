@@ -71,16 +71,21 @@
   #tray-left .seg { margin-bottom: 10px; }
   #tray-right button { width: 100%; margin-bottom: 8px; }
 
-  #sheet-setup { position: fixed; left: 0; right: 0; bottom: 0; z-index: 55;
-                 background: #161616; border-top: 1px solid #333;
-                 border-radius: 16px 16px 0 0;
-                 padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
-                 max-height: 72dvh; overflow-y: auto; transform: translateY(103%);
-                 transition: transform .22s ease-out;
-                 -webkit-overflow-scrolling: touch; }
-  #sheet-setup.open { transform: none; }
-  #sheet-setup .grab { width: 40px; height: 4px; border-radius: 2px; background: #444;
-                       margin: 0 auto 10px; }
+  .sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 55;
+           background: #161616; border-top: 1px solid #333;
+           border-radius: 16px 16px 0 0;
+           padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
+           max-height: 72dvh; overflow-y: auto; transform: translateY(103%);
+           transition: transform .22s ease-out;
+           -webkit-overflow-scrolling: touch; }
+  .sheet.open { transform: none; }
+  .sheet .grab { width: 40px; height: 4px; border-radius: 2px; background: #444;
+                 margin: 0 auto 10px; }
+  #load-list button { display: block; width: 100%; text-align: left;
+                      margin-bottom: 6px; padding: 10px 12px; }
+  #load-list button.cur { border-color: #4da3ff; color: #4da3ff; }
+  .lbl { color: #888; font-size: 12px; margin-right: 6px; }
+  #map-name { color: #eee; font-size: 14px; word-break: break-all; }
 
   #scrim { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.45);
            display: none; }
@@ -127,7 +132,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v2.2</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v2.3</small></span>
 </div>
 
 <div id="menu-dropdown">
@@ -136,7 +141,9 @@
   <button id="btn-redo" title="Redo">Redo</button>
   <hr>
   <button id="menu-setup">Setup&hellip;</button>
-  <button id="menu-save">Save now</button>
+  <button id="menu-save">Save</button>
+  <button id="menu-saveas">Save As&hellip;</button>
+  <button id="menu-load">Load&hellip;</button>
   <hr>
   <button id="btn-stop" class="danger" title="Stop the HUD server">Stop server</button>
 </div>
@@ -169,7 +176,7 @@
   <button id="btn-clear" class="danger" title="Clear current layer">Clear layer</button>
 </aside>
 
-<div id="sheet-setup">
+<div id="sheet-setup" class="sheet">
   <div class="grab"></div>
   <div class="tray-head">Setup</div>
   <div class="row">
@@ -181,10 +188,7 @@
   </div>
   <div class="row">
     <div class="field">
-      <select id="map-picker" title="Saved maps"></select>
-      <input id="filename" type="text" value="hud_map.json" title="Map filename">
-      <button id="btn-save">Save</button>
-      <button id="btn-load">Load</button>
+      <span class="lbl">Map file:</span><b id="map-name">hud_map.json</b>
     </div>
     <div class="field">
       <input id="rw" type="number" value="25" min="4" max="64" title="Width">
@@ -196,6 +200,12 @@
   <div class="row">
     <small id="save-status">not saved yet</small>
   </div>
+</div>
+
+<div id="sheet-load" class="sheet">
+  <div class="grab"></div>
+  <div class="tray-head">Load map</div>
+  <div id="load-list"></div>
 </div>
 
 <div id="scrim"></div>
@@ -609,18 +619,46 @@ $("btn-gen").onclick = async () => {
   const r = await api("/api/generate", { biome: $("biome").value, seed: seedRaw === "" ? null : parseInt(seedRaw, 10) });
   if (r.ok) { await refresh(); toast("generated " + r.biome); } else toast("generate failed");
 };
-$("btn-save").onclick = async () => {
-  const r = await api("/api/save", { filename: $("filename").value });
-  if (r.ok) { toast("saved " + r.file); await refreshMaps(); pollStatus(); }
+// ---- v2.3: explicit Save / Save As / Load ------------------------------------
+let currentFile = "hud_map.json";
+function setFile(name) {
+  currentFile = name;
+  $("map-name").textContent = name;
+}
+async function doSave() {
+  const r = await api("/api/save", { filename: currentFile });
+  if (r.ok) { setFile(r.file); toast("saved " + r.file); pollStatus(); }
   else toast("save failed");
-};
-$("btn-load").onclick = async () => {
-  const r = await api("/api/load", { filename: $("filename").value });
-  if (r.ok) { await refresh(); toast("loaded " + $("filename").value); } else toast("load failed: " + (r.error || ""));
-};
+}
+async function doSaveAs() {
+  const name = prompt("Save map as\u2026", currentFile);
+  if (name === null) return;   // cancelled
+  const r = await api("/api/save", { filename: name.trim() || currentFile });
+  if (r.ok) { setFile(r.file); toast("saved " + r.file); pollStatus(); }
+  else toast("save failed");
+}
+async function renderLoadList() {
+  const list = $("load-list");
+  list.innerHTML = "";
+  try {
+    const m = await api("/api/maps");
+    if (!m.maps.length) list.innerHTML = "<small>no saved maps yet</small>";
+    m.maps.forEach(f => {
+      const b = document.createElement("button");
+      b.textContent = f;
+      if (f === currentFile) b.classList.add("cur");
+      b.onclick = async () => {
+        const r = await api("/api/load", { filename: f });
+        if (r.ok) { setFile(f); panX = 0; panY = 0; await refresh(); closeOverlays(); toast("loaded " + f); }
+        else toast("load failed: " + (r.error || ""));
+      };
+      list.appendChild(b);
+    });
+  } catch (e) { list.innerHTML = "<small>couldn't reach server</small>"; }
+}
 $("btn-resize").onclick = async () => {
   const r = await api("/api/resize", { width: parseInt($("rw").value, 10), height: parseInt($("rh").value, 10) });
-  if (r.ok) { await refresh(); toast("resized " + r.width + "x" + r.height); }
+  if (r.ok) { panX = 0; panY = 0; await refresh(); toast("resized " + r.width + "x" + r.height + " \u2014 map kept"); }
 };
 // v1.8: stop the server from the page — saves first, then your a-Shell prompt comes back
 $("btn-stop").onclick = async () => {
@@ -638,7 +676,7 @@ document.querySelectorAll("#collide-palette .sw").forEach(d => {
 
 // ---- v2.0 trays & dropdown menu ------------------------------------------------
 function closeOverlays() {
-  document.querySelectorAll(".tray.open, #sheet-setup.open, #menu-dropdown.open")
+  document.querySelectorAll(".tray.open, .sheet.open, #menu-dropdown.open")
     .forEach(el => el.classList.remove("open"));
   $("scrim").classList.remove("on");
 }
@@ -653,11 +691,13 @@ $("tab-left").onclick = () => toggleOverlay("tray-left");
 $("tab-right").onclick = () => toggleOverlay("tray-right");
 $("scrim").onclick = closeOverlays;
 $("menu-setup").onclick = () => toggleOverlay("sheet-setup");
-$("menu-save").onclick = () => { closeOverlays(); $("btn-save").click(); };
+$("menu-save").onclick = () => { closeOverlays(); doSave(); };
+$("menu-saveas").onclick = () => { closeOverlays(); doSaveAs(); };
+$("menu-load").onclick = () => { toggleOverlay("sheet-load"); renderLoadList(); };
 // dismiss the menu after any of its action buttons fire
 $("menu-dropdown").addEventListener("click", e => {
   const b = e.target.closest("button");
-  if (b && b.id !== "menu-setup" && b.id !== "menu-save") setTimeout(closeOverlays, 60);
+  if (b && !["menu-setup", "menu-save", "menu-saveas", "menu-load"].includes(b.id)) setTimeout(closeOverlays, 60);
 });
 
 // ---- v2.0: catch unsaved work before the tab closes ---------------------------
@@ -668,21 +708,7 @@ window.addEventListener("beforeunload", e => {
   if (dirtyFlag) { e.preventDefault(); e.returnValue = ""; }
 });
 
-// ---- map picker + save status -------------------------------------------------
-async function refreshMaps() {
-  try {
-    const m = await api("/api/maps");
-    const mp = $("map-picker");
-    const cur = $("filename").value;
-    mp.innerHTML = "";
-    m.maps.forEach(f => {
-      const o = document.createElement("option");
-      o.value = f; o.textContent = f; mp.appendChild(o);
-    });
-    if (m.maps.includes(cur)) mp.value = cur;
-  } catch (e) { /* server away */ }
-}
-$("map-picker").onchange = () => { $("filename").value = $("map-picker").value; };
+// ---- save status -------------------------------------------------------------
 
 async function pollStatus() {
   try {
@@ -715,7 +741,7 @@ async function pollStatus() {
     });
     document.querySelector('#collide-palette .sw[data-cv="1"]').classList.add("sel");
     buildPalette();
-    await refreshMaps();
+    setFile(currentFile);
     await refresh();
     pollStatus();
     setInterval(pollStatus, 10000);

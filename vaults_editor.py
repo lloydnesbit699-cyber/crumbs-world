@@ -612,10 +612,17 @@ class WorldMap:
         self.collision_layer = [[False for _ in range(width)] for _ in range(height)]
     
     def resize(self, w, h):
+        # keep every tile/object/collision in the overlapping region —
+        # resizing must never wipe the map
+        old_w, old_h = self.width, self.height
+        old_data, old_obj, old_col = self.data, self.object_layer, self.collision_layer
         self.width, self.height = w, h
-        self.data = [[0 for _ in range(w)] for _ in range(h)]
-        self.object_layer = [[None for _ in range(w)] for _ in range(h)]
-        self.collision_layer = [[False for _ in range(w)] for _ in range(h)]
+        self.data = [[old_data[y][x] if y < old_h and x < old_w else 0
+                      for x in range(w)] for y in range(h)]
+        self.object_layer = [[old_obj[y][x] if y < old_h and x < old_w else None
+                              for x in range(w)] for y in range(h)]
+        self.collision_layer = [[old_col[y][x] if y < old_h and x < old_w else False
+                                for x in range(w)] for y in range(h)]
     
     def generate_biome(self, biome_name, seed=None):
         biome = BIOMES.get(biome_name, BIOMES["grassland"])

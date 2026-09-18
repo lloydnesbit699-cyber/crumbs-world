@@ -34,6 +34,10 @@ to pan, pinch to zoom, both at once; one finger keeps painting.
 v2.2 (2026-09-18): transform-based camera — the map is positioned with a
 transform offset instead of container scrolling, so panning works
 identically at every zoom level; pinch zooms anchor at the fingers.
+v2.3 (2026-09-18): resize() now preserves the overlapping map instead of
+wiping it (fixed in crumbs_core and vaults_editor); save UI split into
+explicit Save / Save As / Load in the header menu, with a Load bottom sheet
+and a read-only current-map label in Setup.
 
 Run:   python3 crumbs_hud.py
 Open:  http://127.0.0.1:8778   (same phone's browser)
@@ -481,7 +485,7 @@ if __name__ == "__main__":
     srv = ThreadingHTTPServer((host, PORT), Handler)
     threading.Thread(target=_autosave_loop, daemon=True).start()
     print("=" * 52)
-    print("  Crumbs HUD v2.2 — transform camera + gestures + wifi sharing")
+    print("  Crumbs HUD v2.3 — save/load menu + resize preserves map")
     if public:
         ip = _lan_ip()
         print("  PUBLIC mode: anyone on your Wi-Fi can open the HUD.")

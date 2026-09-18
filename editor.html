@@ -128,6 +128,17 @@
   #import-presets button.on { border-color: #4da3ff; color: #4da3ff; }
   #import-speed { font-size: 12px; color: #999; margin-bottom: 8px; }
   #import-speed input { width: 70px; }
+  /* v3.3: one-button animation + custom tile manager */
+  #import-animate { background: #3a2b5c; border-color: #8a6dd7; margin-top: 8px; }
+  #btn-custom-edit { font-size: 11px; padding: 2px 10px; margin: 0 0 0 8px; }
+  #custom-tiles.editing .sw { outline: 2px dashed #8a6dd7; outline-offset: -2px; }
+  #tile-edit-form { background: #1c1c1c; border: 1px solid #444; border-radius: 10px;
+    padding: 10px; margin-top: 8px; }
+  #tile-edit-name { width: 100%; box-sizing: border-box; margin-bottom: 4px; }
+  #tile-edit-presets { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  #tile-edit-presets button { flex: 1 1 28%; margin: 0; padding: 8px 4px; font-size: 12px; }
+  #tile-edit-presets button.on { border-color: #4da3ff; color: #4da3ff; }
+  #tile-edit-delete { background: #5c2b2b; border-color: #d76d6d; }
   .row2 { display: flex; gap: 8px; }
   .row2 button { flex: 1; margin: 0; }
   #collide-palette { display: none; gap: 8px; }
@@ -155,7 +166,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v3.2</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v3.3</small></span>
 </div>
 
 <div id="menu-dropdown">
@@ -179,8 +190,17 @@
 
 <aside class="tray" id="tray-left">
   <div class="tray-head">Tiles<span class="tray-hint" id="layer-hint">paint the ground</span></div>
-  <div class="grp-label">custom</div>
+  <div class="grp-label">custom<button id="btn-custom-edit" class="ghost">Edit</button></div>
   <div id="custom-tiles" class="swatches"></div>
+  <div id="tile-edit-form" hidden>
+    <input id="tile-edit-name" maxlength="24" placeholder="tile name">
+    <div id="tile-edit-presets"></div>
+    <div class="row2">
+      <button id="tile-edit-save">Save</button>
+      <button id="tile-edit-delete">Delete</button>
+      <button id="tile-edit-done" class="ghost">Done</button>
+    </div>
+  </div>
   <button id="btn-import" class="widebtn">＋ Import images…</button>
   <input type="file" id="import-files" accept="image/*" multiple hidden>
   <div id="import-form" hidden>
@@ -188,6 +208,7 @@
     <input id="import-name" maxlength="24" placeholder="tile name">
     <div id="import-presets"></div>
     <div id="import-speed" hidden>frame <input id="import-ms" type="number" value="400" min="80" max="2000" step="40"> ms</div>
+    <button id="import-animate" class="widebtn" hidden>✨ Make it move</button>
     <div class="row2">
       <button id="import-add">Add tile</button>
       <button id="import-cancel" class="ghost">Cancel</button>
@@ -308,6 +329,8 @@ let customFrames = {};              // id -> [Image per frame]
 let presets = [];                   // tile function presets from server
 let importFiles = [];               // pending import [{name,dataUrl}]
 let importPreset = "floor";
+let customEditMode = false;          // v3.3: tile manager edit mode
+let editingTile = null, editPreset = null;
 let animOnMap = new Set();          // custom animated tile ids currently placed
 let heroTileId = null;              // sprite tile used as the play-mode hero
 let colorOf = {};                   // tile id -> css color
@@ -820,7 +843,10 @@ function buildCustomTiles() {
     d.innerHTML = '<canvas width="48" height="48" data-tid="' + t.id + '"></canvas>' +
                   '<div class="lbl">' + t.name + '</div>' +
                   '<div class="preset-tag">' + t.preset + '</div>';
-    d.onclick = () => selectTile(t.id);
+    d.onclick = () => {
+      if (customEditMode) openTileEditor(t.id);   // v3.3: tile manager
+      else selectTile(t.id);
+    };
     box.appendChild(d);
   });
 }
@@ -907,10 +933,29 @@ $("import-files").onchange = async e => {
     im.src = f.dataUrl; im.title = f.name;
     pv.appendChild(im);
   });
-  $("import-speed").hidden = importFiles.length < 2;
+  $("import-speed").hidden = !importFiles.length;
+  $("import-animate").hidden = importFiles.length !== 1;   // v3.3: one-button animation
   buildImportPresets();
 };
 $("import-cancel").onclick = () => { $("import-form").hidden = true; importFiles = []; };
+// v3.3: one button = animation. The server finds the poses in the picture —
+// no slicing talk, no grid talk.
+$("import-animate").onclick = async () => {
+  const r = await api("/api/autoslice", {
+    name: $("import-name").value.trim().slice(0, 24) || "custom",
+    preset: importPreset,
+    frame_ms: +$("import-ms").value || 400,
+    image: importFiles[0].dataUrl,
+  });
+  if (!r.ok) { toast("couldn't make it move: " + (r.error || "unknown")); return; }
+  $("import-form").hidden = true; importFiles = [];
+  await loadCustomTiles();
+  selTile = r.tile.id;
+  buildPalette();
+  toast(r.single
+    ? "That's one picture, so I added it as-is. For movement, pick a picture with several poses side by side."
+    : "Made it move — " + r.frames + " pictures! Tap the map to place it");
+};
 $("import-add").onclick = async () => {
   const r = await api("/api/custom-tiles", {
     name: $("import-name").value.trim().slice(0, 24) || "custom",
@@ -924,6 +969,61 @@ $("import-add").onclick = async () => {
   selTile = r.tile.id;
   buildPalette();
   toast(r.tile.name + " added (" + r.tile.preset + ") — tap the map to place it");
+};
+
+// ---- v3.3: custom tile manager (rename / change type / delete) ---------------
+$("btn-custom-edit").onclick = () => {
+  customEditMode = !customEditMode;
+  $("btn-custom-edit").textContent = customEditMode ? "Done" : "Edit";
+  $("custom-tiles").classList.toggle("editing", customEditMode);
+  $("tile-edit-form").hidden = true; editingTile = null;
+  buildCustomTiles();
+};
+function openTileEditor(id) {
+  editingTile = customById[id];
+  if (!editingTile) return;
+  editPreset = editingTile.preset;
+  $("tile-edit-form").hidden = false;
+  $("tile-edit-name").value = editingTile.name;
+  buildTileEditPresets();
+}
+function buildTileEditPresets() {
+  const box = $("tile-edit-presets"); box.innerHTML = "";
+  presets.forEach(p => {
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = p.label; b.title = p.hint;
+    b.className = p.id === editPreset ? "on" : "";
+    b.onclick = ev => { ev.preventDefault(); editPreset = p.id; buildTileEditPresets(); };
+    box.appendChild(b);
+  });
+}
+$("tile-edit-done").onclick = () => { $("tile-edit-form").hidden = true; editingTile = null; };
+$("tile-edit-save").onclick = async () => {
+  if (!editingTile) return;
+  const r = await api("/api/custom/update", {
+    id: editingTile.id,
+    name: $("tile-edit-name").value.trim().slice(0, 24),
+    preset: editPreset,
+  });
+  if (!r.ok) { toast("couldn't save: " + (r.error || "unknown")); return; }
+  const renamed = editingTile.id;
+  $("tile-edit-form").hidden = true; editingTile = null;
+  await loadCustomTiles();
+  selTile = renamed;
+  buildPalette();
+  toast("saved");
+};
+$("tile-edit-delete").onclick = async () => {
+  if (!editingTile) return;
+  if (!confirm("Delete '" + editingTile.name + "'? It comes off the map too.")) return;
+  const gone = editingTile.id;
+  const r = await api("/api/custom/delete", { id: gone });
+  if (!r.ok) { toast("couldn't delete: " + (r.error || "unknown")); return; }
+  $("tile-edit-form").hidden = true; editingTile = null;
+  await loadCustomTiles();
+  if (selTile === gone) selTile = defaultBrush(layer);
+  buildPalette(); render();
+  toast("deleted");
 };
 
 // ---- toolbar wiring ----------------------------------------------------------

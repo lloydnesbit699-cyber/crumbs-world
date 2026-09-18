@@ -162,6 +162,109 @@ def _load_custom_tiles():
         print(f"[hud] loaded {len(_custom_tiles)} custom tile(s)")
     _save_custom_registry()  # v3.2: persist water→swim migrations, if any
 
+
+# ---- v3.3: one-button animation ("Make it move") ------------------------------
+def _divisor_frames(img):
+    """Last-resort split for edge-to-edge sheets with no detectable gaps.
+    Only fires when the shape clearly says 'strip' (much wider than tall);
+    anything else comes back as one picture — a wrong split is worse than
+    asking the user for a gapped sheet."""
+    w, h = img.size
+    if w < 1.8 * h:
+        return [img]
+    for n in range(8, 1, -1):
+        if w % n:
+            continue
+        if h * 0.5 <= w / n <= h * 2.0:
+            fw = w // n
+            return [img.crop((c * fw, 0, (c + 1) * fw, h))
+                    for c in range(n)][:CUSTOM_MAX_FRAMES]
+    return [img]
+
+
+def _autoslice_pil(img):
+    """Split one picture into animation poses. Transparent gaps or a solid
+    background color mark the cuts; otherwise try even splits."""
+    img = img.convert("RGBA")
+    if max(img.size) > 256:
+        img.thumbnail((256, 256), core.Image.Resampling.NEAREST)
+    w, h = img.size
+    px = img.load()
+    corners = (px[0, 0], px[w - 1, 0], px[0, h - 1], px[w - 1, h - 1])
+    if all(c[3] == 0 for c in corners):
+        def empty(p): return p[3] == 0
+    elif len({(c[0], c[1], c[2]) for c in corners}) == 1:
+        bg = (corners[0][0], corners[0][1], corners[0][2])
+
+        def empty(p): return (p[0], p[1], p[2]) == bg
+    else:
+        return _divisor_frames(img)
+
+    def bands(flags):
+        out, i = [], 0
+        n = len(flags)
+        while i < n:
+            if not flags[i]:
+                j = i
+                while j < n and not flags[j]:
+                    j += 1
+                out.append((i, j))
+                i = j
+            else:
+                i += 1
+        return out
+
+    row_empty = [all(empty(px[x, y]) for x in range(w)) for y in range(h)]
+    col_empty = [all(empty(px[x, y]) for y in range(h)) for x in range(w)]
+    rb, cb = bands(row_empty), bands(col_empty)
+    if not (len(cb) >= 2 and rb):
+        return _divisor_frames(img)
+    frames = []
+    for (y0, y1) in rb:
+        for (x0, x1) in cb:
+            cell = img.crop((x0, y0, x1, y1))
+            cw, ch = cell.size
+            cpx = cell.load()
+            if all(empty(cpx[x, y]) for y in range(ch) for x in range(cw)):
+                continue  # stray blank cell
+            frames.append(cell)
+            if len(frames) >= CUSTOM_MAX_FRAMES:
+                break
+        if len(frames) >= CUSTOM_MAX_FRAMES:
+            break
+    return frames or _divisor_frames(img)
+
+
+def _store_custom_tile(name, preset, frame_ms, pil_images):
+    """Write PIL frames to custom_tiles/, register the tile, save registry.
+    Returns the registry entry. Rolls back partial writes on failure."""
+    tid = assets._next_id()
+    files = []
+    try:
+        for i, im in enumerate(pil_images):
+            im = im.convert("RGBA")
+            if max(im.size) > 256:
+                im.thumbnail((256, 256), core.Image.Resampling.NEAREST)
+            fn = f"{tid}_f{i}.png"
+            im.save(os.path.join(CUSTOM_DIR, fn), "PNG")
+            files.append(fn)
+    except Exception:
+        for fn in files:
+            try:
+                os.remove(os.path.join(CUSTOM_DIR, fn))
+            except OSError:
+                pass
+        raise
+    entry = {"id": tid, "name": name, "preset": preset,
+             "solid": TILE_PRESETS[preset]["solid"],
+             "height": TILE_PRESETS[preset]["height"],
+             "swim": bool(TILE_PRESETS[preset].get("swim", False)),
+             "frame_ms": frame_ms, "files": files}
+    _custom_tiles.append(entry)
+    _register_custom_tile(entry)
+    _save_custom_registry()
+    return entry
+
 # ---- in-memory session state ---------------------------------------------
 assets = core.AssetManager()
 world = core.WorldMap(25, 15, assets)
@@ -517,37 +620,100 @@ class Handler(BaseHTTPRequestHandler):
                 frame_ms = max(80, min(2000, int(body.get("frame_ms", 400))))
             except (TypeError, ValueError):
                 frame_ms = 400
-            tid = assets._next_id()
-            files = []
             try:
+                pil_images = []
                 for i, durl in enumerate(frames_in):
                     if not isinstance(durl, str) or not durl.startswith("data:image/"):
                         raise ValueError(f"frame {i}: not an image")
                     if len(durl) > CUSTOM_MAX_FILE_CHARS:
                         raise ValueError(f"frame {i}: too large (keep each under ~1MB)")
                     raw = base64.b64decode(durl.split(",", 1)[1])
-                    im = core.Image.open(io.BytesIO(raw)).convert("RGBA")
-                    if max(im.size) > 256:
-                        im.thumbnail((256, 256), core.Image.Resampling.NEAREST)
-                    fn = f"{tid}_f{i}.png"
-                    im.save(os.path.join(CUSTOM_DIR, fn), "PNG")
-                    files.append(fn)
+                    pil_images.append(core.Image.open(io.BytesIO(raw)))
+                entry = _store_custom_tile(name, preset, frame_ms, pil_images)
             except Exception as e:
-                for fn in files:  # roll back partial writes
-                    try:
-                        os.remove(os.path.join(CUSTOM_DIR, fn))
-                    except OSError:
-                        pass
                 return self._send_json({"ok": False, "error": str(e)}, 400)
-            entry = {"id": tid, "name": name, "preset": preset,
-                     "solid": TILE_PRESETS[preset]["solid"],
-                     "height": TILE_PRESETS[preset]["height"],
-                     "swim": bool(TILE_PRESETS[preset].get("swim", False)),
-                     "frame_ms": frame_ms, "files": files}
-            _custom_tiles.append(entry)
-            _register_custom_tile(entry)
+            return self._send_json({"ok": True, "tile": _custom_public(entry)})
+
+        if path == "/api/autoslice":
+            # v3.3: one-button animation — body: {name, preset, frame_ms,
+            # image: dataURL}. The server finds the poses and makes the tile.
+            if not core.PIL_AVAILABLE:
+                return self._send_json({"ok": False, "error": "image support unavailable"}, 500)
+            name = str(body.get("name", "")).strip()[:24] or "custom"
+            preset = body.get("preset", "decor")
+            if preset not in TILE_PRESETS:
+                return self._send_json({"ok": False, "error": "unknown preset"}, 400)
+            try:
+                frame_ms = max(80, min(2000, int(body.get("frame_ms", 400))))
+            except (TypeError, ValueError):
+                frame_ms = 400
+            durl = body.get("image", "")
+            try:
+                if not isinstance(durl, str) or not durl.startswith("data:image/"):
+                    raise ValueError("not an image")
+                if len(durl) > CUSTOM_MAX_FILE_CHARS:
+                    raise ValueError("too large (keep under ~1MB)")
+                raw = base64.b64decode(durl.split(",", 1)[1])
+                frames = _autoslice_pil(core.Image.open(io.BytesIO(raw)))
+                entry = _store_custom_tile(name, preset, frame_ms, frames)
+            except Exception as e:
+                return self._send_json({"ok": False, "error": str(e)}, 400)
+            return self._send_json({"ok": True, "tile": _custom_public(entry),
+                                    "frames": len(frames), "single": len(frames) == 1})
+
+        if path == "/api/custom/update":
+            # v3.3: rename / re-designate an imported tile — {id, name?, preset?}
+            try:
+                tid = int(body.get("id"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "bad id"}, 400)
+            entry = next((e for e in _custom_tiles if int(e["id"]) == tid), None)
+            if entry is None:
+                return self._send_json({"ok": False, "error": "not found"}, 404)
+            if "name" in body:
+                entry["name"] = str(body.get("name", "")).strip()[:24] or entry["name"]
+            if "preset" in body:
+                preset = body.get("preset")
+                if preset not in TILE_PRESETS:
+                    return self._send_json({"ok": False, "error": "unknown preset"}, 400)
+                entry["preset"] = preset
+                entry["solid"] = TILE_PRESETS[preset]["solid"]
+                entry["height"] = TILE_PRESETS[preset]["height"]
+                entry["swim"] = bool(TILE_PRESETS[preset].get("swim", False))
+            t = assets.tiles.get(tid)
+            if t is not None:
+                t["name"] = entry["name"]
+                t["preset"] = entry["preset"]
+                t["properties"]["solid"] = bool(entry.get("solid", False))
+                t["properties"]["swim"] = bool(entry.get("swim", False))
             _save_custom_registry()
             return self._send_json({"ok": True, "tile": _custom_public(entry)})
+
+        if path == "/api/custom/delete":
+            # v3.3: delete an imported tile — {id}. Files removed, map scrubbed.
+            try:
+                tid = int(body.get("id"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "bad id"}, 400)
+            entry = next((e for e in _custom_tiles if int(e["id"]) == tid), None)
+            if entry is None:
+                return self._send_json({"ok": False, "error": "not found"}, 404)
+            _custom_tiles[:] = [e for e in _custom_tiles if int(e["id"]) != tid]
+            for fn in entry.get("files", []):
+                try:
+                    os.remove(os.path.join(CUSTOM_DIR, fn))
+                except OSError:
+                    pass
+            assets.tiles.pop(tid, None)
+            for y in range(world.height):
+                for x in range(world.width):
+                    if world.data[y][x] == tid:
+                        world.data[y][x] = 0
+                    if world.object_layer[y][x] == tid:
+                        world.object_layer[y][x] = None
+            _save_custom_registry()
+            _mark_dirty()
+            return self._send_json({"ok": True})
 
         if path == "/api/undo":
             ok = history.undo()
@@ -688,7 +854,7 @@ if __name__ == "__main__":
     srv = ThreadingHTTPServer((host, PORT), Handler)
     threading.Thread(target=_autosave_loop, daemon=True).start()
     print("=" * 52)
-    print("  Crumbs HUD v3.2 — character preset, water swim effect")
+    print("  Crumbs HUD v3.3 — one-button animation, custom tile manager")
     if public:
         ip = _lan_ip()
         print("  PUBLIC mode: anyone on your Wi-Fi can open the HUD.")

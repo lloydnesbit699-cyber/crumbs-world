@@ -9,12 +9,6 @@
   html, body { margin: 0; padding: 0; background: #111; color: #eee;
                font-family: system-ui, -apple-system, sans-serif;
                touch-action: manipulation; overscroll-behavior: none; }
-  header { position: sticky; top: 0; z-index: 10; background: #1a1a1a;
-           padding: 8px; border-bottom: 1px solid #333; }
-  h1 { margin: 0 0 8px 0; font-size: 18px; }
-  h1 small { color: #888; font-weight: normal; font-size: 12px; }
-  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
-  .row:last-child { margin-bottom: 0; }
   button, select, input { font-size: 16px; padding: 10px 12px; border-radius: 10px;
                          border: 1px solid #444; background: #2a2a2a; color: #eee;
                          min-height: 44px; }
@@ -24,13 +18,82 @@
   .seg { display: flex; border: 1px solid #444; border-radius: 10px; overflow: hidden; }
   .seg button { border: none; border-radius: 0; flex: 1; }
   .seg button + button { border-left: 1px solid #444; }
-  #stage { overflow: auto; max-height: 52vh; background: #0a0a0a;
-           border-top: 1px solid #333; border-bottom: 1px solid #333;
-           -webkit-overflow-scrolling: touch; }
-  canvas { display: block; touch-action: none; margin: 8px auto; image-rendering: pixelated; }
-  #palette { position: sticky; bottom: 0; background: #1a1a1a; border-top: 1px solid #333;
-             padding: 8px; }
-  #palette .grp-label { font-size: 12px; color: #999; margin: 6px 2px 4px; text-transform: capitalize; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+  .row:last-child { margin-bottom: 0; }
+  .field { display: flex; gap: 6px; align-items: center; }
+  .field input, .field select { min-width: 0; }
+  input[type=number] { width: 76px; }
+  input[type=text] { width: 150px; }
+
+  /* v2.0: map-first layout — the map owns the whole screen, everything else
+     lives in sliding trays and a dropdown menu */
+  #topbar { position: fixed; top: 0; left: 0; right: 0; height: 48px; z-index: 45;
+            background: #1a1a1a; border-bottom: 1px solid #333;
+            display: flex; align-items: center; gap: 8px; padding: 0 8px;
+            padding-top: env(safe-area-inset-top); }
+  #menu-btn { font-size: 20px; padding: 4px 12px; min-height: 0; line-height: 1.4; }
+  #title { font-size: 15px; font-weight: 600; }
+  #title small { color: #888; font-weight: normal; font-size: 11px; }
+
+  #menu-dropdown { position: fixed; top: 52px; right: 8px; z-index: 60; background: #222;
+                   border: 1px solid #444; border-radius: 12px; padding: 6px;
+                   display: none; min-width: 210px;
+                   box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+  #menu-dropdown.open { display: block; }
+  #menu-dropdown button { display: block; width: 100%; text-align: left; border: none;
+                         background: none; margin: 2px 0; min-height: 44px; }
+  #menu-dropdown button:active { background: #333; }
+  #menu-dropdown #btn-stop { color: #ff8a8a; }
+  #menu-dropdown hr { border: none; border-top: 1px solid #333; margin: 6px 0; }
+
+  #stage { position: fixed; top: 48px; left: 0; right: 0; bottom: 0; overflow: auto;
+           background: #0a0a0a; -webkit-overflow-scrolling: touch; }
+  canvas { display: block; touch-action: none; margin: 12px auto; image-rendering: pixelated; }
+
+  .edge-tab { position: fixed; top: 50%; transform: translateY(-50%); z-index: 35;
+              background: rgba(42,42,42,.92); border: 1px solid #444; color: #eee;
+              padding: 16px 7px; font-size: 11px; letter-spacing: 1px; cursor: pointer;
+              min-height: 0; writing-mode: vertical-rl; }
+  #tab-left { left: 0; border-radius: 0 12px 12px 0; border-left: none; }
+  #tab-right { right: 0; border-radius: 12px 0 0 12px; border-right: none; }
+
+  .tray { position: fixed; top: 48px; bottom: 0; width: min(80vw, 320px); z-index: 55;
+          background: #161616; padding: 12px; overflow-y: auto;
+          transition: transform .22s ease-out; -webkit-overflow-scrolling: touch; }
+  #tray-left { left: 0; border-right: 1px solid #333; transform: translateX(-103%); }
+  #tray-right { right: 0; border-left: 1px solid #333; transform: translateX(103%); }
+  .tray.open { transform: none; }
+  .tray-head { font-size: 14px; font-weight: 600; margin-bottom: 10px; color: #ccc; }
+  .tray-hint { font-weight: normal; color: #777; font-size: 11px; margin-left: 6px; }
+  #tray-left .seg { margin-bottom: 10px; }
+  #tray-right button { width: 100%; margin-bottom: 8px; }
+
+  #sheet-setup { position: fixed; left: 0; right: 0; bottom: 0; z-index: 55;
+                 background: #161616; border-top: 1px solid #333;
+                 border-radius: 16px 16px 0 0;
+                 padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
+                 max-height: 72dvh; overflow-y: auto; transform: translateY(103%);
+                 transition: transform .22s ease-out;
+                 -webkit-overflow-scrolling: touch; }
+  #sheet-setup.open { transform: none; }
+  #sheet-setup .grab { width: 40px; height: 4px; border-radius: 2px; background: #444;
+                       margin: 0 auto 10px; }
+
+  #scrim { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.45);
+           display: none; }
+  #scrim.on { display: block; }
+
+  #zoom-cluster { position: fixed; right: 10px;
+                  bottom: calc(10px + env(safe-area-inset-bottom));
+                  z-index: 30; display: flex; flex-direction: column; gap: 8px; }
+  #zoom-cluster button { width: 52px; height: 52px; border-radius: 50%; padding: 0;
+                        font-size: 20px; background: rgba(42,42,42,.92); }
+  #zoom-cluster #btn-pan { font-size: 12px; border-radius: 14px; height: auto;
+                          padding: 9px 0; }
+
+  #palette-old { display: none; }
+  #tile-palette .grp-label, #collide-palette .grp-label { font-size: 12px; color: #999;
+      margin: 6px 2px 4px; text-transform: capitalize; }
   .swatches { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px;
               -webkit-overflow-scrolling: touch; }
   .sw { flex: 0 0 auto; width: 56px; text-align: center; }
@@ -40,58 +103,72 @@
                   display: block; object-fit: contain; background: #0a0a0a; }
   .sw.sel .chip { border-color: #ffd75f; box-shadow: 0 0 8px #ffd75f; }
   .sw .lbl { font-size: 10px; color: #bbb; margin-top: 2px; word-break: break-word; }
-  #toast { position: fixed; left: 50%; bottom: 170px; transform: translateX(-50%);
-           background: #222; border: 1px solid #555; border-radius: 12px;
-           padding: 10px 16px; font-size: 14px; display: none; z-index: 50;
-           max-width: 90vw; text-align: center; }
-  .field { display: flex; gap: 6px; align-items: center; }
-  .field input, .field select { min-width: 0; }
-  input[type=number] { width: 76px; }
-  input[type=text] { width: 150px; }
   #collide-palette { display: none; gap: 8px; }
   #collide-palette .sw .chip { border-style: dashed; }
   #save-status { color: #888; font-size: 12px; }
+  #toast { position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%);
+           background: #222; border: 1px solid #555; border-radius: 12px;
+           padding: 10px 16px; font-size: 14px; display: none; z-index: 70;
+           max-width: 90vw; text-align: center; }
   #dbg { position: fixed; right: 8px; bottom: 8px; max-width: 92vw; z-index: 99;
          background: #3a1010; color: #ffb3b3; border: 1px solid #a03a3a;
          border-radius: 8px; padding: 8px 10px; font: 11px monospace;
          white-space: pre-wrap; word-break: break-word; display: none; }
-  /* v1.5: collapsible setup drawer + compact phone layout */
-  details#setup { margin-bottom: 8px; }
-  details#setup summary { font-size: 14px; color: #aaa; cursor: pointer;
-                          padding: 6px 2px; }
-  details#setup .row:first-of-type { margin-top: 4px; }
   @media (max-width: 520px) {
-    header { padding: 6px; }
-    h1 { font-size: 15px; margin-bottom: 6px; }
-    .row { gap: 6px; margin-bottom: 6px; }
     button, select, input { font-size: 15px; padding: 8px 10px; min-height: 40px; }
-    #stage { max-height: 58vh; }
+    #menu-dropdown button { min-height: 44px; }
   }
 </style>
 </head>
 <body>
-<header>
-  <h1>Crumbs HUD <small>touch tile painter · v1.9</small></h1>
-  <div class="row">
-    <div class="seg" id="layer-seg">
-      <button data-layer="tiles" class="on">Tiles</button>
-      <button data-layer="objects">Objects</button>
-      <button data-layer="collision">Collision</button>
+
+<div id="topbar">
+  <button id="menu-btn" title="Menu">&#9776;</button>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v2.0</small></span>
+</div>
+
+<div id="menu-dropdown">
+  <button id="btn-play" title="Walk the map">&#9654; Play</button>
+  <button id="btn-undo" title="Undo">Undo</button>
+  <button id="btn-redo" title="Redo">Redo</button>
+  <hr>
+  <button id="menu-setup">Setup&hellip;</button>
+  <button id="menu-save">Save now</button>
+  <hr>
+  <button id="btn-stop" class="danger" title="Stop the HUD server">Stop server</button>
+</div>
+
+<div id="stage"><canvas id="grid"></canvas></div>
+
+<button class="edge-tab" id="tab-left" title="Tile palette">TILES</button>
+<button class="edge-tab" id="tab-right" title="Tools">TOOLS</button>
+
+<aside class="tray" id="tray-left">
+  <div class="tray-head">Tiles<span class="tray-hint">pick one, then tap the map</span></div>
+  <div class="seg" id="layer-seg">
+    <button data-layer="tiles" class="on">Tiles</button>
+    <button data-layer="objects">Objects</button>
+    <button data-layer="collision">Collision</button>
+  </div>
+  <div id="tile-palette"></div>
+  <div id="collide-palette">
+    <div class="grp-label">collision</div>
+    <div class="swatches">
+      <div class="sw" data-cv="1"><div class="chip" style="background:#c0392b"></div><div class="lbl">solid</div></div>
+      <div class="sw" data-cv="0"><div class="chip" style="background:#222"></div><div class="lbl">clear</div></div>
     </div>
-    <button id="btn-undo" title="Undo">Undo</button>
-    <button id="btn-redo" title="Redo">Redo</button>
-    <button id="btn-play" title="Walk the map">▶ Play</button>
   </div>
-  <div class="row">
-    <button id="btn-eraser" title="Eraser">Eraser</button>
-    <button id="btn-clear" class="danger" title="Clear current layer">Clear layer</button>
-    <button id="zoom-out" title="Zoom out">&minus;</button>
-    <button id="zoom-in" title="Zoom in">+</button>
-    <button id="zoom-fit" title="Fit map to screen">Fit</button>
-    <button id="btn-pan" title="Pan the map instead of painting">Move</button>
-  </div>
-  <details id="setup">
-    <summary>Setup: biome, maps, saving</summary>
+</aside>
+
+<aside class="tray" id="tray-right">
+  <div class="tray-head">Tools</div>
+  <button id="btn-eraser" title="Eraser">Eraser</button>
+  <button id="btn-clear" class="danger" title="Clear current layer">Clear layer</button>
+</aside>
+
+<div id="sheet-setup">
+  <div class="grab"></div>
+  <div class="tray-head">Setup</div>
   <div class="row">
     <div class="field">
       <select id="biome"></select>
@@ -115,22 +192,16 @@
   </div>
   <div class="row">
     <small id="save-status">not saved yet</small>
-    <button id="btn-stop" class="danger" title="Stop the HUD server">Stop server</button>
   </div>
-  </details>
-</header>
+</div>
 
-<div id="stage"><canvas id="grid"></canvas></div>
+<div id="scrim"></div>
 
-<div id="palette">
-  <div id="tile-palette"></div>
-  <div id="collide-palette">
-    <div class="grp-label">collision</div>
-    <div class="swatches">
-      <div class="sw" data-cv="1"><div class="chip" style="background:#c0392b"></div><div class="lbl">solid</div></div>
-      <div class="sw" data-cv="0"><div class="chip" style="background:#222"></div><div class="lbl">clear</div></div>
-    </div>
-  </div>
+<div id="zoom-cluster">
+  <button id="zoom-out" title="Zoom out">&minus;</button>
+  <button id="zoom-in" title="Zoom in">+</button>
+  <button id="zoom-fit" title="Fit map to screen">Fit</button>
+  <button id="btn-pan" title="Pan the map instead of painting">Move</button>
 </div>
 
 <div id="toast"></div>
@@ -492,6 +563,30 @@ document.querySelectorAll("#collide-palette .sw").forEach(d => {
     document.querySelectorAll("#collide-palette .sw").forEach(x => x.classList.remove("sel"));
     d.classList.add("sel");
   };
+});
+
+// ---- v2.0 trays & dropdown menu ------------------------------------------------
+function closeOverlays() {
+  document.querySelectorAll(".tray.open, #sheet-setup.open, #menu-dropdown.open")
+    .forEach(el => el.classList.remove("open"));
+  $("scrim").classList.remove("on");
+}
+function toggleOverlay(id) {
+  const el = $(id);
+  const wasOpen = el.classList.contains("open");
+  closeOverlays();
+  if (!wasOpen) { el.classList.add("open"); $("scrim").classList.add("on"); }
+}
+$("menu-btn").onclick = () => toggleOverlay("menu-dropdown");
+$("tab-left").onclick = () => toggleOverlay("tray-left");
+$("tab-right").onclick = () => toggleOverlay("tray-right");
+$("scrim").onclick = closeOverlays;
+$("menu-setup").onclick = () => toggleOverlay("sheet-setup");
+$("menu-save").onclick = () => { closeOverlays(); $("btn-save").click(); };
+// dismiss the menu after any of its action buttons fire
+$("menu-dropdown").addEventListener("click", e => {
+  const b = e.target.closest("button");
+  if (b && b.id !== "menu-setup" && b.id !== "menu-save") setTimeout(closeOverlays, 60);
 });
 
 // ---- map picker + save status -------------------------------------------------

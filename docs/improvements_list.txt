@@ -1,0 +1,49 @@
+Vaults World Editor Professional Improvements
+
+Implemented upgrades from notes and recommended professional editor features:
+
+1. UI polish
+   - Modern dark editor chrome with accent colors and clearer controls
+   - Toolbar with Save, Load, Undo, Redo, tool buttons, brush controls, and sidebar toggle
+   - Collapsible asset sidebar for cleaner workspace
+
+2. Asset management
+   - Auto-categorize imported images into tiles, objects, or animations based on filename hints
+   - Import single images or sprite sheets with category assignment
+   - Preview selected asset in the Asset Studio panel
+   - Support separate asset categories: tiles, objects, animations
+
+3. Editing tools
+   - Paint / Erase / Eyedropper tools
+   - Adjustable brush size
+   - Different brush shapes: square and circle
+   - Object layer painting for sprites and world layer painting for tiles
+   - Player preview sprite size now scaled smaller for proper visual proportions
+
+4. Map generation
+   - Biome generator with seed controls
+   - Multiple biome presets with color-driven terrain generation
+
+5. Performance and workflow
+   - Undo/Redo command history already present
+   - Tile selection previews and status bar feedback
+   - Better tile browser with category grouping and selection highlight
+
+Future improvements to reach a “big game maker” level:
+
+- Layered map editing with named floor/object/collision layers
+- Full paintbrush with continuous strokes, textures, and shape stamps
+- Tile palette windows with drag-and-drop tile placement
+- Modular asset library with tags, search, and saved collections
+- In-editor sprite animator timeline and frame sequencing UI
+- Collision editing and game behavior properties per tile
+- Live play-test mode with actual character movement and collision detection
+- Export to engine-ready formats, e.g., JSON level/asset bundles, Tiled map format
+
+Newly added in this update:
+- Collision layer painting and toggle overlay
+- Asset palette popup with search and category browsing
+- Searchable asset browser in the editor sidebar
+- Collision erase tool for clean level blocking
+- Animation queue builder with orderable frame list
+- Improved toolbar workflow for fast editing

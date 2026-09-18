@@ -76,6 +76,10 @@ LAYERS = ("tiles", "objects", "collision")
 # ---- v3.0: custom imported tiles -------------------------------------------
 CUSTOM_DIR = os.path.join(SCRIPT_DIR, "custom_tiles")
 CUSTOM_REG = os.path.join(SCRIPT_DIR, "custom_tiles.json")
+# v3.8: the shared shelf — imported tiles published for everyone.
+# TRACKED in git (unlike custom_tiles/): a pull delivers them everywhere.
+SHARED_DIR = os.path.join(SCRIPT_DIR, "shared_library")
+SHARED_REG = os.path.join(SCRIPT_DIR, "shared_library.json")
 CUSTOM_MAX_FRAMES = 8
 CUSTOM_MAX_FILE_CHARS = 1500000  # ~1.1MB per frame dataURL
 
@@ -97,7 +101,8 @@ TILE_PRESETS = {
                   "height": "short"},
 }
 
-_custom_tiles = []  # registry mirror: [{id,name,preset,solid,frame_ms,files}]
+_custom_tiles = []  # registry mirror: [{id,name,preset,solid,frame_ms,files,scope}]
+_shared_tiles = []  # v3.8: the shared shelf — same shape, scope="shared"
 
 
 def _custom_public(entry):
@@ -105,23 +110,37 @@ def _custom_public(entry):
             "solid": entry["solid"], "height": entry.get("height", "short"),
             "swim": bool(entry.get("swim", False)),
             "deep": bool(entry.get("deep", False)),
+            "scope": entry.get("scope", "local"),
             "frames": len(entry["files"]), "frame_ms": entry["frame_ms"]}
 
 
-def _save_custom_registry():
+def _find_custom(tid):
+    """v3.8: find an imported tile on either shelf -> (entry, scope)."""
+    for e in _custom_tiles:
+        if int(e["id"]) == tid:
+            return e, "local"
+    for e in _shared_tiles:
+        if int(e["id"]) == tid:
+            return e, "shared"
+    return None, None
+
+
+def _save_custom_registry(scope="local"):
+    path = SHARED_REG if scope == "shared" else CUSTOM_REG
+    tiles = _shared_tiles if scope == "shared" else _custom_tiles
     try:
-        with open(CUSTOM_REG, "w") as f:
-            json.dump({"tiles": _custom_tiles}, f)
+        with open(path, "w") as f:
+            json.dump({"tiles": tiles}, f)
     except Exception as e:
-        print(f"[hud] could not save custom tile registry: {e}")
+        print(f"[hud] could not save {scope} tile registry: {e}")
 
 
-def _register_custom_tile(entry):
+def _register_custom_tile(entry, tile_dir):
     """Load a registry entry's PNGs and register it as a first-class asset tile,
     so collision, thumbnails and play-mode pathfinding all work with it."""
     frames = []
     for fn in entry["files"]:
-        p = os.path.join(CUSTOM_DIR, fn)
+        p = os.path.join(tile_dir, fn)
         if os.path.exists(p):
             frames.append(core.Image.open(p).convert("RGBA"))
     if not frames:
@@ -158,24 +177,33 @@ def _register_custom_tile(entry):
 
 
 def _load_custom_tiles():
-    """Re-register imported tiles from custom_tiles.json at startup."""
-    os.makedirs(CUSTOM_DIR, exist_ok=True)
-    if not core.PIL_AVAILABLE or not os.path.exists(CUSTOM_REG):
+    """Re-register imported tiles at startup — this device's shelf plus the
+    shared shelf. Entries without a scope predate v3.8 and are local."""
+    for d in (CUSTOM_DIR, SHARED_DIR):
+        os.makedirs(d, exist_ok=True)
+    if not core.PIL_AVAILABLE:
         return
-    try:
-        reg = json.load(open(CUSTOM_REG))
-    except Exception as e:
-        print(f"[hud] custom tile registry unreadable: {e}")
-        return
-    for entry in reg.get("tiles", []):
+    for reg_path, tile_dir, store, scope in (
+            (CUSTOM_REG, CUSTOM_DIR, _custom_tiles, "local"),
+            (SHARED_REG, SHARED_DIR, _shared_tiles, "shared")):
+        if not os.path.exists(reg_path):
+            continue
         try:
-            if _register_custom_tile(entry):
-                _custom_tiles.append(entry)
+            reg = json.load(open(reg_path))
         except Exception as e:
-            print(f"[hud] skipping custom tile {entry.get('id')}: {e}")
-    if _custom_tiles:
-        print(f"[hud] loaded {len(_custom_tiles)} custom tile(s)")
-    _save_custom_registry()  # v3.2: persist water→swim migrations, if any
+            print(f"[hud] {scope} tile registry unreadable: {e}")
+            continue
+        for entry in reg.get("tiles", []):
+            try:
+                entry["scope"] = scope
+                if _register_custom_tile(entry, tile_dir):
+                    store.append(entry)
+            except Exception as e:
+                print(f"[hud] skipping {scope} tile {entry.get('id')}: {e}")
+    if _custom_tiles or _shared_tiles:
+        print(f"[hud] loaded {len(_custom_tiles)} local + {len(_shared_tiles)} shared tile(s)")
+    _save_custom_registry("local")   # v3.2: persist water→swim migrations, if any
+    _save_custom_registry("shared")
 
 
 # ---- v3.3: one-button animation ("Make it move") ------------------------------
@@ -267,9 +295,18 @@ def _walkbob_frames(img):
     return frames
 
 
-def _store_custom_tile(name, preset, frame_ms, pil_images):
-    """Write PIL frames to custom_tiles/, register the tile, save registry.
-    Returns the registry entry. Rolls back partial writes on failure."""
+def _body_scope(body):
+    """v3.8: import shelf — 'shared' publishes to the shared library, anything
+    else stays on this device."""
+    return "shared" if body.get("scope") == "shared" else "local"
+
+
+def _store_custom_tile(name, preset, frame_ms, pil_images, scope="local"):
+    """Write PIL frames to the right shelf (this device / shared), register the
+    tile, save that shelf's registry. Returns the entry. Rolls back partial
+    writes on failure."""
+    tile_dir = SHARED_DIR if scope == "shared" else CUSTOM_DIR
+    store = _shared_tiles if scope == "shared" else _custom_tiles
     tid = assets._next_id()
     files = []
     try:
@@ -278,12 +315,12 @@ def _store_custom_tile(name, preset, frame_ms, pil_images):
             if max(im.size) > 256:
                 im.thumbnail((256, 256), core.Image.Resampling.NEAREST)
             fn = f"{tid}_f{i}.png"
-            im.save(os.path.join(CUSTOM_DIR, fn), "PNG")
+            im.save(os.path.join(tile_dir, fn), "PNG")
             files.append(fn)
     except Exception:
         for fn in files:
             try:
-                os.remove(os.path.join(CUSTOM_DIR, fn))
+                os.remove(os.path.join(tile_dir, fn))
             except OSError:
                 pass
         raise
@@ -292,10 +329,10 @@ def _store_custom_tile(name, preset, frame_ms, pil_images):
              "height": TILE_PRESETS[preset]["height"],
              "swim": bool(TILE_PRESETS[preset].get("swim", False)),
              "deep": bool(TILE_PRESETS[preset].get("deep", False)),
-             "frame_ms": frame_ms, "files": files}
-    _custom_tiles.append(entry)
-    _register_custom_tile(entry)
-    _save_custom_registry()
+             "frame_ms": frame_ms, "files": files, "scope": scope}
+    store.append(entry)
+    _register_custom_tile(entry, tile_dir)
+    _save_custom_registry(scope)
     return entry
 
 # ---- v3.4: patrol routes ----------------------------------------------------
@@ -642,7 +679,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"presets": [{"id": k, **v} for k, v in TILE_PRESETS.items()]})
         elif path == "/api/custom-tiles":
             # v3.0: imported tiles with animation metadata
-            self._send_json({"tiles": [_custom_public(e) for e in _custom_tiles]})
+            # v3.8: both shelves — shared first, then this device's
+            self._send_json({"tiles": [_custom_public(e) for e in _shared_tiles + _custom_tiles]})
         elif path == "/api/patrols":
             # v3.4: patrol routes — [{id, tile_id, points}]
             self._send_json({"patrols": _patrols})
@@ -771,7 +809,8 @@ class Handler(BaseHTTPRequestHandler):
                         raise ValueError(f"frame {i}: too large (keep each under ~1MB)")
                     raw = base64.b64decode(durl.split(",", 1)[1])
                     pil_images.append(core.Image.open(io.BytesIO(raw)))
-                entry = _store_custom_tile(name, preset, frame_ms, pil_images)
+                entry = _store_custom_tile(name, preset, frame_ms, pil_images,
+                                           _body_scope(body))
             except Exception as e:
                 return self._send_json({"ok": False, "error": str(e)}, 400)
             return self._send_json({"ok": True, "tile": _custom_public(entry)})
@@ -797,7 +836,8 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("too large (keep under ~1MB)")
                 raw = base64.b64decode(durl.split(",", 1)[1])
                 frames = _autoslice_pil(core.Image.open(io.BytesIO(raw)))
-                entry = _store_custom_tile(name, preset, frame_ms, frames)
+                entry = _store_custom_tile(name, preset, frame_ms, frames,
+                                           _body_scope(body))
             except Exception as e:
                 return self._send_json({"ok": False, "error": str(e)}, 400)
             return self._send_json({"ok": True, "tile": _custom_public(entry),
@@ -830,7 +870,8 @@ class Handler(BaseHTTPRequestHandler):
                 if len(frames) == 1:
                     frames = _walkbob_frames(img)
                     method = "walk"
-                entry = _store_custom_tile(name, preset, frame_ms, frames)
+                entry = _store_custom_tile(name, preset, frame_ms, frames,
+                                           _body_scope(body))
             except Exception as e:
                 return self._send_json({"ok": False, "error": str(e)}, 400)
             return self._send_json({"ok": True, "tile": _custom_public(entry),
@@ -898,7 +939,7 @@ class Handler(BaseHTTPRequestHandler):
                 tid = int(body.get("id"))
             except (TypeError, ValueError):
                 return self._send_json({"ok": False, "error": "bad id"}, 400)
-            entry = next((e for e in _custom_tiles if int(e["id"]) == tid), None)
+            entry, scope = _find_custom(tid)
             if entry is None:
                 return self._send_json({"ok": False, "error": "not found"}, 404)
             if "name" in body:
@@ -919,7 +960,39 @@ class Handler(BaseHTTPRequestHandler):
                 t["properties"]["solid"] = bool(entry.get("solid", False))
                 t["properties"]["swim"] = bool(entry.get("swim", False))
                 t["properties"]["deep"] = bool(entry.get("deep", False))
-            _save_custom_registry()
+            _save_custom_registry(scope)
+            return self._send_json({"ok": True, "tile": _custom_public(entry)})
+
+        if path == "/api/custom/share":
+            # v3.8: move an imported tile between shelves — {id, scope}.
+            # "shared" publishes it to the shared library (git-tracked, so a
+            # pull delivers it to every deployment); "local" pulls it back to
+            # this device only.
+            try:
+                tid = int(body.get("id"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "bad id"}, 400)
+            scope = _body_scope(body)
+            entry, cur = _find_custom(tid)
+            if entry is None:
+                return self._send_json({"ok": False, "error": "not found"}, 404)
+            if cur != scope:
+                src_dir = SHARED_DIR if cur == "shared" else CUSTOM_DIR
+                dst_dir = SHARED_DIR if scope == "shared" else CUSTOM_DIR
+                try:
+                    for fn in entry.get("files", []):
+                        os.rename(os.path.join(src_dir, fn), os.path.join(dst_dir, fn))
+                except OSError as e:
+                    return self._send_json({"ok": False, "error": f"could not move files: {e}"}, 500)
+                if cur == "shared":
+                    _shared_tiles[:] = [e for e in _shared_tiles if int(e["id"]) != tid]
+                    _custom_tiles.append(entry)
+                else:
+                    _custom_tiles[:] = [e for e in _custom_tiles if int(e["id"]) != tid]
+                    _shared_tiles.append(entry)
+                entry["scope"] = scope
+                _save_custom_registry("local")
+                _save_custom_registry("shared")
             return self._send_json({"ok": True, "tile": _custom_public(entry)})
 
         if path == "/api/custom/delete":
@@ -928,13 +1001,17 @@ class Handler(BaseHTTPRequestHandler):
                 tid = int(body.get("id"))
             except (TypeError, ValueError):
                 return self._send_json({"ok": False, "error": "bad id"}, 400)
-            entry = next((e for e in _custom_tiles if int(e["id"]) == tid), None)
+            entry, scope = _find_custom(tid)
             if entry is None:
                 return self._send_json({"ok": False, "error": "not found"}, 404)
-            _custom_tiles[:] = [e for e in _custom_tiles if int(e["id"]) != tid]
+            tile_dir = SHARED_DIR if scope == "shared" else CUSTOM_DIR
+            if scope == "shared":
+                _shared_tiles[:] = [e for e in _shared_tiles if int(e["id"]) != tid]
+            else:
+                _custom_tiles[:] = [e for e in _custom_tiles if int(e["id"]) != tid]
             for fn in entry.get("files", []):
                 try:
-                    os.remove(os.path.join(CUSTOM_DIR, fn))
+                    os.remove(os.path.join(tile_dir, fn))
                 except OSError:
                     pass
             assets.tiles.pop(tid, None)
@@ -948,7 +1025,7 @@ class Handler(BaseHTTPRequestHandler):
                         world.data[y][x] = 0
                     if world.object_layer[y][x] == tid:
                         world.object_layer[y][x] = None
-            _save_custom_registry()
+            _save_custom_registry(scope)
             _mark_dirty()
             return self._send_json({"ok": True})
 
@@ -1134,7 +1211,7 @@ if __name__ == "__main__":
     srv = ThreadingHTTPServer((host, PORT), Handler)
     threading.Thread(target=_autosave_loop, daemon=True).start()
     print("=" * 52)
-    print("  Crumbs HUD v3.7 — rules, touch controls, controller support")
+    print("  Crumbs HUD v3.8 — shared tile library (local vs shared imports)")
     if public:
         ip = _lan_ip()
         print("  PUBLIC mode: anyone on your Wi-Fi can open the HUD.")

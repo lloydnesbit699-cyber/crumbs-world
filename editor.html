@@ -126,6 +126,11 @@
   #import-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
   #import-presets button { flex: 1 1 28%; margin: 0; padding: 8px 4px; font-size: 12px; }
   #import-presets button.on { border-color: #4da3ff; color: #4da3ff; }
+  /* v3.8: import shelf picker */
+  #import-scope { display: flex; gap: 6px; margin: 8px 0; }
+  #import-scope button { flex: 1; margin: 0; padding: 8px 4px; font-size: 12px; }
+  #import-scope button.on { border-color: #8a6dd7; color: #b9a7f2; }
+  .grp-sub { font-size: 10px; color: #8a8a9a; margin: 8px 2px 3px; letter-spacing: .5px; }
   #import-speed { font-size: 12px; color: #999; margin-bottom: 8px; }
   #import-speed input { width: 70px; }
   /* v3.3: one-button animation + custom tile manager */
@@ -187,7 +192,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v3.7</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v3.8</small></span>
 </div>
 
 <div id="menu-dropdown">
@@ -220,6 +225,7 @@
     <div id="tile-edit-presets"></div>
     <div class="row2">
       <button id="tile-edit-save">Save</button>
+      <button id="tile-edit-share">Share</button>
       <button id="tile-edit-delete">Delete</button>
       <button id="tile-edit-done" class="ghost">Done</button>
     </div>
@@ -230,6 +236,10 @@
     <div id="import-previews" class="swatches"></div>
     <input id="import-name" maxlength="24" placeholder="tile name">
     <div id="import-presets"></div>
+    <div id="import-scope">
+      <button data-v="local" class="on" title="Stays on this device — never pushed">This device</button>
+      <button data-v="shared" title="Published to the shared library — everyone gets it">Shared with everyone</button>
+    </div>
     <div id="import-speed" hidden>frame <input id="import-ms" type="number" value="400" min="80" max="2000" step="40"> ms</div>
     <button id="import-animate" class="widebtn" hidden>✨ Bring to life</button>
     <div class="row2">
@@ -383,6 +393,15 @@ let customFrames = {};              // id -> [Image per frame]
 let presets = [];                   // tile function presets from server
 let importFiles = [];               // pending import [{name,dataUrl}]
 let importPreset = "floor";
+let importScope = "local";   // v3.8: this device vs shared with everyone
+document.querySelectorAll("#import-scope button").forEach(b => {
+  b.onclick = ev => {
+    ev.preventDefault();
+    importScope = b.dataset.v;
+    document.querySelectorAll("#import-scope button").forEach(x =>
+      x.classList.toggle("on", x === b));
+  };
+});
 let customEditMode = false;          // v3.3: tile manager edit mode
 let editingTile = null, editPreset = null;
 let animOnMap = new Set();          // custom animated tile ids currently placed
@@ -1279,19 +1298,33 @@ async function loadCustomTiles() {
 }
 function buildCustomTiles() {
   const box = $("custom-tiles"); box.innerHTML = "";
-  customTiles.forEach(t => {
-    const d = document.createElement("div");
-    d.className = "sw" + (t.id === selTile ? " sel" : "");
-    d.title = t.name + " (" + t.preset + (t.frames > 1 ? ", " + t.frames + " frames" : "") + ")";
-    d.innerHTML = '<canvas width="48" height="48" data-tid="' + t.id + '"></canvas>' +
-                  '<div class="lbl">' + t.name + '</div>' +
-                  '<div class="preset-tag">' + t.preset + '</div>';
-    d.onclick = () => {
-      if (customEditMode) openTileEditor(t.id);   // v3.3: tile manager
-      else selectTile(t.id);
-    };
-    box.appendChild(d);
-  });
+  // v3.8: the two shelves — shared library first, then this device
+  const groups = [["shared", "SHARED WITH EVERYONE"], ["local", "THIS DEVICE"]];
+  const nonEmpty = groups.filter(([s]) => customTiles.some(t => (t.scope || "local") === s));
+  const showLabels = nonEmpty.length > 1;
+  for (const [scope, label] of nonEmpty) {
+    if (showLabels) {
+      const h = document.createElement("div");
+      h.className = "grp-sub"; h.textContent = label;
+      box.appendChild(h);
+    }
+    customTiles.filter(t => (t.scope || "local") === scope).forEach(t => {
+      box.appendChild(customSwatch(t));
+    });
+  }
+}
+function customSwatch(t) {
+  const d = document.createElement("div");
+  d.className = "sw" + (t.id === selTile ? " sel" : "");
+  d.title = t.name + " (" + t.preset + (t.frames > 1 ? ", " + t.frames + " frames" : "") + ")";
+  d.innerHTML = '<canvas width="48" height="48" data-tid="' + t.id + '"></canvas>' +
+                '<div class="lbl">' + t.name + '</div>' +
+                '<div class="preset-tag">' + t.preset + '</div>';
+  d.onclick = () => {
+    if (customEditMode) openTileEditor(t.id);   // v3.3: tile manager
+    else selectTile(t.id);
+  };
+  return d;
 }
 // animator tick: animated tray previews + map redraws, but only when a frame
 // actually changed — never redraws a 64x64 map for nothing
@@ -1393,6 +1426,7 @@ $("import-animate").onclick = async () => {
   const r = await api("/api/bring-to-life", {
     name: $("import-name").value.trim().slice(0, 24) || "custom",
     preset: importPreset,
+    scope: importScope,   // v3.8
     frame_ms: +$("import-ms").value || 400,
     image: importFiles[0].dataUrl,
   });
@@ -1409,6 +1443,7 @@ $("import-add").onclick = async () => {
   const r = await api("/api/custom-tiles", {
     name: $("import-name").value.trim().slice(0, 24) || "custom",
     preset: importPreset,
+    scope: importScope,   // v3.8
     frame_ms: +$("import-ms").value || 400,
     frames: importFiles.map(f => f.dataUrl),
   });
@@ -1434,8 +1469,26 @@ function openTileEditor(id) {
   editPreset = editingTile.preset;
   $("tile-edit-form").hidden = false;
   $("tile-edit-name").value = editingTile.name;
+  // v3.8: Share publishes to the shared library; shared tiles can come home
+  $("tile-edit-share").textContent =
+    (editingTile.scope || "local") === "shared" ? "Make private" : "Share";
   buildTileEditPresets();
 }
+$("tile-edit-share").onclick = async () => {
+  if (!editingTile) return;
+  const cur = editingTile.scope || "local";
+  const target = cur === "shared" ? "local" : "shared";
+  const r = await api("/api/custom/share", { id: editingTile.id, scope: target });
+  if (!r.ok) { toast("couldn't move it: " + (r.error || "unknown")); return; }
+  const kept = editingTile.id;
+  $("tile-edit-form").hidden = true; editingTile = null;
+  await loadCustomTiles();
+  selTile = kept;
+  buildPalette();
+  toast(target === "shared"
+    ? "published — the shared library gets it on the next pull"
+    : "back on this device only");
+};
 function buildTileEditPresets() {
   const box = $("tile-edit-presets"); box.innerHTML = "";
   presets.forEach(p => {

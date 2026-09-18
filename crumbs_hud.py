@@ -43,6 +43,11 @@ fractional zoom change was redrawing all 4096 tiles per pointer move and
 freezing the map; now it only redraws when the size actually changes.
 v2.5 (2026-09-18): fixed TILES/TOOLS trays never opening — the ID selector
 for the hidden position was beating the .open rule (CSS specificity).
+v3.0 (2026-09-18): custom tiles — import PNGs from the page, pick a function
+preset (wall/floor/water/door/decor, collision baked in); multi-frame import
+= animated tiles (tray previews + map animate, redraws only on frame change);
+custom tiles live in the TILES tray for select-and-place; play mode walks the
+hero as a sprite with collision respected.
 
 Run:   python3 crumbs_hud.py
 Open:  http://127.0.0.1:8778   (same phone's browser)
@@ -50,13 +55,14 @@ Open:  http://127.0.0.1:8778   (same phone's browser)
 import json
 import io
 import os
+import base64
 import socket
 import sys
 import threading
 import time
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 import crumbs_core as core
 
@@ -65,6 +71,79 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 HTML_PATH = os.path.join(SCRIPT_DIR, "editor.html")
 DEFAULT_SAVE = "hud_map.json"
 LAYERS = ("tiles", "objects", "collision")
+
+# ---- v3.0: custom imported tiles -------------------------------------------
+CUSTOM_DIR = os.path.join(SCRIPT_DIR, "custom_tiles")
+CUSTOM_REG = os.path.join(SCRIPT_DIR, "custom_tiles.json")
+CUSTOM_MAX_FRAMES = 8
+CUSTOM_MAX_FILE_CHARS = 1500000  # ~1.1MB per frame dataURL
+
+# preset definitions: what each tile IS and what it DOES (collision baked in)
+TILE_PRESETS = {
+    "wall":  {"label": "Wall",  "hint": "solid",    "solid": True},
+    "floor": {"label": "Floor", "hint": "walkable", "solid": False},
+    "water": {"label": "Water", "hint": "blocked",  "solid": True},
+    "door":  {"label": "Door",  "hint": "walkable", "solid": False},
+    "decor": {"label": "Decor", "hint": "walkable", "solid": False},
+}
+
+_custom_tiles = []  # registry mirror: [{id,name,preset,solid,frame_ms,files}]
+
+
+def _custom_public(entry):
+    return {"id": entry["id"], "name": entry["name"], "preset": entry["preset"],
+            "solid": entry["solid"], "frames": len(entry["files"]),
+            "frame_ms": entry["frame_ms"]}
+
+
+def _save_custom_registry():
+    try:
+        with open(CUSTOM_REG, "w") as f:
+            json.dump({"tiles": _custom_tiles}, f)
+    except Exception as e:
+        print(f"[hud] could not save custom tile registry: {e}")
+
+
+def _register_custom_tile(entry):
+    """Load a registry entry's PNGs and register it as a first-class asset tile,
+    so collision, thumbnails and play-mode pathfinding all work with it."""
+    frames = []
+    for fn in entry["files"]:
+        p = os.path.join(CUSTOM_DIR, fn)
+        if os.path.exists(p):
+            frames.append(core.Image.open(p).convert("RGBA"))
+    if not frames:
+        return False
+    tid = int(entry["id"])
+    assets.add_tile(tid, "custom", {
+        "name": entry["name"],
+        "category": "custom",
+        "preset": entry.get("preset", "decor"),
+        "frames": frames,
+        "frame_ms": int(entry.get("frame_ms", 400)),
+    })
+    assets.tiles[tid]["properties"]["solid"] = bool(entry.get("solid", False))
+    return True
+
+
+def _load_custom_tiles():
+    """Re-register imported tiles from custom_tiles.json at startup."""
+    os.makedirs(CUSTOM_DIR, exist_ok=True)
+    if not core.PIL_AVAILABLE or not os.path.exists(CUSTOM_REG):
+        return
+    try:
+        reg = json.load(open(CUSTOM_REG))
+    except Exception as e:
+        print(f"[hud] custom tile registry unreadable: {e}")
+        return
+    for entry in reg.get("tiles", []):
+        try:
+            if _register_custom_tile(entry):
+                _custom_tiles.append(entry)
+        except Exception as e:
+            print(f"[hud] skipping custom tile {entry.get('id')}: {e}")
+    if _custom_tiles:
+        print(f"[hud] loaded {len(_custom_tiles)} custom tile(s)")
 
 # ---- in-memory session state ---------------------------------------------
 assets = core.AssetManager()
@@ -79,6 +158,8 @@ for _name, _loader in ((DEFAULT_SAVE, world.load), ("vault_map.txt", world.load_
         break
 else:
     print(f"[hud] fresh map {world.width}x{world.height}")
+
+_load_custom_tiles()  # v3.0: imported tiles back into the asset manager
 
 
 # ---- playtest state (tile-space hero; crumbs_core untouched) ----------------
@@ -266,12 +347,30 @@ class Handler(BaseHTTPRequestHandler):
                     sp.append({"id": tid, "name": t["name"], "type": t["type"],
                                "category": t.get("category", "objects")})
             self._send_json({"tiles": sp})
+        elif path == "/api/presets":
+            # v3.0: tile function presets for the import picker
+            self._send_json({"presets": [{"id": k, **v} for k, v in TILE_PRESETS.items()]})
+        elif path == "/api/custom-tiles":
+            # v3.0: imported tiles with animation metadata
+            self._send_json({"tiles": [_custom_public(e) for e in _custom_tiles]})
         elif path.startswith("/api/thumb/"):
             try:
                 tid = int(path.rsplit("/", 1)[1])
             except ValueError:
                 return self._send_json({"ok": False, "error": "bad tile id"}, 400)
-            thumb = assets.get_thumbnail(tid, size=64)
+            thumb = None
+            # v3.0: ?frame=N serves a specific animation frame
+            q = parse_qs(urlparse(self.path).query)
+            if "frame" in q and core.PIL_AVAILABLE:
+                fr = (assets.tiles.get(tid) or {}).get("frames") or []
+                if fr:
+                    try:
+                        fi = int(q["frame"][0]) % len(fr)
+                    except ValueError:
+                        fi = 0
+                    thumb = fr[fi].resize((64, 64), core.Image.Resampling.NEAREST)
+            if thumb is None:
+                thumb = assets.get_thumbnail(tid, size=64)
             if thumb is None:
                 return self._send_json({"ok": False, "error": "no thumbnail"}, 404)
             buf = io.BytesIO()
@@ -350,6 +449,52 @@ class Handler(BaseHTTPRequestHandler):
             multi.execute()
             _mark_dirty()
             return self._send_json({"ok": True, "painted": len(cmds)})
+
+        if path == "/api/custom-tiles":
+            # v3.0: import image(s) as a tile — body: {name, preset,
+            # frame_ms, frames: [dataURL, ...]}. Multiple frames = animated tile.
+            if not core.PIL_AVAILABLE:
+                return self._send_json({"ok": False, "error": "image support unavailable"}, 500)
+            name = str(body.get("name", "")).strip()[:24] or "custom"
+            preset = body.get("preset", "decor")
+            if preset not in TILE_PRESETS:
+                return self._send_json({"ok": False, "error": "unknown preset"}, 400)
+            frames_in = body.get("frames", [])
+            if not isinstance(frames_in, list) or not (1 <= len(frames_in) <= CUSTOM_MAX_FRAMES):
+                return self._send_json({"ok": False, "error": f"1-{CUSTOM_MAX_FRAMES} frames required"}, 400)
+            try:
+                frame_ms = max(80, min(2000, int(body.get("frame_ms", 400))))
+            except (TypeError, ValueError):
+                frame_ms = 400
+            tid = assets._next_id()
+            files = []
+            try:
+                for i, durl in enumerate(frames_in):
+                    if not isinstance(durl, str) or not durl.startswith("data:image/"):
+                        raise ValueError(f"frame {i}: not an image")
+                    if len(durl) > CUSTOM_MAX_FILE_CHARS:
+                        raise ValueError(f"frame {i}: too large (keep each under ~1MB)")
+                    raw = base64.b64decode(durl.split(",", 1)[1])
+                    im = core.Image.open(io.BytesIO(raw)).convert("RGBA")
+                    if max(im.size) > 256:
+                        im.thumbnail((256, 256), core.Image.Resampling.NEAREST)
+                    fn = f"{tid}_f{i}.png"
+                    im.save(os.path.join(CUSTOM_DIR, fn), "PNG")
+                    files.append(fn)
+            except Exception as e:
+                for fn in files:  # roll back partial writes
+                    try:
+                        os.remove(os.path.join(CUSTOM_DIR, fn))
+                    except OSError:
+                        pass
+                return self._send_json({"ok": False, "error": str(e)}, 400)
+            entry = {"id": tid, "name": name, "preset": preset,
+                     "solid": TILE_PRESETS[preset]["solid"],
+                     "frame_ms": frame_ms, "files": files}
+            _custom_tiles.append(entry)
+            _register_custom_tile(entry)
+            _save_custom_registry()
+            return self._send_json({"ok": True, "tile": _custom_public(entry)})
 
         if path == "/api/undo":
             ok = history.undo()
@@ -490,7 +635,7 @@ if __name__ == "__main__":
     srv = ThreadingHTTPServer((host, PORT), Handler)
     threading.Thread(target=_autosave_loop, daemon=True).start()
     print("=" * 52)
-    print("  Crumbs HUD v2.5 — trays open + smooth pinch + save/load menu")
+    print("  Crumbs HUD v3.0 — import tiles, animator, play mode")
     if public:
         ip = _lan_ip()
         print("  PUBLIC mode: anyone on your Wi-Fi can open the HUD.")

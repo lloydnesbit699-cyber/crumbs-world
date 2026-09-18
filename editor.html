@@ -111,6 +111,25 @@
                   display: block; object-fit: contain; background: #0a0a0a; }
   .sw.sel .chip { border-color: #ffd75f; box-shadow: 0 0 8px #ffd75f; }
   .sw .lbl { font-size: 10px; color: #bbb; margin-top: 2px; word-break: break-word; }
+
+  /* v3.0: custom imported tiles + import form */
+  #custom-tiles .sw canvas { width: 48px; height: 48px; border-radius: 10px;
+      border: 2px solid #555; image-rendering: pixelated; background: #1c1c1c; }
+  #custom-tiles .sw.sel canvas { border-color: #ffd75f; box-shadow: 0 0 8px #ffd75f; }
+  #custom-tiles .preset-tag { font-size: 9px; color: #4da3ff; }
+  .widebtn { width: 100%; margin: 4px 0 10px; }
+  #import-form { background: #1c1c1c; border: 1px solid #444; border-radius: 10px;
+      padding: 10px; margin-bottom: 10px; }
+  #import-previews img { width: 44px; height: 44px; border-radius: 6px;
+      image-rendering: pixelated; background: #222; }
+  #import-name { width: 100%; box-sizing: border-box; margin: 8px 0; }
+  #import-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  #import-presets button { flex: 1 1 28%; margin: 0; padding: 8px 4px; font-size: 12px; }
+  #import-presets button.on { border-color: #4da3ff; color: #4da3ff; }
+  #import-speed { font-size: 12px; color: #999; margin-bottom: 8px; }
+  #import-speed input { width: 70px; }
+  .row2 { display: flex; gap: 8px; }
+  .row2 button { flex: 1; margin: 0; }
   #collide-palette { display: none; gap: 8px; }
   #collide-palette .sw .chip { border-style: dashed; }
   #save-status { color: #888; font-size: 12px; }
@@ -132,7 +151,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v2.5</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v3.0</small></span>
 </div>
 
 <div id="menu-dropdown">
@@ -155,6 +174,20 @@
 
 <aside class="tray" id="tray-left">
   <div class="tray-head">Tiles<span class="tray-hint">pick one, then tap the map</span></div>
+  <div class="grp-label">custom</div>
+  <div id="custom-tiles" class="swatches"></div>
+  <button id="btn-import" class="widebtn">＋ Import images…</button>
+  <input type="file" id="import-files" accept="image/*" multiple hidden>
+  <div id="import-form" hidden>
+    <div id="import-previews" class="swatches"></div>
+    <input id="import-name" maxlength="24" placeholder="tile name">
+    <div id="import-presets"></div>
+    <div id="import-speed" hidden>frame <input id="import-ms" type="number" value="400" min="80" max="2000" step="40"> ms</div>
+    <div class="row2">
+      <button id="import-add">Add tile</button>
+      <button id="import-cancel" class="ghost">Cancel</button>
+    </div>
+  </div>
   <div class="seg" id="layer-seg">
     <button data-layer="tiles" class="on">Tiles</button>
     <button data-layer="objects">Objects</button>
@@ -260,6 +293,15 @@ let tiles = [], objects = [], coll = [];
 let palette = [];                   // [{id,name,color}]
 let spriteTiles = [];               // [{id,name,type,category}] image/animation tiles
 let thumbImg = {};                  // tile id -> preloaded Image thumbnail
+// v3.0: custom imported tiles + animator state
+let customTiles = [];               // [{id,name,preset,solid,frames,frame_ms}]
+let customById = {};                // id -> tile
+let customFrames = {};              // id -> [Image per frame]
+let presets = [];                   // tile function presets from server
+let importFiles = [];               // pending import [{name,dataUrl}]
+let importPreset = "floor";
+let animOnMap = new Set();          // custom animated tile ids currently placed
+let heroTileId = null;              // sprite tile used as the play-mode hero
 let colorOf = {};                   // tile id -> css color
 let layer = "tiles";
 let erasing = false;
@@ -337,7 +379,29 @@ async function refresh() {
   tiles = m.tiles; objects = m.objects; coll = m.collision;
   $("rw").value = W; $("rh").value = H;
   fitTiles();
+  // v3.0: note which animated custom tiles are on the map so the anim
+  // tick knows whether a redraw is worthwhile (64x64 = 4096 tiles)
+  animOnMap = new Set();
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const t = customById[tiles[y][x]];
+    if (t && t.frames > 1) animOnMap.add(tiles[y][x]);
+  }
   render();
+}
+
+// v3.0: animator — which frame of a tile is showing right now
+function frameIdx(t) { return Math.floor(performance.now() / t.frame_ms) % t.frames; }
+// v3.0: current drawable image for any tile id (custom animated frame,
+// sprite thumbnail, or null while still loading)
+function tileFrameImage(id) {
+  const ct = customById[id];
+  if (ct) {
+    const fr = customFrames[id];
+    const im = fr && fr[frameIdx(ct)];
+    return (im && im.complete && im.naturalWidth) ? im : null;
+  }
+  const im = thumbImg[id];
+  return (im && im.complete && im.naturalWidth) ? im : null;
 }
 
 function cellColor(x, y) {
@@ -352,11 +416,11 @@ function render() {
   canvas.width = W * tilePx; canvas.height = H * tilePx;
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const id = tiles[y][x];
-    const im = thumbImg[id];
-    if (im && im.complete && im.naturalWidth) {
+    const im = tileFrameImage(id);   // v3.0: animated custom tiles draw current frame
+    if (im) {
       ctx.drawImage(im, x * tilePx, y * tilePx, tilePx, tilePx);
     } else {
-      ctx.fillStyle = colorOf[id] || "#000";
+      ctx.fillStyle = customById[id] ? "#1c1c1c" : (colorOf[id] || "#000");
       ctx.fillRect(x * tilePx, y * tilePx, tilePx, tilePx);
     }
   }
@@ -369,18 +433,23 @@ function render() {
       ctx.moveTo(px + tilePx, py); ctx.lineTo(px, py + tilePx); ctx.stroke();
     }
   }
-  // hero marker in play mode
+  // hero marker in play mode — v3.0: hero sprite when available
   if (playMode && hero) {
-    const cx = hero.x * tilePx + tilePx / 2, cy = hero.y * tilePx + tilePx / 2, r = tilePx * 0.32;
-    ctx.fillStyle = "#ffd75f"; ctx.strokeStyle = "#000"; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    const him = heroTileId != null ? tileFrameImage(heroTileId) : null;
+    if (him) {
+      ctx.drawImage(him, hero.x * tilePx, hero.y * tilePx, tilePx, tilePx);
+    } else {
+      const cx = hero.x * tilePx + tilePx / 2, cy = hero.y * tilePx + tilePx / 2, r = tilePx * 0.32;
+      ctx.fillStyle = "#ffd75f"; ctx.strokeStyle = "#000"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    }
   }
   // object markers
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const oid = objects[y][x];
     if (oid !== null && oid !== undefined) {
-      const oim = thumbImg[oid];
-      if (oim && oim.complete && oim.naturalWidth) {
+      const oim = tileFrameImage(oid);   // v3.0: custom tiles work as objects too
+      if (oim) {
         ctx.drawImage(oim, x * tilePx, y * tilePx, tilePx, tilePx);
       } else {
       const cx = x * tilePx + tilePx / 2, cy = y * tilePx + tilePx / 2, r = tilePx * 0.28;
@@ -419,8 +488,11 @@ function localGrid() { return layer === "objects" ? objects : layer === "collisi
 function strokeAdd(cell) {
   const key = cell.x + "," + cell.y;
   if (stroke.cells.has(key)) return;
-  stroke.cells.set(key, { x: cell.x, y: cell.y, tile_id: brushValue() });
-  localGrid()[cell.y][cell.x] = brushValue();   // optimistic preview
+  const bv = brushValue();
+  stroke.cells.set(key, { x: cell.x, y: cell.y, tile_id: bv });
+  localGrid()[cell.y][cell.x] = bv;   // optimistic preview
+  const bt = customById[bv];          // v3.0: track animated placements
+  if (bt && bt.frames > 1) animOnMap.add(bv);
   dirtyFlag = true;   // v2.0: assume unsaved until the server says otherwise
   render();
 }
@@ -570,13 +642,15 @@ function buildPalette() {
     });
     box.appendChild(row);
   });
-  if (spriteTiles.length) {
+  // v3.0: custom tiles live in their own section — keep them out of sprites
+  const builtins = spriteTiles.filter(t => t.type !== "custom");
+  if (builtins.length) {
     const lab = document.createElement("div");
     lab.className = "grp-label"; lab.textContent = "sprites";
     box.appendChild(lab);
     const row = document.createElement("div");
     row.className = "swatches";
-    spriteTiles.forEach(t => {
+    builtins.forEach(t => {
       const d = document.createElement("div");
       d.className = "sw" + (t.id === selTile ? " sel" : "");
       d.title = t.name + " (#" + t.id + " · " + t.type + ")";
@@ -589,7 +663,117 @@ function buildPalette() {
   }
   $("tile-palette").style.display = layer === "collision" ? "none" : "block";
   $("collide-palette").style.display = layer === "collision" ? "block" : "none";
+  buildCustomTiles();   // v3.0: keep custom selection highlight in sync
 }
+
+// ---- v3.0: custom imported tiles + animator --------------------------------
+async function loadCustomTiles() {
+  const r = await api("/api/custom-tiles");
+  customTiles = r.tiles || [];
+  customById = {}; customFrames = {};
+  for (const t of customTiles) {
+    customById[t.id] = t;
+    const fr = [];
+    for (let i = 0; i < t.frames; i++) {
+      const im = new Image();
+      im.onload = () => render();
+      im.src = "/api/thumb/" + t.id + "?frame=" + i;
+      fr.push(im);
+    }
+    customFrames[t.id] = fr;
+  }
+  buildCustomTiles();
+}
+function buildCustomTiles() {
+  const box = $("custom-tiles"); box.innerHTML = "";
+  customTiles.forEach(t => {
+    const d = document.createElement("div");
+    d.className = "sw" + (t.id === selTile ? " sel" : "");
+    d.title = t.name + " (" + t.preset + (t.frames > 1 ? ", " + t.frames + " frames" : "") + ")";
+    d.innerHTML = '<canvas width="48" height="48" data-tid="' + t.id + '"></canvas>' +
+                  '<div class="lbl">' + t.name + '</div>' +
+                  '<div class="preset-tag">' + t.preset + '</div>';
+    d.onclick = () => { selTile = t.id; erasing = false; $("btn-eraser").classList.remove("on"); buildPalette(); };
+    box.appendChild(d);
+  });
+}
+// animator tick: animated tray previews + map redraws, but only when a frame
+// actually changed — never redraws a 64x64 map for nothing
+let lastAnimSig = "";
+setInterval(() => {
+  if (document.hidden) return;
+  document.querySelectorAll("#custom-tiles canvas").forEach(cv => {
+    const t = customById[cv.dataset.tid];
+    if (!t || t.frames < 2) return;
+    const fr = customFrames[t.id], im = fr && fr[frameIdx(t)];
+    if (im && im.complete && im.naturalWidth) {
+      const c = cv.getContext("2d");
+      c.imageSmoothingEnabled = false;
+      c.clearRect(0, 0, 48, 48);
+      c.drawImage(im, 0, 0, 48, 48);
+    }
+  });
+  if (!animOnMap.size) return;
+  let sig = "";
+  animOnMap.forEach(id => { const t = customById[id]; if (t) sig += frameIdx(t) + ","; });
+  if (sig !== lastAnimSig) { lastAnimSig = sig; render(); }
+}, 150);
+
+// ---- v3.0: image import ------------------------------------------------------
+function readFile(f) {
+  return new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(f); });
+}
+async function buildImportPresets() {
+  if (!presets.length) {
+    const r = await api("/api/presets");
+    presets = r.presets || [];
+  }
+  const box = $("import-presets"); box.innerHTML = "";
+  presets.forEach(p => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = p.label; b.title = p.hint;
+    b.className = p.id === importPreset ? "on" : "";
+    b.onclick = ev => { ev.preventDefault(); importPreset = p.id; buildImportPresets(); };
+    box.appendChild(b);
+  });
+}
+$("btn-import").onclick = () => $("import-files").click();
+$("import-files").onchange = async e => {
+  importFiles = [];
+  const files = [...e.target.files].slice(0, 8);
+  for (const f of files) {
+    if (f.size > 1500000) { toast(f.name + " too big — skipped"); continue; }
+    importFiles.push({ name: f.name.replace(/\.[^.]+$/, ""), dataUrl: await readFile(f) });
+  }
+  e.target.value = "";
+  if (!importFiles.length) return;
+  $("import-form").hidden = false;
+  $("import-name").value = importFiles[0].name.slice(0, 24);
+  const pv = $("import-previews"); pv.innerHTML = "";
+  importFiles.forEach(f => {
+    const im = document.createElement("img");
+    im.src = f.dataUrl; im.title = f.name;
+    pv.appendChild(im);
+  });
+  $("import-speed").hidden = importFiles.length < 2;
+  buildImportPresets();
+};
+$("import-cancel").onclick = () => { $("import-form").hidden = true; importFiles = []; };
+$("import-add").onclick = async () => {
+  const r = await api("/api/custom-tiles", {
+    name: $("import-name").value.trim().slice(0, 24) || "custom",
+    preset: importPreset,
+    frame_ms: +$("import-ms").value || 400,
+    frames: importFiles.map(f => f.dataUrl),
+  });
+  if (!r.ok) { toast("import failed: " + (r.error || "unknown")); return; }
+  $("import-form").hidden = true; importFiles = [];
+  await loadCustomTiles();
+  selTile = r.tile.id;
+  buildPalette();
+  toast(r.tile.name + " added (" + r.tile.preset + ") — tap the map to place it");
+};
 
 // ---- toolbar wiring ----------------------------------------------------------
 document.querySelectorAll("#layer-seg button").forEach(b => {
@@ -742,6 +926,9 @@ async function pollStatus() {
       im.src = "/api/thumb/" + t.id;
       thumbImg[t.id] = im;
     });
+    const ht = spriteTiles.find(t => /hero/i.test(t.name));
+    if (ht) heroTileId = ht.id;   // v3.0: play-mode hero walks as a sprite
+    await loadCustomTiles();      // v3.0: imported tiles before first render
     document.querySelector('#collide-palette .sw[data-cv="1"]').classList.add("sel");
     buildPalette();
     setFile(currentFile);

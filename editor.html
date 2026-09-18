@@ -65,7 +65,7 @@
           transition: transform .22s ease-out; -webkit-overflow-scrolling: touch; }
   #tray-left { left: 0; border-right: 1px solid #333; transform: translateX(-103%); }
   #tray-right { right: 0; border-left: 1px solid #333; transform: translateX(103%); }
-  .tray.open { transform: none; }
+  #tray-left.open, #tray-right.open { transform: none; }   /* v2.5: ID+class beats the ID-only hidden transform */
   .tray-head { font-size: 14px; font-weight: 600; margin-bottom: 10px; color: #ccc; }
   .tray-hint { font-weight: normal; color: #777; font-size: 11px; margin-left: 6px; }
   #tray-left .seg { margin-bottom: 10px; }
@@ -132,7 +132,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v2.4</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v2.5</small></span>
 </div>
 
 <div id="menu-dropdown">

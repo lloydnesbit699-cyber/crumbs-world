@@ -41,6 +41,8 @@ and a read-only current-map label in Setup.
 v2.4 (2026-09-18): pinch zoom quantized to whole-pixel steps — at 64x64 every
 fractional zoom change was redrawing all 4096 tiles per pointer move and
 freezing the map; now it only redraws when the size actually changes.
+v2.5 (2026-09-18): fixed TILES/TOOLS trays never opening — the ID selector
+for the hidden position was beating the .open rule (CSS specificity).
 
 Run:   python3 crumbs_hud.py
 Open:  http://127.0.0.1:8778   (same phone's browser)
@@ -488,7 +490,7 @@ if __name__ == "__main__":
     srv = ThreadingHTTPServer((host, PORT), Handler)
     threading.Thread(target=_autosave_loop, daemon=True).start()
     print("=" * 52)
-    print("  Crumbs HUD v2.4 — smooth pinch at 64x64 + save/load menu")
+    print("  Crumbs HUD v2.5 — trays open + smooth pinch + save/load menu")
     if public:
         ip = _lan_ip()
         print("  PUBLIC mode: anyone on your Wi-Fi can open the HUD.")

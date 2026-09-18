@@ -145,6 +145,21 @@
   /* v3.5: recording indicator */
   #btn-record.on { border-color: #e5484d; color: #ff8589; animation: recpulse 1.2s infinite; }
   @keyframes recpulse { 50% { background: #4a1d1d; } }
+  /* v3.7: on-screen controls */
+  #dpad { position: fixed; z-index: 55; display: none;
+          grid-template-columns: repeat(3, 46px); grid-template-rows: repeat(3, 46px);
+          gap: 5px; opacity: 0.8; touch-action: none; }
+  #dpad.show { display: grid; }
+  #dpad.dragging { opacity: 1; outline: 2px dashed #4da3ff; outline-offset: 4px; }
+  #dpad button { font-size: 18px; padding: 0; min-height: 0; margin: 0;
+                 background: rgba(28,28,38,.85); border-radius: 10px; touch-action: none; }
+  #dpad button:active { background: #4da3ff; }
+  #dpad .spacer { visibility: hidden; }
+  /* v3.7: rules sheet option buttons */
+  #sheet-rules .opt-row { display: flex; gap: 6px; margin: 2px 0 10px; }
+  #sheet-rules .opt-row button { flex: 1; margin: 0; }
+  #sheet-rules .opt-row button.on { border-color: #4da3ff; color: #4da3ff; }
+  #sheet-rules .lbl { font-size: 12px; color: #9aa; }
   .row2 { display: flex; gap: 8px; }
   .row2 button { flex: 1; margin: 0; }
   #collide-palette { display: none; gap: 8px; }
@@ -172,12 +187,13 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v3.6</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v3.7</small></span>
 </div>
 
 <div id="menu-dropdown">
   <button id="btn-play" title="Walk the map">&#9654; Play</button>
   <button id="btn-record" title="Record the screen as a video">&#9679; Record</button>
+  <button id="menu-rules" title="Game rules for this build">Rules&hellip;</button>
   <button id="btn-light" title="Fog/lighting overlay in play mode">Lighting: on</button>
   <button id="btn-undo" title="Undo">Undo</button>
   <button id="btn-redo" title="Redo">Redo</button>
@@ -279,6 +295,29 @@
   <div id="load-list"></div>
 </div>
 
+<div id="sheet-rules" class="sheet">
+  <div class="grab"></div>
+  <div class="tray-head">Rules — this build</div>
+  <div class="lbl">Walk speed</div>
+  <div class="opt-row" id="rules-walk">
+    <button data-v="220">Slow</button><button data-v="140">Normal</button><button data-v="90">Fast</button>
+  </div>
+  <div class="lbl">Swim drag</div>
+  <div class="opt-row" id="rules-swim">
+    <button data-v="2">2&times;</button><button data-v="3">3&times;</button><button data-v="4">4&times;</button>
+  </div>
+  <div class="opt-row">
+    <button id="rules-ghost" title="Builder noclip: walk through walls">Ghost: off</button>
+    <button id="rules-touch" title="Show the on-screen controls in play mode">Controls: on</button>
+  </div>
+  <div class="opt-row">
+    <button id="rules-move" title="Drag the on-screen controls anywhere">&#10022; Move controls</button>
+    <button id="rules-defaults" title="Use these rules for maps you generate">&#9733; My defaults</button>
+  </div>
+  <div><small>Controller: <span id="pad-status">none — press a button on it</span></small></div>
+  <div><small>Rules save with this map. Defaults apply to new maps you generate.</small></div>
+</div>
+
 <div id="scrim"></div>
 
 <div id="zoom-cluster">
@@ -286,6 +325,12 @@
   <button id="zoom-in" title="Zoom in">+</button>
   <button id="zoom-fit" title="Fit map to screen">Fit</button>
   <button id="btn-pan" title="Pan the map instead of painting">Move</button>
+</div>
+
+<div id="dpad" aria-label="On-screen movement controls">
+  <span class="spacer"></span><button data-dx="0" data-dy="-1" title="Up">&#9650;</button><span class="spacer"></span>
+  <button data-dx="-1" data-dy="0" title="Left">&#9664;</button><span class="spacer"></span><button data-dx="1" data-dy="0" title="Right">&#9654;</button>
+  <span class="spacer"></span><button data-dx="0" data-dy="1" title="Down">&#9660;</button><span class="spacer"></span>
 </div>
 
 <div id="toast"></div>
@@ -752,7 +797,8 @@ async function playTap(cell) {
     heroInDeep = !!deep[i];     // v3.6: lights the swim-animation hook below
     i++; render();
     if (i >= path.length) { heroTimer = null; heroSwimming = false; heroInDeep = false; return; }
-    heroTimer = setTimeout(step, (swim[i] || deep[i]) ? 430 : 140);
+    const wms = RULES.walk_ms;   // v3.7: tap-to-walk obeys this build's rules
+    heroTimer = setTimeout(step, (swim[i] || deep[i]) ? wms * RULES.swim_mult : wms);
   };
   heroTimer = setTimeout(step, 0);
 }
@@ -769,6 +815,8 @@ $("btn-play").onclick = async () => {
     if (npcs.length) npcTimer = setInterval(() => npcTick(0.1), 100);
     // "can't reach" confusion was play mode intercepting taps — paint tools rest now
     $("btn-play").classList.add("on");
+    await refreshRules();   // v3.7: this build's rules + touch controls
+    padStart();             // v3.7: controller polling
     toast("play mode — tap a tile to walk there");
   } else {
     await api("/api/play/stop", {});
@@ -776,6 +824,9 @@ $("btn-play").onclick = async () => {
     if (heroTimer) { clearInterval(heroTimer); heroTimer = null; }
     if (npcTimer) { clearInterval(npcTimer); npcTimer = null; }   // v3.4: walkers rest
     npcs = [];
+    clearTimeout(stepTimer); stepTimer = null;   // v3.7: D-pad repeat stops
+    dpadDrag = false; dpad.classList.remove("dragging");
+    updateDpad();   // v3.7: hide the touch controls (pad loop self-stops)
     $("btn-play").classList.remove("on");
     toast("back to editing");
   }
@@ -845,6 +896,167 @@ async function finishRecording() {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
   toast("video saved — share it anywhere");
 }
+
+// ---- v3.7: rules, touch controls, controller --------------------------------
+// Rules live per build (server sidecar) + per user (localStorage defaults).
+// Movement: tap-to-walk, on-screen D-pad (draggable), or a real controller
+// (Bluetooth/wired via the Gamepad API — iOS Safari 10.3+).
+let RULES = { walk_ms: 140, swim_mult: 3, ghost: false, touch: true };
+async function refreshRules() {
+  try {
+    const r = await api("/api/rules");
+    if (r.ok && r.rules) RULES = r.rules;
+  } catch (e) { /* offline — keep last known */ }
+  syncRulesSheet();
+  updateDpad();
+}
+function syncRulesSheet() {
+  document.querySelectorAll("#rules-walk button").forEach(b =>
+    b.classList.toggle("on", +b.dataset.v === RULES.walk_ms));
+  document.querySelectorAll("#rules-swim button").forEach(b =>
+    b.classList.toggle("on", +b.dataset.v === RULES.swim_mult));
+  $("rules-ghost").textContent = "Ghost: " + (RULES.ghost ? "on" : "off");
+  $("rules-ghost").classList.toggle("on", RULES.ghost);
+  $("rules-touch").textContent = "Controls: " + (RULES.touch ? "on" : "off");
+  $("rules-touch").classList.toggle("on", RULES.touch);
+}
+async function setRules(patch) {
+  try {
+    const r = await api("/api/rules", patch);
+    if (r.ok && r.rules) RULES = r.rules;
+  } catch (e) { toast("couldn't reach server"); }
+  syncRulesSheet();
+  updateDpad();
+}
+$("menu-rules").onclick = () => { refreshRules(); toggleOverlay("sheet-rules"); };
+document.querySelectorAll("#rules-walk button").forEach(b =>
+  b.onclick = () => setRules({ walk_ms: +b.dataset.v }));
+document.querySelectorAll("#rules-swim button").forEach(b =>
+  b.onclick = () => setRules({ swim_mult: +b.dataset.v }));
+$("rules-ghost").onclick = () => setRules({ ghost: !RULES.ghost });
+$("rules-touch").onclick = () => setRules({ touch: !RULES.touch });
+$("rules-defaults").onclick = () => {
+  try { localStorage.setItem("crumbs_rules", JSON.stringify(RULES)); } catch (e) {}
+  toast("saved as your defaults for new maps");
+};
+function myDefaults() {
+  try { return JSON.parse(localStorage.getItem("crumbs_rules")) || null; }
+  catch (e) { return null; }
+}
+
+// ---- on-screen D-pad --------------------------------------------------------
+const dpad = $("dpad");
+let dpadDrag = false, stepTimer = null;
+function placeDpad() {
+  let p = null;
+  try { p = JSON.parse(localStorage.getItem("crumbs_dpad")); } catch (e) {}
+  if (p && typeof p.x === "number") {
+    dpad.style.left = p.x + "px"; dpad.style.top = p.y + "px";
+    dpad.style.right = "auto"; dpad.style.bottom = "auto";
+  } else {
+    dpad.style.left = "12px"; dpad.style.bottom = "96px";
+    dpad.style.right = "auto"; dpad.style.top = "auto";
+  }
+}
+function updateDpad() {
+  dpad.classList.toggle("show", playMode && RULES.touch);
+  placeDpad();
+}
+$("rules-move").onclick = () => {
+  dpadDrag = !dpadDrag;
+  $("rules-move").classList.toggle("on", dpadDrag);
+  dpad.classList.toggle("dragging", dpadDrag);
+  closeOverlays();
+  if (dpadDrag && !playMode) toast("enter Play first, then drag the controls");
+  else toast(dpadDrag ? "drag the controls where you want them — tap \u2725 again when done"
+                      : "controls placed");
+  updateDpad();
+};
+dpad.addEventListener("pointerdown", e => {
+  if (!dpadDrag) return;   // buttons step the hero; the pad itself drags
+  e.preventDefault();
+  const ox = e.clientX - dpad.offsetLeft, oy = e.clientY - dpad.offsetTop;
+  const mv = ev => {
+    dpad.style.left = (ev.clientX - ox) + "px";
+    dpad.style.top = (ev.clientY - oy) + "px";
+    dpad.style.right = "auto"; dpad.style.bottom = "auto";
+  };
+  const up = () => {
+    window.removeEventListener("pointermove", mv);
+    window.removeEventListener("pointerup", up);
+    try { localStorage.setItem("crumbs_dpad",
+      JSON.stringify({ x: dpad.offsetLeft, y: dpad.offsetTop })); } catch (err) {}
+  };
+  window.addEventListener("pointermove", mv);
+  window.addEventListener("pointerup", up);
+});
+dpad.querySelectorAll("button").forEach(b => {
+  const dx = +b.dataset.dx, dy = +b.dataset.dy;
+  b.addEventListener("pointerdown", e => {
+    if (dpadDrag || !playMode) return;
+    e.preventDefault();
+    doStep(dx, dy, true);   // tap steps once; hold repeats
+  });
+  ["pointerup", "pointercancel", "pointerleave"].forEach(ev =>
+    b.addEventListener(ev, () => { clearTimeout(stepTimer); stepTimer = null; }));
+});
+async function doStep(dx, dy, repeat) {
+  if (!playMode) return;
+  let r;
+  try { r = await api("/api/play/step", { dx, dy }); }
+  catch (e) { return; }
+  if (!r.ok) return;
+  hero = { x: r.x, y: r.y };
+  heroSwimming = !!r.swim; heroInDeep = !!r.deep;
+  render();
+  clearTimeout(stepTimer); stepTimer = null;
+  if (repeat && !r.blocked) {
+    const wms = RULES.walk_ms;
+    const delay = Math.max((r.swim || r.deep) ? wms * RULES.swim_mult : wms, 120);
+    stepTimer = setTimeout(() => doStep(dx, dy, true), delay);
+  }
+}
+
+// ---- controller (Gamepad API) ------------------------------------------------
+let padIdx = null, padLoop = null, padCool = 0;
+function padShort(id) {
+  return String(id || "").split("(")[0].trim().slice(0, 28) || "controller";
+}
+window.addEventListener("gamepadconnected", e => {
+  padIdx = e.gamepad.index;
+  $("pad-status").textContent = padShort(e.gamepad.id);
+  toast("controller connected: " + padShort(e.gamepad.id));
+});
+window.addEventListener("gamepaddisconnected", e => {
+  if (padIdx === e.gamepad.index) padIdx = null;
+  $("pad-status").textContent = "none \u2014 press a button on it";
+  toast("controller disconnected");
+});
+function padTick() {
+  if (!playMode) { padLoop = null; return; }
+  padLoop = requestAnimationFrame(padTick);
+  if (padIdx == null || !("getGamepads" in navigator)) return;
+  const gp = navigator.getGamepads()[padIdx];
+  if (!gp || !gp.connected) return;
+  const now = performance.now();
+  if (now < padCool) return;
+  let dx = 0, dy = 0;
+  const b = gp.buttons || [];
+  if (b[14] && b[14].pressed) dx = -1;
+  else if (b[15] && b[15].pressed) dx = 1;
+  if (b[12] && b[12].pressed) dy = -1;
+  else if (b[13] && b[13].pressed) dy = 1;
+  const ax = gp.axes || [];
+  if (!dx && !dy && ax.length >= 2) {
+    if (Math.abs(ax[0]) > 0.5) dx = Math.sign(ax[0]);
+    else if (Math.abs(ax[1]) > 0.5) dy = Math.sign(ax[1]);
+  }
+  if (dx || dy) {
+    padCool = now + Math.max(RULES.walk_ms, 150);
+    doStep(dx, dy, false);   // the rAF loop is the repeat
+  }
+}
+function padStart() { if (!padLoop) padLoop = requestAnimationFrame(padTick); }
 
 // ---- v3.4: patrol NPCs -------------------------------------------------------
 // Pick a character tile, tap Patrol, tap the stops in order, Done. In play
@@ -1306,6 +1518,9 @@ $("btn-gen").onclick = async () => {
     currentTheme = r.biome || "dungeon"; $("theme-sel").value = currentTheme;
     if (layer === "tiles") { selTile = defaultBrush("tiles"); selByLayer.tiles = selTile; }
     buildPalette();
+    // v3.7: fresh build — apply the user's saved rule defaults, if any
+    const def = myDefaults();
+    if (def) await setRules(def);
     toast("generated " + r.biome);
   } else toast("generate failed");
 };
@@ -1339,7 +1554,7 @@ async function renderLoadList() {
       if (f === currentFile) b.classList.add("cur");
       b.onclick = async () => {
         const r = await api("/api/load", { filename: f });
-        if (r.ok) { setFile(f); panX = 0; panY = 0; await refresh(); closeOverlays(); toast("loaded " + f); }
+        if (r.ok) { setFile(f); panX = 0; panY = 0; await refresh(); await refreshRules(); closeOverlays(); toast("loaded " + f); }
         else toast("load failed: " + (r.error || ""));
       };
       list.appendChild(b);

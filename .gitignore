@@ -5,3 +5,4 @@ hud_map.json
 custom_tiles.json
 hud_patrols.json
 custom_tiles/
+*.rules.json

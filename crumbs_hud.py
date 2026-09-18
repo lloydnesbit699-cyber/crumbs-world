@@ -338,6 +338,49 @@ assets = core.AssetManager()
 world = core.WorldMap(25, 15, assets)
 history = core.HistoryManager()
 
+# ---- v3.7: per-map game rules ---------------------------------------------------
+# Rules differ per build (saved with the map) and per user preference (the
+# client keeps personal defaults in localStorage and pushes them after
+# Generate). Sidecar file because crumbs_core's save schema is untouched.
+DEFAULT_RULES = {"walk_ms": 140,     # hero step delay: 90 fast / 140 normal / 220 slow
+                 "swim_mult": 3,     # water slowdown: 2x / 3x / 4x
+                 "ghost": False,     # builder noclip: walk through walls
+                 "touch": True}      # show the on-screen controls in play mode
+rules = dict(DEFAULT_RULES)
+_current_map = DEFAULT_SAVE
+
+
+def _rules_path(name):
+    base = name[:-5] if name.endswith(".json") else name
+    return os.path.join(SCRIPT_DIR, base + ".rules.json")
+
+
+def _load_rules(name):
+    """v3.7: read this map's rules sidecar; fall back to defaults."""
+    global rules, _current_map
+    _current_map = name
+    rules = dict(DEFAULT_RULES)
+    try:
+        saved = json.load(open(_rules_path(name)))
+    except (OSError, ValueError):
+        return
+    for k, v in (saved or {}).items():
+        if k == "walk_ms" and v in (90, 140, 220):
+            rules[k] = v
+        elif k == "swim_mult" and v in (2, 3, 4):
+            rules[k] = v
+        elif k in ("ghost", "touch") and isinstance(v, bool):
+            rules[k] = v
+
+
+def _save_rules(name):
+    try:
+        with open(_rules_path(name), "w") as f:
+            json.dump(rules, f)  # flat — matches what _load_rules reads
+    except OSError as e:
+        print(f"[hud] could not save rules: {e}")
+
+
 # try to resume: last HUD save, else the blank starter, else fresh 25x15
 for _name, _loader in ((DEFAULT_SAVE, world.load), ("vault_map.txt", world.load_csv)):
     _p = os.path.join(SCRIPT_DIR, _name)
@@ -349,6 +392,7 @@ else:
 
 _load_custom_tiles()  # v3.0: imported tiles back into the asset manager
 _load_patrols()       # v3.4: patrol routes back (needs tiles loaded first)
+_load_rules(DEFAULT_SAVE)  # v3.7: this build's rules (or defaults)
 
 # v3.2: built-in water/ocean colors are swimmable — slow the hero, don't block
 for _tid, _t in assets.tiles.items():
@@ -411,13 +455,17 @@ def _find_spawn():
     return 0, 0
 
 
-def _find_path(sx, sy, tx, ty):
+def _find_path(sx, sy, tx, ty, ghost=False):
     """v3.2: Dijkstra over walkable tiles — water costs 4x (swim), so the hero
     walks around it when a dry route exists and swims only when it must.
     v3.6: deep water is unwalkable until SWIM_UNLOCKED flips; then it costs
     4x like shallow water and its steps are flagged deep for the client.
+    v3.7: ghost (builder noclip rule) walks straight through everything.
     Returns ([(x,y), ...] excluding the start, [swim?, ...], [deep?, ...])."""
-    if (sx, sy) == (tx, ty) or not _walkable(tx, ty):
+    def _ok(x, y):
+        return (0 <= x < world.width and 0 <= y < world.height
+                and (ghost or _walkable(x, y)))
+    if (sx, sy) == (tx, ty) or not _ok(tx, ty):
         return [], [], []
     SWIM_COST = 4
     dist = {(sx, sy): 0}
@@ -430,11 +478,9 @@ def _find_path(sx, sy, tx, ty):
         if (x, y) == (tx, ty):
             break
         for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
-            if not (0 <= nx < world.width and 0 <= ny < world.height):
+            if not _ok(nx, ny):
                 continue
-            if not _walkable(nx, ny):
-                continue
-            nd = d + (SWIM_COST if (_swim_at(nx, ny) or _deep_at(nx, ny)) else 1)
+            nd = d + (1 if ghost else (SWIM_COST if (_swim_at(nx, ny) or _deep_at(nx, ny)) else 1))
             if nd < dist.get((nx, ny), float("inf")):
                 dist[(nx, ny)] = nd
                 prev[(nx, ny)] = (x, y)
@@ -467,6 +513,7 @@ def _save_now(name=DEFAULT_SAVE):
     if world.save(p):
         _save_state["dirty"] = False
         _save_state["last"] = time.strftime("%H:%M:%S")
+        _save_rules(name)  # v3.7: rules ride alongside the map
         return True
     return False
 
@@ -633,6 +680,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"maps": files})
         elif path == "/api/biomes":
             self._send_json({"biomes": [{"id": k, "name": v["name"]} for k, v in core.BIOMES.items()]})
+        elif path == "/api/rules":
+            # v3.7: this build's game rules
+            self._send_json({"ok": True, "rules": rules})
         elif path == "/api/status":
             self._send_json({"dirty": _save_state["dirty"],
                              "last_save": _save_state["last"],
@@ -924,7 +974,9 @@ class Handler(BaseHTTPRequestHandler):
             world.generate_biome(biome, seed)
             history.push(core.MapSnapshotCommand(world, old, _snapshot()))
             _mark_dirty()
-            return self._send_json({"ok": True, "biome": biome})
+            rules.clear()
+            rules.update(DEFAULT_RULES)  # v3.7: fresh build, fresh rules
+            return self._send_json({"ok": True, "biome": biome, "rules": rules})
 
         if path == "/api/clear_layer":
             layer = body.get("layer", "tiles")
@@ -956,6 +1008,8 @@ class Handler(BaseHTTPRequestHandler):
             if not name.endswith(".json"):
                 name += ".json"
             ok = world.save(os.path.join(SCRIPT_DIR, name))
+            if ok:
+                _save_rules(name)  # v3.7
             return self._send_json({"ok": ok, "file": name})
 
         if path == "/api/load":
@@ -969,7 +1023,9 @@ class Handler(BaseHTTPRequestHandler):
             if ok:
                 history.undo_stack.clear()
                 history.redo_stack.clear()
-            return self._send_json({"ok": ok, "width": world.width, "height": world.height})
+                _load_rules(name)  # v3.7: this build's rules come with it
+            return self._send_json({"ok": ok, "width": world.width,
+                                    "height": world.height, "rules": rules})
 
         if path == "/api/play/start":
             sx, sy = _find_spawn()
@@ -983,12 +1039,48 @@ class Handler(BaseHTTPRequestHandler):
             x, y = body.get("x"), body.get("y")
             if not isinstance(x, int) or not isinstance(y, int):
                 return self._send_json({"ok": False, "error": "x/y ints required"}, 400)
-            cells, swim, deep = _find_path(play["tx"], play["ty"], x, y)
+            cells, swim, deep = _find_path(play["tx"], play["ty"], x, y,
+                                           ghost=rules["ghost"])
             if cells:
                 play["tx"], play["ty"] = cells[-1]
             return self._send_json({"ok": True, "path": [list(c) for c in cells],
                                     "swim": swim, "deep": deep,
                                     "x": play["tx"], "y": play["ty"]})
+
+        if path == "/api/play/step":
+            # v3.7: single-step hero movement for the D-pad / controller.
+            # {dx, dy} must be one of the 4 cardinal directions.
+            if not play["active"]:
+                return self._send_json({"ok": False, "error": "play mode not active"}, 400)
+            dx, dy = body.get("dx"), body.get("dy")
+            if (dx, dy) not in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                return self._send_json({"ok": False, "error": "dx/dy must be cardinal"}, 400)
+            nx, ny = play["tx"] + dx, play["ty"] + dy
+            in_bounds = 0 <= nx < world.width and 0 <= ny < world.height
+            can = in_bounds and (rules["ghost"] or _walkable(nx, ny))
+            if can:
+                play["tx"], play["ty"] = nx, ny
+            return self._send_json({"ok": True, "x": play["tx"], "y": play["ty"],
+                                    "swim": _swim_at(play["tx"], play["ty"]),
+                                    "deep": _deep_at(play["tx"], play["ty"]),
+                                    "blocked": not can})
+
+        if path == "/api/rules":
+            # v3.7: per-build game rules. POST sets any of walk_ms
+            # (90/140/220), swim_mult (2/3/4), ghost, touch.
+            changed = False
+            wms = body.get("walk_ms")
+            if wms in (90, 140, 220):
+                rules["walk_ms"] = wms; changed = True
+            sm = body.get("swim_mult")
+            if sm in (2, 3, 4):
+                rules["swim_mult"] = sm; changed = True
+            for k in ("ghost", "touch"):
+                if isinstance(body.get(k), bool):
+                    rules[k] = body[k]; changed = True
+            if changed:
+                _mark_dirty()  # autosave persists the sidecar
+            return self._send_json({"ok": True, "rules": rules})
 
         if path == "/api/play/stop":
             play["active"] = False
@@ -1042,7 +1134,7 @@ if __name__ == "__main__":
     srv = ThreadingHTTPServer((host, PORT), Handler)
     threading.Thread(target=_autosave_loop, daemon=True).start()
     print("=" * 52)
-    print("  Crumbs HUD v3.6 — deep water + swim hook")
+    print("  Crumbs HUD v3.7 — rules, touch controls, controller support")
     if public:
         ip = _lan_ip()
         print("  PUBLIC mode: anyone on your Wi-Fi can open the HUD.")

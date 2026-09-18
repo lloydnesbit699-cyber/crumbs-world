@@ -34,6 +34,11 @@ outputType = "webview"
 localPort = 5000
 externalPort = 80
 
+[[ports]]
+localPort = 8778
+externalPort = 3000
+exposeLocalhost = true
+
 [deployment]
 deploymentTarget = "cloudrun"
 run = "python3 crumbs_hud.py --public"

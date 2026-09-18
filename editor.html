@@ -145,17 +145,22 @@
     button, select, input { font-size: 15px; padding: 8px 10px; min-height: 40px; }
     #menu-dropdown button { min-height: 44px; }
   }
+  /* v3.1: theme selector */
+  #theme-row { margin: 4px 0 6px; }
+  #theme-row select { background: #222; color: #eee; border: 1px solid #444;
+                      border-radius: 8px; padding: 6px 8px; font-size: 13px; }
 </style>
 </head>
 <body>
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v3.0</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v3.1</small></span>
 </div>
 
 <div id="menu-dropdown">
   <button id="btn-play" title="Walk the map">&#9654; Play</button>
+  <button id="btn-light" title="Fog/lighting overlay in play mode">Lighting: on</button>
   <button id="btn-undo" title="Undo">Undo</button>
   <button id="btn-redo" title="Redo">Redo</button>
   <hr>
@@ -173,7 +178,7 @@
 <button class="edge-tab" id="tab-right" title="Tools">TOOLS</button>
 
 <aside class="tray" id="tray-left">
-  <div class="tray-head">Tiles<span class="tray-hint">pick one, then tap the map</span></div>
+  <div class="tray-head">Tiles<span class="tray-hint" id="layer-hint">paint the ground</span></div>
   <div class="grp-label">custom</div>
   <div id="custom-tiles" class="swatches"></div>
   <button id="btn-import" class="widebtn">＋ Import images…</button>
@@ -193,11 +198,13 @@
     <button data-layer="objects">Objects</button>
     <button data-layer="collision">Collision</button>
   </div>
+  <div id="theme-row" class="tray-hint">colors: <select id="theme-sel"></select></div>
   <div id="tile-palette"></div>
   <div id="collide-palette">
     <div class="grp-label">collision</div>
     <div class="swatches">
       <div class="sw" data-cv="1"><div class="chip" style="background:#c0392b"></div><div class="lbl">solid</div></div>
+      <div class="sw" data-cv="2"><div class="chip" style="background:#b97a1a"></div><div class="lbl">locked</div></div>
       <div class="sw" data-cv="0"><div class="chip" style="background:#222"></div><div class="lbl">clear</div></div>
     </div>
   </div>
@@ -206,6 +213,7 @@
 <aside class="tray" id="tray-right">
   <div class="tray-head">Tools</div>
   <button id="btn-eraser" title="Eraser">Eraser</button>
+  <button id="btn-link" title="Stamp the selected collision under painted tiles">Stamp collision: off</button>
   <button id="btn-clear" class="danger" title="Clear current layer">Clear layer</button>
 </aside>
 
@@ -306,7 +314,13 @@ let colorOf = {};                   // tile id -> css color
 let layer = "tiles";
 let erasing = false;
 let selTile = null;                 // selected tile id (tiles/objects layers)
-let selCollide = true;              // collision brush value
+let selCollide = 1;                 // collision brush: 0 = clear, 1 = solid, 2 = locked
+let currentTheme = "dungeon";       // v3.1: palette shows the map's theme colors
+let selByLayer = { tiles: null, objects: null };  // v3.1: remembered brush per layer
+let linkCollision = false;          // v3.1: painting tiles also stamps collision
+let lightingOn = true;              // v3.1: fog/lighting overlay in play mode
+const LAYER_HINTS = { tiles: "paint the ground", objects: "things that sit on tiles",
+                      collision: "red = solid · amber = locked" };
 let tilePx = 32;
 let manualZoom = false;   // v1.5: until the user zooms, tiles auto-fit the screen
 function fitTiles() {
@@ -414,23 +428,59 @@ function render() {
   // crash on the empty grid, just wait for refresh() to draw for real.
   if (!tiles.length || tiles.length < H) return;
   canvas.width = W * tilePx; canvas.height = H * tilePx;
+  const tallTiles = [];   // v3.1: [x, y] of tall custom tiles needing extruded faces
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const id = tiles[y][x];
     const im = tileFrameImage(id);   // v3.0: animated custom tiles draw current frame
+    const px = x * tilePx, py = y * tilePx;
     if (im) {
-      ctx.drawImage(im, x * tilePx, y * tilePx, tilePx, tilePx);
+      // v3.1: depth cues — soft shadow under art tiles
+      if (customById[id] || thumbImg[id]) {
+        ctx.fillStyle = "rgba(0,0,0,0.30)";
+        ctx.beginPath();
+        ctx.ellipse(px + tilePx / 2, py + tilePx * 0.88, tilePx * 0.34, tilePx * 0.13, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.drawImage(im, px, py, tilePx, tilePx);
+      const ct = customById[id];
+      if (ct && ct.height === "tall") tallTiles.push([x, y]);   // v3.1: tall wall face, drawn below
     } else {
       ctx.fillStyle = customById[id] ? "#1c1c1c" : (colorOf[id] || "#000");
-      ctx.fillRect(x * tilePx, y * tilePx, tilePx, tilePx);
+      ctx.fillRect(px, py, tilePx, tilePx);
     }
   }
-  // collision overlay (always on in play mode so you can see walls)
-  if (layer === "collision" || playMode) {
-    ctx.strokeStyle = "rgba(255,80,80,0.9)"; ctx.lineWidth = 2;
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (coll[y][x]) {
+  // v3.1: tall faces — the bottom of the sprite, stretched down and darkened,
+  // drawn after the base pass so they overlap the tile below (fake 2.5D)
+  for (const [x, y] of tallTiles) {
+    const id = tiles[y][x];
+    const fr = customFrames[id], im = fr && fr[frameIdx(id)];
+    if (!im || !im.complete || !im.naturalWidth) continue;
+    const px = x * tilePx, py = y * tilePx, faceH = Math.round(tilePx * 0.38);
+    ctx.drawImage(im, 0, im.naturalHeight * 0.62, im.naturalWidth, im.naturalHeight * 0.38,
+                  px, py + tilePx - 1, tilePx, faceH);
+    ctx.fillStyle = "rgba(0,0,0,0.35)";
+    ctx.fillRect(px, py + tilePx - 1, tilePx, faceH);
+  }
+  // collision overlay — v3.1: edit mode only. Play mode keeps the solidity
+  // but hides the red X (and amber diamonds for locked).
+  if (layer === "collision") {
+    ctx.lineWidth = 2;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const cv = coll[y][x];
+      if (!cv) continue;
       const px = x * tilePx, py = y * tilePx;
-      ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + tilePx, py + tilePx);
-      ctx.moveTo(px + tilePx, py); ctx.lineTo(px, py + tilePx); ctx.stroke();
+      if (cv === 2) {   // locked — amber diamond
+        const cx = px + tilePx / 2, cy = py + tilePx / 2, r = tilePx * 0.3;
+        ctx.strokeStyle = "rgba(255,170,40,0.95)";
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r, cy);
+        ctx.lineTo(cx, cy + r); ctx.lineTo(cx - r, cy);
+        ctx.closePath(); ctx.stroke();
+      } else {          // solid — red X
+        ctx.strokeStyle = "rgba(255,80,80,0.9)";
+        ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + tilePx, py + tilePx);
+        ctx.moveTo(px + tilePx, py); ctx.lineTo(px, py + tilePx); ctx.stroke();
+      }
     }
   }
   // hero marker in play mode — v3.0: hero sprite when available
@@ -450,6 +500,11 @@ function render() {
     if (oid !== null && oid !== undefined) {
       const oim = tileFrameImage(oid);   // v3.0: custom tiles work as objects too
       if (oim) {
+        ctx.fillStyle = "rgba(0,0,0,0.30)";   // v3.1: shadow under art objects
+        ctx.beginPath();
+        ctx.ellipse(x * tilePx + tilePx / 2, y * tilePx + tilePx * 0.88,
+                    tilePx * 0.34, tilePx * 0.13, 0, 0, Math.PI * 2);
+        ctx.fill();
         ctx.drawImage(oim, x * tilePx, y * tilePx, tilePx, tilePx);
       } else {
       const cx = x * tilePx + tilePx / 2, cy = y * tilePx + tilePx / 2, r = tilePx * 0.28;
@@ -467,6 +522,22 @@ function render() {
   for (let x = 0; x <= W; x++) { ctx.moveTo(x * tilePx + .5, 0); ctx.lineTo(x * tilePx + .5, H * tilePx); }
   for (let y = 0; y <= H; y++) { ctx.moveTo(0, y * tilePx + .5); ctx.lineTo(W * tilePx, y * tilePx + .5); }
   ctx.stroke();
+  // v3.1: fog/lighting — darkness over the map with a pool of light around
+  // the hero, so dungeons feel like dungeons
+  if (playMode && lightingOn && hero) {
+    const hx = hero.x * tilePx + tilePx / 2, hy = hero.y * tilePx + tilePx / 2;
+    const lr = tilePx * 4;
+    ctx.save();
+    ctx.fillStyle = "rgba(3,3,14,0.62)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.globalCompositeOperation = "destination-out";
+    const g = ctx.createRadialGradient(hx, hy, tilePx * 0.6, hx, hy, lr);
+    g.addColorStop(0, "rgba(0,0,0,1)");
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(hx, hy, lr, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
   layout();   // v2.2: re-center + apply pan offset after every draw
 }
 
@@ -491,6 +562,11 @@ function strokeAdd(cell) {
   const bv = brushValue();
   stroke.cells.set(key, { x: cell.x, y: cell.y, tile_id: bv });
   localGrid()[cell.y][cell.x] = bv;   // optimistic preview
+  // v3.1: "stamp collision" — painting a solid wall stamps its collision too
+  if (linkCollision && layer !== "collision" && !erasing) {
+    coll[cell.y][cell.x] = selCollide;
+    stroke.linkCells.set(key, { x: cell.x, y: cell.y, tile_id: selCollide });
+  }
   const bt = customById[bv];          // v3.0: track animated placements
   if (bt && bt.frames > 1) animOnMap.add(bv);
   dirtyFlag = true;   // v2.0: assume unsaved until the server says otherwise
@@ -514,7 +590,7 @@ canvas.addEventListener("pointerdown", e => {
   }
   const cell = evCell(e); if (!cell) return;
   if (playMode) { playTap(cell); return; }
-  stroke = { cells: new Map(), layer };
+  stroke = { cells: new Map(), linkCells: new Map(), layer };
   strokeAdd(cell);
 });
 // v2.2: two fingers on the map — drag pans, pinch zooms around the fingers
@@ -555,7 +631,12 @@ async function endStroke() {
   const s = stroke; stroke = null;
   if (!s.cells.size) return;
   const r = await api("/api/stroke", { layer: s.layer, cells: [...s.cells.values()] });
-  if (!r.ok) { toast("paint failed"); await refresh(); }
+  if (!r.ok) { toast("paint failed"); await refresh(); return; }
+  // v3.1: linked collision stamps ride along as their own stroke
+  if (s.linkCells.size) {
+    const r2 = await api("/api/stroke", { layer: "collision", cells: [...s.linkCells.values()] });
+    if (!r2.ok) toast("collision stamp failed");
+  }
   // server is source of truth; light re-sync keeps undo/redo exact
   await refresh();
 }
@@ -595,6 +676,8 @@ $("btn-play").onclick = async () => {
     const r = await api("/api/play/start", {});
     if (!r.ok) { toast("play failed"); return; }
     playMode = true; hero = { x: r.x, y: r.y };
+    erasing = false; $("btn-eraser").classList.remove("on");   // v3.1: the eraser
+    // "can't reach" confusion was play mode intercepting taps — paint tools rest now
     $("btn-play").classList.add("on");
     toast("play mode — tap a tile to walk there");
   } else {
@@ -604,6 +687,12 @@ $("btn-play").onclick = async () => {
     $("btn-play").classList.remove("on");
     toast("back to editing");
   }
+  render();
+};
+// v3.1: fog/lighting toggle for play mode
+$("btn-light").onclick = () => {
+  lightingOn = !lightingOn;
+  $("btn-light").textContent = "Lighting: " + (lightingOn ? "on" : "off");
   render();
 };
 
@@ -617,49 +706,75 @@ function shortName(name) {
   const b = biomeOf(name);
   return b === "core" ? name : name.slice(b.length + 1);
 }
+// v3.1: one helper for picking a brush — remembers it per layer
+function selectTile(id) {
+  selTile = id; selByLayer[layer] = id;
+  erasing = false; $("btn-eraser").classList.remove("on");
+  buildPalette();
+}
+function defaultBrush(l) {
+  if (l === "objects") {
+    const sp = spriteTiles.find(t => t.type !== "custom");
+    if (sp) return sp.id;
+    if (customTiles.length) return customTiles[0].id;
+    return null;
+  }
+  const th = palette.find(t => biomeOf(t.name) === currentTheme);
+  return th ? th.id : (palette.length ? palette[0].id : null);
+}
 function buildPalette() {
   colorOf = {};
   palette.forEach(t => colorOf[t.id] = t.color);
   const box = $("tile-palette"); box.innerHTML = "";
-  const groups = { core: [] };
-  BIOME_ORDER.forEach(b => groups[b] = []);
-  palette.forEach(t => groups[biomeOf(t.name)].push(t));
-  ["core", ...BIOME_ORDER].forEach(g => {
-    if (!groups[g].length) return;
-    const lab = document.createElement("div");
-    lab.className = "grp-label"; lab.textContent = g;
-    box.appendChild(lab);
-    const row = document.createElement("div");
-    row.className = "swatches";
-    groups[g].forEach(t => {
-      const d = document.createElement("div");
-      d.className = "sw" + (t.id === selTile ? " sel" : "");
-      d.title = t.name + " (#" + t.id + ")";
-      d.innerHTML = '<div class="chip" style="background:' + t.color + '"></div>' +
-                    '<div class="lbl">' + shortName(t.name) + "</div>";
-      d.onclick = () => { selTile = t.id; erasing = false; $("btn-eraser").classList.remove("on"); buildPalette(); };
-      row.appendChild(d);
+  // v3.1: theme-aware colors — a dungeon map shows dungeon colors only.
+  // Same-color tiles collapse into one swatch (no repeated water/deep-water).
+  if (layer !== "objects") {
+    const seen = new Set();
+    const themeTiles = palette.filter(t => {
+      if (biomeOf(t.name) !== currentTheme) return false;
+      if (seen.has(t.color)) return false;
+      seen.add(t.color);
+      return true;
     });
-    box.appendChild(row);
-  });
-  // v3.0: custom tiles live in their own section — keep them out of sprites
-  const builtins = spriteTiles.filter(t => t.type !== "custom");
-  if (builtins.length) {
-    const lab = document.createElement("div");
-    lab.className = "grp-label"; lab.textContent = "sprites";
-    box.appendChild(lab);
-    const row = document.createElement("div");
-    row.className = "swatches";
-    builtins.forEach(t => {
-      const d = document.createElement("div");
-      d.className = "sw" + (t.id === selTile ? " sel" : "");
-      d.title = t.name + " (#" + t.id + " · " + t.type + ")";
-      d.innerHTML = '<div class="chip"><img src="/api/thumb/' + t.id + '" alt=""></div>' +
-                    '<div class="lbl">' + t.name + "</div>";
-      d.onclick = () => { selTile = t.id; erasing = false; $("btn-eraser").classList.remove("on"); buildPalette(); };
-      row.appendChild(d);
-    });
-    box.appendChild(row);
+    if (themeTiles.length) {
+      const lab = document.createElement("div");
+      lab.className = "grp-label"; lab.textContent = currentTheme;
+      box.appendChild(lab);
+      const row = document.createElement("div");
+      row.className = "swatches";
+      themeTiles.forEach(t => {
+        const d = document.createElement("div");
+        d.className = "sw" + (t.id === selTile ? " sel" : "");
+        d.title = t.name + " (#" + t.id + ")";
+        d.innerHTML = '<div class="chip" style="background:' + t.color + '"></div>' +
+                      '<div class="lbl">' + shortName(t.name) + "</div>";
+        d.onclick = () => selectTile(t.id);
+        row.appendChild(d);
+      });
+      box.appendChild(row);
+    }
+  }
+  // v3.1: objects get art (sprites + customs), not flat colors — the two
+  // menus are no longer mirrors of each other.
+  if (layer === "objects") {
+    const builtins = spriteTiles.filter(t => t.type !== "custom");
+    if (builtins.length) {
+      const lab = document.createElement("div");
+      lab.className = "grp-label"; lab.textContent = "sprites";
+      box.appendChild(lab);
+      const row = document.createElement("div");
+      row.className = "swatches";
+      builtins.forEach(t => {
+        const d = document.createElement("div");
+        d.className = "sw" + (t.id === selTile ? " sel" : "");
+        d.title = t.name + " (#" + t.id + " · " + t.type + ")";
+        d.innerHTML = '<div class="chip"><img src="/api/thumb/' + t.id + '" alt=""></div>' +
+                      '<div class="lbl">' + t.name + "</div>";
+        d.onclick = () => selectTile(t.id);
+        row.appendChild(d);
+      });
+      box.appendChild(row);
+    }
   }
   $("tile-palette").style.display = layer === "collision" ? "none" : "block";
   $("collide-palette").style.display = layer === "collision" ? "block" : "none";
@@ -693,7 +808,7 @@ function buildCustomTiles() {
     d.innerHTML = '<canvas width="48" height="48" data-tid="' + t.id + '"></canvas>' +
                   '<div class="lbl">' + t.name + '</div>' +
                   '<div class="preset-tag">' + t.preset + '</div>';
-    d.onclick = () => { selTile = t.id; erasing = false; $("btn-eraser").classList.remove("on"); buildPalette(); };
+    d.onclick = () => selectTile(t.id);
     box.appendChild(d);
   });
 }
@@ -723,6 +838,28 @@ setInterval(() => {
 function readFile(f) {
   return new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(f); });
 }
+// v3.1: normalize everything to PNG on-device — iPhone HEIC photos and huge
+// camera shots get decoded, capped at 256px, and re-encoded so the server
+// always receives a plain PNG it can actually read.
+function normalizeImage(dataUrl) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const maxSide = 256;
+        const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+        const w = Math.max(1, Math.round(img.naturalWidth * scale));
+        const h = Math.max(1, Math.round(img.naturalHeight * scale));
+        const cv = document.createElement("canvas");
+        cv.width = w; cv.height = h;
+        cv.getContext("2d").drawImage(img, 0, 0, w, h);
+        resolve(cv.toDataURL("image/png"));
+      } catch (_) { resolve(null); }
+    };
+    img.onerror = () => resolve(null);
+    img.src = dataUrl;
+  });
+}
 async function buildImportPresets() {
   if (!presets.length) {
     const r = await api("/api/presets");
@@ -743,8 +880,10 @@ $("import-files").onchange = async e => {
   importFiles = [];
   const files = [...e.target.files].slice(0, 8);
   for (const f of files) {
-    if (f.size > 1500000) { toast(f.name + " too big — skipped"); continue; }
-    importFiles.push({ name: f.name.replace(/\.[^.]+$/, ""), dataUrl: await readFile(f) });
+    if (f.size > 8000000) { toast(f.name + " too big — skipped"); continue; }
+    const norm = await normalizeImage(await readFile(f));   // v3.1: HEIC → PNG
+    if (!norm) { toast("couldn't read " + f.name + " — try PNG or JPEG"); continue; }
+    importFiles.push({ name: f.name.replace(/\.[^.]+$/, ""), dataUrl: norm });
   }
   e.target.value = "";
   if (!importFiles.length) return;
@@ -778,8 +917,13 @@ $("import-add").onclick = async () => {
 // ---- toolbar wiring ----------------------------------------------------------
 document.querySelectorAll("#layer-seg button").forEach(b => {
   b.onclick = () => {
+    selByLayer[layer] = selTile;   // v3.1: each layer remembers its brush
     document.querySelectorAll("#layer-seg button").forEach(x => x.classList.remove("on"));
-    b.classList.add("on"); layer = b.dataset.layer; buildPalette(); render();
+    b.classList.add("on"); layer = b.dataset.layer;
+    $("layer-hint").textContent = LAYER_HINTS[layer];
+    const st = selByLayer[layer];
+    selTile = (st != null) ? st : defaultBrush(layer);
+    buildPalette(); render();
   };
 });
 $("btn-eraser").onclick = () => {
@@ -804,7 +948,14 @@ $("zoom-fit").onclick = () => { manualZoom = false; panX = 0; panY = 0; fitTiles
 $("btn-gen").onclick = async () => {
   const seedRaw = $("seed").value.trim();
   const r = await api("/api/generate", { biome: $("biome").value, seed: seedRaw === "" ? null : parseInt(seedRaw, 10) });
-  if (r.ok) { await refresh(); toast("generated " + r.biome); } else toast("generate failed");
+  if (r.ok) {
+    await refresh();
+    // v3.1: the palette follows the generated biome
+    currentTheme = r.biome || "dungeon"; $("theme-sel").value = currentTheme;
+    if (layer === "tiles") { selTile = defaultBrush("tiles"); selByLayer.tiles = selTile; }
+    buildPalette();
+    toast("generated " + r.biome);
+  } else toast("generate failed");
 };
 // ---- v2.3: explicit Save / Save As / Load ------------------------------------
 let currentFile = "hud_map.json";
@@ -855,11 +1006,18 @@ $("btn-stop").onclick = async () => {
 };
 document.querySelectorAll("#collide-palette .sw").forEach(d => {
   d.onclick = () => {
-    selCollide = d.dataset.cv === "1"; erasing = false; $("btn-eraser").classList.remove("on");
+    selCollide = parseInt(d.dataset.cv, 10); erasing = false; $("btn-eraser").classList.remove("on");
     document.querySelectorAll("#collide-palette .sw").forEach(x => x.classList.remove("sel"));
     d.classList.add("sel");
   };
 });
+$("btn-link").onclick = () => {
+  linkCollision = !linkCollision;
+  $("btn-link").textContent = "Stamp collision: " + (linkCollision ? "on" : "off");
+  $("btn-link").classList.toggle("on", linkCollision);
+  toast(linkCollision ? "painting now stamps " + (selCollide === 2 ? "locked" : "solid") + " collision too"
+                      : "collision stamp off");
+};
 
 // ---- v2.0 trays & dropdown menu ------------------------------------------------
 function closeOverlays() {
@@ -917,7 +1075,6 @@ async function pollStatus() {
     $("biome").value = "dungeon";
     const p = await api("/api/palette");
     palette = p.tiles;
-    selTile = palette.length ? palette[0].id : null;
     const s = await api("/api/sprites");
     spriteTiles = s.tiles;
     spriteTiles.forEach(t => {
@@ -930,6 +1087,18 @@ async function pollStatus() {
     if (ht) heroTileId = ht.id;   // v3.0: play-mode hero walks as a sprite
     await loadCustomTiles();      // v3.0: imported tiles before first render
     document.querySelector('#collide-palette .sw[data-cv="1"]').classList.add("sel");
+    // v3.1: theme selector — the palette follows the map's theme
+    ["dungeon", ...BIOME_ORDER.filter(b => b !== "dungeon"), "core"].forEach(th => {
+      const o = document.createElement("option");
+      o.value = th; o.textContent = th; $("theme-sel").appendChild(o);
+    });
+    $("theme-sel").value = currentTheme;
+    $("theme-sel").onchange = e => {
+      currentTheme = e.target.value;
+      if (layer === "tiles") { selTile = defaultBrush("tiles"); selByLayer.tiles = selTile; }
+      buildPalette();
+    };
+    selTile = defaultBrush("tiles");   // v3.1: first dungeon color, not tile #0
     buildPalette();
     setFile(currentFile);
     await refresh();

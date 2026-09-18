@@ -79,12 +79,13 @@ CUSTOM_MAX_FRAMES = 8
 CUSTOM_MAX_FILE_CHARS = 1500000  # ~1.1MB per frame dataURL
 
 # preset definitions: what each tile IS and what it DOES (collision baked in)
+# v3.1: height feeds the depth-cue renderer (tall walls get an extruded face)
 TILE_PRESETS = {
-    "wall":  {"label": "Wall",  "hint": "solid",    "solid": True},
-    "floor": {"label": "Floor", "hint": "walkable", "solid": False},
-    "water": {"label": "Water", "hint": "blocked",  "solid": True},
-    "door":  {"label": "Door",  "hint": "walkable", "solid": False},
-    "decor": {"label": "Decor", "hint": "walkable", "solid": False},
+    "wall":  {"label": "Wall",  "hint": "solid",    "solid": True,  "height": "tall"},
+    "floor": {"label": "Floor", "hint": "walkable", "solid": False, "height": "short"},
+    "water": {"label": "Water", "hint": "blocked",  "solid": True,  "height": "short"},
+    "door":  {"label": "Door",  "hint": "walkable", "solid": False, "height": "short"},
+    "decor": {"label": "Decor", "hint": "walkable", "solid": False, "height": "short"},
 }
 
 _custom_tiles = []  # registry mirror: [{id,name,preset,solid,frame_ms,files}]
@@ -92,8 +93,8 @@ _custom_tiles = []  # registry mirror: [{id,name,preset,solid,frame_ms,files}]
 
 def _custom_public(entry):
     return {"id": entry["id"], "name": entry["name"], "preset": entry["preset"],
-            "solid": entry["solid"], "frames": len(entry["files"]),
-            "frame_ms": entry["frame_ms"]}
+            "solid": entry["solid"], "height": entry.get("height", "short"),
+            "frames": len(entry["files"]), "frame_ms": entry["frame_ms"]}
 
 
 def _save_custom_registry():
@@ -119,6 +120,7 @@ def _register_custom_tile(entry):
         "name": entry["name"],
         "category": "custom",
         "preset": entry.get("preset", "decor"),
+        "height": entry.get("height", "short"),
         "frames": frames,
         "frame_ms": int(entry.get("frame_ms", 400)),
     })
@@ -256,7 +258,12 @@ def _snapshot():
 
 def _paint_value(layer, tile_id):
     if layer == "collision":
-        return bool(tile_id)
+        # v3.1: collision is 0 = open, 1 = solid, 2 = locked (both block)
+        try:
+            v = int(tile_id)
+        except (TypeError, ValueError):
+            return False
+        return v if v in (1, 2) else bool(v)
     if layer == "objects":
         return None if tile_id is None else int(tile_id)
     return int(tile_id)
@@ -490,6 +497,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": False, "error": str(e)}, 400)
             entry = {"id": tid, "name": name, "preset": preset,
                      "solid": TILE_PRESETS[preset]["solid"],
+                     "height": TILE_PRESETS[preset]["height"],
                      "frame_ms": frame_ms, "files": files}
             _custom_tiles.append(entry)
             _register_custom_tile(entry)
@@ -635,7 +643,7 @@ if __name__ == "__main__":
     srv = ThreadingHTTPServer((host, PORT), Handler)
     threading.Thread(target=_autosave_loop, daemon=True).start()
     print("=" * 52)
-    print("  Crumbs HUD v3.0 — import tiles, animator, play mode")
+    print("  Crumbs HUD v3.1 — depth cues, collision 2.0, theme palette")
     if public:
         ip = _lan_ip()
         print("  PUBLIC mode: anyone on your Wi-Fi can open the HUD.")

@@ -5,6 +5,7 @@ modules = ["python-3.12", "web", "bash"]
 
 [nix]
 channel = "stable-25_05"
+packages = ["freetype", "lcms2", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "openjpeg", "tcl", "tk", "zlib"]
 
 [workflows]
 runButton = "Project"
@@ -41,12 +42,10 @@ args = "git pull — rebase origin main"
 
 [[ports]]
 localPort = 5000
-externalPort = 80
 
 [[ports]]
 localPort = 8778
 externalPort = 3000
-exposeLocalhost = true
 
 [deployment]
 deploymentTarget = "cloudrun"

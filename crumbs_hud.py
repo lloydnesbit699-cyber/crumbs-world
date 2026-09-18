@@ -60,6 +60,7 @@ import socket
 import sys
 import threading
 import time
+import heapq
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
@@ -83,9 +84,12 @@ CUSTOM_MAX_FILE_CHARS = 1500000  # ~1.1MB per frame dataURL
 TILE_PRESETS = {
     "wall":  {"label": "Wall",  "hint": "solid",    "solid": True,  "height": "tall"},
     "floor": {"label": "Floor", "hint": "walkable", "solid": False, "height": "short"},
-    "water": {"label": "Water", "hint": "blocked",  "solid": True,  "height": "short"},
+    "water": {"label": "Water", "hint": "swim — slow", "solid": False, "height": "short",
+              "swim": True},
     "door":  {"label": "Door",  "hint": "walkable", "solid": False, "height": "short"},
     "decor": {"label": "Decor", "hint": "walkable", "solid": False, "height": "short"},
+    "character": {"label": "Character", "hint": "walkable sprite", "solid": False,
+                  "height": "short"},
 }
 
 _custom_tiles = []  # registry mirror: [{id,name,preset,solid,frame_ms,files}]
@@ -94,6 +98,7 @@ _custom_tiles = []  # registry mirror: [{id,name,preset,solid,frame_ms,files}]
 def _custom_public(entry):
     return {"id": entry["id"], "name": entry["name"], "preset": entry["preset"],
             "solid": entry["solid"], "height": entry.get("height", "short"),
+            "swim": bool(entry.get("swim", False)),
             "frames": len(entry["files"]), "frame_ms": entry["frame_ms"]}
 
 
@@ -125,6 +130,15 @@ def _register_custom_tile(entry):
         "frame_ms": int(entry.get("frame_ms", 400)),
     })
     assets.tiles[tid]["properties"]["solid"] = bool(entry.get("solid", False))
+    # v3.2: swim flag — water tiles slow the hero instead of blocking
+    swim = bool(entry.get("swim", False))
+    if entry.get("preset") == "water":
+        # v3.2 migration: water used to be solid; now it's swimmable
+        assets.tiles[tid]["properties"]["solid"] = False
+        entry["solid"] = False
+        swim = True
+        entry["swim"] = True
+    assets.tiles[tid]["properties"]["swim"] = swim
     return True
 
 
@@ -146,6 +160,7 @@ def _load_custom_tiles():
             print(f"[hud] skipping custom tile {entry.get('id')}: {e}")
     if _custom_tiles:
         print(f"[hud] loaded {len(_custom_tiles)} custom tile(s)")
+    _save_custom_registry()  # v3.2: persist water→swim migrations, if any
 
 # ---- in-memory session state ---------------------------------------------
 assets = core.AssetManager()
@@ -162,6 +177,12 @@ else:
     print(f"[hud] fresh map {world.width}x{world.height}")
 
 _load_custom_tiles()  # v3.0: imported tiles back into the asset manager
+
+# v3.2: built-in water/ocean colors are swimmable — slow the hero, don't block
+for _tid, _t in assets.tiles.items():
+    _nm = str(_t.get("name", "")).lower()
+    if _t.get("type") == "color" and ("water" in _nm or "ocean" in _nm):
+        _t["properties"]["swim"] = True
 
 
 # ---- playtest state (tile-space hero; crumbs_core untouched) ----------------
@@ -181,9 +202,15 @@ def _walkable(tx, ty):
     return not _tile_solid(tx, ty)
 
 
+def _swim_at(tx, ty):
+    """v3.2: True when this tile is water — walkable, but slow (swim effect)."""
+    tile = assets.tiles.get(world.data[ty][tx])
+    return bool(tile and tile.get("properties", {}).get("swim"))
+
+
 def _find_spawn():
     cx, cy = world.width // 2, world.height // 2
-    if _walkable(cx, cy):
+    if _walkable(cx, cy) and not _swim_at(cx, cy):
         return cx, cy
     for r in range(1, max(world.width, world.height)):
         for dy in range(-r, r + 1):
@@ -191,31 +218,48 @@ def _find_spawn():
                 if max(abs(dx), abs(dy)) != r:
                     continue
                 x, y = cx + dx, cy + dy
-                if _walkable(x, y):
+                if _walkable(x, y) and not _swim_at(x, y):
                     return x, y
     return 0, 0
 
 
 def _find_path(sx, sy, tx, ty):
-    """BFS over walkable tiles. Returns [(x,y), ...] excluding the start."""
+    """v3.2: Dijkstra over walkable tiles — water costs 4x (swim), so the hero
+    walks around it when a dry route exists and swims only when it must.
+    Returns ([(x,y), ...] excluding the start, [swim?, ...] per step)."""
     if (sx, sy) == (tx, ty) or not _walkable(tx, ty):
-        return []
+        return [], []
+    SWIM_COST = 4
+    dist = {(sx, sy): 0}
     prev = {(sx, sy): None}
-    dq = deque([(sx, sy)])
-    while dq:
-        x, y = dq.popleft()
+    pq = [(0, sx, sy)]
+    while pq:
+        d, x, y = heapq.heappop(pq)
+        if d != dist[(x, y)]:
+            continue
+        if (x, y) == (tx, ty):
+            break
         for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
-            if (nx, ny) in prev or not _walkable(nx, ny):
+            if not (0 <= nx < world.width and 0 <= ny < world.height):
                 continue
-            prev[(nx, ny)] = (x, y)
-            if (nx, ny) == (tx, ty):
-                path = [(tx, ty)]
-                while path[-1] != (sx, sy):
-                    path.append(prev[path[-1]])
-                path.reverse()
-                return path[1:]
-            dq.append((nx, ny))
-    return []
+            if not _walkable(nx, ny):
+                continue
+            nd = d + (SWIM_COST if _swim_at(nx, ny) else 1)
+            if nd < dist.get((nx, ny), float("inf")):
+                dist[(nx, ny)] = nd
+                prev[(nx, ny)] = (x, y)
+                heapq.heappush(pq, (nd, nx, ny))
+    if (tx, ty) not in prev:
+        return [], []
+    path = [(tx, ty)]
+    while path[-1] != (sx, sy):
+        p = prev.get(path[-1])
+        if p is None:
+            return [], []
+        path.append(p)
+    path.reverse()
+    steps = path[1:]
+    return steps, [_swim_at(x, y) for x, y in steps]
 
 
 # ---- autosave state ----------------------------------------------------------
@@ -498,6 +542,7 @@ class Handler(BaseHTTPRequestHandler):
             entry = {"id": tid, "name": name, "preset": preset,
                      "solid": TILE_PRESETS[preset]["solid"],
                      "height": TILE_PRESETS[preset]["height"],
+                     "swim": bool(TILE_PRESETS[preset].get("swim", False)),
                      "frame_ms": frame_ms, "files": files}
             _custom_tiles.append(entry)
             _register_custom_tile(entry)
@@ -585,11 +630,11 @@ class Handler(BaseHTTPRequestHandler):
             x, y = body.get("x"), body.get("y")
             if not isinstance(x, int) or not isinstance(y, int):
                 return self._send_json({"ok": False, "error": "x/y ints required"}, 400)
-            cells = _find_path(play["tx"], play["ty"], x, y)
+            cells, swim = _find_path(play["tx"], play["ty"], x, y)
             if cells:
                 play["tx"], play["ty"] = cells[-1]
             return self._send_json({"ok": True, "path": [list(c) for c in cells],
-                                    "x": play["tx"], "y": play["ty"]})
+                                    "swim": swim, "x": play["tx"], "y": play["ty"]})
 
         if path == "/api/play/stop":
             play["active"] = False
@@ -643,7 +688,7 @@ if __name__ == "__main__":
     srv = ThreadingHTTPServer((host, PORT), Handler)
     threading.Thread(target=_autosave_loop, daemon=True).start()
     print("=" * 52)
-    print("  Crumbs HUD v3.1 — depth cues, collision 2.0, theme palette")
+    print("  Crumbs HUD v3.2 — character preset, water swim effect")
     if public:
         ip = _lan_ip()
         print("  PUBLIC mode: anyone on your Wi-Fi can open the HUD.")

@@ -155,7 +155,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v3.1</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v3.2</small></span>
 </div>
 
 <div id="menu-dropdown">
@@ -361,7 +361,7 @@ let panMode = false, panStart = null;   // v1.7 camera: pan instead of paint
 let panX = 0, panY = 0;                 // v2.2: canvas offset in px, relative to centered
 const ptrs = new Map();                 // v2.1: active pointers for gestures
 let gesture = null;                     // v2.1: two-finger pan/pinch state
-let playMode = false, hero = null, heroTimer = null;
+let playMode = false, hero = null, heroTimer = null, heroSwimming = false;   // v3.2: swim state
 
 async function api(path, body) {
   // v1.4: iOS freezes the server when a-Shell backgrounds; a fetch that dies
@@ -485,9 +485,17 @@ function render() {
   }
   // hero marker in play mode — v3.0: hero sprite when available
   if (playMode && hero) {
+    const hx = hero.x * tilePx, hy = hero.y * tilePx;
+    if (heroSwimming) {   // v3.2: ripple ring while swimming
+      ctx.strokeStyle = "rgba(150,210,255,0.85)"; ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(hx + tilePx / 2, hy + tilePx * 0.72, tilePx * 0.36, tilePx * 0.14,
+                  0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
     const him = heroTileId != null ? tileFrameImage(heroTileId) : null;
     if (him) {
-      ctx.drawImage(him, hero.x * tilePx, hero.y * tilePx, tilePx, tilePx);
+      ctx.drawImage(him, hx, hy, tilePx, tilePx);
     } else {
       const cx = hero.x * tilePx + tilePx / 2, cy = hero.y * tilePx + tilePx / 2, r = tilePx * 0.32;
       ctx.fillStyle = "#ffd75f"; ctx.strokeStyle = "#000"; ctx.lineWidth = 2;
@@ -664,12 +672,16 @@ async function playTap(cell) {
   if (!r.ok) { toast("play failed"); return; }
   const path = r.path || [];
   if (!path.length) { toast("can't reach that tile"); return; }
+  const swim = r.swim || [];   // v3.2: per-step water flags from the server
   let i = 0;
-  heroTimer = setInterval(() => {
+  const step = () => {
     hero = { x: path[i][0], y: path[i][1] };
+    heroSwimming = !!swim[i];   // ripple + slow wading through water
     i++; render();
-    if (i >= path.length) { clearInterval(heroTimer); heroTimer = null; }
-  }, 140);
+    if (i >= path.length) { heroTimer = null; heroSwimming = false; return; }
+    heroTimer = setTimeout(step, swim[i] ? 430 : 140);
+  };
+  heroTimer = setTimeout(step, 0);
 }
 $("btn-play").onclick = async () => {
   if (!playMode) {
@@ -682,7 +694,7 @@ $("btn-play").onclick = async () => {
     toast("play mode — tap a tile to walk there");
   } else {
     await api("/api/play/stop", {});
-    playMode = false; hero = null;
+    playMode = false; hero = null; heroSwimming = false;
     if (heroTimer) { clearInterval(heroTimer); heroTimer = null; }
     $("btn-play").classList.remove("on");
     toast("back to editing");

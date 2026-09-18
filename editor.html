@@ -142,6 +142,9 @@
   /* v3.4: patrol tool */
   #btn-patrol.on { border-color: #8a6dd7; color: #c9b8ff; }
   #btn-patrol-done { background: #2b4a2b; border-color: #6dd76d; margin-top: 6px; }
+  /* v3.5: recording indicator */
+  #btn-record.on { border-color: #e5484d; color: #ff8589; animation: recpulse 1.2s infinite; }
+  @keyframes recpulse { 50% { background: #4a1d1d; } }
   .row2 { display: flex; gap: 8px; }
   .row2 button { flex: 1; margin: 0; }
   #collide-palette { display: none; gap: 8px; }
@@ -169,11 +172,12 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v3.4</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v3.5</small></span>
 </div>
 
 <div id="menu-dropdown">
   <button id="btn-play" title="Walk the map">&#9654; Play</button>
+  <button id="btn-record" title="Record the screen as a video">&#9679; Record</button>
   <button id="btn-light" title="Fog/lighting overlay in play mode">Lighting: on</button>
   <button id="btn-undo" title="Undo">Undo</button>
   <button id="btn-redo" title="Redo">Redo</button>
@@ -773,6 +777,64 @@ $("btn-light").onclick = () => {
   $("btn-light").textContent = "Lighting: " + (lightingOn ? "on" : "off");
   render();
 };
+
+// ---- v3.5: screen recording ---------------------------------------------------
+// Records the map canvas as a video for TikTok / sharing / showing off.
+// Pure client-side: canvas.captureStream -> MediaRecorder. MP4 on Safari,
+// WebM elsewhere. The video holds the canvas only — no UI chrome.
+let recorder = null, recChunks = [], recTimer = null, recStart = 0;
+const REC_MIME = ["video/mp4;codecs=avc1", "video/mp4", "video/webm;codecs=vp9", "video/webm"]
+  .find(m => { try { return window.MediaRecorder && MediaRecorder.isTypeSupported(m); } catch (e) { return false; } });
+$("btn-record").onclick = () => {
+  if (recorder) { stopRecording(); return; }
+  if (!REC_MIME || typeof canvas.captureStream !== "function") {
+    toast("recording isn't supported in this browser"); return;
+  }
+  try {
+    recChunks = [];
+    recorder = new MediaRecorder(canvas.captureStream(30),
+      { mimeType: REC_MIME, videoBitsPerSecond: 8000000 });
+    recorder.ondataavailable = e => { if (e.data && e.data.size) recChunks.push(e.data); };
+    recorder.onstop = finishRecording;
+    recorder.start(250);
+    recStart = Date.now();
+    closeOverlays();
+    $("btn-record").classList.add("on");
+    recTimer = setInterval(() => {
+      const s = Math.floor((Date.now() - recStart) / 1000);
+      $("btn-record").innerHTML = "&#9679; " + Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+      if (s >= 60) stopRecording();   // 60s cap keeps the file phone-friendly
+    }, 500);
+    toast("recording — open the menu and tap Record to stop");
+  } catch (e) { toast("couldn't start recording"); recorder = null; }
+};
+function stopRecording() {
+  clearInterval(recTimer); recTimer = null;
+  if (recorder && recorder.state !== "inactive") recorder.stop();
+  // -> onstop -> finishRecording
+}
+async function finishRecording() {
+  const mime = REC_MIME, ext = mime.includes("mp4") ? "mp4" : "webm";
+  const blob = new Blob(recChunks, { type: mime });
+  const file = new File([blob], "crumbs-world." + ext, { type: mime });
+  recorder = null; recChunks = [];
+  $("btn-record").classList.remove("on");
+  $("btn-record").innerHTML = "&#9679; Record";
+  // iOS share sheet -> TikTok, Messages, Save to Photos
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: "Crumbs World" });
+      toast("sent to the share sheet");
+      return;
+    }
+  } catch (e) { /* user cancelled — fall through to download */ }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = file.name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  toast("video saved — share it anywhere");
+}
 
 // ---- v3.4: patrol NPCs -------------------------------------------------------
 // Pick a character tile, tap Patrol, tap the stops in order, Done. In play

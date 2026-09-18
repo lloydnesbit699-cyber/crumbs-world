@@ -43,7 +43,7 @@ from urllib.parse import urlparse
 
 import crumbs_core as core
 
-HOST, PORT = "127.0.0.1", 8778
+HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 HTML_PATH = os.path.join(SCRIPT_DIR, "editor.html")
 DEFAULT_SAVE = "hud_map.json"

@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Crumbs HUD — Tile Painter</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; background: #111; color: #eee;
+               font-family: system-ui, -apple-system, sans-serif;
+               touch-action: manipulation; overscroll-behavior: none; }
+  header { position: sticky; top: 0; z-index: 10; background: #1a1a1a;
+           padding: 8px; border-bottom: 1px solid #333; }
+  h1 { margin: 0 0 8px 0; font-size: 18px; }
+  h1 small { color: #888; font-weight: normal; font-size: 12px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+  .row:last-child { margin-bottom: 0; }
+  button, select, input { font-size: 16px; padding: 10px 12px; border-radius: 10px;
+                         border: 1px solid #444; background: #2a2a2a; color: #eee;
+                         min-height: 44px; }
+  button:active { background: #3d3d3d; }
+  button.on { background: #6b4d1a; border-color: #c9973f; }
+  button.danger { background: #4a1f1f; border-color: #a03a3a; }
+  .seg { display: flex; border: 1px solid #444; border-radius: 10px; overflow: hidden; }
+  .seg button { border: none; border-radius: 0; flex: 1; }
+  .seg button + button { border-left: 1px solid #444; }
+  #stage { overflow: auto; max-height: 52vh; background: #0a0a0a;
+           border-top: 1px solid #333; border-bottom: 1px solid #333;
+           -webkit-overflow-scrolling: touch; }
+  canvas { display: block; touch-action: none; margin: 8px auto; image-rendering: pixelated; }
+  #palette { position: sticky; bottom: 0; background: #1a1a1a; border-top: 1px solid #333;
+             padding: 8px; }
+  #palette .grp-label { font-size: 12px; color: #999; margin: 6px 2px 4px; text-transform: capitalize; }
+  .swatches { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px;
+              -webkit-overflow-scrolling: touch; }
+  .sw { flex: 0 0 auto; width: 56px; text-align: center; }
+  .sw .chip { width: 48px; height: 48px; margin: 0 auto; border-radius: 10px;
+              border: 2px solid #555; }
+  .sw .chip img { width: 100%; height: 100%; border-radius: 8px; image-rendering: pixelated;
+                  display: block; object-fit: contain; background: #0a0a0a; }
+  .sw.sel .chip { border-color: #ffd75f; box-shadow: 0 0 8px #ffd75f; }
+  .sw .lbl { font-size: 10px; color: #bbb; margin-top: 2px; word-break: break-word; }
+  #toast { position: fixed; left: 50%; bottom: 170px; transform: translateX(-50%);
+           background: #222; border: 1px solid #555; border-radius: 12px;
+           padding: 10px 16px; font-size: 14px; display: none; z-index: 50;
+           max-width: 90vw; text-align: center; }
+  .field { display: flex; gap: 6px; align-items: center; }
+  .field input, .field select { min-width: 0; }
+  input[type=number] { width: 76px; }
+  input[type=text] { width: 150px; }
+  #collide-palette { display: none; gap: 8px; }
+  #collide-palette .sw .chip { border-style: dashed; }
+  #save-status { color: #888; font-size: 12px; }
+  #dbg { position: fixed; right: 8px; bottom: 8px; max-width: 92vw; z-index: 99;
+         background: #3a1010; color: #ffb3b3; border: 1px solid #a03a3a;
+         border-radius: 8px; padding: 8px 10px; font: 11px monospace;
+         white-space: pre-wrap; word-break: break-word; display: none; }
+  /* v1.5: collapsible setup drawer + compact phone layout */
+  details#setup { margin-bottom: 8px; }
+  details#setup summary { font-size: 14px; color: #aaa; cursor: pointer;
+                          padding: 6px 2px; }
+  details#setup .row:first-of-type { margin-top: 4px; }
+  @media (max-width: 520px) {
+    header { padding: 6px; }
+    h1 { font-size: 15px; margin-bottom: 6px; }
+    .row { gap: 6px; margin-bottom: 6px; }
+    button, select, input { font-size: 15px; padding: 8px 10px; min-height: 40px; }
+    #stage { max-height: 58vh; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Crumbs HUD <small>touch tile painter · v1.8</small></h1>
+  <div class="row">
+    <div class="seg" id="layer-seg">
+      <button data-layer="tiles" class="on">Tiles</button>
+      <button data-layer="objects">Objects</button>
+      <button data-layer="collision">Collision</button>
+    </div>
+    <button id="btn-undo" title="Undo">Undo</button>
+    <button id="btn-redo" title="Redo">Redo</button>
+    <button id="btn-play" title="Walk the map">▶ Play</button>
+  </div>
+  <div class="row">
+    <button id="btn-eraser" title="Eraser">Eraser</button>
+    <button id="btn-clear" class="danger" title="Clear current layer">Clear layer</button>
+    <button id="zoom-out" title="Zoom out">&minus;</button>
+    <button id="zoom-in" title="Zoom in">+</button>
+    <button id="zoom-fit" title="Fit map to screen">Fit</button>
+    <button id="btn-pan" title="Pan the map instead of painting">Move</button>
+  </div>
+  <details id="setup">
+    <summary>Setup: biome, maps, saving</summary>
+  <div class="row">
+    <div class="field">
+      <select id="biome"></select>
+      <input id="seed" type="number" placeholder="seed" title="Seed (blank = random)">
+      <button id="btn-gen">Generate</button>
+    </div>
+  </div>
+  <div class="row">
+    <div class="field">
+      <select id="map-picker" title="Saved maps"></select>
+      <input id="filename" type="text" value="hud_map.json" title="Map filename">
+      <button id="btn-save">Save</button>
+      <button id="btn-load">Load</button>
+    </div>
+    <div class="field">
+      <input id="rw" type="number" value="25" min="4" max="64" title="Width">
+      <span>&times;</span>
+      <input id="rh" type="number" value="15" min="4" max="64" title="Height">
+      <button id="btn-resize">Resize</button>
+    </div>
+  </div>
+  <div class="row">
+    <small id="save-status">not saved yet</small>
+    <button id="btn-stop" class="danger" title="Stop the HUD server">Stop server</button>
+  </div>
+  </details>
+</header>
+
+<div id="stage"><canvas id="grid"></canvas></div>
+
+<div id="palette">
+  <div id="tile-palette"></div>
+  <div id="collide-palette">
+    <div class="grp-label">collision</div>
+    <div class="swatches">
+      <div class="sw" data-cv="1"><div class="chip" style="background:#c0392b"></div><div class="lbl">solid</div></div>
+      <div class="sw" data-cv="0"><div class="chip" style="background:#222"></div><div class="lbl">clear</div></div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<div id="dbg"></div>
+
+<script>
+"use strict";
+// ---- v1.3 remote debug: mirror page errors to the server terminal + on-page
+(function () {
+  const dbg = document.getElementById("dbg");
+  function show(msg) {
+    dbg.style.display = "block";
+    dbg.textContent = "JS: " + msg + "\n(tap to hide)";
+  }
+  dbg.onclick = () => { dbg.style.display = "none"; };
+  function report(msg, src, line, col, stack) {
+    show(String(msg).slice(0, 200) + " @ " + (src || "") + ":" + (line || "?"));
+    try {
+      fetch("/api/jslog", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ msg: String(msg).slice(0, 300),
+          src: String(src || "").slice(0, 120), line: line || 0,
+          col: col || 0, stack: String(stack || "").slice(0, 500) })
+      }).catch(function () { /* server unreachable — on-page panel still shows it */ });
+    } catch (e) { /* sync failure — on-page panel still shows it */ }
+  }
+  window.onerror = (msg, src, line, col, err) =>
+    report(msg, src, line, col, err && err.stack);
+  window.addEventListener("unhandledrejection", e => {
+    const r = e.reason || {};
+    report("unhandled rejection: " + (r.message || r), "", 0, 0, r.stack);
+  });
+  if (location.protocol === "file:") {
+    show("opened as a file — serve it instead: run crumbs_hud.py, then open http://127.0.0.1:8778");
+  }
+})();
+const $ = id => document.getElementById(id);
+const canvas = $("grid"), ctx = canvas.getContext("2d");
+const stage = $("stage");
+
+let W = 25, H = 15;                 // map dims from server
+let tiles = [], objects = [], coll = [];
+let palette = [];                   // [{id,name,color}]
+let spriteTiles = [];               // [{id,name,type,category}] image/animation tiles
+let thumbImg = {};                  // tile id -> preloaded Image thumbnail
+let colorOf = {};                   // tile id -> css color
+let layer = "tiles";
+let erasing = false;
+let selTile = null;                 // selected tile id (tiles/objects layers)
+let selCollide = true;              // collision brush value
+let tilePx = 32;
+let manualZoom = false;   // v1.5: until the user zooms, tiles auto-fit the screen
+function fitTiles() {
+  if (manualZoom || !W) return;
+  const w = $("stage").clientWidth - 16;
+  if (w > 0) tilePx = Math.max(8, Math.min(40, Math.floor(w / W)));
+}
+window.addEventListener("resize", () => { fitTiles(); render(); });
+let stroke = null;                  // {cells:Map, layer}
+let panMode = false, panStart = null;   // v1.7 camera: pan instead of paint
+let playMode = false, hero = null, heroTimer = null;
+
+async function api(path, body) {
+  // v1.4: iOS freezes the server when a-Shell backgrounds; a fetch that dies
+  // mid-freeze throws "Load failed". Retry a few times before giving up —
+  // all our endpoints are idempotent so a retry is always safe.
+  const opt = { headers: { "Content-Type": "application/json" } };
+  if (body !== undefined) { opt.method = "POST"; opt.body = JSON.stringify(body); }
+  let lastErr = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const r = await fetch(path, opt);
+      return await r.json();
+    } catch (e) {
+      lastErr = e;
+      await new Promise(res => setTimeout(res, 400 * (attempt + 1)));
+    }
+  }
+  throw lastErr;
+}
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg; t.style.display = "block";
+  clearTimeout(t._h); t._h = setTimeout(() => t.style.display = "none", 2200);
+}
+
+async function refresh() {
+  const m = await api("/api/map");
+  W = m.width; H = m.height;
+  tiles = m.tiles; objects = m.objects; coll = m.collision;
+  $("rw").value = W; $("rh").value = H;
+  fitTiles();
+  render();
+}
+
+function cellColor(x, y) {
+  const id = tiles[y][x];
+  return colorOf[id] || "#000";
+}
+
+function render() {
+  // v1.5: thumbnails can finish loading before /api/map returns — don't
+  // crash on the empty grid, just wait for refresh() to draw for real.
+  if (!tiles.length || tiles.length < H) return;
+  canvas.width = W * tilePx; canvas.height = H * tilePx;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const id = tiles[y][x];
+    const im = thumbImg[id];
+    if (im && im.complete && im.naturalWidth) {
+      ctx.drawImage(im, x * tilePx, y * tilePx, tilePx, tilePx);
+    } else {
+      ctx.fillStyle = colorOf[id] || "#000";
+      ctx.fillRect(x * tilePx, y * tilePx, tilePx, tilePx);
+    }
+  }
+  // collision overlay (always on in play mode so you can see walls)
+  if (layer === "collision" || playMode) {
+    ctx.strokeStyle = "rgba(255,80,80,0.9)"; ctx.lineWidth = 2;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (coll[y][x]) {
+      const px = x * tilePx, py = y * tilePx;
+      ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + tilePx, py + tilePx);
+      ctx.moveTo(px + tilePx, py); ctx.lineTo(px, py + tilePx); ctx.stroke();
+    }
+  }
+  // hero marker in play mode
+  if (playMode && hero) {
+    const cx = hero.x * tilePx + tilePx / 2, cy = hero.y * tilePx + tilePx / 2, r = tilePx * 0.32;
+    ctx.fillStyle = "#ffd75f"; ctx.strokeStyle = "#000"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  }
+  // object markers
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const oid = objects[y][x];
+    if (oid !== null && oid !== undefined) {
+      const oim = thumbImg[oid];
+      if (oim && oim.complete && oim.naturalWidth) {
+        ctx.drawImage(oim, x * tilePx, y * tilePx, tilePx, tilePx);
+      } else {
+      const cx = x * tilePx + tilePx / 2, cy = y * tilePx + tilePx / 2, r = tilePx * 0.28;
+      ctx.fillStyle = colorOf[oid] || "#fff";
+      ctx.strokeStyle = "#000"; ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r, cy); ctx.lineTo(cx, cy + r); ctx.lineTo(cx - r, cy);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      }
+    }
+  }
+  // grid lines
+  ctx.strokeStyle = "rgba(0,0,0,0.25)"; ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = 0; x <= W; x++) { ctx.moveTo(x * tilePx + .5, 0); ctx.lineTo(x * tilePx + .5, H * tilePx); }
+  for (let y = 0; y <= H; y++) { ctx.moveTo(0, y * tilePx + .5); ctx.lineTo(W * tilePx, y * tilePx + .5); }
+  ctx.stroke();
+}
+
+// ---- painting -------------------------------------------------------------
+function evCell(e) {
+  const r = canvas.getBoundingClientRect();
+  const x = Math.floor((e.clientX - r.left) / tilePx);
+  const y = Math.floor((e.clientY - r.top) / tilePx);
+  if (x < 0 || y < 0 || x >= W || y >= H) return null;
+  return { x, y };
+}
+function brushValue() {
+  if (layer === "collision") return erasing ? false : selCollide;
+  if (layer === "objects")   return erasing ? null  : selTile;
+  return erasing ? 0 : selTile;
+}
+function localGrid() { return layer === "objects" ? objects : layer === "collision" ? coll : tiles; }
+
+function strokeAdd(cell) {
+  const key = cell.x + "," + cell.y;
+  if (stroke.cells.has(key)) return;
+  stroke.cells.set(key, { x: cell.x, y: cell.y, tile_id: brushValue() });
+  localGrid()[cell.y][cell.x] = brushValue();   // optimistic preview
+  render();
+}
+canvas.addEventListener("pointerdown", e => {
+  e.preventDefault();
+  if (panMode) {  // v1.7 camera: drag pans the map instead of painting
+    panStart = { x: e.clientX, y: e.clientY,
+                 sl: stage.scrollLeft, st: stage.scrollTop };
+    canvas.setPointerCapture(e.pointerId);
+    return;
+  }
+  const cell = evCell(e); if (!cell) return;
+  if (playMode) { playTap(cell); return; }
+  canvas.setPointerCapture(e.pointerId);
+  stroke = { cells: new Map(), layer };
+  strokeAdd(cell);
+});
+canvas.addEventListener("pointermove", e => {
+  if (panMode) {
+    if (!panStart) return;
+    e.preventDefault();
+    stage.scrollLeft = panStart.sl - (e.clientX - panStart.x);
+    stage.scrollTop  = panStart.st - (e.clientY - panStart.y);
+    return;
+  }
+  if (!stroke) return;
+  e.preventDefault();
+  const cell = evCell(e); if (cell) strokeAdd(cell);
+});
+async function endStroke() {
+  if (panMode) { panStart = null; return; }
+  if (!stroke) return;
+  const s = stroke; stroke = null;
+  if (!s.cells.size) return;
+  const r = await api("/api/stroke", { layer: s.layer, cells: [...s.cells.values()] });
+  if (!r.ok) { toast("paint failed"); await refresh(); }
+  // server is source of truth; light re-sync keeps undo/redo exact
+  await refresh();
+}
+canvas.addEventListener("pointerup", endStroke);
+canvas.addEventListener("pointercancel", () => { stroke = null; panStart = null; refresh(); });
+
+// v1.7 camera: Move toggles pan mode, -/+ zoom, Fit re-fits the screen
+$("btn-pan").onclick = () => {
+  panMode = !panMode;
+  $("btn-pan").classList.toggle("on", panMode);
+  toast(panMode ? "move mode — drag the map to pan" : "paint mode");
+};
+
+// ---- playtest ---------------------------------------------------------------
+async function playTap(cell) {
+  if (heroTimer) return;  // let the current walk finish first
+  const r = await api("/api/play/move", { x: cell.x, y: cell.y });
+  if (!r.ok) { toast("play failed"); return; }
+  const path = r.path || [];
+  if (!path.length) { toast("can't reach that tile"); return; }
+  let i = 0;
+  heroTimer = setInterval(() => {
+    hero = { x: path[i][0], y: path[i][1] };
+    i++; render();
+    if (i >= path.length) { clearInterval(heroTimer); heroTimer = null; }
+  }, 140);
+}
+$("btn-play").onclick = async () => {
+  if (!playMode) {
+    const r = await api("/api/play/start", {});
+    if (!r.ok) { toast("play failed"); return; }
+    playMode = true; hero = { x: r.x, y: r.y };
+    $("btn-play").classList.add("on");
+    toast("play mode — tap a tile to walk there");
+  } else {
+    await api("/api/play/stop", {});
+    playMode = false; hero = null;
+    if (heroTimer) { clearInterval(heroTimer); heroTimer = null; }
+    $("btn-play").classList.remove("on");
+    toast("back to editing");
+  }
+  render();
+};
+
+// ---- palette ---------------------------------------------------------------
+const BIOME_ORDER = ["dungeon", "grassland", "desert", "arctic", "forest", "ocean"];
+function biomeOf(name) {
+  for (const b of BIOME_ORDER) if (name.startsWith(b + "_")) return b;
+  return "core";
+}
+function shortName(name) {
+  const b = biomeOf(name);
+  return b === "core" ? name : name.slice(b.length + 1);
+}
+function buildPalette() {
+  colorOf = {};
+  palette.forEach(t => colorOf[t.id] = t.color);
+  const box = $("tile-palette"); box.innerHTML = "";
+  const groups = { core: [] };
+  BIOME_ORDER.forEach(b => groups[b] = []);
+  palette.forEach(t => groups[biomeOf(t.name)].push(t));
+  ["core", ...BIOME_ORDER].forEach(g => {
+    if (!groups[g].length) return;
+    const lab = document.createElement("div");
+    lab.className = "grp-label"; lab.textContent = g;
+    box.appendChild(lab);
+    const row = document.createElement("div");
+    row.className = "swatches";
+    groups[g].forEach(t => {
+      const d = document.createElement("div");
+      d.className = "sw" + (t.id === selTile ? " sel" : "");
+      d.title = t.name + " (#" + t.id + ")";
+      d.innerHTML = '<div class="chip" style="background:' + t.color + '"></div>' +
+                    '<div class="lbl">' + shortName(t.name) + "</div>";
+      d.onclick = () => { selTile = t.id; erasing = false; $("btn-eraser").classList.remove("on"); buildPalette(); };
+      row.appendChild(d);
+    });
+    box.appendChild(row);
+  });
+  if (spriteTiles.length) {
+    const lab = document.createElement("div");
+    lab.className = "grp-label"; lab.textContent = "sprites";
+    box.appendChild(lab);
+    const row = document.createElement("div");
+    row.className = "swatches";
+    spriteTiles.forEach(t => {
+      const d = document.createElement("div");
+      d.className = "sw" + (t.id === selTile ? " sel" : "");
+      d.title = t.name + " (#" + t.id + " · " + t.type + ")";
+      d.innerHTML = '<div class="chip"><img src="/api/thumb/' + t.id + '" alt=""></div>' +
+                    '<div class="lbl">' + t.name + "</div>";
+      d.onclick = () => { selTile = t.id; erasing = false; $("btn-eraser").classList.remove("on"); buildPalette(); };
+      row.appendChild(d);
+    });
+    box.appendChild(row);
+  }
+  $("tile-palette").style.display = layer === "collision" ? "none" : "block";
+  $("collide-palette").style.display = layer === "collision" ? "block" : "none";
+}
+
+// ---- toolbar wiring ----------------------------------------------------------
+document.querySelectorAll("#layer-seg button").forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll("#layer-seg button").forEach(x => x.classList.remove("on"));
+    b.classList.add("on"); layer = b.dataset.layer; buildPalette(); render();
+  };
+});
+$("btn-eraser").onclick = () => {
+  erasing = !erasing;
+  $("btn-eraser").classList.toggle("on", erasing);
+  toast(erasing ? "eraser on" : "eraser off");
+};
+$("btn-undo").onclick = async () => { const r = await api("/api/undo", {}); if (!r.ok) toast("nothing to undo"); await refresh(); };
+$("btn-redo").onclick = async () => { const r = await api("/api/redo", {}); if (!r.ok) toast("nothing to redo"); await refresh(); };
+$("btn-clear").onclick = async () => {
+  if (!confirm("Clear the " + layer + " layer? (undoable)")) return;
+  await api("/api/clear_layer", { layer }); await refresh(); toast("layer cleared");
+};
+$("zoom-in").onclick  = () => { manualZoom = true; tilePx = Math.min(64, tilePx + 8); render(); };
+$("zoom-out").onclick = () => { manualZoom = true; tilePx = Math.max(8, tilePx - 8); render(); };
+$("zoom-fit").onclick = () => { manualZoom = false; fitTiles(); render(); toast("fit to screen"); };
+$("btn-gen").onclick = async () => {
+  const seedRaw = $("seed").value.trim();
+  const r = await api("/api/generate", { biome: $("biome").value, seed: seedRaw === "" ? null : parseInt(seedRaw, 10) });
+  if (r.ok) { await refresh(); toast("generated " + r.biome); } else toast("generate failed");
+};
+$("btn-save").onclick = async () => {
+  const r = await api("/api/save", { filename: $("filename").value });
+  if (r.ok) { toast("saved " + r.file); await refreshMaps(); pollStatus(); }
+  else toast("save failed");
+};
+$("btn-load").onclick = async () => {
+  const r = await api("/api/load", { filename: $("filename").value });
+  if (r.ok) { await refresh(); toast("loaded " + $("filename").value); } else toast("load failed: " + (r.error || ""));
+};
+$("btn-resize").onclick = async () => {
+  const r = await api("/api/resize", { width: parseInt($("rw").value, 10), height: parseInt($("rh").value, 10) });
+  if (r.ok) { await refresh(); toast("resized " + r.width + "x" + r.height); }
+};
+// v1.8: stop the server from the page — saves first, then your a-Shell prompt comes back
+$("btn-stop").onclick = async () => {
+  if (!confirm("Stop the HUD server? The page goes dead until you restart it.")) return;
+  try { await api("/api/shutdown", {}); } catch (e) { /* server is going away */ }
+  toast("server stopping — restart it in a-Shell when ready");
+};
+document.querySelectorAll("#collide-palette .sw").forEach(d => {
+  d.onclick = () => {
+    selCollide = d.dataset.cv === "1"; erasing = false; $("btn-eraser").classList.remove("on");
+    document.querySelectorAll("#collide-palette .sw").forEach(x => x.classList.remove("sel"));
+    d.classList.add("sel");
+  };
+});
+
+// ---- map picker + save status -------------------------------------------------
+async function refreshMaps() {
+  try {
+    const m = await api("/api/maps");
+    const mp = $("map-picker");
+    const cur = $("filename").value;
+    mp.innerHTML = "";
+    m.maps.forEach(f => {
+      const o = document.createElement("option");
+      o.value = f; o.textContent = f; mp.appendChild(o);
+    });
+    if (m.maps.includes(cur)) mp.value = cur;
+  } catch (e) { /* server away */ }
+}
+$("map-picker").onchange = () => { $("filename").value = $("map-picker").value; };
+
+async function pollStatus() {
+  try {
+    const s = await api("/api/status");
+    $("save-status").textContent = s.dirty ? "● unsaved changes"
+      : (s.last_save ? "saved " + s.last_save : "no changes yet");
+  } catch (e) { /* server away */ }
+}
+
+// ---- init ----------------------------------------------------------------------
+(async function init() {
+  try {
+    const b = await api("/api/biomes");
+    b.biomes.forEach(x => {
+      const o = document.createElement("option");
+      o.value = x.id; o.textContent = x.name; $("biome").appendChild(o);
+    });
+    $("biome").value = "dungeon";
+    const p = await api("/api/palette");
+    palette = p.tiles;
+    selTile = palette.length ? palette[0].id : null;
+    const s = await api("/api/sprites");
+    spriteTiles = s.tiles;
+    spriteTiles.forEach(t => {
+      const im = new Image();
+      im.onload = () => render();
+      im.src = "/api/thumb/" + t.id;
+      thumbImg[t.id] = im;
+    });
+    document.querySelector('#collide-palette .sw[data-cv="1"]').classList.add("sel");
+    buildPalette();
+    await refreshMaps();
+    await refresh();
+    pollStatus();
+    setInterval(pollStatus, 10000);
+  } catch (e) {
+    toast("can't reach the HUD server — is crumbs_hud.py running?");
+  }
+})();
+</script>
+</body>
+</html>

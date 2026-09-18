@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+hud_map.json
+.DS_Store

@@ -1,0 +1,4 @@
+Copy your sprite PNGs here from the old PC:
+  C:\Users\lloyd\OneDrive\Desktop\VaultsWorldEditor\asset_library\
+Needed by sprite_library.json: hero4.png, 3.png
+(Old sprite source folder was D:\VaultSdc120\sprites)

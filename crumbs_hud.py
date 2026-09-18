@@ -86,6 +86,11 @@ TILE_PRESETS = {
     "floor": {"label": "Floor", "hint": "walkable", "solid": False, "height": "short"},
     "water": {"label": "Water", "hint": "swim — slow", "solid": False, "height": "short",
               "swim": True},
+    # v3.6: deep water — impassable WITHOUT the swim animation. Passable WITH
+    # it once SWIM_UNLOCKED flips (see the SWIM HOOK below). Shallow water's
+    # ripple wading is untouched.
+    "deepwater": {"label": "Deep water", "hint": "needs swim", "solid": True,
+                  "height": "short", "deep": True},
     "door":  {"label": "Door",  "hint": "walkable", "solid": False, "height": "short"},
     "decor": {"label": "Decor", "hint": "walkable", "solid": False, "height": "short"},
     "character": {"label": "Character", "hint": "walkable sprite", "solid": False,
@@ -99,6 +104,7 @@ def _custom_public(entry):
     return {"id": entry["id"], "name": entry["name"], "preset": entry["preset"],
             "solid": entry["solid"], "height": entry.get("height", "short"),
             "swim": bool(entry.get("swim", False)),
+            "deep": bool(entry.get("deep", False)),
             "frames": len(entry["files"]), "frame_ms": entry["frame_ms"]}
 
 
@@ -139,6 +145,15 @@ def _register_custom_tile(entry):
         swim = True
         entry["swim"] = True
     assets.tiles[tid]["properties"]["swim"] = swim
+    # v3.6: deep-water flag — solid (blocking) until SWIM_UNLOCKED flips
+    deep = bool(entry.get("deep", False)) or entry.get("preset") == "deepwater"
+    if deep:
+        assets.tiles[tid]["properties"]["solid"] = True
+        assets.tiles[tid]["properties"]["deep"] = True
+        entry["solid"] = True
+        entry["deep"] = True
+    else:
+        assets.tiles[tid]["properties"]["deep"] = False
     return True
 
 
@@ -276,6 +291,7 @@ def _store_custom_tile(name, preset, frame_ms, pil_images):
              "solid": TILE_PRESETS[preset]["solid"],
              "height": TILE_PRESETS[preset]["height"],
              "swim": bool(TILE_PRESETS[preset].get("swim", False)),
+             "deep": bool(TILE_PRESETS[preset].get("deep", False)),
              "frame_ms": frame_ms, "files": files}
     _custom_tiles.append(entry)
     _register_custom_tile(entry)
@@ -344,6 +360,14 @@ for _tid, _t in assets.tiles.items():
 # ---- playtest state (tile-space hero; crumbs_core untouched) ----------------
 play = {"active": False, "tx": 0, "ty": 0}
 
+# ---- v3.6 SWIM HOOK ----------------------------------------------------------
+# Deep water is IMPASSABLE until the swim animation exists. When the swim
+# animation gets built, flip this to True: deep water becomes swimmable
+# (slow, with the swim animation) instead of blocking, and the per-step
+# "deep" flags already flowing to the client light up the animation hook
+# in the renderer. Nothing else needs to change.
+SWIM_UNLOCKED = False
+
 
 def _tile_solid(tx, ty):
     tile = assets.tiles.get(world.data[ty][tx])
@@ -355,7 +379,15 @@ def _walkable(tx, ty):
         return False
     if world.collision_layer[ty][tx]:
         return False
+    if _deep_at(tx, ty):
+        return SWIM_UNLOCKED  # v3.6: no swim animation yet — deep water blocks
     return not _tile_solid(tx, ty)
+
+
+def _deep_at(tx, ty):
+    """v3.6: True when this tile is deep water — needs the swim animation."""
+    tile = assets.tiles.get(world.data[ty][tx])
+    return bool(tile and tile.get("properties", {}).get("deep"))
 
 
 def _swim_at(tx, ty):
@@ -382,9 +414,11 @@ def _find_spawn():
 def _find_path(sx, sy, tx, ty):
     """v3.2: Dijkstra over walkable tiles — water costs 4x (swim), so the hero
     walks around it when a dry route exists and swims only when it must.
-    Returns ([(x,y), ...] excluding the start, [swim?, ...] per step)."""
+    v3.6: deep water is unwalkable until SWIM_UNLOCKED flips; then it costs
+    4x like shallow water and its steps are flagged deep for the client.
+    Returns ([(x,y), ...] excluding the start, [swim?, ...], [deep?, ...])."""
     if (sx, sy) == (tx, ty) or not _walkable(tx, ty):
-        return [], []
+        return [], [], []
     SWIM_COST = 4
     dist = {(sx, sy): 0}
     prev = {(sx, sy): None}
@@ -400,22 +434,24 @@ def _find_path(sx, sy, tx, ty):
                 continue
             if not _walkable(nx, ny):
                 continue
-            nd = d + (SWIM_COST if _swim_at(nx, ny) else 1)
+            nd = d + (SWIM_COST if (_swim_at(nx, ny) or _deep_at(nx, ny)) else 1)
             if nd < dist.get((nx, ny), float("inf")):
                 dist[(nx, ny)] = nd
                 prev[(nx, ny)] = (x, y)
                 heapq.heappush(pq, (nd, nx, ny))
     if (tx, ty) not in prev:
-        return [], []
+        return [], [], []
     path = [(tx, ty)]
     while path[-1] != (sx, sy):
         p = prev.get(path[-1])
         if p is None:
-            return [], []
+            return [], [], []
         path.append(p)
     path.reverse()
     steps = path[1:]
-    return steps, [_swim_at(x, y) for x, y in steps]
+    return (steps,
+            [_swim_at(x, y) for x, y in steps],
+            [_deep_at(x, y) for x, y in steps])
 
 
 # ---- autosave state ----------------------------------------------------------
@@ -800,7 +836,7 @@ class Handler(BaseHTTPRequestHandler):
             for leg in legs:
                 try:
                     (x1, y1), (x2, y2) = leg
-                    cells, _swim = _find_path(int(x1), int(y1), int(x2), int(y2))
+                    cells, _swim, _deep = _find_path(int(x1), int(y1), int(x2), int(y2))
                 except (TypeError, ValueError):
                     cells = []
                 paths.append([list(c) for c in cells])
@@ -825,12 +861,14 @@ class Handler(BaseHTTPRequestHandler):
                 entry["solid"] = TILE_PRESETS[preset]["solid"]
                 entry["height"] = TILE_PRESETS[preset]["height"]
                 entry["swim"] = bool(TILE_PRESETS[preset].get("swim", False))
+                entry["deep"] = bool(TILE_PRESETS[preset].get("deep", False))
             t = assets.tiles.get(tid)
             if t is not None:
                 t["name"] = entry["name"]
                 t["preset"] = entry["preset"]
                 t["properties"]["solid"] = bool(entry.get("solid", False))
                 t["properties"]["swim"] = bool(entry.get("swim", False))
+                t["properties"]["deep"] = bool(entry.get("deep", False))
             _save_custom_registry()
             return self._send_json({"ok": True, "tile": _custom_public(entry)})
 
@@ -945,11 +983,12 @@ class Handler(BaseHTTPRequestHandler):
             x, y = body.get("x"), body.get("y")
             if not isinstance(x, int) or not isinstance(y, int):
                 return self._send_json({"ok": False, "error": "x/y ints required"}, 400)
-            cells, swim = _find_path(play["tx"], play["ty"], x, y)
+            cells, swim, deep = _find_path(play["tx"], play["ty"], x, y)
             if cells:
                 play["tx"], play["ty"] = cells[-1]
             return self._send_json({"ok": True, "path": [list(c) for c in cells],
-                                    "swim": swim, "x": play["tx"], "y": play["ty"]})
+                                    "swim": swim, "deep": deep,
+                                    "x": play["tx"], "y": play["ty"]})
 
         if path == "/api/play/stop":
             play["active"] = False
@@ -1003,7 +1042,7 @@ if __name__ == "__main__":
     srv = ThreadingHTTPServer((host, PORT), Handler)
     threading.Thread(target=_autosave_loop, daemon=True).start()
     print("=" * 52)
-    print("  Crumbs HUD v3.5 — screen recording")
+    print("  Crumbs HUD v3.6 — deep water + swim hook")
     if public:
         ip = _lan_ip()
         print("  PUBLIC mode: anyone on your Wi-Fi can open the HUD.")

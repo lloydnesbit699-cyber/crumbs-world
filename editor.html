@@ -172,7 +172,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v3.5</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v3.6</small></span>
 </div>
 
 <div id="menu-dropdown">
@@ -394,6 +394,7 @@ let panX = 0, panY = 0;                 // v2.2: canvas offset in px, relative t
 const ptrs = new Map();                 // v2.1: active pointers for gestures
 let gesture = null;                     // v2.1: two-finger pan/pinch state
 let playMode = false, hero = null, heroTimer = null, heroSwimming = false;   // v3.2: swim state
+let heroInDeep = false;   // v3.6 SWIM HOOK: true on deep-water steps (only once SWIM_UNLOCKED flips server-side)
 // v3.4: patrol NPCs — routes from the server, live walkers in play mode
 let patrolTool = false, draftPoints = [], patrols = [], npcs = [], npcTimer = null;
 
@@ -526,6 +527,13 @@ function render() {
       ctx.ellipse(hx + tilePx / 2, hy + tilePx * 0.72, tilePx * 0.36, tilePx * 0.14,
                   0, 0, Math.PI * 2);
       ctx.stroke();
+    }
+    // v3.6 SWIM HOOK: the deep-water swim animation plugs in right here.
+    // Unreachable for now — deep water blocks the hero until SWIM_UNLOCKED
+    // flips server-side, at which point heroInDeep goes true on deep steps
+    // and this branch draws the swim animation instead of the wade ripple.
+    if (heroInDeep) {
+      // TODO(swim): draw the swim animation (strokes, splash, submerged bob).
     }
     const him = heroTileId != null ? tileFrameImage(heroTileId) : null;
     if (him) {
@@ -736,13 +744,15 @@ async function playTap(cell) {
   const path = r.path || [];
   if (!path.length) { toast("can't reach that tile"); return; }
   const swim = r.swim || [];   // v3.2: per-step water flags from the server
+  const deep = r.deep || [];   // v3.6: per-step deep-water flags (swim hook)
   let i = 0;
   const step = () => {
     hero = { x: path[i][0], y: path[i][1] };
     heroSwimming = !!swim[i];   // ripple + slow wading through water
+    heroInDeep = !!deep[i];     // v3.6: lights the swim-animation hook below
     i++; render();
-    if (i >= path.length) { heroTimer = null; heroSwimming = false; return; }
-    heroTimer = setTimeout(step, swim[i] ? 430 : 140);
+    if (i >= path.length) { heroTimer = null; heroSwimming = false; heroInDeep = false; return; }
+    heroTimer = setTimeout(step, (swim[i] || deep[i]) ? 430 : 140);
   };
   heroTimer = setTimeout(step, 0);
 }
@@ -762,7 +772,7 @@ $("btn-play").onclick = async () => {
     toast("play mode — tap a tile to walk there");
   } else {
     await api("/api/play/stop", {});
-    playMode = false; hero = null; heroSwimming = false;
+    playMode = false; hero = null; heroSwimming = false; heroInDeep = false;
     if (heroTimer) { clearInterval(heroTimer); heroTimer = null; }
     if (npcTimer) { clearInterval(npcTimer); npcTimer = null; }   // v3.4: walkers rest
     npcs = [];

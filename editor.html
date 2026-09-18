@@ -131,6 +131,26 @@
   #import-scope button { flex: 1; margin: 0; padding: 8px 4px; font-size: 12px; }
   #import-scope button.on { border-color: #8a6dd7; color: #b9a7f2; }
   .grp-sub { font-size: 10px; color: #8a8a9a; margin: 8px 2px 3px; letter-spacing: .5px; }
+  /* v3.9: rules sheet tabs + game rules list + end-of-game overlay */
+  #sheet-rules .tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+  #sheet-rules .tabs button { flex: 1; margin: 0; }
+  #sheet-rules .tabs button.on { border-color: #ffd75f; color: #ffd75f; }
+  #game-rules-list { margin-bottom: 8px; }
+  .gr-row { display: flex; align-items: center; gap: 8px; padding: 7px 4px;
+            border-bottom: 1px solid #2c2c2c; font-size: 13px; }
+  .gr-row .gr-x { margin-left: auto; color: #ff7b7b; background: none;
+                  border: none; font-size: 15px; padding: 2px 6px; }
+  #gr-text-input { width: 100%; box-sizing: border-box; margin: 6px 0;
+                   padding: 8px; font-size: 14px; }
+  #end-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.72);
+                 display: flex; align-items: center; justify-content: center;
+                 z-index: 90; }
+  #end-overlay[hidden] { display: none; }
+  #end-card { background: #1c1c22; border: 1px solid #ffd75f; border-radius: 14px;
+              padding: 26px 30px; text-align: center; max-width: 78vw; }
+  #end-emoji { font-size: 44px; margin-bottom: 10px; }
+  #end-text { font-size: 16px; margin-bottom: 16px; line-height: 1.4; }
+  #end-again { font-size: 15px; padding: 10px 22px; }
   #import-speed { font-size: 12px; color: #999; margin-bottom: 8px; }
   #import-speed input { width: 70px; }
   /* v3.3: one-button animation + custom tile manager */
@@ -308,6 +328,11 @@
 <div id="sheet-rules" class="sheet">
   <div class="grab"></div>
   <div class="tray-head">Rules — this build</div>
+  <div class="tabs">
+    <button id="rules-tabbtn-play" class="on">Gameplay</button>
+    <button id="rules-tabbtn-game">Game rules</button>
+  </div>
+  <div id="rules-tab-play">
   <div class="lbl">Walk speed</div>
   <div class="opt-row" id="rules-walk">
     <button data-v="220">Slow</button><button data-v="140">Normal</button><button data-v="90">Fast</button>
@@ -326,6 +351,36 @@
   </div>
   <div><small>Controller: <span id="pad-status">none — press a button on it</span></small></div>
   <div><small>Rules save with this map. Defaults apply to new maps you generate.</small></div>
+  </div>
+  <div id="rules-tab-game" hidden>
+    <div class="lbl">What makes this build a <i>game</i> — tap &#65291; then tap the map.</div>
+    <div id="game-rules-list"></div>
+    <div id="gr-add" hidden>
+      <div class="opt-row" id="gr-kinds">
+        <button data-k="goal" title="Reach a tile and win">&#127937; Goal</button>
+        <button data-k="hazard" title="Touch a tile and it's game over">&#9760;&#65039; Hazard</button>
+        <button data-k="keydoor" title="Pick up a key, its door opens">&#128273; Key &amp; door</button>
+        <button data-k="message" title="Step somewhere, words appear">&#128172; Message</button>
+      </div>
+      <div class="lbl" id="gr-hint">pick what kind of rule</div>
+      <div id="gr-text" hidden>
+        <input id="gr-text-input" maxlength="140" placeholder="say what happens…">
+        <div class="opt-row">
+          <button id="gr-save">Save rule</button>
+          <button id="gr-cancel" class="ghost">Cancel</button>
+        </div>
+      </div>
+    </div>
+    <div class="opt-row"><button id="gr-addbtn">&#65291; Add rule</button></div>
+  </div>
+</div>
+
+<div id="end-overlay" hidden>
+  <div id="end-card">
+    <div id="end-emoji">&#127937;</div>
+    <div id="end-text"></div>
+    <button id="end-again">Play again</button>
+  </div>
 </div>
 
 <div id="scrim"></div>
@@ -733,6 +788,7 @@ canvas.addEventListener("pointerdown", e => {
   const cell = evCell(e); if (!cell) return;
   if (playMode) { playTap(cell); return; }
   if (patrolTool) { patrolTap(cell); return; }   // v3.4: patrol stops, not paint
+  if (ruleDraft) { ruleTap(cell); return; }      // v3.9: binding a game rule
   stroke = { cells: new Map(), linkCells: new Map(), layer };
   strokeAdd(cell);
 });
@@ -801,20 +857,66 @@ $("btn-pan").onclick = () => {
 };
 
 // ---- playtest ---------------------------------------------------------------
+let playOver = false;   // v3.9: a win/lose freezes movement until Play again
+async function syncMap() {
+  // v3.9: re-pull the tile grids without touching zoom — game rules (keys,
+  // doors) change the map server-side during play and the cache goes stale.
+  try {
+    const m = await api("/api/map");
+    tiles = m.tiles; objects = m.objects; coll = m.collision;
+  } catch (e) {}
+  render();
+}
+// v3.9: run the per-step events the server attached — messages toast, unlocks
+// re-sync the map, a win/lose ends the walk and shows the overlay.
+async function playEvents(evs) {
+  let over = false;
+  for (const e of evs || []) {
+    if (e.t === "message" || e.t === "unlock") {
+      toast(e.text);
+      if (e.t === "unlock") await syncMap();
+    } else if (e.t === "win" || e.t === "lose") {
+      over = true;
+      endPlay(e.t, e.text);
+    }
+  }
+  return over;
+}
+function endPlay(kind, text) {
+  playOver = true;
+  if (heroTimer) { clearTimeout(heroTimer); heroTimer = null; }
+  if (stepTimer) { clearTimeout(stepTimer); stepTimer = null; }
+  heroSwimming = false; heroInDeep = false;
+  $("end-emoji").textContent = kind === "win" ? "🏁" : "💀";
+  $("end-text").textContent = text;
+  $("end-overlay").hidden = false;
+  render();
+}
+$("end-again").onclick = async () => {
+  const r = await api("/api/play/start", {});
+  $("end-overlay").hidden = true;
+  playOver = false;
+  if (r.ok) hero = { x: r.x, y: r.y };
+  await syncMap();   // picked-up keys and opened doors come back
+  toast("back to the start — go again");
+};
 async function playTap(cell) {
-  if (heroTimer) return;  // let the current walk finish first
+  if (heroTimer || playOver) return;  // let the current walk finish first
   const r = await api("/api/play/move", { x: cell.x, y: cell.y });
   if (!r.ok) { toast("play failed"); return; }
   const path = r.path || [];
   if (!path.length) { toast("can't reach that tile"); return; }
   const swim = r.swim || [];   // v3.2: per-step water flags from the server
   const deep = r.deep || [];   // v3.6: per-step deep-water flags (swim hook)
+  const evts = r.events || []; // v3.9: per-step game-rule events
   let i = 0;
-  const step = () => {
+  const step = async () => {
     hero = { x: path[i][0], y: path[i][1] };
     heroSwimming = !!swim[i];   // ripple + slow wading through water
     heroInDeep = !!deep[i];     // v3.6: lights the swim-animation hook below
+    const evs = evts[i] || [];
     i++; render();
+    if (await playEvents(evs)) { heroTimer = null; return; }
     if (i >= path.length) { heroTimer = null; heroSwimming = false; heroInDeep = false; return; }
     const wms = RULES.walk_ms;   // v3.7: tap-to-walk obeys this build's rules
     heroTimer = setTimeout(step, (swim[i] || deep[i]) ? wms * RULES.swim_mult : wms);
@@ -830,6 +932,8 @@ $("btn-play").onclick = async () => {
     // v3.4: patrol tool rests during play; NPCs start walking their routes
     patrolTool = false; $("btn-patrol").classList.remove("on");
     draftPoints = []; $("btn-patrol-done").hidden = true;
+    grCancel();   // v3.9: a half-drafted rule doesn't follow you into play
+    playOver = false; $("end-overlay").hidden = true;
     await buildNpcs();
     if (npcs.length) npcTimer = setInterval(() => npcTick(0.1), 100);
     // "can't reach" confusion was play mode intercepting taps — paint tools rest now
@@ -847,6 +951,8 @@ $("btn-play").onclick = async () => {
     dpadDrag = false; dpad.classList.remove("dragging");
     updateDpad();   // v3.7: hide the touch controls (pad loop self-stops)
     $("btn-play").classList.remove("on");
+    playOver = false; $("end-overlay").hidden = true;   // v3.9
+    await syncMap();   // v3.9: picked-up keys / opened doors come back
     toast("back to editing");
   }
   render();
@@ -947,7 +1053,7 @@ async function setRules(patch) {
   syncRulesSheet();
   updateDpad();
 }
-$("menu-rules").onclick = () => { refreshRules(); toggleOverlay("sheet-rules"); };
+$("menu-rules").onclick = () => { refreshRules(); loadGameRules(); toggleOverlay("sheet-rules"); };
 document.querySelectorAll("#rules-walk button").forEach(b =>
   b.onclick = () => setRules({ walk_ms: +b.dataset.v }));
 document.querySelectorAll("#rules-swim button").forEach(b =>
@@ -962,6 +1068,132 @@ function myDefaults() {
   try { return JSON.parse(localStorage.getItem("crumbs_rules")) || null; }
   catch (e) { return null; }
 }
+
+// ---- v3.9: game rules — goals, hazards, keys & doors, messages --------------
+// The deeper "rules" drawer: what makes a build a *game*. Builders tap the map
+// to bind rules; play mode evaluates them server-side on every hero step.
+let gameRules = [], grNames = {}, ruleDraft = null;
+
+function rulesTab(which) {
+  $("rules-tabbtn-play").classList.toggle("on", which === "play");
+  $("rules-tabbtn-game").classList.toggle("on", which === "game");
+  $("rules-tab-play").hidden = which !== "play";
+  $("rules-tab-game").hidden = which !== "game";
+}
+$("rules-tabbtn-play").onclick = () => rulesTab("play");
+$("rules-tabbtn-game").onclick = () => rulesTab("game");
+
+async function loadGameRules() {
+  try {
+    const r = await api("/api/game-rules");
+    if (r.ok) { gameRules = r.rules || []; grNames = r.names || {}; }
+  } catch (e) { /* offline — keep last known */ }
+  renderGameRules();
+}
+function grSummary(r) {
+  const nm = id => grNames[id] || ("tile " + id);
+  if (r.kind === "goal") return "🏁 Reach (" + r.x + ", " + r.y + ") → win";
+  if (r.kind === "hazard") return "☠️ Touch " + nm(r.tile) + " → game over";
+  if (r.kind === "keydoor") return "🗝️ " + nm(r.key) + " opens " + nm(r.door);
+  if (r.kind === "message")
+    return "💬 At (" + r.x + ", " + r.y + "): “" +
+      (r.text || "…").slice(0, 42) + ((r.text || "").length > 42 ? "…" : "") + "”";
+  return r.kind;
+}
+function renderGameRules() {
+  const box = $("game-rules-list"); box.innerHTML = "";
+  if (!gameRules.length) {
+    box.innerHTML = '<div class="lbl">no rules yet — this build is a diorama. ' +
+      "Add a goal and it's a game.</div>";
+    return;
+  }
+  gameRules.forEach(r => {
+    const d = document.createElement("div");
+    d.className = "gr-row";
+    const s = document.createElement("span"); s.textContent = grSummary(r);
+    const x = document.createElement("button");
+    x.className = "gr-x"; x.textContent = "✕"; x.title = "remove this rule";
+    x.onclick = async () => {
+      const res = await api("/api/game-rules", { action: "delete", id: r.id });
+      if (!res.ok) { toast("couldn't remove it"); return; }
+      await loadGameRules(); toast("rule removed");
+    };
+    d.appendChild(s); d.appendChild(x); box.appendChild(d);
+  });
+}
+
+// --- rule drafting: pick a kind, then tap the map to bind it ---
+const GR_HINTS = {
+  goal: "tap the tile the hero must reach",
+  hazard: "tap the dangerous tile",
+  keydoor0: "tap the KEY tile",
+  keydoor1: "now tap the DOOR it opens",
+  message: "tap where the hero should stand",
+};
+$("gr-addbtn").onclick = () => {
+  $("gr-add").hidden = false; $("gr-addbtn").hidden = true;
+  $("gr-text").hidden = true; ruleDraft = null;
+  $("gr-hint").textContent = "pick what kind of rule";
+  document.querySelectorAll("#gr-kinds button").forEach(b => b.classList.remove("on"));
+};
+function grCancel() {
+  ruleDraft = null;
+  $("gr-add").hidden = true; $("gr-addbtn").hidden = false;
+  $("gr-text").hidden = true; $("gr-text-input").value = "";
+}
+$("gr-cancel").onclick = grCancel;
+document.querySelectorAll("#gr-kinds button").forEach(b => {
+  b.onclick = ev => {
+    ev.preventDefault();
+    document.querySelectorAll("#gr-kinds button").forEach(x =>
+      x.classList.toggle("on", x === b));
+    ruleDraft = { kind: b.dataset.k, stage: 0 };
+    $("gr-text").hidden = true;
+    $("gr-hint").textContent = GR_HINTS[b.dataset.k === "keydoor" ? "keydoor0" : b.dataset.k];
+    toast("tap the map — " + $("gr-hint").textContent);
+  };
+});
+function cellTileId(cell) {
+  // tiles layer first, then objects — a rule binds the art that's there
+  return (tiles[cell.y] && tiles[cell.y][cell.x]) ||
+         (objects[cell.y] && objects[cell.y][cell.x]) || 0;
+}
+function ruleTap(cell) {
+  const d = ruleDraft;
+  if (d.kind === "goal" || d.kind === "message") {
+    d.x = cell.x; d.y = cell.y;
+  } else if (d.kind === "hazard") {
+    const t = cellTileId(cell);
+    if (!t) { toast("tap a tile, not empty ground"); return; }
+    d.tile = t;
+  } else if (d.kind === "keydoor") {
+    const t = cellTileId(cell);
+    if (!t) { toast("tap a tile, not empty ground"); return; }
+    if (d.stage === 0) {
+      d.key = t; d.stage = 1;
+      $("gr-hint").textContent = GR_HINTS.keydoor1;
+      toast("key picked — now tap the door it opens");
+      return;
+    }
+    if (t === d.key) { toast("the door can't be the key itself"); return; }
+    d.door = t;
+  }
+  $("gr-hint").textContent = "what should it say? (optional)";
+  $("gr-text").hidden = false;
+  $("gr-text-input").value = "";
+  setTimeout(() => $("gr-text-input").focus(), 50);
+}
+$("gr-save").onclick = async () => {
+  const d = ruleDraft; if (!d) return;
+  const rule = { kind: d.kind, text: $("gr-text-input").value.trim().slice(0, 140) };
+  if (d.kind === "goal" || d.kind === "message") { rule.x = d.x; rule.y = d.y; }
+  else if (d.kind === "hazard") rule.tile = d.tile;
+  else if (d.kind === "keydoor") { rule.key = d.key; rule.door = d.door; }
+  const r = await api("/api/game-rules", { action: "add", rule });
+  if (!r.ok) { toast("couldn't save that rule"); return; }
+  grCancel(); await loadGameRules();
+  toast("rule added — try it in play mode");
+};
 
 // ---- on-screen D-pad --------------------------------------------------------
 const dpad = $("dpad");
@@ -1020,7 +1252,7 @@ dpad.querySelectorAll("button").forEach(b => {
     b.addEventListener(ev, () => { clearTimeout(stepTimer); stepTimer = null; }));
 });
 async function doStep(dx, dy, repeat) {
-  if (!playMode) return;
+  if (!playMode || playOver) return;   // v3.9: a win/lose freezes movement
   let r;
   try { r = await api("/api/play/step", { dx, dy }); }
   catch (e) { return; }
@@ -1029,6 +1261,7 @@ async function doStep(dx, dy, repeat) {
   heroSwimming = !!r.swim; heroInDeep = !!r.deep;
   render();
   clearTimeout(stepTimer); stepTimer = null;
+  if (await playEvents(r.events)) return;   // v3.9: win/lose ends the walk
   if (repeat && !r.blocked) {
     const wms = RULES.walk_ms;
     const delay = Math.max((r.swim || r.deep) ? wms * RULES.swim_mult : wms, 120);

@@ -386,6 +386,63 @@ DEFAULT_RULES = {"walk_ms": 140,     # hero step delay: 90 fast / 140 normal / 2
 rules = dict(DEFAULT_RULES)
 _current_map = DEFAULT_SAVE
 
+# ---- v3.9: game rules — what makes a build a *game* --------------------------
+# goals (reach X = win), hazards (touch X = lose), key&door pairs, and
+# step-on messages. Live in the same sidecar, under "game".
+game_rules = []  # [{id, kind, ...}]
+_game_seq = {"next": 1}
+
+GAME_KINDS = ("goal", "hazard", "keydoor", "message")
+
+
+def _valid_game_rule(d):
+    """Normalize a submitted game rule; return None if it's nonsense."""
+    if not isinstance(d, dict):
+        return None
+    kind = d.get("kind")
+    if kind not in GAME_KINDS:
+        return None
+    text = str(d.get("text", "")).strip()[:140]
+
+    def _cell(v):
+        return (isinstance(v, (list, tuple)) and len(v) == 2 and
+                all(isinstance(n, int) for n in v))
+
+    def _tid(v):
+        return isinstance(v, int) and v > 0 and v in assets.tiles
+    if kind in ("goal", "message"):
+        x, y = d.get("x"), d.get("y")
+        if not isinstance(x, int) or not isinstance(y, int):
+            return None
+        if not (0 <= x < world.width and 0 <= y < world.height):
+            return None
+        return {"kind": kind, "x": x, "y": y, "text": text}
+    if kind == "hazard":
+        if not _tid(d.get("tile")):
+            return None
+        return {"kind": kind, "tile": int(d["tile"]), "text": text}
+    if kind == "keydoor":
+        if not _tid(d.get("key")) or not _tid(d.get("door")):
+            return None
+        if int(d["key"]) == int(d["door"]):
+            return None
+        return {"kind": kind, "key": int(d["key"]), "door": int(d["door"]),
+                "text": text}
+    return None
+
+
+def _load_game_rules(saved_list):
+    global game_rules
+    game_rules = []
+    _game_seq["next"] = 1
+    for d in saved_list or []:
+        r = _valid_game_rule(d)
+        if r is None:
+            continue
+        r["id"] = _game_seq["next"]
+        _game_seq["next"] += 1
+        game_rules.append(r)
+
 
 def _rules_path(name):
     base = name[:-5] if name.endswith(".json") else name
@@ -393,27 +450,36 @@ def _rules_path(name):
 
 
 def _load_rules(name):
-    """v3.7: read this map's rules sidecar; fall back to defaults."""
+    """v3.7: read this map's rules sidecar; fall back to defaults.
+    v3.9: sidecar v2 is {"tweaks": {...}, "game": [...]}; the old flat
+    {"walk_ms": ...} shape still loads."""
     global rules, _current_map
     _current_map = name
     rules = dict(DEFAULT_RULES)
     try:
         saved = json.load(open(_rules_path(name)))
     except (OSError, ValueError):
+        _load_game_rules([])
         return
-    for k, v in (saved or {}).items():
+    saved = saved or {}
+    if "tweaks" in saved or "game" in saved:
+        tweaks, game = saved.get("tweaks") or {}, saved.get("game") or []
+    else:
+        tweaks, game = saved, []
+    for k, v in tweaks.items():
         if k == "walk_ms" and v in (90, 140, 220):
             rules[k] = v
         elif k == "swim_mult" and v in (2, 3, 4):
             rules[k] = v
         elif k in ("ghost", "touch") and isinstance(v, bool):
             rules[k] = v
+    _load_game_rules(game)
 
 
 def _save_rules(name):
     try:
         with open(_rules_path(name), "w") as f:
-            json.dump(rules, f)  # flat — matches what _load_rules reads
+            json.dump({"tweaks": rules, "game": game_rules}, f)
     except OSError as e:
         print(f"[hud] could not save rules: {e}")
 
@@ -440,6 +506,94 @@ for _tid, _t in assets.tiles.items():
 
 # ---- playtest state (tile-space hero; crumbs_core untouched) ----------------
 play = {"active": False, "tx": 0, "ty": 0}
+
+# ---- v3.9: game-rule session state -------------------------------------------
+# Keys get picked up and doors swing open *during play only* — the world edits
+# are recorded in _rule_mods and reverted when play starts, stops, or saves,
+# so a playtest never permanently changes the build.
+_rule_mods = []    # [(layer, x, y, old_value)]
+_rule_shown = set()  # message-rule ids already delivered this session
+_rule_keys = set()   # keydoor-rule ids already used this session
+_rule_over = None    # None | "win" | "lose"
+
+
+def _revert_rule_mods():
+    for layer, x, y, old in reversed(_rule_mods):
+        try:
+            _grid(layer)[y][x] = old
+        except IndexError:
+            pass
+    _rule_mods.clear()
+
+
+def _reset_rule_session():
+    _revert_rule_mods()
+    _rule_shown.clear()
+    _rule_keys.clear()
+    global _rule_over
+    _rule_over = None
+
+
+def _tile_at_any_layer(x, y):
+    """Tile id under the hero's feet — the objects layer sits on top of the
+    tiles layer, so a key lying on grass reads as the key, not the grass."""
+    try:
+        o = world.object_layer[y][x]
+        if o:
+            return o
+        return world.data[y][x]
+    except IndexError:
+        return None
+
+
+def _clear_tile_everywhere(tid):
+    """Remove every cell painted with tid (tiles + objects layers),
+    recording the edits so play can put them back."""
+    for layer in ("tiles", "objects"):
+        grid = _grid(layer)
+        empty = _default_value(layer)
+        for y in range(world.height):
+            row = grid[y]
+            for x in range(world.width):
+                if row[x] == tid:
+                    _rule_mods.append((layer, x, y, tid))
+                    row[x] = empty
+
+
+def _check_rules(x, y):
+    """Run the build's game rules for the hero arriving at (x, y).
+    Returns [events]; each event is {"t": ..., "text": ...}."""
+    global _rule_over
+    events = []
+    if _rule_over:
+        return events
+    for r in game_rules:
+        kind = r["kind"]
+        if kind == "message":
+            if r["x"] == x and r["y"] == y and r["id"] not in _rule_shown:
+                _rule_shown.add(r["id"])
+                events.append({"t": "message",
+                               "text": r["text"] or "Something catches your eye…"})
+        elif kind == "keydoor":
+            if r["id"] not in _rule_keys and _tile_at_any_layer(x, y) == r["key"]:
+                _rule_keys.add(r["id"])
+                _clear_tile_everywhere(r["key"])
+                _clear_tile_everywhere(r["door"])
+                events.append({"t": "unlock",
+                               "text": r["text"] or "Click — a door swings open!"})
+        elif kind == "goal":
+            if r["x"] == x and r["y"] == y:
+                _rule_over = "win"
+                events.append({"t": "win",
+                               "text": r["text"] or "You made it — you win!"})
+                break
+        elif kind == "hazard":
+            if _tile_at_any_layer(x, y) == r["tile"]:
+                _rule_over = "lose"
+                events.append({"t": "lose",
+                               "text": r["text"] or "Oh no — game over."})
+                break
+    return events
 
 # ---- v3.6 SWIM HOOK ----------------------------------------------------------
 # Deep water is IMPASSABLE until the swim animation exists. When the swim
@@ -721,6 +875,16 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/rules":
             # v3.7: this build's game rules
             self._send_json({"ok": True, "rules": rules})
+        elif path == "/api/game-rules":
+            # v3.9: this build's game rules (goals, hazards, keys, messages)
+            tids = set()
+            for r in game_rules:
+                for k in ("tile", "key", "door"):
+                    if k in r:
+                        tids.add(r[k])
+            names = {str(t): assets.tiles[t]["name"]
+                     for t in tids if t in assets.tiles}
+            self._send_json({"ok": True, "rules": game_rules, "names": names})
         elif path == "/api/status":
             self._send_json({"dirty": _save_state["dirty"],
                              "last_save": _save_state["last"],
@@ -1084,6 +1248,7 @@ class Handler(BaseHTTPRequestHandler):
             name = _safe_name(body.get("filename") or DEFAULT_SAVE)
             if not name.endswith(".json"):
                 name += ".json"
+            _revert_rule_mods()  # v3.9: a playtest never permanently edits the build
             ok = world.save(os.path.join(SCRIPT_DIR, name))
             if ok:
                 _save_rules(name)  # v3.7
@@ -1108,6 +1273,7 @@ class Handler(BaseHTTPRequestHandler):
             sx, sy = _find_spawn()
             play["active"] = True
             play["tx"], play["ty"] = sx, sy
+            _reset_rule_session()  # v3.9: fresh keys, messages, win/lose
             return self._send_json({"ok": True, "x": sx, "y": sy})
 
         if path == "/api/play/move":
@@ -1118,10 +1284,22 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": False, "error": "x/y ints required"}, 400)
             cells, swim, deep = _find_path(play["tx"], play["ty"], x, y,
                                            ghost=rules["ghost"])
+            # v3.9: walk the path step by step on the server — game rules fire
+            # in order, and a win/lose ends the walk where it happens.
+            events = []
+            kept = 0
+            for i, (cx, cy) in enumerate(cells):
+                ev = _check_rules(cx, cy)
+                events.append(ev)
+                kept = i + 1
+                if _rule_over:
+                    break
+            cells = cells[:kept]
             if cells:
                 play["tx"], play["ty"] = cells[-1]
             return self._send_json({"ok": True, "path": [list(c) for c in cells],
-                                    "swim": swim, "deep": deep,
+                                    "swim": swim[:kept], "deep": deep[:kept],
+                                    "events": events,
                                     "x": play["tx"], "y": play["ty"]})
 
         if path == "/api/play/step":
@@ -1137,9 +1315,12 @@ class Handler(BaseHTTPRequestHandler):
             can = in_bounds and (rules["ghost"] or _walkable(nx, ny))
             if can:
                 play["tx"], play["ty"] = nx, ny
+            # v3.9: game rules fire when the hero actually arrives
+            events = _check_rules(play["tx"], play["ty"]) if can else []
             return self._send_json({"ok": True, "x": play["tx"], "y": play["ty"],
                                     "swim": _swim_at(play["tx"], play["ty"]),
                                     "deep": _deep_at(play["tx"], play["ty"]),
+                                    "events": events,
                                     "blocked": not can})
 
         if path == "/api/rules":
@@ -1159,8 +1340,39 @@ class Handler(BaseHTTPRequestHandler):
                 _mark_dirty()  # autosave persists the sidecar
             return self._send_json({"ok": True, "rules": rules})
 
+        if path == "/api/game-rules":
+            # v3.9: the build's game rules — goals, hazards, keys & doors,
+            # messages. {action: "add", rule: {...}} or {action: "delete", id}.
+            action = body.get("action")
+            if action == "add":
+                r = _valid_game_rule(body.get("rule"))
+                if r is None:
+                    return self._send_json({"ok": False,
+                                            "error": "that rule doesn't make sense"}, 400)
+                r["id"] = _game_seq["next"]
+                _game_seq["next"] += 1
+                game_rules.append(r)
+                _save_rules(_current_map)
+                _mark_dirty()
+                return self._send_json({"ok": True, "rule": r,
+                                        "rules": game_rules})
+            if action == "delete":
+                try:
+                    rid = int(body.get("id"))
+                except (TypeError, ValueError):
+                    return self._send_json({"ok": False, "error": "bad id"}, 400)
+                before = len(game_rules)
+                game_rules[:] = [r for r in game_rules if r["id"] != rid]
+                if len(game_rules) == before:
+                    return self._send_json({"ok": False, "error": "not found"}, 404)
+                _save_rules(_current_map)
+                _mark_dirty()
+                return self._send_json({"ok": True, "rules": game_rules})
+            return self._send_json({"ok": False, "error": "action?"}, 400)
+
         if path == "/api/play/stop":
             play["active"] = False
+            _reset_rule_session()  # v3.9: put picked-up keys / opened doors back
             return self._send_json({"ok": True})
 
         if path == "/api/jslog":
@@ -1211,7 +1423,7 @@ if __name__ == "__main__":
     srv = ThreadingHTTPServer((host, PORT), Handler)
     threading.Thread(target=_autosave_loop, daemon=True).start()
     print("=" * 52)
-    print("  Crumbs HUD v3.8 — shared tile library (local vs shared imports)")
+    print("  Crumbs HUD v3.9 — game rules: goals, hazards, keys & doors, messages")
     if public:
         ip = _lan_ip()
         print("  PUBLIC mode: anyone on your Wi-Fi can open the HUD.")

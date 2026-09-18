@@ -241,7 +241,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v4.3</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v4.4</small></span>
 </div>
 
 <div id="menu-dropdown">
@@ -1832,23 +1832,23 @@ function drawNpc(n) {
     ctx.drawImage(im, px, py, tilePx, tilePx);
   }
 }
-// v3.4: the "silo" trick — a back view faked from the front picture. The
-// silhouette of the current frame, filled dark: the back of a hooded guy
-// is basically just hood. Pure canvas compositing, no server smarts.
+// v3.4: the "silo" trick — a back view faked from the front picture.
+// v4.4: the old near-black fill read as a roaming blob on real art — now the
+// sprite just sinks into shadow, so the walker stays recognizable.
 const silCache = {};
 function npcSilhouette(tile_id) {
   const im = tileFrameImage(tile_id);
   if (!im) return null;
   const t = customById[tile_id];
-  const key = tile_id + ":" + (t ? frameIdx(t) : 0);
+  const key = tile_id + ":shade2:" + (t ? frameIdx(t) : 0);
   if (silCache[key]) return silCache[key];
   const c = document.createElement("canvas");
   c.width = im.naturalWidth || 48; c.height = im.naturalHeight || 48;
   const g = c.getContext("2d");
   g.imageSmoothingEnabled = false;
   g.drawImage(im, 0, 0);
-  g.globalCompositeOperation = "source-in";
-  g.fillStyle = "#23232f";
+  g.globalCompositeOperation = "source-atop";
+  g.fillStyle = "rgba(8,8,18,0.62)";
   g.fillRect(0, 0, c.width, c.height);
   silCache[key] = c;
   return c;

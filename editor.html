@@ -175,6 +175,18 @@
   #tile-edit-delete { background: #5c2b2b; border-color: #d76d6d; }
   /* v3.4: patrol tool */
   #btn-patrol.on { border-color: #8a6dd7; color: #c9b8ff; }
+  #btn-select.on { border-color: #4da3ff; color: #bcd6ff; }
+  /* v4.3: the inspector — one row per thing living on the tapped tile */
+  .insp-row { display: flex; align-items: center; gap: 8px; padding: 7px 2px;
+              border-bottom: 1px solid #2a2a30; font-size: 14px; }
+  .insp-row .k { min-width: 86px; color: #9db3ff; font-size: 12px;
+                 text-transform: uppercase; letter-spacing: 0.5px; }
+  .insp-row .v { flex: 1; color: #eee; }
+  .insp-row button { font-size: 13px; padding: 5px 9px; min-height: 0; }
+  .insp-row button.danger { border-color: #a03a3a; color: #ffb3b3; }
+  .insp-traits { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 0; }
+  .insp-traits button { font-size: 13px; padding: 5px 9px; min-height: 0; }
+  .insp-empty { color: #888; padding: 8px 2px; font-size: 14px; }
   #btn-patrol-done { background: #2b4a2b; border-color: #6dd76d; margin-top: 6px; }
   /* v3.5: recording indicator */
   #btn-record.on { border-color: #e5484d; color: #ff8589; animation: recpulse 1.2s infinite; }
@@ -184,7 +196,15 @@
           grid-template-columns: repeat(3, 46px); grid-template-rows: repeat(3, 46px);
           gap: 5px; opacity: 0.8; touch-action: none; }
   #dpad.show { display: grid; }
-  #dpad.dragging { opacity: 1; outline: 2px dashed #4da3ff; outline-offset: 4px; }
+  /* v4.3: grab the handle to drag the pad anywhere — no mode needed */
+  #dpad-grip { position: absolute; top: -14px; right: -8px; width: 30px; height: 30px;
+               display: flex; align-items: center; justify-content: center;
+               background: #1c1c22; border: 1px solid #555; border-radius: 50%;
+               color: #9db3ff; font-size: 15px; cursor: grab; touch-action: none;
+               z-index: 2; }
+  #dpad-grip:active { cursor: grabbing; background: #2a2a35; }
+  /* v4.3: clean screen — hide every play button for recordings */
+  body.clean #dpad.show, body.clean #meters, body.clean #btn-fire { display: none !important; }
   #dpad button { font-size: 18px; padding: 0; min-height: 0; margin: 0;
                  background: rgba(28,28,38,.85); border-radius: 10px; touch-action: none; }
   #dpad button:active { background: #4da3ff; }
@@ -221,7 +241,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v4.2</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v4.3</small></span>
 </div>
 
 <div id="menu-dropdown">
@@ -230,6 +250,8 @@
   <button id="menu-rules" title="Game rules for this build">Rules&hellip;</button>
   <button id="menu-world" title="This world's nature: meters and traits">World&hellip;</button>
   <button id="btn-light" title="Fog/lighting overlay in play mode">Lighting: on</button>
+  <button id="menu-dpad" title="Show or hide the on-screen controls">D-pad: on</button>
+  <button id="menu-clean" title="Hide every play button for a clean screen">Hide buttons</button>
   <button id="btn-undo" title="Undo">Undo</button>
   <button id="btn-redo" title="Redo">Redo</button>
   <hr>
@@ -296,6 +318,7 @@
 
 <aside class="tray" id="tray-right">
   <div class="tray-head">Tools</div>
+  <button id="btn-select" title="Inspect whatever is on a tile">Select</button>
   <button id="btn-eraser" title="Eraser">Eraser</button>
   <button id="btn-patrol" title="Make a character walk a route">Patrol</button>
   <button id="btn-patrol-done" hidden title="Finish this patrol route">Done ✓</button>
@@ -303,6 +326,12 @@
   <button id="btn-link" title="Stamp the selected collision under painted tiles">Stamp collision: off</button>
   <button id="btn-clear" class="danger" title="Clear current layer">Clear layer</button>
 </aside>
+
+<div id="sheet-inspect" class="sheet">
+  <div class="grab"></div>
+  <div class="tray-head">Inspect <span id="inspect-xy" class="tray-hint"></span></div>
+  <div id="inspect-body"></div>
+</div>
 
 <div id="sheet-setup" class="sheet">
   <div class="grab"></div>
@@ -357,7 +386,6 @@
     <button id="rules-touch" title="Show the on-screen controls in play mode">Controls: on</button>
   </div>
   <div class="opt-row">
-    <button id="rules-move" title="Drag the on-screen controls anywhere">&#10022; Move controls</button>
     <button id="rules-defaults" title="Use these rules for maps you generate">&#9733; My defaults</button>
   </div>
   <div><small>Controller: <span id="pad-status">none — press a button on it</span></small></div>
@@ -434,6 +462,7 @@
 </div>
 
 <div id="dpad" aria-label="On-screen movement controls">
+  <div id="dpad-grip" title="drag to move the controls">&#10247;</div>
   <span class="spacer"></span><button data-dx="0" data-dy="-1" title="Up">&#9650;</button><span class="spacer"></span>
   <button data-dx="-1" data-dy="0" title="Left">&#9664;</button><span class="spacer"></span><button data-dx="1" data-dy="0" title="Right">&#9654;</button>
   <span class="spacer"></span><button data-dx="0" data-dy="1" title="Down">&#9660;</button><span class="spacer"></span>
@@ -844,6 +873,7 @@ canvas.addEventListener("pointerdown", e => {
   }
   const cell = evCell(e); if (!cell) return;
   if (playMode) { playTap(cell); return; }
+  if (selectTool) { inspectTap(cell); return; }   // v4.3: the inspector, not paint
   if (patrolTool) { patrolTap(cell); return; }   // v3.4: patrol stops, not paint
   if (ruleDraft) { ruleTap(cell); return; }      // v3.9: binding a game rule
   if (traitTool) { traitTap(cell); return; }    // v4.0: stamping nature
@@ -995,6 +1025,7 @@ $("btn-play").onclick = async () => {
     draftPoints = []; $("btn-patrol-done").hidden = true;
     grCancel();   // v3.9: a half-drafted rule doesn't follow you into play
     traitTool = false; $("btn-traits").classList.remove("on");  // v4.0: stamping rests
+    selectTool = false; $("btn-select").classList.remove("on");  // v4.3: inspecting rests
     syncNature(r);   // v4.0: meters + inventory onto the HUD
     natureTimer = setInterval(natureTick, 2000);   // v4.0: ambient nature
     wxStart();   // v4.1: the sky performs
@@ -1015,7 +1046,6 @@ $("btn-play").onclick = async () => {
     wxStop();   // v4.1: the sky rests
     npcs = [];
     clearTimeout(stepTimer); stepTimer = null;   // v3.7: D-pad repeat stops
-    dpadDrag = false; dpad.classList.remove("dragging");
     updateDpad();   // v3.7: hide the touch controls (pad loop self-stops)
     $("btn-play").classList.remove("on");
     playOver = false; $("end-overlay").hidden = true;   // v3.9
@@ -1029,6 +1059,32 @@ $("btn-light").onclick = () => {
   lightingOn = !lightingOn;
   $("btn-light").textContent = "Lighting: " + (lightingOn ? "on" : "off");
   render();
+};
+
+// ---- v4.3: D-pad show/hide + clean screen -------------------------------------
+// D-pad visibility rides the Controls rule (one truth with the Rules sheet);
+// the clean-screen toggle is a per-device pref for recordings and showing off.
+let uiClean = false;
+try { uiClean = !!(JSON.parse(localStorage.getItem("crumbs_ui") || "{}").clean); } catch (e) {}
+function applyUiClean() {
+  document.body.classList.toggle("clean", uiClean);
+  $("menu-clean").textContent = uiClean ? "Show buttons" : "Hide buttons";
+  $("menu-clean").classList.toggle("on", uiClean);
+}
+function syncMenuDpad() {
+  $("menu-dpad").textContent = "D-pad: " + (RULES.touch ? "on" : "off");
+  $("menu-dpad").classList.toggle("on", RULES.touch);
+}
+$("menu-dpad").onclick = async () => {
+  await setRules({ touch: !RULES.touch });
+  syncMenuDpad(); closeOverlays();
+  toast(RULES.touch ? "D-pad on" : "D-pad hidden — flip it back here any time");
+};
+$("menu-clean").onclick = () => {
+  uiClean = !uiClean;
+  try { localStorage.setItem("crumbs_ui", JSON.stringify({ clean: uiClean })); } catch (e) {}
+  applyUiClean(); closeOverlays();
+  toast(uiClean ? "buttons hidden — tap \u2630 to bring them back" : "buttons back");
 };
 
 // ---- v3.5: screen recording ---------------------------------------------------
@@ -1219,6 +1275,129 @@ async function traitTap(cell) {
   traitGrid[cell.y][cell.x] = traitBrush;
   render();
 }
+
+// ---- v4.3: the inspector -----------------------------------------------------
+// One tap, everything on the tile: ground, object (+ its patrol), collision,
+// trait, and every game rule that touches it — each with its own small lever.
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g,
+    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function tileLabel(id) {
+  if (id == null) return "—";
+  const c = customById[id];
+  if (c) return c.name ? c.name : "custom #" + id;
+  return "tile #" + id;
+}
+const COLL_WORDS = { 1: "solid ⛔", 2: "locked 🔶" };
+const TRAIT_WORDS = { hot: "🔥 hot", cold: "❄️ cold", sharp: "🗡️ sharp", wood: "🪵 wood", food: "🍖 food" };
+function ruleWords(r) {
+  if (r.kind === "goal") return "🏁 goal — you win here";
+  if (r.kind === "message") return "💬 message — “" + (r.text || "") + "”";
+  if (r.kind === "hazard") return "☠️ hazard — " + tileLabel(r.tile) + (r.text ? " · " + r.text : "");
+  if (r.kind === "keydoor") return "🗝️ " + tileLabel(r.key) + " opens " + tileLabel(r.door);
+  return r.kind;
+}
+// Which rules touch a cell? Goals/messages live on it; hazards ride the tile
+// kind under it; key/door rules ride either tile under it.
+function rulesOnCell(x, y) {
+  const tv = tiles[y][x], ov = objects[y][x];
+  return gameRules.filter(r => {
+    if (r.kind === "goal" || r.kind === "message") return r.x === x && r.y === y;
+    if (r.kind === "hazard") return r.tile === tv;
+    if (r.kind === "keydoor") return r.key === tv || r.key === ov || r.door === tv || r.door === ov;
+    return false;
+  });
+}
+function inspectTap(cell) {
+  inspectPos = cell;
+  $("inspect-xy").textContent = "(" + cell.x + ", " + cell.y + ")";
+  renderInspect();
+  toggleOverlay("sheet-inspect");
+}
+function inspRow(k, v, btns) {
+  return '<div class="insp-row"><div class="k">' + k + '</div><div class="v">' + v + '</div>' +
+         (btns || "") + "</div>";
+}
+function renderInspect() {
+  if (!inspectPos) return;
+  const x = inspectPos.x, y = inspectPos.y;
+  const tv = tiles[y][x], ov = objects[y][x], cv = coll[y][x];
+  const tr = (traitGrid[y] && traitGrid[y][x]) || null;
+  let h = "";
+  h += inspRow("tile", esc(tileLabel(tv)), "");
+  if (ov != null) {
+    const p = patrols.find(p => p.tile_id === ov);
+    let v = "🚶 " + esc(tileLabel(ov));
+    if (p) v += '<br><small>patrol — ' + p.points.length + ' stops</small>';
+    let btns = '<button data-act="delobj" class="danger">Remove</button>';
+    if (p) btns += '<button data-act="reroute" data-pid="' + p.id + '">Re-route</button>' +
+                   '<button data-act="delpatrol" data-pid="' + p.id + '" class="danger">End patrol</button>';
+    h += inspRow("object", v, btns);
+  } else {
+    h += inspRow("object", '<span style="color:#777">nothing here</span>', "");
+  }
+  h += inspRow("collision",
+    cv ? esc(COLL_WORDS[cv] || "solid") : '<span style="color:#777">open</span>',
+    cv ? '<button data-act="clearcoll" class="danger">Clear</button>' : "");
+  let th = '<div class="insp-traits">';
+  Object.keys(TRAIT_WORDS).forEach(t => {
+    th += '<button data-act="trait" data-t="' + t + '"' + (tr === t ? ' class="on"' : "") +
+          '>' + TRAIT_WORDS[t] + '</button>';
+  });
+  th += '<button data-act="trait" data-t=""' + (!tr ? ' class="on"' : "") + '>✕ none</button></div>';
+  h += inspRow("trait", (tr ? TRAIT_WORDS[tr] : '<span style="color:#777">none</span>') + th, "");
+  const rs = rulesOnCell(x, y);
+  if (rs.length) {
+    rs.forEach(r => {
+      h += inspRow("rule", esc(ruleWords(r)),
+        '<button data-act="delrule" data-rid="' + r.id + '" class="danger">Delete</button>');
+    });
+  } else {
+    h += inspRow("rules", '<span style="color:#777">no rules touch this tile</span>', "");
+  }
+  const box = $("inspect-body");
+  box.innerHTML = h;
+  box.querySelectorAll("button[data-act]").forEach(b => {
+    b.onclick = () => inspectAction(b.dataset.act, b.dataset);
+  });
+}
+async function inspectAction(act, d) {
+  const x = inspectPos.x, y = inspectPos.y;
+  if (act === "delobj") {
+    const r = await api("/api/paint", { layer: "objects", x, y, tile_id: null });
+    if (!r.ok) { toast("couldn't remove that"); return; }
+    await refresh();
+  } else if (act === "clearcoll") {
+    const r = await api("/api/paint", { layer: "collision", x, y, tile_id: 0 });
+    if (!r.ok) { toast("couldn't clear that"); return; }
+    await refresh();
+  } else if (act === "trait") {
+    const r = await api("/api/traits", { x, y, trait: d.t || null });
+    if (!r.ok) { toast(r.error || "couldn't set that"); return; }
+    await loadTraits();
+  } else if (act === "delrule") {
+    const r = await api("/api/game-rules", { action: "delete", id: +d.rid });
+    if (!r.ok) { toast("couldn't delete that rule"); return; }
+    await loadGameRules();
+  } else if (act === "delpatrol") {
+    await removePatrol(+d.pid);   // reloads patrols + toasts
+  } else if (act === "reroute") {
+    const p = patrols.find(p => p.id === +d.pid);
+    const r = await api("/api/patrols/delete", { id: +d.pid });
+    if (!r.ok) { toast("couldn't lift that patrol"); return; }
+    await loadPatrols();
+    // hand the patrol tool his character and let him re-tap the route
+    if (p) { selTile = p.tile_id; buildPalette(); }
+    selectTool = false; $("btn-select").classList.remove("on");
+    patrolTool = true; $("btn-patrol").classList.add("on");
+    draftPoints = []; $("btn-patrol-done").hidden = true;
+    closeOverlays(); render();
+    toast("tap his new stops, then Done ✓");
+    return;
+  }
+  renderInspect(); render();
+}
 $("btn-traits").onclick = () => {
   traitTool = !traitTool;
   $("btn-traits").classList.toggle("on", traitTool);
@@ -1226,12 +1405,31 @@ $("btn-traits").onclick = () => {
     // one nature tool at a time — the patrol tool rests
     patrolTool = false; $("btn-patrol").classList.remove("on");
     draftPoints = []; $("btn-patrol-done").hidden = true;
+    selectTool = false; $("btn-select").classList.remove("on");   // v4.3
     toggleOverlay("sheet-traits");
   }
 };
 $("trait-clear").onclick = () => {
   traitBrush = null; buildTraitList();
   toast("tap tiles to clear their traits");
+};
+// v4.3: the Select tool — tap anything, inspect and micromanage everything on
+// that tile: the ground, the object, its patrol, collision, trait, and rules.
+let selectTool = false, inspectPos = null;
+$("btn-select").onclick = () => {
+  if (playMode) return;
+  selectTool = !selectTool;
+  $("btn-select").classList.toggle("on", selectTool);
+  if (selectTool) {
+    // one inspection tool at a time — the stamping tools rest
+    patrolTool = false; $("btn-patrol").classList.remove("on");
+    draftPoints = []; $("btn-patrol-done").hidden = true;
+    traitTool = false; $("btn-traits").classList.remove("on");
+    erasing = false; $("btn-eraser").classList.remove("on");
+    closeOverlays();
+    toast("select — tap a tile to see everything living on it");
+  }
+  render();
 };
 let worldWeather = "clear";   // v4.1: what the sky is doing
 async function loadWorld() {
@@ -1432,7 +1630,7 @@ $("gr-save").onclick = async () => {
 
 // ---- on-screen D-pad --------------------------------------------------------
 const dpad = $("dpad");
-let dpadDrag = false, stepTimer = null;
+let stepTimer = null;
 function placeDpad() {
   let p = null;
   try { p = JSON.parse(localStorage.getItem("crumbs_dpad")); } catch (e) {}
@@ -1448,19 +1646,10 @@ function updateDpad() {
   dpad.classList.toggle("show", playMode && RULES.touch);
   placeDpad();
 }
-$("rules-move").onclick = () => {
-  dpadDrag = !dpadDrag;
-  $("rules-move").classList.toggle("on", dpadDrag);
-  dpad.classList.toggle("dragging", dpadDrag);
-  closeOverlays();
-  if (dpadDrag && !playMode) toast("enter Play first, then drag the controls");
-  else toast(dpadDrag ? "drag the controls where you want them — tap \u2725 again when done"
-                      : "controls placed");
-  updateDpad();
-};
-dpad.addEventListener("pointerdown", e => {
-  if (!dpadDrag) return;   // buttons step the hero; the pad itself drags
-  e.preventDefault();
+// v4.3: grab the ⠿ handle and drag the pad anywhere — no mode to enter first
+$("dpad-grip").addEventListener("pointerdown", e => {
+  e.preventDefault(); e.stopPropagation();
+  try { $("dpad-grip").setPointerCapture(e.pointerId); } catch (_) {}
   const ox = e.clientX - dpad.offsetLeft, oy = e.clientY - dpad.offsetTop;
   const mv = ev => {
     dpad.style.left = (ev.clientX - ox) + "px";
@@ -1470,16 +1659,18 @@ dpad.addEventListener("pointerdown", e => {
   const up = () => {
     window.removeEventListener("pointermove", mv);
     window.removeEventListener("pointerup", up);
+    window.removeEventListener("pointercancel", up);
     try { localStorage.setItem("crumbs_dpad",
       JSON.stringify({ x: dpad.offsetLeft, y: dpad.offsetTop })); } catch (err) {}
   };
   window.addEventListener("pointermove", mv);
   window.addEventListener("pointerup", up);
+  window.addEventListener("pointercancel", up);
 });
 dpad.querySelectorAll("button").forEach(b => {
   const dx = +b.dataset.dx, dy = +b.dataset.dy;
   b.addEventListener("pointerdown", e => {
-    if (dpadDrag || !playMode) return;
+    if (!playMode) return;
     e.preventDefault();
     doStep(dx, dy, true);   // tap steps once; hold repeats
   });
@@ -1559,6 +1750,7 @@ $("btn-patrol").onclick = () => {
   $("btn-patrol").classList.toggle("on", patrolTool);
   draftPoints = []; $("btn-patrol-done").hidden = true;
   erasing = false; $("btn-eraser").classList.remove("on");
+  selectTool = false; $("btn-select").classList.remove("on");   // v4.3
   toast(patrolTool ? "patrol — tap the stops he should walk, then Done" : "patrol off");
   render();
 };
@@ -2015,6 +2207,7 @@ $("btn-eraser").onclick = () => {
   // v3.4: patrol tool rests when the eraser takes over
   patrolTool = false; $("btn-patrol").classList.remove("on");
   draftPoints = []; $("btn-patrol-done").hidden = true;
+  selectTool = false; $("btn-select").classList.remove("on");   // v4.3
   toast(erasing ? "eraser on" : "eraser off");
 };
 $("btn-undo").onclick = async () => { const r = await api("/api/undo", {}); if (!r.ok) toast("nothing to undo"); await refresh(); };
@@ -2195,6 +2388,8 @@ async function pollStatus() {
     buildPalette();
     setFile(currentFile);
     await refresh();
+    await refreshRules();   // v4.3: RULES.touch known before first D-pad sync
+    applyUiClean(); syncMenuDpad();
     pollStatus();
     setInterval(pollStatus, 10000);
   } catch (e) {

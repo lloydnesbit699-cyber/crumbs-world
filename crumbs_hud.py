@@ -853,6 +853,15 @@ def _swim_at(tx, ty):
 
 
 def _find_spawn():
+    # v4.9: the crowned hero starts where he stands — the selected PC's
+    # placed instance is the spawn point, so "set as hero" puts YOU there.
+    ht = rules.get("hero_tile")
+    if ht is not None:
+        for y in range(world.height):
+            for x in range(world.width):
+                if (world.object_layer[y][x] == ht and _walkable(x, y)
+                        and not _swim_at(x, y)):
+                    return x, y
     cx, cy = world.width // 2, world.height // 2
     if _walkable(cx, cy) and not _swim_at(cx, cy):
         return cx, cy

@@ -241,7 +241,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v4.8</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v4.9</small></span>
 </div>
 
 <div id="menu-dropdown">
@@ -549,6 +549,7 @@ let currentTheme = "dungeon";       // v3.1: palette shows the map's theme color
 let selByLayer = { tiles: null, objects: null };  // v3.1: remembered brush per layer
 let linkCollision = false;          // v3.1: painting tiles also stamps collision
 let lightingOn = true;              // v3.1: fog/lighting overlay in play mode
+let lightCv = null;                 // v4.9: the darkness lives on its own layer
 const LAYER_HINTS = { tiles: "paint the ground", objects: "things that sit on tiles",
                       collision: "red = solid · amber = locked" };
 let tilePx = 32;
@@ -803,23 +804,23 @@ function render() {
   // object markers
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const oid = objects[y][x];
-    if (oid !== null && oid !== undefined) {
-      const oim = tileFrameImage(oid);   // v3.0: custom tiles work as objects too
-      if (oim) {
-        ctx.fillStyle = "rgba(0,0,0,0.30)";   // v3.1: shadow under art objects
-        ctx.beginPath();
-        ctx.ellipse(x * tilePx + tilePx / 2, y * tilePx + tilePx * 0.88,
-                    tilePx * 0.34, tilePx * 0.13, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.drawImage(oim, x * tilePx, y * tilePx, tilePx, tilePx);
-      } else {
+    if (oid === null || oid === undefined) continue;
+    if (playMode && heroTileId != null && oid === heroTileId) continue;   // v4.9: he walks himself now — no twin left standing at the spawn
+    const oim = tileFrameImage(oid);   // v3.0: custom tiles work as objects too
+    if (oim) {
+      ctx.fillStyle = "rgba(0,0,0,0.30)";   // v3.1: shadow under art objects
+      ctx.beginPath();
+      ctx.ellipse(x * tilePx + tilePx / 2, y * tilePx + tilePx * 0.88,
+                  tilePx * 0.34, tilePx * 0.13, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.drawImage(oim, x * tilePx, y * tilePx, tilePx, tilePx);
+    } else {
       const cx = x * tilePx + tilePx / 2, cy = y * tilePx + tilePx / 2, r = tilePx * 0.28;
       ctx.fillStyle = colorOf[oid] || "#fff";
       ctx.strokeStyle = "#000"; ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r, cy); ctx.lineTo(cx, cy + r); ctx.lineTo(cx - r, cy);
       ctx.closePath(); ctx.fill(); ctx.stroke();
-      }
     }
   }
   // grid lines
@@ -832,20 +833,29 @@ function render() {
   // the hero, so dungeons feel like dungeons.
   // v4.2: the dark listens to the sky — a clear day stays bright, a storm
   // broods. (Fog gets its wash from drawWeather instead.)
+  // v4.9: the dark lives on its own layer. Punching the light pool with
+  // destination-out used to erase the hero and the map along with it,
+  // leaving a black hole where the hero stood.
   const darkFor = { clear: 0.12, rain: 0.35, snow: 0.25, storm: 0.45, fog: 0.20 };
   if (playMode && lightingOn && hero) {
     const hx = hero.x * tilePx + tilePx / 2, hy = hero.y * tilePx + tilePx / 2;
     const lr = tilePx * 4;
-    ctx.save();
-    ctx.fillStyle = "rgba(3,3,14," + (darkFor[worldWeather] ?? 0.62) + ")";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.globalCompositeOperation = "destination-out";
-    const g = ctx.createRadialGradient(hx, hy, tilePx * 0.6, hx, hy, lr);
+    if (!lightCv || lightCv.width !== canvas.width || lightCv.height !== canvas.height) {
+      lightCv = document.createElement("canvas");
+      lightCv.width = canvas.width; lightCv.height = canvas.height;
+    }
+    const d = lightCv.getContext("2d");
+    d.clearRect(0, 0, lightCv.width, lightCv.height);
+    d.fillStyle = "rgba(3,3,14," + (darkFor[worldWeather] ?? 0.62) + ")";
+    d.fillRect(0, 0, lightCv.width, lightCv.height);
+    d.globalCompositeOperation = "destination-out";
+    const g = d.createRadialGradient(hx, hy, tilePx * 0.6, hx, hy, lr);
     g.addColorStop(0, "rgba(0,0,0,1)");
     g.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = g;
-    ctx.beginPath(); ctx.arc(hx, hy, lr, 0, Math.PI * 2); ctx.fill();
-    ctx.restore();
+    d.fillStyle = g;
+    d.beginPath(); d.arc(hx, hy, lr, 0, Math.PI * 2); d.fill();
+    d.globalCompositeOperation = "source-over";
+    ctx.drawImage(lightCv, 0, 0);
   }
   if (playMode && worldWeather !== "clear") drawWeather();  // v4.1: the sky performs
   layout();   // v2.2: re-center + apply pan offset after every draw
@@ -2249,19 +2259,28 @@ $("import-animate").onclick = async () => {
     : "One picture, no problem — I made him walk! Tap the map to place him");
 };
 $("import-add").onclick = async () => {
-  const r = await api("/api/custom-tiles", {
-    name: $("import-name").value.trim().slice(0, 24) || "custom",
-    preset: importPreset,
-    scope: importScope,   // v3.8
-    frame_ms: +$("import-ms").value || 400,
-    frames: importFiles.map(f => f.dataUrl),
-  });
-  if (!r.ok) { toast("import failed: " + (r.error || "unknown")); return; }
+  // v4.9: every picture becomes its own tile — importing three characters
+  // gives you three thumbnails, not one chip with three faces stacked in it.
+  // (Bring-to-life still animates a single picture into a walking character.)
+  const files = importFiles.slice();
+  const base = $("import-name").value.trim().slice(0, 24) || "custom";
   $("import-form").hidden = true; importFiles = [];
+  let made = 0, lastId = null, fail = 0;
+  for (const f of files) {
+    const r = await api("/api/custom-tiles", {
+      name: files.length > 1 ? f.name.slice(0, 24) : base,
+      preset: importPreset,
+      scope: importScope,   // v3.8
+      frame_ms: +$("import-ms").value || 400,
+      frames: [f.dataUrl],
+    });
+    if (r.ok) { made++; lastId = r.tile.id; } else fail++;
+  }
   await loadCustomTiles();
-  selTile = r.tile.id;
-  buildPalette();
-  toast(r.tile.name + " added (" + r.tile.preset + ") — tap the map to place it");
+  if (made) { selTile = lastId; buildPalette(); }
+  toast(made + (made === 1 ? " character" : " characters") + " added" +
+        (fail ? " — " + fail + " failed" : "") +
+        (made ? " — tap the map to place " + (made === 1 ? "it" : "them") : ""));
 };
 
 // ---- v3.3: custom tile manager (rename / change type / delete) ---------------
@@ -2471,10 +2490,13 @@ $("menu-setup").onclick = () => toggleOverlay("sheet-setup");
 $("menu-save").onclick = () => { closeOverlays(); doSave(); };
 $("menu-saveas").onclick = () => { closeOverlays(); doSaveAs(); };
 $("menu-load").onclick = () => { toggleOverlay("sheet-load"); renderLoadList(); };
-// dismiss the menu after any of its action buttons fire
+// dismiss the menu after any of its action buttons fire — but never while a
+// sheet it just opened is still being read (v4.9: Rules/World were flashing
+// open then getting closed 60ms later by this very timer)
 $("menu-dropdown").addEventListener("click", e => {
   const b = e.target.closest("button");
-  if (b && !["menu-setup", "menu-save", "menu-saveas", "menu-load"].includes(b.id)) setTimeout(closeOverlays, 60);
+  if (b && !["menu-setup", "menu-save", "menu-saveas", "menu-load",
+             "menu-rules", "menu-world"].includes(b.id)) setTimeout(closeOverlays, 60);
 });
 
 // ---- v2.0: catch unsaved work before the tab closes ---------------------------

@@ -383,7 +383,8 @@ history = core.HistoryManager()
 DEFAULT_RULES = {"walk_ms": 140,     # hero step delay: 90 fast / 140 normal / 220 slow
                  "swim_mult": 3,     # water slowdown: 2x / 3x / 4x
                  "ghost": False,     # builder noclip: walk through walls
-                 "touch": True}      # show the on-screen controls in play mode
+                 "touch": True,      # show the on-screen controls in play mode
+                 "hero_tile": None}  # v4.8: the chosen PC sprite (inspector assignment)
 rules = dict(DEFAULT_RULES)
 _current_map = DEFAULT_SAVE
 
@@ -677,6 +678,8 @@ def _load_rules(name):
             rules[k] = v
         elif k in ("ghost", "touch") and isinstance(v, bool):
             rules[k] = v
+        elif k == "hero_tile" and (v is None or (isinstance(v, int) and v in assets.tiles)):
+            rules[k] = v   # v4.8: the chosen PC survives reloads
     for k in DEFAULT_WORLD["meters"]:
         if isinstance(wm.get(k), bool):
             world_profile["meters"][k] = wm[k]
@@ -1572,6 +1575,9 @@ class Handler(BaseHTTPRequestHandler):
             for k in ("ghost", "touch"):
                 if isinstance(body.get(k), bool):
                     rules[k] = body[k]; changed = True
+            ht = body.get("hero_tile", "unset")   # v4.8: the inspector's PC pick
+            if ht is None or (isinstance(ht, int) and ht in assets.tiles):
+                rules["hero_tile"] = ht; changed = True
             if changed:
                 _mark_dirty()  # autosave persists the sidecar
             return self._send_json({"ok": True, "rules": rules})

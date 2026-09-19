@@ -241,7 +241,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v4.7</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v4.8</small></span>
 </div>
 
 <div id="menu-dropdown">
@@ -790,6 +790,15 @@ function render() {
         ctx.fillText(String(i + 1), cx, cy);
       });
     }
+    // v4.8: the working selection wears a gold dashed outline on the map
+    const _sel = moveArmed || (selectTool && inspectPos);
+    if (_sel) {
+      ctx.save();
+      ctx.strokeStyle = "#ffd75f"; ctx.lineWidth = Math.max(2, tilePx * 0.08);
+      ctx.setLineDash([tilePx * 0.28, tilePx * 0.16]);
+      ctx.strokeRect(_sel.x * tilePx + 3, _sel.y * tilePx + 3, tilePx - 6, tilePx - 6);
+      ctx.restore();
+    }
   }
   // object markers
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
@@ -891,7 +900,10 @@ canvas.addEventListener("pointerdown", e => {
   }
   const cell = evCell(e); if (!cell) return;
   if (playMode) { playTap(cell); return; }
-  if (selectTool) { inspectTap(cell); return; }   // v4.3: the inspector, not paint
+  if (selectTool) {   // v4.3: the inspector, not paint
+    if (moveArmed) moveTap(cell); else inspectTap(cell);   // v4.8: carrying something
+    return;
+  }
   if (patrolTool) { patrolTap(cell); return; }   // v3.4: patrol stops, not paint
   if (ruleDraft) { ruleTap(cell); return; }      // v3.9: binding a game rule
   if (traitTool) { traitTap(cell); return; }    // v4.0: stamping nature
@@ -1168,7 +1180,7 @@ async function finishRecording() {
 // Rules live per build (server sidecar) + per user (localStorage defaults).
 // Movement: tap-to-walk, on-screen D-pad (draggable), or a real controller
 // (Bluetooth/wired via the Gamepad API — iOS Safari 10.3+).
-let RULES = { walk_ms: 140, swim_mult: 3, ghost: false, touch: true };
+let RULES = { walk_ms: 140, swim_mult: 3, ghost: false, touch: true, hero_tile: null };
 async function refreshRules() {
   try {
     const r = await api("/api/rules");
@@ -1176,6 +1188,13 @@ async function refreshRules() {
   } catch (e) { /* offline — keep last known */ }
   syncRulesSheet();
   updateDpad();
+  resolveHero();   // v4.8: the saved PC pick applies
+}
+// v4.8: the inspector's PC pick wins; otherwise the old name-guess
+function resolveHero() {
+  if (RULES.hero_tile != null) { heroTileId = RULES.hero_tile; return; }
+  const ht = spriteTiles.find(t => /hero/i.test(t.name));
+  heroTileId = ht ? ht.id : null;
 }
 function syncRulesSheet() {
   document.querySelectorAll("#rules-walk button").forEach(b =>
@@ -1194,6 +1213,7 @@ async function setRules(patch) {
   } catch (e) { toast("couldn't reach server"); }
   syncRulesSheet();
   updateDpad();
+  resolveHero();   // v4.8: keep the PC pick in sync
 }
 $("menu-rules").onclick = () => { refreshRules(); loadGameRules(); toggleOverlay("sheet-rules"); };
 document.querySelectorAll("#rules-walk button").forEach(b =>
@@ -1345,6 +1365,20 @@ function inspectTap(cell) {
   renderInspect();
   toggleOverlay("sheet-inspect");
 }
+// v4.8: the working selection walks to a new cell
+async function moveTap(cell) {
+  const m = moveArmed; moveArmed = null;
+  if (!m) return;
+  if (cell.x === m.x && cell.y === m.y) { render(); return; }   // set back down
+  if (objects[cell.y][cell.x] != null) { toast("something's already there"); render(); return; }
+  const r1 = await api("/api/paint", { layer: "objects", x: m.x, y: m.y, tile_id: null });
+  const r2 = await api("/api/paint", { layer: "objects", x: cell.x, y: cell.y, tile_id: m.tile });
+  if (!r1.ok || !r2.ok) { toast("couldn't move him"); await refresh(); render(); return; }
+  await refresh();
+  inspectPos = { x: cell.x, y: cell.y };   // the selection follows him
+  renderInspect(); render();
+  toast("moved");
+}
 function inspRow(k, v, btns) {
   return '<div class="insp-row"><div class="k">' + k + '</div><div class="v">' + v + '</div>' +
          (btns || "") + "</div>";
@@ -1359,10 +1393,14 @@ function renderInspect() {
   if (ov != null) {
     const p = patrols.find(p => p.tile_id === ov);
     const said = gameRules.find(r => r.kind === "message" && r.tile === ov);
+    const isHero = heroTileId != null && ov === heroTileId;
     let v = "🚶 " + esc(tileLabel(ov));
+    if (isHero) v += '<br><small>⭐ your hero — the PC</small>';
     if (p) v += '<br><small>patrol — ' + p.points.length + ' stops</small>';
     if (said) v += '<br><small>💬 “' + esc(said.text) + '”</small>';
     let btns = '<button data-act="delobj" class="danger">Remove</button>';
+    btns += '<button data-act="move">' + (moveArmed ? "Cancel move" : "Move") + "</button>";
+    if (!isHero) btns += '<button data-act="sethero">Set as hero</button>';
     if (p) btns += '<button data-act="reroute" data-pid="' + p.id + '">Re-route</button>' +
                    '<button data-act="delpatrol" data-pid="' + p.id + '" class="danger">End patrol</button>';
     else btns += '<button data-act="givepatrol">Give patrol</button>';
@@ -1418,6 +1456,19 @@ async function inspectAction(act, d) {
     await loadGameRules();
   } else if (act === "delpatrol") {
     await removePatrol(+d.pid);   // reloads patrols + toasts
+  } else if (act === "move") {
+    // v4.8: arm the working selection — the next tap is his new home
+    if (moveArmed) { moveArmed = null; toast("move cancelled"); }
+    else { moveArmed = { x, y, tile: ov }; toast("tap where he goes"); }
+    renderInspect(); render();
+    return;
+  } else if (act === "sethero") {
+    // v4.8: this one is you — the PC, unmistakable in play mode
+    const r = await api("/api/rules", { hero_tile: ov });
+    if (!r.ok) { toast("couldn't crown him"); return; }
+    RULES = r.rules; resolveHero();
+    renderInspect(); render();
+    toast("he's you now");
   } else if (act === "settext" || act === "edittext") {
     // v4.6: words for the character — the little editor opens under the rows
     const rid = +(d.rid || 0);
@@ -1495,9 +1546,11 @@ $("trait-clear").onclick = () => {
 // v4.3: the Select tool — tap anything, inspect and micromanage everything on
 // that tile: the ground, the object, its patrol, collision, trait, and rules.
 let selectTool = false, inspectPos = null;
+let moveArmed = null;   // v4.8: {x, y, tile} — the working selection, waiting for a destination
 $("btn-select").onclick = () => {
   if (playMode) return;
   selectTool = !selectTool;
+  moveArmed = null;   // v4.8: leaving Select drops whatever you were carrying
   $("btn-select").classList.toggle("on", selectTool);
   if (selectTool) {
     // one inspection tool at a time — the stamping tools rest
@@ -2462,8 +2515,7 @@ async function pollStatus() {
       im.src = "/api/thumb/" + t.id;
       thumbImg[t.id] = im;
     });
-    const ht = spriteTiles.find(t => /hero/i.test(t.name));
-    if (ht) heroTileId = ht.id;   // v3.0: play-mode hero walks as a sprite
+    resolveHero();   // v4.8: saved PC pick wins, else the /hero/i name-guess
     await loadCustomTiles();      // v3.0: imported tiles before first render
     await loadPatrols();          // v3.4: patrol routes back
     await loadTraits();           // v4.0: nature traits before first render

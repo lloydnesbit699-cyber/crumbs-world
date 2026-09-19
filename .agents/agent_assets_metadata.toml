@@ -1,0 +1,16 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "ZAd728upAyHd_0ZVFLv0_"
+uri = "file://attached_assets/generated_videos/crumbs-hud-demo.mp4"
+type = "video"
+title = "Crumbs HUD animated demo"
+description = "A 28-second 720p landscape product demo for Crumbs HUD, showing the dungeon map editor, painting, layered design, and Play mode."
+logical_id = "63b08136-7235-4e58-bd11-212609439a02"
+content_hash = "sha256:0addde5c64636edace9dfbdafbb32562270dc8c30bf08cc1cad6f31d909efdd6"
+size = 4253881
+mtime_ms = 1789802575012
+storage_uri = "gcs://replit-rams-assets-reed/rams/assets/repl:79e92949-4e1e-4b3b-9f0f-056dc1c73171/63b08136-7235-4e58-bd11-212609439a02/b9548dbe-0cd8-48c6-84cf-b1d039466b4d"
+storage_version_token = "1789802581929415"
+content_type = "video/mp4"

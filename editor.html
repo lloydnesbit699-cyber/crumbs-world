@@ -34,6 +34,10 @@
   #menu-btn { font-size: 20px; padding: 4px 12px; min-height: 0; line-height: 1.4; }
   #title { font-size: 15px; font-weight: 600; }
   #title small { color: #888; font-weight: normal; font-size: 11px; }
+  /* v5.0: undo/redo live on the top bar — thumb-sized, always in reach */
+  #topbar-undo { margin-left: auto; display: flex; gap: 8px; }
+  #topbar-undo button { font-size: 22px; padding: 6px 14px; min-height: 40px;
+                        min-width: 52px; line-height: 1; }
 
   #menu-dropdown { position: fixed; top: 52px; right: 8px; z-index: 60; background: #222;
                    border: 1px solid #444; border-radius: 12px; padding: 6px;
@@ -241,7 +245,11 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v4.9</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v5.0</small></span>
+  <span id="topbar-undo">
+    <button id="btn-undo2" title="Undo">&#8617;</button>
+    <button id="btn-redo2" title="Redo">&#8618;</button>
+  </span>
 </div>
 
 <div id="menu-dropdown">
@@ -596,6 +604,9 @@ let playMode = false, hero = null, heroTimer = null, heroSwimming = false;   // 
 let heroInDeep = false;   // v3.6 SWIM HOOK: true on deep-water steps (only once SWIM_UNLOCKED flips server-side)
 // v3.4: patrol NPCs — routes from the server, live walkers in play mode
 let patrolTool = false, draftPoints = [], patrols = [], npcs = [], npcTimer = null;
+let patrolAnchor = null;   // v5.0: {x, y} — the placed character this route is assigned to
+let rerouteId = null;      // v5.0: patrol id being re-routed (replaced on Done)
+let walkingAnchors = new Set();  // v5.0: "x,y" cells whose placed character is walking in play mode
 
 async function api(path, body) {
   // v1.4: iOS freezes the server when a-Shell backgrounds; a fetch that dies
@@ -634,6 +645,32 @@ async function refresh() {
     const t = customById[tiles[y][x]];
     if (t && t.frames > 1) animOnMap.add(tiles[y][x]);
   }
+  render();
+}
+
+// v5.0: the seed's own ground per cell — what the eraser restores.
+// Fetched after generate/resize/load/undo/redo; the erase preview paints
+// from this cache and the server re-resolves on pointer-up.
+let naturalGrid = [];
+async function loadNatural() {
+  try {
+    const r = await api("/api/natural");
+    if (r.ok && r.natural) naturalGrid = r.natural;
+  } catch (e) { /* offline — keep last known */ }
+}
+
+// v5.0: undo/redo can change everything — map, patrols, traits, rules,
+// game rules, world, seed — so reload the whole design state.
+async function refreshAll() {
+  moveArmed = null;
+  await refresh();
+  await loadNatural();
+  try { await loadPatrols(); } catch (e) {}
+  await loadTraits();
+  await refreshRules();
+  await loadGameRules();
+  await loadWorld();
+  renderInspect();
   render();
 }
 
@@ -765,12 +802,16 @@ function render() {
     ctx.restore();
   }
   // v3.4: patrol NPCs — moving walkers in play mode, standing figures + routes
-  // while editing
+  // while editing. v5.0: assigned patrols don't draw a standing figure — the
+  // placed character is already on the map; only anchorless (pre-v5.0)
+  // patrols draw their figure so the route stays visible.
   if (playMode) {
     npcs.forEach(drawNpc);
   } else {
-    patrols.forEach(p => drawNpc({ tile_id: p.tile_id,
-      x: p.points[0][0], y: p.points[0][1], flip: false }));
+    patrols.forEach(p => {
+      if (p.x != null && p.y != null) return;
+      drawNpc({ tile_id: p.tile_id, x: p.points[0][0], y: p.points[0][1], flip: false });
+    });
     if (patrolTool) {
       patrols.forEach(p => {
         ctx.strokeStyle = "rgba(150,140,255,0.5)"; ctx.lineWidth = 2;
@@ -806,6 +847,7 @@ function render() {
     const oid = objects[y][x];
     if (oid === null || oid === undefined) continue;
     if (playMode && heroTileId != null && oid === heroTileId) continue;   // v4.9: he walks himself now — no twin left standing at the spawn
+    if (playMode && walkingAnchors.has(x + "," + y)) continue;   // v5.0: he's walking his patrol — the npc draws him, no twin at the anchor
     const oim = tileFrameImage(oid);   // v3.0: custom tiles work as objects too
     if (oim) {
       ctx.fillStyle = "rgba(0,0,0,0.30)";   // v3.1: shadow under art objects
@@ -872,7 +914,9 @@ function evCell(e) {
 function brushValue() {
   if (layer === "collision") return erasing ? false : selCollide;
   if (layer === "objects")   return erasing ? null  : selTile;
-  return erasing ? 0 : selTile;
+  // v5.0: the eraser sends "natural" — the server restores the seed's own
+  // ground for each cell instead of a fixed tile 0.
+  return erasing ? "natural" : selTile;
 }
 function localGrid() { return layer === "objects" ? objects : layer === "collision" ? coll : tiles; }
 
@@ -880,8 +924,14 @@ function strokeAdd(cell) {
   const key = cell.x + "," + cell.y;
   if (stroke.cells.has(key)) return;
   const bv = brushValue();
+  // v5.0: the erase preview paints the seed's ground from the cache
+  // (the server re-resolves on pointer-up, so undo stays exact).
+  const pv = (bv === "natural")
+    ? ((naturalGrid[cell.y] && naturalGrid[cell.y][cell.x] != null)
+       ? naturalGrid[cell.y][cell.x] : tiles[cell.y][cell.x])
+    : bv;
   stroke.cells.set(key, { x: cell.x, y: cell.y, tile_id: bv });
-  localGrid()[cell.y][cell.x] = bv;   // optimistic preview
+  localGrid()[cell.y][cell.x] = pv;   // optimistic preview
   // v3.1: "stamp collision" — painting a solid wall stamps its collision too
   if (linkCollision && layer !== "collision" && !erasing) {
     coll[cell.y][cell.x] = selCollide;
@@ -1061,8 +1111,7 @@ $("btn-play").onclick = async () => {
     playMode = true; hero = { x: r.x, y: r.y };
     erasing = false; $("btn-eraser").classList.remove("on");   // v3.1: the eraser
     // v3.4: patrol tool rests during play; NPCs start walking their routes
-    patrolTool = false; $("btn-patrol").classList.remove("on");
-    draftPoints = []; $("btn-patrol-done").hidden = true;
+    cancelPatrol();
     grCancel();   // v3.9: a half-drafted rule doesn't follow you into play
     traitTool = false; $("btn-traits").classList.remove("on");  // v4.0: stamping rests
     selectTool = false; $("btn-select").classList.remove("on");  // v4.3: inspecting rests
@@ -1381,10 +1430,11 @@ async function moveTap(cell) {
   if (!m) return;
   if (cell.x === m.x && cell.y === m.y) { render(); return; }   // set back down
   if (objects[cell.y][cell.x] != null) { toast("something's already there"); render(); return; }
-  const r1 = await api("/api/paint", { layer: "objects", x: m.x, y: m.y, tile_id: null });
-  const r2 = await api("/api/paint", { layer: "objects", x: cell.x, y: cell.y, tile_id: m.tile });
-  if (!r1.ok || !r2.ok) { toast("couldn't move him"); await refresh(); render(); return; }
+  // v5.0: one call, one undo step — his patrol route moves with him too.
+  const r = await api("/api/move", { fx: m.x, fy: m.y, tx: cell.x, ty: cell.y });
+  if (!r.ok) { toast("couldn't move him"); await refresh(); render(); return; }
   await refresh();
+  await loadPatrols();
   inspectPos = { x: cell.x, y: cell.y };   // the selection follows him
   renderInspect(); render();
   toast("moved");
@@ -1401,7 +1451,10 @@ function renderInspect() {
   let h = "";
   h += inspRow("tile", esc(tileLabel(tv)), "");
   if (ov != null) {
-    const p = patrols.find(p => p.tile_id === ov);
+    // v5.0: the patrol belongs to THIS placed character (anchor match);
+    // anchorless patrols from before v5.0 still match by tile.
+    const p = patrols.find(p => (p.x != null && p.x === x && p.y === y) ||
+                                (p.x == null && p.tile_id === ov));
     const said = gameRules.find(r => r.kind === "message" && r.tile === ov);
     const isHero = heroTileId != null && ov === heroTileId;
     let v = "🚶 " + esc(tileLabel(ov));
@@ -1449,9 +1502,10 @@ function renderInspect() {
 async function inspectAction(act, d) {
   const x = inspectPos.x, y = inspectPos.y, ov = objects[y][x];
   if (act === "delobj") {
-    const r = await api("/api/paint", { layer: "objects", x, y, tile_id: null });
+    // v5.0: lifting him ends his patrol too — one undo step.
+    const r = await api("/api/remove-object", { x, y });
     if (!r.ok) { toast("couldn't remove that"); return; }
-    await refresh();
+    await refresh(); await loadPatrols();
   } else if (act === "clearcoll") {
     const r = await api("/api/paint", { layer: "collision", x, y, tile_id: 0 });
     if (!r.ok) { toast("couldn't clear that"); return; }
@@ -1493,27 +1547,26 @@ async function inspectAction(act, d) {
     if (!r.ok) { toast("couldn't clear that"); return; }
     await loadGameRules();
   } else if (act === "givepatrol") {
-    // v4.6: the placed character becomes the walker — lift him off the map,
-    // hand the patrol tool his tile, and start his route where he stood.
-    const r = await api("/api/paint", { layer: "objects", x, y, tile_id: null });
-    if (!r.ok) { toast("couldn't lift him"); return; }
-    await refresh();
-    selTile = ov; buildPalette();
+    // v5.0: the patrol is ASSIGNED to him — he stays on the map, the route
+    // is anchored to the cell he stands on. No more lifting.
     selectTool = false; $("btn-select").classList.remove("on");
     patrolTool = true; $("btn-patrol").classList.add("on");
+    patrolAnchor = { x, y }; rerouteId = null;
     draftPoints = [[x, y]]; $("btn-patrol-done").hidden = true;
+    selTile = ov; buildPalette();
     closeOverlays(); render();
     toast("tap where he should walk, then Done ✓");
     return;
   } else if (act === "reroute") {
+    // v5.0: re-route without deleting first — the old route is replaced
+    // atomically when Done is tapped, as one undo step.
     const p = patrols.find(p => p.id === +d.pid);
-    const r = await api("/api/patrols/delete", { id: +d.pid });
-    if (!r.ok) { toast("couldn't lift that patrol"); return; }
-    await loadPatrols();
-    // hand the patrol tool his character and let him re-tap the route
-    if (p) { selTile = p.tile_id; buildPalette(); }
+    if (!p) { toast("that patrol is gone"); return; }
     selectTool = false; $("btn-select").classList.remove("on");
     patrolTool = true; $("btn-patrol").classList.add("on");
+    rerouteId = p.id;
+    patrolAnchor = (p.x != null && p.y != null) ? { x: p.x, y: p.y } : null;
+    if (p.tile_id != null) { selTile = p.tile_id; buildPalette(); }
     draftPoints = []; $("btn-patrol-done").hidden = true;
     closeOverlays(); render();
     toast("tap his new stops, then Done ✓");
@@ -1543,8 +1596,7 @@ $("btn-traits").onclick = () => {
   $("btn-traits").classList.toggle("on", traitTool);
   if (traitTool) {
     // one nature tool at a time — the patrol tool rests
-    patrolTool = false; $("btn-patrol").classList.remove("on");
-    draftPoints = []; $("btn-patrol-done").hidden = true;
+    cancelPatrol();
     selectTool = false; $("btn-select").classList.remove("on");   // v4.3
     toggleOverlay("sheet-traits");
   }
@@ -1564,8 +1616,7 @@ $("btn-select").onclick = () => {
   $("btn-select").classList.toggle("on", selectTool);
   if (selectTool) {
     // one inspection tool at a time — the stamping tools rest
-    patrolTool = false; $("btn-patrol").classList.remove("on");
-    draftPoints = []; $("btn-patrol-done").hidden = true;
+    cancelPatrol();
     traitTool = false; $("btn-traits").classList.remove("on");
     erasing = false; $("btn-eraser").classList.remove("on");
     closeOverlays();
@@ -1897,20 +1948,41 @@ async function loadPatrols() {
   const r = await api("/api/patrols");
   patrols = r.patrols || [];
 }
+// v5.0: a patrol is ASSIGNED to a placed character — it never spawns one.
+// First tap picks the character the route belongs to, then tap his stops.
+function cancelPatrol() {
+  patrolTool = false; $("btn-patrol").classList.remove("on");
+  draftPoints = []; patrolAnchor = null; rerouteId = null;
+  $("btn-patrol-done").hidden = true;
+}
 $("btn-patrol").onclick = () => {
   if (playMode) return;
   patrolTool = !patrolTool;
   $("btn-patrol").classList.toggle("on", patrolTool);
-  draftPoints = []; $("btn-patrol-done").hidden = true;
+  draftPoints = []; patrolAnchor = null; rerouteId = null;  // v5.0: cancel drops the re-route too
+  $("btn-patrol-done").hidden = true;
   erasing = false; $("btn-eraser").classList.remove("on");
   selectTool = false; $("btn-select").classList.remove("on");   // v4.3
-  toast(patrolTool ? "patrol — tap the stops he should walk, then Done" : "patrol off");
+  toast(patrolTool ? "patrol — tap one of your placed characters first, then his stops, then Done" : "patrol off");
   render();
 };
 function patrolTap(cell) {
-  if (!draftPoints.length) {
-    const hit = patrols.find(p => p.points[0][0] === cell.x && p.points[0][1] === cell.y);
-    if (hit && confirm("Remove this patrol?")) { removePatrol(hit.id); return; }
+  const ov = objects[cell.y] && objects[cell.y][cell.x];
+  if (!patrolAnchor && rerouteId == null) {
+    // no character chosen yet — this tap picks him (or removes a patrol)
+    if (ov == null) {
+      const hit = patrols.find(p => p.points[0][0] === cell.x && p.points[0][1] === cell.y);
+      if (hit && confirm("Remove this patrol?")) { removePatrol(hit.id); return; }
+      toast("tap one of your placed characters first — the patrol belongs to him");
+      return;
+    }
+    patrolAnchor = { x: cell.x, y: cell.y };
+    selTile = ov; buildPalette();
+    draftPoints = [[cell.x, cell.y]];
+    $("btn-patrol-done").hidden = true;
+    toast("he's got it — tap where he should walk, then Done ✓");
+    render();
+    return;
   }
   if (draftPoints.length >= 8) { toast("that's enough stops — tap Done"); return; }
   draftPoints.push([cell.x, cell.y]);
@@ -1918,12 +1990,21 @@ function patrolTap(cell) {
   render();
 }
 $("btn-patrol-done").onclick = async () => {
-  if (draftPoints.length < 2 || selTile == null) return;
-  const r = await api("/api/patrols/create", { tile_id: selTile, points: draftPoints });
+  if (draftPoints.length < 2 || selTile == null || !patrolAnchor) return;
+  // v5.0: the route is assigned to the character at the anchor — picked by
+  // tapping him (or via Give patrol / Re-route). The server rejects the call
+  // when he isn't there, so a failed tap never touches the old route.
+  const body = { tile_id: selTile, x: patrolAnchor.x, y: patrolAnchor.y,
+                 points: draftPoints };
+  const wasReroute = rerouteId != null;
+  if (wasReroute) body.replace_id = rerouteId;
+  const r = await api("/api/patrols/create", body);
   if (!r.ok) { toast("patrol failed: " + (r.error || "unknown")); return; }
-  draftPoints = []; $("btn-patrol-done").hidden = true;
-  await loadPatrols(); render();
-  toast("he's on patrol — hit Play to watch him walk it");
+  draftPoints = []; patrolAnchor = null; rerouteId = null;
+  $("btn-patrol-done").hidden = true;
+  patrolTool = false; $("btn-patrol").classList.remove("on");
+  await refresh(); await loadPatrols(); render();
+  toast(wasReroute ? "his route is updated" : "he's on patrol — hit Play to watch him walk it");
 };
 async function removePatrol(id) {
   await api("/api/patrols/delete", { id });
@@ -1931,21 +2012,38 @@ async function removePatrol(id) {
   toast("patrol removed");
 };
 // NPC walkers: legs ride the server pathfinder, concatenated into a loop
+// NPC walkers: legs ride the server pathfinder, concatenated into a loop.
+// v5.0: a patrol is ASSIGNED to a placed character — the walker IS the
+// character standing at the patrol's anchor, not a separately spawned NPC.
+// Patrols from before v5.0 have no anchor and keep the old spawn behavior.
 async function buildNpcs() {
   npcs = [];
+  walkingAnchors = new Set();
   if (!patrols.length) return;
   const legs = [];
+  const starts = [];
   patrols.forEach((p, pi) => {
-    for (let i = 0; i < p.points.length; i++)
-      legs.push({ pi, from: p.points[i], to: p.points[(i + 1) % p.points.length] });
+    let way = p.points;
+    let sx = p.points[0][0], sy = p.points[0][1];
+    if (p.x != null && p.y != null) {
+      const oid = objects[p.y] && objects[p.y][p.x];
+      if (oid !== p.tile_id) return;   // his character is gone — the patrol waits
+      way = [[p.x, p.y], ...p.points];
+      sx = p.x; sy = p.y;
+      walkingAnchors.add(p.x + "," + p.y);
+    }
+    starts[pi] = { x: sx, y: sy, tile_id: p.tile_id };
+    for (let i = 0; i < way.length; i++)
+      legs.push({ pi, from: way[i], to: way[(i + 1) % way.length] });
   });
   const r = await api("/api/patrol-paths", { legs: legs.map(l => [l.from, l.to]) });
   const paths = (r && r.paths) || [];
   patrols.forEach((p, pi) => {
+    if (!starts[pi]) return;
     const loop = [];
     legs.forEach((l, li) => { if (l.pi === pi && paths[li] && paths[li].length) loop.push(...paths[li]); });
-    if (loop.length) npcs.push({ tile_id: p.tile_id, loop, seg: 0,
-      x: p.points[0][0], y: p.points[0][1], flip: false, away: false });
+    if (loop.length) npcs.push({ tile_id: starts[pi].tile_id, loop, seg: 0,
+      x: starts[pi].x, y: starts[pi].y, flip: false, away: false });
   });
 }
 function npcTick(dt) {
@@ -2372,13 +2470,27 @@ $("btn-eraser").onclick = () => {
   erasing = !erasing;
   $("btn-eraser").classList.toggle("on", erasing);
   // v3.4: patrol tool rests when the eraser takes over
-  patrolTool = false; $("btn-patrol").classList.remove("on");
-  draftPoints = []; $("btn-patrol-done").hidden = true;
+    cancelPatrol();
   selectTool = false; $("btn-select").classList.remove("on");   // v4.3
   toast(erasing ? "eraser on" : "eraser off");
 };
-$("btn-undo").onclick = async () => { const r = await api("/api/undo", {}); if (!r.ok) toast("nothing to undo"); await refresh(); };
-$("btn-redo").onclick = async () => { const r = await api("/api/redo", {}); if (!r.ok) toast("nothing to redo"); await refresh(); };
+// v5.0: undo/redo are top-bar citizens now — one pair of functions drives
+// the top-bar buttons and the menu copies, and refreshAll() reloads every
+// aspect of the design they can change.
+async function doUndo() {
+  const r = await api("/api/undo", {});
+  if (!r.ok) toast("nothing to undo");
+  await refreshAll();
+}
+async function doRedo() {
+  const r = await api("/api/redo", {});
+  if (!r.ok) toast("nothing to redo");
+  await refreshAll();
+}
+$("btn-undo").onclick = doUndo;
+$("btn-redo").onclick = doRedo;
+$("btn-undo2").onclick = doUndo;
+$("btn-redo2").onclick = doRedo;
 $("btn-clear").onclick = async () => {
   if (!confirm("Clear the " + layer + " layer? (undoable)")) return;
   await api("/api/clear_layer", { layer }); await refresh(); toast("layer cleared");
@@ -2398,6 +2510,7 @@ $("btn-gen").onclick = async () => {
     await refresh();
     await loadTraits();   // v4.0: fresh build, fresh nature
     await loadWorld();    // v4.0: fresh build, default meters
+    await loadNatural();  // v5.0: the seed's ground for the eraser
     // v3.1: the palette follows the generated biome
     currentTheme = r.biome || "dungeon"; $("theme-sel").value = currentTheme;
     if (layer === "tiles") { selTile = defaultBrush("tiles"); selByLayer.tiles = selTile; }
@@ -2438,7 +2551,7 @@ async function renderLoadList() {
       if (f === currentFile) b.classList.add("cur");
       b.onclick = async () => {
         const r = await api("/api/load", { filename: f });
-        if (r.ok) { setFile(f); panX = 0; panY = 0; await refresh(); await refreshRules(); await loadWorld(); closeOverlays(); toast("loaded " + f); }
+        if (r.ok) { setFile(f); panX = 0; panY = 0; await refresh(); await refreshRules(); await loadWorld(); await loadNatural(); await loadPatrols(); closeOverlays(); toast("loaded " + f); }
         else toast("load failed: " + (r.error || ""));
       };
       list.appendChild(b);
@@ -2447,7 +2560,7 @@ async function renderLoadList() {
 }
 $("btn-resize").onclick = async () => {
   const r = await api("/api/resize", { width: parseInt($("rw").value, 10), height: parseInt($("rh").value, 10) });
-  if (r.ok) { panX = 0; panY = 0; await refresh(); toast("resized " + r.width + "x" + r.height + " \u2014 map kept"); }
+  if (r.ok) { panX = 0; panY = 0; await refresh(); await loadNatural(); toast("resized " + r.width + "x" + r.height + " \u2014 map kept"); }
 };
 // v1.8: stop the server from the page — saves first, then your a-Shell prompt comes back
 $("btn-stop").onclick = async () => {
@@ -2541,6 +2654,7 @@ async function pollStatus() {
     await loadCustomTiles();      // v3.0: imported tiles before first render
     await loadPatrols();          // v3.4: patrol routes back
     await loadTraits();           // v4.0: nature traits before first render
+    await loadNatural();          // v5.0: the seed's ground for the eraser
     document.querySelector('#collide-palette .sw[data-cv="1"]').classList.add("sel");
     // v3.1: theme selector — the palette follows the map's theme
     ["dungeon", ...BIOME_ORDER.filter(b => b !== "dungeon"), "core"].forEach(th => {

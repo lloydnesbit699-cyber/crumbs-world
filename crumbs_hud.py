@@ -56,6 +56,7 @@ import json
 import io
 import os
 import base64
+import copy
 import random
 import socket
 import sys
@@ -538,6 +539,92 @@ def _trait_at(x, y):
         return traits_grid[y][x]
     return None
 
+
+# ---- v5.0: universal undo/redo -------------------------------------------
+# The map layers already had history; everything else (patrols, nature
+# traits, rules, game rules, world profile, map seed) lived outside it.
+# _snapshot_state grabs the whole design state, _restore_state puts it back
+# and persists the sidecars, and _undoable wraps any mutation as ONE step.
+map_meta = {"biome": None, "seed": None}  # v5.0: what seed built this map
+
+
+def _snapshot_state():
+    return {
+        "width": world.width, "height": world.height,  # v5.0: resize undoes too
+        "tiles": [row[:] for row in world.data],
+        "objects": [row[:] for row in world.object_layer],
+        "collision": [row[:] for row in world.collision_layer],
+        "patrols": copy.deepcopy(_patrols),
+        "patrol_seq": copy.deepcopy(_patrol_seq),  # v5.0: was a live ref — undo skipped IDs
+        "traits": copy.deepcopy(traits_grid),
+        "rules": copy.deepcopy(rules),
+        "game_rules": copy.deepcopy(game_rules),
+        "game_seq": copy.deepcopy(_game_seq),
+        "world": copy.deepcopy(world_profile),
+        "meta": copy.deepcopy(map_meta),
+    }
+
+
+def _restore_state(s):
+    global _patrols, _patrol_seq, traits_grid, rules, game_rules
+    global _game_seq, map_meta
+    world.width, world.height = s["width"], s["height"]
+    world.data = [row[:] for row in s["tiles"]]
+    world.object_layer = [row[:] for row in s["objects"]]
+    world.collision_layer = [row[:] for row in s["collision"]]
+    _patrols = copy.deepcopy(s["patrols"])
+    _patrol_seq = copy.deepcopy(s["patrol_seq"])
+    traits_grid = copy.deepcopy(s["traits"])
+    rules = copy.deepcopy(s["rules"])
+    game_rules = copy.deepcopy(s["game_rules"])
+    _game_seq = copy.deepcopy(s["game_seq"])
+    world_profile["meters"] = copy.deepcopy(s["world"]["meters"])
+    world_profile["weather"] = s["world"]["weather"]
+    map_meta = copy.deepcopy(s["meta"])
+    _save_patrols()
+    _save_traits(_current_map)
+    _save_rules(_current_map)
+    _mark_dirty()
+
+
+def _undoable(label, fn):
+    """Run fn() as one undo step. The command snapshots before, and captures
+    after when fn finishes; a throw inside fn leaves history untouched."""
+    cmd = core.StateSnapshotCommand(_snapshot_state, _restore_state, label)
+    out = fn()
+    cmd.capture_after()
+    history.push(cmd)
+    return out
+
+
+def _natural_tile(x, y):
+    """v5.0: what the eraser restores — the seed's own ground for this cell,
+    or the map's most common ground tile when the seed is unknown."""
+    t = core.natural_tile_at(assets.tiles, map_meta.get("biome"),
+                             map_meta.get("seed"), x, y)
+    if t is not None:
+        return t
+    return _common_ground()
+
+
+def _common_ground():
+    cnt = {}
+    for row in world.data:
+        for v in row:
+            cnt[v] = cnt.get(v, 0) + 1
+    return max(cnt, key=cnt.get) if cnt else 0
+
+
+def _natural_grid():
+    """v5.0: the whole seed-ground grid for the eraser preview cache."""
+    g = core.natural_grid(assets.tiles, map_meta.get("biome"),
+                          map_meta.get("seed"), world.width, world.height)
+    if g is not None:
+        return g
+    base = _common_ground()
+    return [[base] * world.width for _ in range(world.height)]
+
+
 def _revert_nature_mods():
     for (x, y, old, _kind) in _nature_mods:
         if 0 <= y < len(traits_grid) and 0 <= x < len(traits_grid[y]):
@@ -652,10 +739,12 @@ def _load_rules(name):
     v3.9: sidecar v2 is {"tweaks": {...}, "game": [...]}; the old flat
     {"walk_ms": ...} shape still loads. v4.0 adds "world" (meter selectors);
     missing keys simply fall back to defaults. v4.1: world also carries
-    "weather"; old sidecars without it get clear skies."""
-    global rules, _current_map
+    "weather"; old sidecars without it get clear skies. v5.0: "meta" carries
+    the map's biome/seed so the eraser can restore the seed's ground."""
+    global rules, _current_map, map_meta
     _current_map = name
     rules = dict(DEFAULT_RULES)
+    map_meta = {"biome": None, "seed": None}  # v5.0
     world_profile["meters"] = dict(DEFAULT_WORLD["meters"])
     world_profile["weather"] = DEFAULT_WORLD["weather"]  # v4.1
     try:
@@ -685,6 +774,11 @@ def _load_rules(name):
             world_profile["meters"][k] = wm[k]
     if isinstance(wblk.get("weather"), str) and wblk["weather"] in WEATHERS:
         world_profile["weather"] = wblk["weather"]  # v4.1
+    mblk = saved.get("meta") or {}  # v5.0: map seed for the eraser
+    if isinstance(mblk.get("biome"), str):
+        map_meta["biome"] = mblk["biome"]
+    if isinstance(mblk.get("seed"), int):
+        map_meta["seed"] = mblk["seed"]
     _load_game_rules(game)
 
 
@@ -692,7 +786,7 @@ def _save_rules(name):
     try:
         with open(_rules_path(name), "w") as f:
             json.dump({"tweaks": rules, "game": game_rules,
-                       "world": world_profile}, f)
+                       "world": world_profile, "meta": map_meta}, f)  # v5.0: meta
     except OSError as e:
         print(f"[hud] could not save rules: {e}")
 
@@ -1119,6 +1213,10 @@ class Handler(BaseHTTPRequestHandler):
             # v4.0: this build's nature traits + the plain-words legend
             self._send_json({"ok": True, "traits": traits_grid,
                              "legend": TRAITS})
+        elif path == "/api/natural":
+            # v5.0: the seed's own ground per cell — the eraser preview cache.
+            # Falls back to the map's most common ground when seed unknown.
+            self._send_json({"ok": True, "natural": _natural_grid()})
         elif path == "/api/world":
             # v4.0: this build's world profile (meter selectors, v4.1: sky)
             self._send_json({"ok": True, "world": world_profile})
@@ -1145,7 +1243,11 @@ class Handler(BaseHTTPRequestHandler):
             tile_id = body.get("tile_id")
             if layer == "tiles" and tile_id is None:
                 return self._send_json({"ok": False, "error": "no tile selected"}, 400)
-            new_val = _paint_value(layer, tile_id)
+            # v5.0: "natural" = the eraser — restore the seed's own ground
+            # for this cell instead of a fixed tile 0.
+            new_val = _natural_tile(x, y) \
+                if layer == "tiles" and tile_id == "natural" \
+                else _paint_value(layer, tile_id)
             grid = _grid(layer)
             if grid[y][x] == new_val:
                 return self._send_json({"ok": True, "noop": True})
@@ -1173,7 +1275,11 @@ class Handler(BaseHTTPRequestHandler):
                 seen.add((x, y))
                 if layer == "tiles" and c.get("tile_id") is None:
                     continue  # nothing selected: skip instead of crashing
-                new_val = _paint_value(layer, c.get("tile_id"))
+                # v5.0: "natural" = the eraser — the seed's own ground per cell
+                tid = c.get("tile_id")
+                new_val = _natural_tile(x, y) \
+                    if layer == "tiles" and tid == "natural" \
+                    else _paint_value(layer, tid)
                 grid = _grid(layer)
                 if grid[y][x] != new_val:
                     cmds.append(core.SetTileCommand(world, x, y, grid[y][x], new_val, layer))
@@ -1184,6 +1290,61 @@ class Handler(BaseHTTPRequestHandler):
             multi.execute()
             _mark_dirty()
             return self._send_json({"ok": True, "painted": len(cmds)})
+
+        if path == "/api/move":
+            # v5.0: slide one object tile — clear + place as ONE undo step.
+            # A patrol anchored to him moves with him: the whole route shifts
+            # by the same delta when every shifted stop stays walkable,
+            # otherwise just his anchor moves and he walks to his old route.
+            try:
+                fx, fy, tx, ty = (int(body.get(k))
+                                 for k in ("fx", "fy", "tx", "ty"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False,
+                                        "error": "fx/fy/tx/ty ints required"}, 400)
+            for x, y in ((fx, fy), (tx, ty)):
+                if not (0 <= x < world.width and 0 <= y < world.height):
+                    return self._send_json({"ok": False, "error": "off the map"}, 400)
+            if (fx, fy) == (tx, ty):
+                return self._send_json({"ok": True, "noop": True})
+            tile = world.object_layer[fy][fx]
+            if tile is None:
+                return self._send_json({"ok": False, "error": "nothing there"}, 400)
+            dx, dy = tx - fx, ty - fy
+            def _do():
+                world.object_layer[fy][fx] = None
+                world.object_layer[ty][tx] = tile
+                for p in _patrols:
+                    if p.get("x") == fx and p.get("y") == fy:
+                        shifted = [[sx + dx, sy + dy] for sx, sy in p["points"]]
+                        if all(0 <= sx < world.width and 0 <= sy < world.height
+                               and _walkable(sx, sy) for sx, sy in shifted):
+                            p["points"] = shifted
+                        p["x"], p["y"] = tx, ty
+                _save_patrols()
+                _mark_dirty()
+            _undoable("move", _do)
+            return self._send_json({"ok": True})
+
+        if path == "/api/remove-object":
+            # v5.0: lift one placed character — and end his patrol with him,
+            # as ONE undo step (the route belonged to him).
+            try:
+                x, y = int(body.get("x")), int(body.get("y"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "x/y ints required"}, 400)
+            if not (0 <= x < world.width and 0 <= y < world.height):
+                return self._send_json({"ok": False, "error": "out of bounds"}, 400)
+            if world.object_layer[y][x] is None:
+                return self._send_json({"ok": True, "noop": True})
+            def _do():
+                world.object_layer[y][x] = None
+                _patrols[:] = [p for p in _patrols
+                               if not (p.get("x") == x and p.get("y") == y)]
+                _save_patrols()
+                _mark_dirty()
+            _undoable("remove", _do)
+            return self._send_json({"ok": True})
 
         if path == "/api/custom-tiles":
             # v3.0: import image(s) as a tile — body: {name, preset,
@@ -1280,6 +1441,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/patrols/create":
             # v3.4: {tile_id, points: [[x,y], ...]} — 2-8 walkable stops.
+            # v5.0: patrols are ASSIGNED to already-placed characters, never
+            # spawned — {x, y} must already hold that character's tile, or the
+            # call is rejected. {replace_id} re-routes atomically: old route
+            # out, new route in, one undo step.
             try:
                 tid = int(body.get("tile_id"))
             except (TypeError, ValueError):
@@ -1298,10 +1463,39 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send_json({"ok": False, "error": "stop off the map"}, 400)
                 if not _walkable(x, y):
                     return self._send_json({"ok": False, "error": "a stop is blocked"}, 400)
-            p = {"id": _patrol_seq["next"], "tile_id": tid, "points": pts}
-            _patrol_seq["next"] += 1
-            _patrols.append(p)
-            _save_patrols()
+            try:
+                ax, ay = int(body.get("x")), int(body.get("y"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "anchor x/y required"}, 400)
+            if not (0 <= ax < world.width and 0 <= ay < world.height):
+                return self._send_json({"ok": False, "error": "anchor off the map"}, 400)
+            if world.object_layer[ay][ax] != tid:
+                # v5.0: a patrol never creates its character — the tile must
+                # already be standing at the anchor.
+                return self._send_json(
+                    {"ok": False,
+                     "error": "no such character at the anchor — place him first"},
+                    400)
+            replace_id = body.get("replace_id")
+            if replace_id is not None:
+                try:
+                    replace_id = int(replace_id)
+                except (TypeError, ValueError):
+                    return self._send_json({"ok": False, "error": "bad replace_id"}, 400)
+                if not any(p["id"] == replace_id for p in _patrols):
+                    return self._send_json({"ok": False, "error": "patrol not found"}, 404)
+            p = {"id": _patrol_seq["next"], "tile_id": tid,
+                 "x": ax, "y": ay, "points": pts}
+            def _do():
+                if replace_id is not None:
+                    _patrols[:] = [q for q in _patrols if q["id"] != replace_id]
+                # v5.0: the character is already standing at the anchor — a
+                # patrol only assigns the route, it never places or moves him.
+                _patrol_seq["next"] += 1
+                _patrols.append(p)
+                _save_patrols()
+                _mark_dirty()
+            _undoable("re-route patrol" if replace_id is not None else "assign patrol", _do)
             return self._send_json({"ok": True, "patrol": p})
 
         if path == "/api/patrols/delete":
@@ -1310,11 +1504,13 @@ class Handler(BaseHTTPRequestHandler):
                 pid = int(body.get("id"))
             except (TypeError, ValueError):
                 return self._send_json({"ok": False, "error": "bad id"}, 400)
-            before = len(_patrols)
-            _patrols[:] = [p for p in _patrols if p["id"] != pid]
-            if len(_patrols) == before:
+            if not any(p["id"] == pid for p in _patrols):
                 return self._send_json({"ok": False, "error": "not found"}, 404)
-            _save_patrols()
+            def _do():
+                _patrols[:] = [p for p in _patrols if p["id"] != pid]
+                _save_patrols()
+                _mark_dirty()
+            _undoable("delete patrol", _do)  # v5.0
             return self._send_json({"ok": True})
 
         if path == "/api/patrol-paths":
@@ -1448,28 +1644,40 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": False, "error": "unknown biome"}, 400)
             seed = body.get("seed")
             seed = int(seed) if isinstance(seed, int) or (isinstance(seed, str) and seed.strip().lstrip("-").isdigit()) else None
-            old = _snapshot()
-            world.generate_biome(biome, seed)
-            history.push(core.MapSnapshotCommand(world, old, _snapshot()))
-            _mark_dirty()
-            rules.clear()
-            rules.update(DEFAULT_RULES)  # v3.7: fresh build, fresh rules
-            world_profile["meters"] = dict(DEFAULT_WORLD["meters"])  # v4.0
-            world_profile["weather"] = DEFAULT_WORLD["weather"]  # v4.1: fresh sky
-            traits_grid[:] = _blank_traits()  # v4.0: fresh build, fresh nature
-            return self._send_json({"ok": True, "biome": biome, "rules": rules})
+            if seed is None:
+                # v5.0: a blank seed still gets a concrete one — otherwise the
+                # build can't be reproduced or restored by the eraser.
+                seed = random.randrange(1_000_000_000)
+            def _do():
+                world.generate_biome(biome, seed)
+                map_meta["biome"] = biome  # v5.0: the eraser needs the seed
+                map_meta["seed"] = seed
+                rules.clear()
+                rules.update(DEFAULT_RULES)  # v3.7: fresh build, fresh rules
+                world_profile["meters"] = dict(DEFAULT_WORLD["meters"])  # v4.0
+                world_profile["weather"] = DEFAULT_WORLD["weather"]  # v4.1: fresh sky
+                traits_grid[:] = _blank_traits()  # v4.0: fresh build, fresh nature
+                _save_rules(_current_map)
+                _save_traits(_current_map)
+                _mark_dirty()
+            _undoable("generate " + biome, _do)  # v5.0: whole build, one step
+            return self._send_json({"ok": True, "biome": biome, "seed": seed,
+                                    "rules": rules})
 
         if path == "/api/clear_layer":
             layer = body.get("layer", "tiles")
             if layer not in LAYERS:
                 return self._send_json({"ok": False, "error": "bad layer"}, 400)
-            old = _snapshot()
             grid, default = _grid(layer), _default_value(layer)
-            for yy in range(world.height):
-                for xx in range(world.width):
-                    grid[yy][xx] = default
-            history.push(core.MapSnapshotCommand(world, old, _snapshot()))
-            _mark_dirty()
+            if all(v == default for row in grid for v in row):
+                return self._send_json({"ok": True, "noop": True})
+            def _do():
+                grid, default = _grid(layer), _default_value(layer)
+                for yy in range(world.height):
+                    for xx in range(world.width):
+                        grid[yy][xx] = default
+                _mark_dirty()
+            _undoable("clear " + layer, _do)  # v5.0
             return self._send_json({"ok": True, "layer": layer})
 
         if path == "/api/resize":
@@ -1478,11 +1686,14 @@ class Handler(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 return self._send_json({"ok": False, "error": "width/height ints required"}, 400)
             w, h = max(4, min(64, w)), max(4, min(64, h))
-            old = _snapshot()
-            world.resize(w, h)
-            _fit_traits()  # v4.0: keep the nature grid matched to the map
-            history.push(core.MapSnapshotCommand(world, old, _snapshot()))
-            _mark_dirty()
+            if w == world.width and h == world.height:
+                return self._send_json({"ok": True, "noop": True})
+            def _do():
+                world.resize(w, h)
+                _fit_traits()  # v4.0: keep the nature grid matched to the map
+                _save_traits(_current_map)
+                _mark_dirty()
+            _undoable("resize", _do)  # v5.0: dims undo too now
             return self._send_json({"ok": True, "width": w, "height": h})
 
         if path == "/api/save":
@@ -1574,22 +1785,29 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/rules":
             # v3.7: per-build game rules. POST sets any of walk_ms
             # (90/140/220), swim_mult (2/3/4), ghost, touch.
-            changed = False
+            new_vals = {}
             wms = body.get("walk_ms")
             if wms in (90, 140, 220):
-                rules["walk_ms"] = wms; changed = True
+                new_vals["walk_ms"] = wms
             sm = body.get("swim_mult")
             if sm in (2, 3, 4):
-                rules["swim_mult"] = sm; changed = True
+                new_vals["swim_mult"] = sm
             for k in ("ghost", "touch"):
                 if isinstance(body.get(k), bool):
-                    rules[k] = body[k]; changed = True
+                    new_vals[k] = body[k]
             ht = body.get("hero_tile", "unset")   # v4.8: the inspector's PC pick
             if ht is None or (isinstance(ht, int) and ht in assets.tiles):
-                rules["hero_tile"] = ht; changed = True
-            if changed:
-                _mark_dirty()  # autosave persists the sidecar
-            return self._send_json({"ok": True, "rules": rules})
+                new_vals["hero_tile"] = ht
+            # v5.0: no-op changes don't take up an undo step
+            new_vals = {k: v for k, v in new_vals.items() if rules.get(k) != v}
+            if new_vals:
+                def _do():
+                    rules.update(new_vals)
+                    _save_rules(_current_map)
+                    _mark_dirty()  # autosave persists the sidecar
+                _undoable("rules", _do)  # v5.0
+                return self._send_json({"ok": True, "rules": rules})
+            return self._send_json({"ok": True, "rules": rules, "noop": True})
 
         if path == "/api/game-rules":
             # v3.9: the build's game rules — goals, hazards, keys & doors,
@@ -1601,10 +1819,12 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send_json({"ok": False,
                                             "error": "that rule doesn't make sense"}, 400)
                 r["id"] = _game_seq["next"]
-                _game_seq["next"] += 1
-                game_rules.append(r)
-                _save_rules(_current_map)
-                _mark_dirty()
+                def _do():
+                    _game_seq["next"] += 1
+                    game_rules.append(r)
+                    _save_rules(_current_map)
+                    _mark_dirty()
+                _undoable("add game rule", _do)  # v5.0
                 return self._send_json({"ok": True, "rule": r,
                                         "rules": game_rules})
             if action == "delete":
@@ -1612,12 +1832,13 @@ class Handler(BaseHTTPRequestHandler):
                     rid = int(body.get("id"))
                 except (TypeError, ValueError):
                     return self._send_json({"ok": False, "error": "bad id"}, 400)
-                before = len(game_rules)
-                game_rules[:] = [r for r in game_rules if r["id"] != rid]
-                if len(game_rules) == before:
+                if not any(r["id"] == rid for r in game_rules):
                     return self._send_json({"ok": False, "error": "not found"}, 404)
-                _save_rules(_current_map)
-                _mark_dirty()
+                def _do():
+                    game_rules[:] = [r for r in game_rules if r["id"] != rid]
+                    _save_rules(_current_map)
+                    _mark_dirty()
+                _undoable("delete game rule", _do)  # v5.0
                 return self._send_json({"ok": True, "rules": game_rules})
             return self._send_json({"ok": False, "error": "action?"}, 400)
 
@@ -1635,8 +1856,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": False, "error": "off the map"}, 400)
             if t is not None and t not in TRAITS:
                 return self._send_json({"ok": False, "error": "unknown trait"}, 400)
-            traits_grid[y][x] = t
-            _save_traits(_current_map)
+            if traits_grid[y][x] == t:
+                return self._send_json({"ok": True, "noop": True})
+            def _do():
+                traits_grid[y][x] = t
+                _save_traits(_current_map)
+                _mark_dirty()
+            _undoable("stamp trait", _do)  # v5.0
             return self._send_json({"ok": True})
 
         if path == "/api/world":
@@ -1645,17 +1871,25 @@ class Handler(BaseHTTPRequestHandler):
             # v4.1: also {weather: "clear"|"rain"|"fog"|"snow"|"storm"}.
             changed = False
             m = body.get("meters", {})
+            new_meters = {}
             for k in DEFAULT_WORLD["meters"]:
                 if isinstance(m.get(k), bool):
-                    world_profile["meters"][k] = m[k]
+                    new_meters[k] = m[k]
                     changed = True
+            new_weather = None
             if isinstance(body.get("weather"), str) \
                     and body["weather"] in WEATHERS:
-                world_profile["weather"] = body["weather"]
+                new_weather = body["weather"]
                 changed = True
             if changed:
-                _save_rules(_current_map)
-                _mark_dirty()
+                def _do():
+                    for k, v in new_meters.items():
+                        world_profile["meters"][k] = v
+                    if new_weather is not None:
+                        world_profile["weather"] = new_weather
+                    _save_rules(_current_map)
+                    _mark_dirty()
+                _undoable("world profile", _do)  # v5.0
             return self._send_json({"ok": True, "world": world_profile})
 
         if path == "/api/play/tick":

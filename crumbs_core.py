@@ -251,6 +251,31 @@ class MapSnapshotCommand(Command):
         self._apply(self.old_data, self.old_objects, self.old_collision)
 
 
+class StateSnapshotCommand(Command):
+    """v5.0: undo/redo for everything that isn't a map-layer paint —
+    patrols, nature traits, rules, game rules, world profile, and the map
+    itself. get_state/set_state are supplied by the host (crumbs_hud.py),
+    which owns those stores; this command just carries before/after."""
+    def __init__(self, get_state, set_state, label="edit"):
+        self.get_state = get_state
+        self.set_state = set_state
+        self.before = get_state()
+        self.after = None
+        self.label = label
+
+    def capture_after(self):
+        self.after = self.get_state()
+
+    def execute(self):
+        self.set_state(self.after if self.after is not None else self.before)
+
+    def undo(self):
+        self.set_state(self.before)
+
+    def redo(self):
+        self.set_state(self.after)
+
+
 class HistoryManager:
     def __init__(self, max_steps=50):
         self.undo_stack = deque(maxlen=max_steps)
@@ -609,6 +634,74 @@ class AssetManager:
 # ==========================================
 # WORLD MAP
 # ==========================================
+def _build_color_map(assets_tiles, biome_name):
+    """v5.0: resolve this biome's color names -> tile ids (shared by
+    generate_biome and natural_tile_at)."""
+    biome = BIOMES.get(biome_name, BIOMES["grassland"])
+    # only tiles from THIS biome's own set are candidates, so shared
+    # color names like "sand"/"water" can't resolve to another biome's tile.
+    # Biome-owned tiles are named like "dungeon_wall"; nameless-prefix tiles
+    # (the built-in defaults, user customs) stay shared.
+    color_map = {}
+    for tid, tile in assets_tiles.items():
+        if tile['type'] != 'color':
+            continue
+        tname = tile.get('name', '')
+        owner = next((b for b in BIOMES if tname.startswith(b + '_')), None)
+        if owner is not None and owner != biome_name:
+            continue  # belongs to a different biome
+        for c_name, c_hex in biome["colors"].items():
+            if tile.get('color') == c_hex:
+                color_map[c_name] = tid
+    # dungeon fallbacks resolve from the biome's own generated tiles,
+    # not hardcoded IDs (7 and 8 are grassland water/sand)
+    fallback = {'water': 1, 'sand': 2, 'grass': 4, 'stone': 5,
+                'floor': color_map.get('floor', 0), 'wall': color_map.get('wall', 0)}
+    return color_map, fallback
+
+
+def _biome_cell(biome_name, color_map, fallback, settings, noise, x, y):
+    """v5.0: the single tile the seed's noise places at (x, y)."""
+    v = (noise.noise2d(x / 20.0, y / 20.0) + 1) / 2
+    if biome_name == 'dungeon':
+        if v > 0.6:
+            return color_map.get('wall', fallback['wall'])
+        return color_map.get('floor', fallback['floor'])
+    if v < settings["water_level"]:
+        return color_map.get('deep_water', color_map.get('water', fallback['water']))
+    elif v < settings["sand_level"]:
+        return color_map.get('sand', fallback['sand'])
+    elif v < settings["grass_level"]:
+        return color_map.get('grass', fallback['grass'])
+    else:
+        return color_map.get('stone', fallback['stone'])
+
+
+def natural_tile_at(assets_tiles, biome_name, seed, x, y):
+    """v5.0: the tile generate_biome(biome_name, seed) would have placed at
+    (x, y) — the seed's own ground. The eraser restores this instead of a
+    fixed tile 0. Returns None when the map has no known biome/seed."""
+    if biome_name not in BIOMES or seed is None:
+        return None
+    biome = BIOMES[biome_name]
+    color_map, fallback = _build_color_map(assets_tiles, biome_name)
+    return _biome_cell(biome_name, color_map, fallback,
+                       biome["noise_settings"], NoiseGenerator(seed), x, y)
+
+
+def natural_grid(assets_tiles, biome_name, seed, w, h):
+    """v5.0: the whole seed-ground grid at once (one noise/color-map build).
+    None when the map has no known biome/seed."""
+    if biome_name not in BIOMES or seed is None:
+        return None
+    biome = BIOMES[biome_name]
+    color_map, fallback = _build_color_map(assets_tiles, biome_name)
+    noise = NoiseGenerator(seed)
+    settings = biome["noise_settings"]
+    return [[_biome_cell(biome_name, color_map, fallback, settings,
+                         noise, x, y) for x in range(w)] for y in range(h)]
+
+
 class WorldMap:
     def __init__(self, width, height, assets):
         self.width, self.height = width, height
@@ -634,45 +727,13 @@ class WorldMap:
         biome = BIOMES.get(biome_name, BIOMES["grassland"])
         noise = NoiseGenerator(seed)
         settings = biome["noise_settings"]
-
-        # only tiles from THIS biome's own set are candidates, so shared
-        # color names like "sand"/"water" can't resolve to another biome's tile.
-        # Biome-owned tiles are named like "dungeon_wall"; nameless-prefix tiles
-        # (the built-in defaults, user customs) stay shared.
-        color_map = {}
-        for tid, tile in self.assets.tiles.items():
-            if tile['type'] != 'color':
-                continue
-            tname = tile.get('name', '')
-            owner = next((b for b in BIOMES if tname.startswith(b + '_')), None)
-            if owner is not None and owner != biome_name:
-                continue  # belongs to a different biome
-            for c_name, c_hex in biome["colors"].items():
-                if tile.get('color') == c_hex:
-                    color_map[c_name] = tid
-
-        # dungeon fallbacks resolve from the biome's own generated tiles,
-        # not hardcoded IDs (7 and 8 are grassland water/sand)
-        fallback = {'water': 1, 'sand': 2, 'grass': 4, 'stone': 5,
-                    'floor': color_map.get('floor', 0), 'wall': color_map.get('wall', 0)}
-
+        color_map, fallback = _build_color_map(self.assets.tiles, biome_name)
         for y in range(self.height):
             for x in range(self.width):
-                v = (noise.noise2d(x/20.0, y/20.0) + 1) / 2
-                if biome_name == 'dungeon':
-                    if v > 0.6:
-                        self.data[y][x] = color_map.get('wall', fallback['wall'])
-                    else:
-                        self.data[y][x] = color_map.get('floor', fallback['floor'])
-                else:
-                    if v < settings["water_level"]:
-                        self.data[y][x] = color_map.get('deep_water', color_map.get('water', fallback['water']))
-                    elif v < settings["sand_level"]:
-                        self.data[y][x] = color_map.get('sand', fallback['sand'])
-                    elif v < settings["grass_level"]:
-                        self.data[y][x] = color_map.get('grass', fallback['grass'])
-                    else:
-                        self.data[y][x] = color_map.get('stone', fallback['stone'])
+                # v5.0: per-cell logic shared with natural_tile_at so the
+                # eraser can restore exactly what the seed placed here.
+                self.data[y][x] = _biome_cell(
+                    biome_name, color_map, fallback, settings, noise, x, y)
 
     def save(self, filepath):
         try:

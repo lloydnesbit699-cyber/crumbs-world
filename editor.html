@@ -134,6 +134,15 @@
   #paint-strip.editing .sw { outline: 2px dashed #8a6dd7; outline-offset: -2px; }
   #paint-strip .strip-label { flex: 0 0 auto; align-self: center; font-size: 10px;
     color: #888; letter-spacing: 1px; }
+  /* v5.2: strip search + collapsible pack headers (the 6k-tile Utumno pack) */
+  #strip-search-row { padding: 2px 2px 8px; }
+  #strip-search { width: 100%; box-sizing: border-box; background: #14141c;
+    color: #eee; border: 1px solid #333; border-radius: 8px; padding: 8px 10px;
+    font-size: 14px; }
+  #strip-search::placeholder { color: #666; }
+  #paint-strip .pack-head { cursor: pointer; border: 1px solid #444;
+    border-radius: 8px; padding: 8px 12px; background: #1b1b26; color: #ffd75f;
+    font-size: 11px; letter-spacing: 1px; white-space: nowrap; }
   /* v5.1: the selected one's card */
   #sel-card { display: flex; gap: 10px; align-items: center; background: #16181d;
     border: 1px solid #2c2f36; border-radius: 12px; padding: 10px; margin: 6px 0;
@@ -352,6 +361,8 @@
   <div id="theme-row" class="tray-hint">colors: <select id="theme-sel"></select></div>
   <!-- v5.1: the elongated palette — one long strip, everything paintable. -->
   <div class="grp-label">palette<button id="btn-custom-edit" class="ghost">Edit</button></div>
+  <!-- v5.2: search the strip — 6,038 Utumno tiles live here now -->
+  <div id="strip-search-row"><input id="strip-search" placeholder="search tiles…"></div>
   <div id="paint-strip"></div>
   <div id="collide-palette">
     <div class="grp-label">collision</div>
@@ -722,7 +733,7 @@ function frameIdx(t) { return Math.floor(performance.now() / t.frame_ms) % t.fra
 function tileFrameImage(id) {
   const ct = customById[id];
   if (ct) {
-    const fr = customFrames[id];
+    const fr = ensureFrames(ct);   // v5.2: lazy — painted tiles fetch on demand
     const im = fr && fr[frameIdx(ct)];
     return (im && im.complete && im.naturalWidth) ? im : null;
   }
@@ -2231,30 +2242,41 @@ function buildPalette() {
 }
 
 // ---- v3.0: custom imported tiles + animator --------------------------------
-async function loadCustomTiles() {
-  const r = await api("/api/custom-tiles");
-  customTiles = r.tiles || [];
-  customById = {}; customFrames = {};
-  for (const t of customTiles) {
-    customById[t.id] = t;
-    const fr = [];
+// v5.2: frames load lazily — only tiles that actually get rendered (a strip
+// swatch, a map cell, the selected card) ever fetch their /api/thumb images.
+// A 6k-tile pack would otherwise fire 6k requests on every page load.
+function ensureFrames(t) {
+  let fr = customFrames[t.id];
+  if (!fr) {
+    fr = [];
     for (let i = 0; i < t.frames; i++) {
       const im = new Image();
       // v4.7: the tray chip is a still — frame 0 paints it once it arrives
-      im.onload = () => { render(); renderSelCard(); if (i === 0) paintSwatch(
-        document.querySelector('#paint-strip canvas[data-tid="' + t.id + '"]'), t.id); };
+      im.onload = () => { render(); renderSelCard();
+        paintSwatch(document.querySelector('#paint-strip canvas[data-tid="' + t.id + '"]'), t.id); };
       im.src = "/api/thumb/" + t.id + "?frame=" + i;
       fr.push(im);
     }
     customFrames[t.id] = fr;
   }
+  return fr;
+}
+async function loadCustomTiles() {
+  const r = await api("/api/custom-tiles");
+  customTiles = r.tiles || [];
+  customById = {}; customFrames = {};
+  for (const t of customTiles) customById[t.id] = t;
   buildCustomTiles();
 }
 function buildCustomTiles() {
-  // v5.1: customs ride the same elongated strip, shelf-labeled.
+  // v5.2: strip search + collapsible pack groups. Packs over 300 tiles start
+  // collapsed so the strip stays usable; search matches across everything.
   const box = $("paint-strip");
+  box.innerHTML = "";
+  const q = stripQuery.trim().toLowerCase();
+  const match = t => !q || t.name.toLowerCase().includes(q);
   const groups = [["shared", "SHARED"], ["local", "DEVICE"]];
-  const nonEmpty = groups.filter(([s]) => customTiles.some(t => (t.scope || "local") === s));
+  const nonEmpty = groups.filter(([s]) => customTiles.some(t => (t.scope || "local") === s && match(t)));
   const showLabels = nonEmpty.length > 1;
   for (const [scope, label] of nonEmpty) {
     if (showLabels) {
@@ -2262,12 +2284,41 @@ function buildCustomTiles() {
       h.className = "strip-label"; h.textContent = label;
       box.appendChild(h);
     }
-    customTiles.filter(t => (t.scope || "local") === scope).forEach(t => {
-      box.appendChild(customSwatch(t));
-    });
+    const tiles = customTiles.filter(t => (t.scope || "local") === scope && match(t));
+    let i = 0;
+    while (i < tiles.length) {
+      const t = tiles[i];
+      const pk = (!q && t.pack) || null;
+      if (!pk) { box.appendChild(customSwatch(t)); i++; continue; }
+      let j = i;
+      while (j < tiles.length && tiles[j].pack === pk) j++;
+      const members = tiles.slice(i, j);
+      if (packCollapsed[pk] === undefined) packCollapsed[pk] = members.length > 300;
+      const collapsed = packCollapsed[pk];
+      const h = document.createElement("div");
+      h.className = "strip-label pack-head";
+      h.textContent = (collapsed ? "▸ " : "▾ ") + pk.toUpperCase() + " (" + members.length + ")";
+      h.title = "tap to " + (collapsed ? "expand" : "collapse");
+      h.onclick = () => { packCollapsed[pk] = !packCollapsed[pk]; buildCustomTiles(); };
+      box.appendChild(h);
+      if (!collapsed) for (const m of members) box.appendChild(customSwatch(m));
+      i = j;
+    }
+  }
+  const n = box.querySelectorAll(".sw").length;
+  const srow = $("strip-search-row");
+  if (srow) srow.style.display = customTiles.length ? "" : "none";
+  if (q && !n) {
+    const h = document.createElement("div");
+    h.className = "strip-label"; h.textContent = "no tiles match “" + stripQuery.trim() + "”";
+    box.appendChild(h);
   }
 }
+// v5.2: strip search state + pack collapse state
+let stripQuery = "";
+const packCollapsed = {};
 function customSwatch(t) {
+  ensureFrames(t);   // v5.2: lazy — only rendered swatches fetch thumbnails
   const d = document.createElement("div");
   d.className = "sw" + (t.id === selTile ? " sel" : "");
   d.title = t.name + " (" + t.preset + (t.frames > 1 ? ", " + t.frames + " frames" : "") + ")";
@@ -2301,7 +2352,7 @@ function paintSelThumb(tid) {
   const c = cv.getContext("2d");
   c.imageSmoothingEnabled = false;
   c.clearRect(0, 0, 48, 48);
-  const im = tileImage(tid);
+  const im = tileFrameImage(tid);   // v5.2: was tileImage (undefined) — card thumb never painted
   if (im) c.drawImage(im, 0, 0, 48, 48);
 }
 
@@ -2796,6 +2847,8 @@ async function pollStatus() {
     });
     resolveHero();   // v4.8: saved PC pick wins, else the /hero/i name-guess
     await loadCustomTiles();      // v3.0: imported tiles before first render
+    // v5.2: strip search — filters the palette as he types
+    $("strip-search").addEventListener("input", e => { stripQuery = e.target.value; buildCustomTiles(); });
     await loadPatrols();          // v3.4: patrol routes back
     await loadTraits();           // v4.0: nature traits before first render
     await loadNames();            // v5.1: per-instance names before first render

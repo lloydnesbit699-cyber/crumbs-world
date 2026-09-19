@@ -1,0 +1,6 @@
+Dungeon Crawl 32x32 Tiles — combined sheet ("Project Utumno")
+Source: https://opengameart.org/content/dungeon-crawl-32x32-tiles
+License: CC0 1.0 Universal (public domain — no attribution required).
+Credit (appreciated, not required): the Dungeon Crawl Stone Soup team.
+Sliced into 32x32 cells for Crumbs World's shared tile library; cell names are
+grid positions (r{row}c{col}) on utumno_sheet.png.

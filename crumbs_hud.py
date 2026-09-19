@@ -113,6 +113,7 @@ def _custom_public(entry):
             "swim": bool(entry.get("swim", False)),
             "deep": bool(entry.get("deep", False)),
             "scope": entry.get("scope", "local"),
+            "pack": entry.get("pack"),
             "frames": len(entry["files"]), "frame_ms": entry["frame_ms"]}
 
 
@@ -131,8 +132,16 @@ def _save_custom_registry(scope="local"):
     path = SHARED_REG if scope == "shared" else CUSTOM_REG
     tiles = _shared_tiles if scope == "shared" else _custom_tiles
     try:
+        # v5.2: preserve top-level metadata (e.g. "packs") across rewrites
+        try:
+            doc = json.load(open(path))
+            if not isinstance(doc, dict):
+                doc = {}
+        except Exception:
+            doc = {}
+        doc["tiles"] = tiles
         with open(path, "w") as f:
-            json.dump({"tiles": tiles}, f)
+            json.dump(doc, f)
     except Exception as e:
         print(f"[hud] could not save {scope} tile registry: {e}")
 

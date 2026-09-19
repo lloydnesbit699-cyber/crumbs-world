@@ -534,6 +534,41 @@ def _save_traits(name):
     except OSError as e:
         print(f"[hud] could not save traits: {e}")
 
+# v5.1: per-instance names — "Grub" the goblin, not just "goblin #70".
+# Keyed by "x,y" so a name belongs to THAT placed instance. The tile
+# palette rename still renames the tile definition for everywhere.
+object_names = {}  # "x,y" -> name
+
+def _names_path(name):
+    base = name[:-5] if name.endswith(".json") else name
+    return os.path.join(SCRIPT_DIR, base + ".names.json")
+
+def _name_key(x, y):
+    return "%d,%d" % (x, y)
+
+def _load_names(name):
+    global object_names
+    object_names = {}
+    try:
+        saved = json.load(open(_names_path(name)))
+    except (OSError, ValueError):
+        return
+    rows = (saved or {}).get("names", {})
+    if isinstance(rows, dict):
+        for k, v in rows.items():
+            if isinstance(v, str) and v.strip():
+                object_names[k] = v.strip()[:40]
+
+def _save_names(name):
+    try:
+        with open(_names_path(name), "w") as f:
+            json.dump({"names": object_names}, f)
+    except OSError as e:
+        print(f"[hud] could not save names: {e}")
+
+def _instance_name(x, y):
+    return object_names.get(_name_key(x, y))
+
 def _trait_at(x, y):
     if 0 <= y < len(traits_grid) and 0 <= x < len(traits_grid[y]):
         return traits_grid[y][x]
@@ -557,6 +592,7 @@ def _snapshot_state():
         "patrols": copy.deepcopy(_patrols),
         "patrol_seq": copy.deepcopy(_patrol_seq),  # v5.0: was a live ref — undo skipped IDs
         "traits": copy.deepcopy(traits_grid),
+        "names": copy.deepcopy(object_names),  # v5.1: per-instance names undo too
         "rules": copy.deepcopy(rules),
         "game_rules": copy.deepcopy(game_rules),
         "game_seq": copy.deepcopy(_game_seq),
@@ -567,7 +603,7 @@ def _snapshot_state():
 
 def _restore_state(s):
     global _patrols, _patrol_seq, traits_grid, rules, game_rules
-    global _game_seq, map_meta
+    global _game_seq, map_meta, object_names
     world.width, world.height = s["width"], s["height"]
     world.data = [row[:] for row in s["tiles"]]
     world.object_layer = [row[:] for row in s["objects"]]
@@ -575,6 +611,7 @@ def _restore_state(s):
     _patrols = copy.deepcopy(s["patrols"])
     _patrol_seq = copy.deepcopy(s["patrol_seq"])
     traits_grid = copy.deepcopy(s["traits"])
+    object_names = copy.deepcopy(s.get("names", {}))  # v5.1 (old saves: {})
     rules = copy.deepcopy(s["rules"])
     game_rules = copy.deepcopy(s["game_rules"])
     _game_seq = copy.deepcopy(s["game_seq"])
@@ -583,6 +620,7 @@ def _restore_state(s):
     map_meta = copy.deepcopy(s["meta"])
     _save_patrols()
     _save_traits(_current_map)
+    _save_names(_current_map)  # v5.1
     _save_rules(_current_map)
     _mark_dirty()
 
@@ -804,6 +842,7 @@ _load_custom_tiles()  # v3.0: imported tiles back into the asset manager
 _load_patrols()       # v3.4: patrol routes back (needs tiles loaded first)
 _load_rules(DEFAULT_SAVE)  # v3.7: this build's rules (or defaults)
 _load_traits(DEFAULT_SAVE)  # v4.0: this build's nature traits (or blank)
+_load_names(DEFAULT_SAVE)   # v5.1: per-instance names (or none)
 
 # v3.2: built-in water/ocean colors are swimmable — slow the hero, don't block
 for _tid, _t in assets.tiles.items():
@@ -1213,6 +1252,9 @@ class Handler(BaseHTTPRequestHandler):
             # v4.0: this build's nature traits + the plain-words legend
             self._send_json({"ok": True, "traits": traits_grid,
                              "legend": TRAITS})
+        elif path == "/api/object-names":
+            # v5.1: per-instance names, "x,y" -> name
+            self._send_json({"ok": True, "names": object_names})
         elif path == "/api/natural":
             # v5.0: the seed's own ground per cell — the eraser preview cache.
             # Falls back to the map's most common ground when seed unknown.
@@ -1251,10 +1293,20 @@ class Handler(BaseHTTPRequestHandler):
             grid = _grid(layer)
             if grid[y][x] == new_val:
                 return self._send_json({"ok": True, "noop": True})
-            cmd = core.SetTileCommand(world, x, y, grid[y][x], new_val, layer)
-            history.push(cmd)
-            cmd.execute()
-            _mark_dirty()
+            if layer == "objects":
+                # v5.1: painting over him ends his instance — name included —
+                # as one undo step.
+                def _do():
+                    _grid(layer)[y][x] = new_val
+                    if object_names.pop(_name_key(x, y), None):
+                        _save_names(_current_map)
+                    _mark_dirty()
+                _undoable("paint object", _do)
+            else:
+                cmd = core.SetTileCommand(world, x, y, grid[y][x], new_val, layer)
+                history.push(cmd)
+                cmd.execute()
+                _mark_dirty()
             return self._send_json({"ok": True})
 
         if path == "/api/stroke":
@@ -1262,7 +1314,7 @@ class Handler(BaseHTTPRequestHandler):
             cells = body.get("cells", [])
             if layer not in LAYERS or not isinstance(cells, list):
                 return self._send_json({"ok": False, "error": "cells list and layer required"}, 400)
-            cmds = []
+            paints = []
             seen = set()
             for c in cells:
                 x, y = c.get("x"), c.get("y")
@@ -1282,9 +1334,25 @@ class Handler(BaseHTTPRequestHandler):
                     else _paint_value(layer, tid)
                 grid = _grid(layer)
                 if grid[y][x] != new_val:
-                    cmds.append(core.SetTileCommand(world, x, y, grid[y][x], new_val, layer))
-            if not cmds:
+                    paints.append((x, y, new_val))
+            if not paints:
                 return self._send_json({"ok": True, "painted": 0, "noop": True})
+            if layer == "objects":
+                # v5.1: one stroke, one undo step — displaced names go too.
+                def _do():
+                    g = _grid(layer)
+                    touched = False
+                    for (sx, sy, nv) in paints:
+                        g[sy][sx] = nv
+                        if object_names.pop(_name_key(sx, sy), None):
+                            touched = True
+                    if touched:
+                        _save_names(_current_map)
+                    _mark_dirty()
+                _undoable("stroke objects", _do)
+                return self._send_json({"ok": True, "painted": len(paints)})
+            cmds = [core.SetTileCommand(world, x, y, _grid(layer)[y][x], nv, layer)
+                    for (x, y, nv) in paints]
             multi = core.MultiCommand(cmds)
             history.push(multi)
             multi.execute()
@@ -1314,6 +1382,11 @@ class Handler(BaseHTTPRequestHandler):
             def _do():
                 world.object_layer[fy][fx] = None
                 world.object_layer[ty][tx] = tile
+                # v5.1: his name walks with him
+                nm = object_names.pop(_name_key(fx, fy), None)
+                if nm:
+                    object_names[_name_key(tx, ty)] = nm
+                    _save_names(_current_map)
                 for p in _patrols:
                     if p.get("x") == fx and p.get("y") == fy:
                         shifted = [[sx + dx, sy + dy] for sx, sy in p["points"]]
@@ -1339,6 +1412,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": True, "noop": True})
             def _do():
                 world.object_layer[y][x] = None
+                # v5.1: his name goes with him
+                if object_names.pop(_name_key(x, y), None):
+                    _save_names(_current_map)
                 _patrols[:] = [p for p in _patrols
                                if not (p.get("x") == x and p.get("y") == y)]
                 _save_patrols()
@@ -1657,6 +1733,8 @@ class Handler(BaseHTTPRequestHandler):
                 world_profile["meters"] = dict(DEFAULT_WORLD["meters"])  # v4.0
                 world_profile["weather"] = DEFAULT_WORLD["weather"]  # v4.1: fresh sky
                 traits_grid[:] = _blank_traits()  # v4.0: fresh build, fresh nature
+                object_names.clear()  # v5.1: fresh build, no names yet
+                _save_names(_current_map)
                 _save_rules(_current_map)
                 _save_traits(_current_map)
                 _mark_dirty()
@@ -1676,6 +1754,10 @@ class Handler(BaseHTTPRequestHandler):
                 for yy in range(world.height):
                     for xx in range(world.width):
                         grid[yy][xx] = default
+                if layer == "objects" and object_names:
+                    # v5.1: clearing the cast clears their names
+                    object_names.clear()
+                    _save_names(_current_map)
                 _mark_dirty()
             _undoable("clear " + layer, _do)  # v5.0
             return self._send_json({"ok": True, "layer": layer})
@@ -1692,6 +1774,11 @@ class Handler(BaseHTTPRequestHandler):
                 world.resize(w, h)
                 _fit_traits()  # v4.0: keep the nature grid matched to the map
                 _save_traits(_current_map)
+                # v5.1: names outside the new bounds fall off with their tiles
+                for k in [k for k in object_names
+                          if int(k.split(",")[0]) >= w or int(k.split(",")[1]) >= h]:
+                    del object_names[k]
+                _save_names(_current_map)
                 _mark_dirty()
             _undoable("resize", _do)  # v5.0: dims undo too now
             return self._send_json({"ok": True, "width": w, "height": h})
@@ -1720,6 +1807,7 @@ class Handler(BaseHTTPRequestHandler):
                 history.redo_stack.clear()
                 _load_rules(name)  # v3.7: this build's rules come with it
                 _load_traits(name)  # v4.0: this build's nature comes with it
+                _load_names(name)  # v5.1: this build's names come with it
             return self._send_json({"ok": ok, "width": world.width,
                                     "height": world.height, "rules": rules})
 
@@ -1864,6 +1952,38 @@ class Handler(BaseHTTPRequestHandler):
                 _mark_dirty()
             _undoable("stamp trait", _do)  # v5.0
             return self._send_json({"ok": True})
+
+        if path == "/api/object-name":
+            # v5.1: name THAT placed instance — {x, y, name}
+            # (empty/missing name clears it). Renaming the tile in the
+            # palette still renames the definition for everywhere.
+            if play["active"]:
+                return self._send_json({"ok": False,
+                                        "error": "leave play mode first"}, 400)
+            try:
+                x, y = int(body.get("x")), int(body.get("y"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False,
+                                        "error": "x/y ints required"}, 400)
+            if not (0 <= x < world.width and 0 <= y < world.height):
+                return self._send_json({"ok": False, "error": "off the map"}, 400)
+            if world.object_layer[y][x] is None:
+                return self._send_json({"ok": False,
+                                        "error": "nobody there to name"}, 400)
+            name = body.get("name")
+            name = str(name).strip()[:40] if name is not None else ""
+            key = _name_key(x, y)
+            if object_names.get(key, "") == name:
+                return self._send_json({"ok": True, "noop": True})
+            def _do():
+                if name:
+                    object_names[key] = name
+                else:
+                    object_names.pop(key, None)
+                _save_names(_current_map)
+                _mark_dirty()
+            _undoable("name " + (name or "unnamed"), _do)
+            return self._send_json({"ok": True, "name": name or None})
 
         if path == "/api/world":
             # v4.0: this build's world profile — which meters exist.

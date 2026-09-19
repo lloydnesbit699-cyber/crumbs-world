@@ -104,7 +104,7 @@
                           padding: 9px 0; }
 
   #palette-old { display: none; }
-  #tile-palette .grp-label, #collide-palette .grp-label { font-size: 12px; color: #999;
+  #collide-palette .grp-label { font-size: 12px; color: #999;
       margin: 6px 2px 4px; text-transform: capitalize; }
   .swatches { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px;
               -webkit-overflow-scrolling: touch; }
@@ -117,10 +117,40 @@
   .sw .lbl { font-size: 10px; color: #bbb; margin-top: 2px; word-break: break-word; }
 
   /* v3.0: custom imported tiles + import form */
-  #custom-tiles .sw canvas { width: 48px; height: 48px; border-radius: 10px;
-      border: 2px solid #555; image-rendering: pixelated; background: #1c1c1c; }
-  #custom-tiles .sw.sel canvas { border-color: #ffd75f; box-shadow: 0 0 8px #ffd75f; }
-  #custom-tiles .preset-tag { font-size: 9px; color: #4da3ff; }
+  /* v5.1: the elongated palette — one horizontal strip, everything paintable */
+  #paint-strip { display: flex; overflow-x: auto; gap: 10px; padding: 6px 2px;
+    -webkit-overflow-scrolling: touch; }
+  #paint-strip .sw { flex: 0 0 auto; min-width: 64px; padding: 6px 4px; }
+  #paint-strip .sw canvas { width: 48px; height: 48px; border-radius: 10px;
+      border: 2px solid #555; image-rendering: pixelated; background: #1c1c1c;
+      display: block; margin: 0 auto; }
+  #paint-strip .sw .chip { width: 48px; height: 48px; border-radius: 10px;
+    border: 2px solid #555; margin: 0 auto; overflow: hidden; background: #1c1c1c; }
+  #paint-strip .sw .chip img { width: 100%; height: 100%; object-fit: contain;
+    image-rendering: pixelated; }
+  #paint-strip .sw.sel canvas, #paint-strip .sw.sel .chip { border-color: #ffd75f; box-shadow: 0 0 8px #ffd75f; }
+  #paint-strip .preset-tag { font-size: 9px; color: #4da3ff; text-align: center; }
+  #paint-strip .lbl { text-align: center; }
+  #paint-strip.editing .sw { outline: 2px dashed #8a6dd7; outline-offset: -2px; }
+  #paint-strip .strip-label { flex: 0 0 auto; align-self: center; font-size: 10px;
+    color: #888; letter-spacing: 1px; }
+  /* v5.1: the selected one's card */
+  #sel-card { display: flex; gap: 10px; align-items: center; background: #16181d;
+    border: 1px solid #2c2f36; border-radius: 12px; padding: 10px; margin: 6px 0;
+    flex-wrap: wrap; }
+  #sel-card[hidden] { display: none; }
+  #sel-canvas { width: 56px; height: 56px; border-radius: 10px; border: 2px solid #ffd75f;
+    flex: 0 0 auto; background: #000; image-rendering: pixelated; }
+  #sel-meta { flex: 1 1 auto; min-width: 0; }
+  #sel-name { font-size: 17px; font-weight: 700; color: #fff; padding: 4px 2px;
+    border-radius: 6px; }
+  #sel-name .edit-hint { font-size: 10px; color: #777; font-weight: 400; }
+  #sel-name input { font-size: 17px; width: 100%; background: #000; color: #fff;
+    border: 1px solid #4da3ff; border-radius: 6px; padding: 2px 6px; box-sizing: border-box; }
+  #sel-desig { font-size: 11px; color: #4da3ff; margin-top: 2px; }
+  #sel-btns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; flex-basis: 100%; }
+  #sel-btns button { font-size: 12px; padding: 6px 10px; }
+  #sel-empty { margin: 4px 0 8px; }
   .widebtn { width: 100%; margin: 4px 0 10px; }
   #import-form { background: #1c1c1c; border: 1px solid #444; border-radius: 10px;
       padding: 10px; margin-bottom: 10px; }
@@ -169,7 +199,6 @@
   /* v3.3: one-button animation + custom tile manager */
   #import-animate { background: #3a2b5c; border-color: #8a6dd7; margin-top: 8px; }
   #btn-custom-edit { font-size: 11px; padding: 2px 10px; margin: 0 0 0 8px; }
-  #custom-tiles.editing .sw { outline: 2px dashed #8a6dd7; outline-offset: -2px; }
   #tile-edit-form { background: #1c1c1c; border: 1px solid #444; border-radius: 10px;
     padding: 10px; margin-top: 8px; }
   #tile-edit-name { width: 100%; box-sizing: border-box; margin-bottom: 4px; }
@@ -245,7 +274,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v5.0</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v5.1</small></span>
   <span id="topbar-undo">
     <button id="btn-undo2" title="Undo">&#8617;</button>
     <button id="btn-redo2" title="Redo">&#8618;</button>
@@ -278,8 +307,16 @@
 
 <aside class="tray" id="tray-left">
   <div class="tray-head">Tiles<span class="tray-hint" id="layer-hint">paint the ground</span></div>
-  <div class="grp-label">custom<button id="btn-custom-edit" class="ghost">Edit</button></div>
-  <div id="custom-tiles" class="swatches"></div>
+  <!-- v5.1: the selected one — his card, his name, his jobs. -->
+  <div id="sel-card" hidden>
+    <canvas id="sel-canvas" width="48" height="48"></canvas>
+    <div id="sel-meta">
+      <div id="sel-name" title="tap to rename"></div>
+      <div id="sel-desig"></div>
+    </div>
+    <div id="sel-btns"></div>
+  </div>
+  <div id="sel-empty" class="tray-hint">select tool → tap a placed character to manage him</div>
   <div id="tile-edit-form" hidden>
     <input id="tile-edit-name" maxlength="24" placeholder="tile name">
     <div id="tile-edit-presets"></div>
@@ -313,7 +350,9 @@
     <button data-layer="collision">Collision</button>
   </div>
   <div id="theme-row" class="tray-hint">colors: <select id="theme-sel"></select></div>
-  <div id="tile-palette"></div>
+  <!-- v5.1: the elongated palette — one long strip, everything paintable. -->
+  <div class="grp-label">palette<button id="btn-custom-edit" class="ghost">Edit</button></div>
+  <div id="paint-strip"></div>
   <div id="collide-palette">
     <div class="grp-label">collision</div>
     <div class="swatches">
@@ -667,9 +706,11 @@ async function refreshAll() {
   await loadNatural();
   try { await loadPatrols(); } catch (e) {}
   await loadTraits();
+  await loadNames();   // v5.1: per-instance names
   await refreshRules();
   await loadGameRules();
   await loadWorld();
+  renderSelCard();     // v5.1: the tray card follows undo/redo too
   renderInspect();
   render();
 }
@@ -1421,6 +1462,10 @@ function inspectTap(cell) {
   inspectPos = cell;
   textEdit = null; $("inspect-textedit").hidden = true;   // a fresh tile, a fresh editor
   $("inspect-xy").textContent = "(" + cell.x + ", " + cell.y + ")";
+  // v5.1: tapping a placed character also parks him on the tray card
+  if (objects[cell.y] && objects[cell.y][cell.x] != null)
+    selectedInstance = { x: cell.x, y: cell.y };
+  renderSelCard();
   renderInspect();
   toggleOverlay("sheet-inspect");
 }
@@ -1436,6 +1481,8 @@ async function moveTap(cell) {
   await refresh();
   await loadPatrols();
   inspectPos = { x: cell.x, y: cell.y };   // the selection follows him
+  selectedInstance = { x: cell.x, y: cell.y };   // v5.1: the tray card too
+  renderSelCard();
   renderInspect(); render();
   toast("moved");
 }
@@ -1457,7 +1504,9 @@ function renderInspect() {
                                 (p.x == null && p.tile_id === ov));
     const said = gameRules.find(r => r.kind === "message" && r.tile === ov);
     const isHero = heroTileId != null && ov === heroTileId;
-    let v = "🚶 " + esc(tileLabel(ov));
+    const iname = instanceName(x, y);   // v5.1: HIS name, not the tile's
+    let v = "🚶 " + esc(iname || tileLabel(ov));
+    if (iname) v += '<br><small>' + esc(tileLabel(ov)) + '</small>';
     if (isHero) v += '<br><small>⭐ your hero — the PC</small>';
     if (p) v += '<br><small>patrol — ' + p.points.length + ' stops</small>';
     if (said) v += '<br><small>💬 “' + esc(said.text) + '”</small>';
@@ -2134,60 +2183,51 @@ function defaultBrush(l) {
 function buildPalette() {
   colorOf = {};
   palette.forEach(t => colorOf[t.id] = t.color);
-  const box = $("tile-palette"); box.innerHTML = "";
-  // v3.1: theme-aware colors — a dungeon map shows dungeon colors only.
-  // Same-color tiles collapse into one swatch (no repeated water/deep-water).
-  if (layer !== "objects") {
+  const box = $("paint-strip"); box.innerHTML = "";
+  // v5.1: one elongated strip — everything paintable for this layer.
+  // The WHOLE swatch taps (no more tiny-target hunting on phones).
+  const sw = (sel, title, inner, onclick) => {
+    const d = document.createElement("div");
+    d.className = "sw" + (sel ? " sel" : "");
+    d.title = title;
+    d.innerHTML = inner;
+    d.onclick = onclick;
+    box.appendChild(d);
+    return d;
+  };
+  if (layer === "collision") {
+    box.style.display = "none";
+    $("collide-palette").style.display = "block";
+    return;
+  }
+  box.style.display = "flex";
+  box.classList.toggle("editing", customEditMode);
+  $("collide-palette").style.display = "none";
+  if (layer === "tiles") {
+    // v3.1: theme-aware colors — a dungeon map shows dungeon colors only.
+    // Same-color tiles collapse into one swatch.
     const seen = new Set();
-    const themeTiles = palette.filter(t => {
+    palette.filter(t => {
       if (biomeOf(t.name) !== currentTheme) return false;
       if (seen.has(t.color)) return false;
       seen.add(t.color);
       return true;
+    }).forEach(t => {
+      sw(t.id === selTile, t.name + " (#" + t.id + ")",
+         '<div class="chip" style="background:' + t.color + '"></div>' +
+         '<div class="lbl">' + shortName(t.name) + "</div>",
+         () => selectTile(t.id));
     });
-    if (themeTiles.length) {
-      const lab = document.createElement("div");
-      lab.className = "grp-label"; lab.textContent = currentTheme;
-      box.appendChild(lab);
-      const row = document.createElement("div");
-      row.className = "swatches";
-      themeTiles.forEach(t => {
-        const d = document.createElement("div");
-        d.className = "sw" + (t.id === selTile ? " sel" : "");
-        d.title = t.name + " (#" + t.id + ")";
-        d.innerHTML = '<div class="chip" style="background:' + t.color + '"></div>' +
-                      '<div class="lbl">' + shortName(t.name) + "</div>";
-        d.onclick = () => selectTile(t.id);
-        row.appendChild(d);
-      });
-      box.appendChild(row);
-    }
+  } else {
+    // v3.1: objects get art (sprites + customs), not flat colors.
+    spriteTiles.filter(t => t.type !== "custom").forEach(t => {
+      sw(t.id === selTile, t.name + " (#" + t.id + " · " + t.type + ")",
+         '<div class="chip"><img src="/api/thumb/' + t.id + '" alt=""></div>' +
+         '<div class="lbl">' + t.name + "</div>",
+         () => selectTile(t.id));
+    });
+    buildCustomTiles();   // v5.1: customs join the same strip
   }
-  // v3.1: objects get art (sprites + customs), not flat colors — the two
-  // menus are no longer mirrors of each other.
-  if (layer === "objects") {
-    const builtins = spriteTiles.filter(t => t.type !== "custom");
-    if (builtins.length) {
-      const lab = document.createElement("div");
-      lab.className = "grp-label"; lab.textContent = "sprites";
-      box.appendChild(lab);
-      const row = document.createElement("div");
-      row.className = "swatches";
-      builtins.forEach(t => {
-        const d = document.createElement("div");
-        d.className = "sw" + (t.id === selTile ? " sel" : "");
-        d.title = t.name + " (#" + t.id + " · " + t.type + ")";
-        d.innerHTML = '<div class="chip"><img src="/api/thumb/' + t.id + '" alt=""></div>' +
-                      '<div class="lbl">' + t.name + "</div>";
-        d.onclick = () => selectTile(t.id);
-        row.appendChild(d);
-      });
-      box.appendChild(row);
-    }
-  }
-  $("tile-palette").style.display = layer === "collision" ? "none" : "block";
-  $("collide-palette").style.display = layer === "collision" ? "block" : "none";
-  buildCustomTiles();   // v3.0: keep custom selection highlight in sync
 }
 
 // ---- v3.0: custom imported tiles + animator --------------------------------
@@ -2201,8 +2241,8 @@ async function loadCustomTiles() {
     for (let i = 0; i < t.frames; i++) {
       const im = new Image();
       // v4.7: the tray chip is a still — frame 0 paints it once it arrives
-      im.onload = () => { render(); if (i === 0) paintSwatch(
-        document.querySelector('#custom-tiles canvas[data-tid="' + t.id + '"]'), t.id); };
+      im.onload = () => { render(); renderSelCard(); if (i === 0) paintSwatch(
+        document.querySelector('#paint-strip canvas[data-tid="' + t.id + '"]'), t.id); };
       im.src = "/api/thumb/" + t.id + "?frame=" + i;
       fr.push(im);
     }
@@ -2211,15 +2251,15 @@ async function loadCustomTiles() {
   buildCustomTiles();
 }
 function buildCustomTiles() {
-  const box = $("custom-tiles"); box.innerHTML = "";
-  // v3.8: the two shelves — shared library first, then this device
-  const groups = [["shared", "SHARED WITH EVERYONE"], ["local", "THIS DEVICE"]];
+  // v5.1: customs ride the same elongated strip, shelf-labeled.
+  const box = $("paint-strip");
+  const groups = [["shared", "SHARED"], ["local", "DEVICE"]];
   const nonEmpty = groups.filter(([s]) => customTiles.some(t => (t.scope || "local") === s));
   const showLabels = nonEmpty.length > 1;
   for (const [scope, label] of nonEmpty) {
     if (showLabels) {
       const h = document.createElement("div");
-      h.className = "grp-sub"; h.textContent = label;
+      h.className = "strip-label"; h.textContent = label;
       box.appendChild(h);
     }
     customTiles.filter(t => (t.scope || "local") === scope).forEach(t => {
@@ -2240,6 +2280,110 @@ function customSwatch(t) {
     else selectTile(t.id);
   };
   return d;
+}
+
+// ---- v5.1: the selected one — his card, his name, his jobs -----------------
+// Per-instance names ("Grub", not just "goblin #70"), keyed by "x,y".
+let objectNames = {};
+let selectedInstance = null;  // {x, y} — the placed character being managed
+let renaming = false;
+
+async function loadNames() {
+  try { const r = await api("/api/object-names"); objectNames = r.names || {}; }
+  catch (e) { objectNames = {}; }
+}
+function instanceName(x, y) { return objectNames[x + "," + y] || null; }
+
+// v5.1: the card's thumbnail — any tile id, custom or built-in.
+function paintSelThumb(tid) {
+  const cv = $("sel-canvas");
+  if (!cv) return;
+  const c = cv.getContext("2d");
+  c.imageSmoothingEnabled = false;
+  c.clearRect(0, 0, 48, 48);
+  const im = tileImage(tid);
+  if (im) c.drawImage(im, 0, 0, 48, 48);
+}
+
+function renderSelCard() {
+  const card = $("sel-card"), empty = $("sel-empty");
+  // Drop the selection if he walked away / was removed / undone.
+  if (selectedInstance) {
+    const sx = selectedInstance.x, sy = selectedInstance.y;
+    if (!objects[sy] || objects[sy][sx] == null) selectedInstance = null;
+  }
+  if (!selectedInstance) { card.hidden = true; empty.hidden = false; return; }
+  if (renaming) return;   // don't clobber the inline rename editor
+  const x = selectedInstance.x, y = selectedInstance.y;
+  const tid = objects[y][x];
+  card.hidden = false; empty.hidden = true;
+  paintSelThumb(tid);   // his thumbnail
+  const nm = instanceName(x, y);
+  const tname = tileLabel(tid);
+  const c = customById[tid];
+  const isHero = heroTileId != null && tid === heroTileId;
+  // v5.0 patrols anchor to THIS cell; older ones match by tile.
+  const p = patrols.find(pp => (pp.x != null && pp.x === x && pp.y === y) ||
+                               (pp.x == null && pp.tile_id === tid));
+  $("sel-name").innerHTML = esc(nm || tname) +
+    ' <span class="edit-hint">tap to rename</span>';
+  $("sel-desig").textContent =
+    (c ? c.preset : "tile") + " · (" + x + ", " + y + ")" +
+    (isHero ? " · ⭐ your hero" : "") +
+    (p ? " · 🚶 " + p.points.length + " stops" : "");
+  const acts = [];
+  if (!isHero) acts.push(["sethero", "⭐ Hero"]);
+  acts.push(p ? ["reroute", "🚶 Re-route"] : ["givepatrol", "🚶 Patrol"]);
+  if (p) acts.push(["delpatrol", "End patrol"]);
+  acts.push(["settext", "💬 Text"]);
+  acts.push(["move", moveArmed ? "Cancel move" : "Move"]);
+  acts.push(["delobj", "Remove"]);
+  const bb = $("sel-btns"); bb.innerHTML = "";
+  acts.forEach(([act, label]) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    if (act === "delobj" || act === "delpatrol") b.className = "danger";
+    b.onclick = async () => {
+      inspectPos = { x, y };
+      const d = (act === "reroute" || act === "delpatrol") && p ? { pid: p.id } : {};
+      await inspectAction(act, d);
+      if (act === "delobj") selectedInstance = null;
+      renderSelCard(); render();
+    };
+    bb.appendChild(b);
+  });
+  $("sel-name").onclick = () => renameInstance();
+}
+
+function renameInstance() {
+  if (!selectedInstance || renaming) return;
+  renaming = true;
+  const x = selectedInstance.x, y = selectedInstance.y;
+  const cur = instanceName(x, y) || "";
+  const el = $("sel-name");
+  el.innerHTML = "";
+  const inp = document.createElement("input");
+  inp.value = cur; inp.maxLength = 40;
+  inp.placeholder = tileLabel(objects[y][x]);
+  el.appendChild(inp);
+  inp.focus(); inp.select();
+  let done = false;
+  const commit = async (save) => {
+    if (done) return; done = true; renaming = false;
+    const v = inp.value.trim();
+    if (save && v !== cur) {
+      const r = await api("/api/object-name", { x, y, name: v });
+      if (!r.ok) toast(r.error || "couldn't name him");
+      else { await loadNames(); toast(v ? "named “" + v + "”" : "name cleared"); }
+    }
+    renderSelCard(); render();
+  };
+  inp.onkeydown = (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") commit(true);
+    else if (e.key === "Escape") commit(false);
+  };
+  inp.onblur = () => commit(true);
 }
 // v4.7: tray chips are stills — the animation lives on the map, not in the tray.
 // (This also fixes single-frame customs, whose swatches the old tick never drew.)
@@ -2385,7 +2529,7 @@ $("import-add").onclick = async () => {
 $("btn-custom-edit").onclick = () => {
   customEditMode = !customEditMode;
   $("btn-custom-edit").textContent = customEditMode ? "Done" : "Edit";
-  $("custom-tiles").classList.toggle("editing", customEditMode);
+  $("paint-strip").classList.toggle("editing", customEditMode);
   $("tile-edit-form").hidden = true; editingTile = null;
   buildCustomTiles();
 };
@@ -2646,7 +2790,7 @@ async function pollStatus() {
     spriteTiles = s.tiles;
     spriteTiles.forEach(t => {
       const im = new Image();
-      im.onload = () => render();
+      im.onload = () => { render(); renderSelCard(); };   // v5.1: card thumb too
       im.src = "/api/thumb/" + t.id;
       thumbImg[t.id] = im;
     });
@@ -2654,6 +2798,7 @@ async function pollStatus() {
     await loadCustomTiles();      // v3.0: imported tiles before first render
     await loadPatrols();          // v3.4: patrol routes back
     await loadTraits();           // v4.0: nature traits before first render
+    await loadNames();            // v5.1: per-instance names before first render
     await loadNatural();          // v5.0: the seed's ground for the eraser
     document.querySelector('#collide-palette .sw[data-cv="1"]').classList.add("sel");
     // v3.1: theme selector — the palette follows the map's theme

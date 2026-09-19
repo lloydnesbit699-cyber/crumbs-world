@@ -241,7 +241,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v4.6</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v4.7</small></span>
 </div>
 
 <div id="menu-dropdown">
@@ -2039,7 +2039,9 @@ async function loadCustomTiles() {
     const fr = [];
     for (let i = 0; i < t.frames; i++) {
       const im = new Image();
-      im.onload = () => render();
+      // v4.7: the tray chip is a still — frame 0 paints it once it arrives
+      im.onload = () => { render(); if (i === 0) paintSwatch(
+        document.querySelector('#custom-tiles canvas[data-tid="' + t.id + '"]'), t.id); };
       im.src = "/api/thumb/" + t.id + "?frame=" + i;
       fr.push(im);
     }
@@ -2071,28 +2073,31 @@ function customSwatch(t) {
   d.innerHTML = '<canvas width="48" height="48" data-tid="' + t.id + '"></canvas>' +
                 '<div class="lbl">' + t.name + '</div>' +
                 '<div class="preset-tag">' + t.preset + '</div>';
+  paintSwatch(d.querySelector("canvas"), t.id);   // v4.7: still chip, painted now if loaded
   d.onclick = () => {
     if (customEditMode) openTileEditor(t.id);   // v3.3: tile manager
     else selectTile(t.id);
   };
   return d;
 }
-// animator tick: animated tray previews + map redraws, but only when a frame
-// actually changed — never redraws a 64x64 map for nothing
+// v4.7: tray chips are stills — the animation lives on the map, not in the tray.
+// (This also fixes single-frame customs, whose swatches the old tick never drew.)
+function paintSwatch(cv, tid) {
+  if (!cv) return;
+  const fr = customFrames[tid], im = fr && fr[0];
+  if (im && im.complete && im.naturalWidth) {
+    const c = cv.getContext("2d");
+    c.imageSmoothingEnabled = false;
+    c.clearRect(0, 0, 48, 48);
+    c.drawImage(im, 0, 0, 48, 48);
+  }
+}
+// animator tick: map redraws when an on-map frame actually changed — never
+// redraws a 64x64 map for nothing. v4.7: tray chips are stills; the animation
+// lives on the map, not in the tray.
 let lastAnimSig = "";
 setInterval(() => {
   if (document.hidden) return;
-  document.querySelectorAll("#custom-tiles canvas").forEach(cv => {
-    const t = customById[cv.dataset.tid];
-    if (!t || t.frames < 2) return;
-    const fr = customFrames[t.id], im = fr && fr[frameIdx(t)];
-    if (im && im.complete && im.naturalWidth) {
-      const c = cv.getContext("2d");
-      c.imageSmoothingEnabled = false;
-      c.clearRect(0, 0, 48, 48);
-      c.drawImage(im, 0, 0, 48, 48);
-    }
-  });
   let sig = "";
   animOnMap.forEach(id => { const t = customById[id]; if (t) sig += frameIdx(t) + ","; });
   if (!playMode) patrols.forEach(p => {   // v3.4: standing NPCs animate too

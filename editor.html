@@ -287,7 +287,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v5.4</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v5.5</small></span>
   <span id="topbar-undo">
     <button id="btn-undo2" title="Undo">&#8617;</button>
     <button id="btn-redo2" title="Redo">&#8618;</button>
@@ -660,6 +660,7 @@ let heroInDeep = false;   // v3.6 SWIM HOOK: true on deep-water steps (only once
 let patrolTool = false, draftPoints = [], patrols = [], npcs = [], npcTimer = null;
 let patrolAnchor = null;   // v5.0: {x, y} — the placed character this route is assigned to
 let rerouteId = null;      // v5.0: patrol id being re-routed (replaced on Done)
+let savedBrush = null;     // v5.4: brush stashed while the patrol flow borrows selTile
 let walkingAnchors = new Set();  // v5.0: "x,y" cells whose placed character is walking in play mode
 
 async function api(path, body) {
@@ -1673,7 +1674,7 @@ async function inspectAction(act, d) {
     patrolTool = true; $("btn-patrol").classList.add("on");
     patrolAnchor = { x, y }; rerouteId = null;
     draftPoints = [[x, y]]; $("btn-patrol-done").hidden = true;
-    selTile = ov; buildPalette();
+    stashBrush(); selTile = ov; buildPalette();
     closeOverlays(); render();
     toast("tap where he should walk, then Done ✓");
     return;
@@ -1686,7 +1687,7 @@ async function inspectAction(act, d) {
     patrolTool = true; $("btn-patrol").classList.add("on");
     rerouteId = p.id;
     patrolAnchor = (p.x != null && p.y != null) ? { x: p.x, y: p.y } : null;
-    if (p.tile_id != null) { selTile = p.tile_id; buildPalette(); }
+    if (p.tile_id != null) { stashBrush(); selTile = p.tile_id; buildPalette(); }
     draftPoints = []; $("btn-patrol-done").hidden = true;
     closeOverlays(); render();
     toast("tap his new stops, then Done ✓");
@@ -2074,6 +2075,14 @@ function cancelPatrol() {
   patrolTool = false; $("btn-patrol").classList.remove("on");
   draftPoints = []; patrolAnchor = null; rerouteId = null;
   $("btn-patrol-done").hidden = true;
+  restoreBrush();
+}
+// v5.5: the patrol flow borrows selTile to tag the route's character —
+// stash the real brush first, hand it back on every exit, so paint never
+// keeps stamping the last patrolled character.
+function stashBrush() { if (savedBrush == null) savedBrush = selTile; }
+function restoreBrush() {
+  if (savedBrush != null) { selTile = savedBrush; savedBrush = null; buildPalette(); }
 }
 $("btn-patrol").onclick = () => {
   if (playMode) return;
@@ -2081,6 +2090,7 @@ $("btn-patrol").onclick = () => {
   $("btn-patrol").classList.toggle("on", patrolTool);
   draftPoints = []; patrolAnchor = null; rerouteId = null;  // v5.0: cancel drops the re-route too
   $("btn-patrol-done").hidden = true;
+  restoreBrush();   // v5.5: toggling off mid-draft hands the brush back too
   erasing = false; $("btn-eraser").classList.remove("on");
   selectTool = false; $("btn-select").classList.remove("on");   // v4.3
   toast(patrolTool ? "patrol — tap one of your placed characters first, then his stops, then Done" : "patrol off");
@@ -2097,7 +2107,7 @@ function patrolTap(cell) {
       return;
     }
     patrolAnchor = { x: cell.x, y: cell.y };
-    selTile = ov; buildPalette();
+    stashBrush(); selTile = ov; buildPalette();
     draftPoints = [[cell.x, cell.y]];
     $("btn-patrol-done").hidden = true;
     toast("he's got it — tap where he should walk, then Done ✓");
@@ -2123,6 +2133,7 @@ $("btn-patrol-done").onclick = async () => {
   draftPoints = []; patrolAnchor = null; rerouteId = null;
   $("btn-patrol-done").hidden = true;
   patrolTool = false; $("btn-patrol").classList.remove("on");
+  restoreBrush();
   await refresh(); await loadPatrols(); render();
   toast(wasReroute ? "his route is updated" : "he's on patrol — hit Play to watch him walk it");
 };

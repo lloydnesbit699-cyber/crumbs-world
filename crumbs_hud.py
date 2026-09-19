@@ -48,6 +48,10 @@ preset (wall/floor/water/door/decor, collision baked in); multi-frame import
 = animated tiles (tray previews + map animate, redraws only on frame change);
 custom tiles live in the TILES tray for select-and-place; play mode walks the
 hero as a sprite with collision respected.
+v5.6 (2026-09-19): MVP finish — server event log (/api/log), one-tap map
+validator (/api/validate), PNG export (/api/export/png), map thumbnails
+(/api/map/thumb), map management (rename/duplicate/delete-to-trash/import/
+metadata), play-session save slots (/api/slots*).
 
 Run:   python3 crumbs_hud.py
 Open:  http://127.0.0.1:8778   (same phone's browser)
@@ -582,6 +586,102 @@ def _trait_at(x, y):
     if 0 <= y < len(traits_grid) and 0 <= x < len(traits_grid[y]):
         return traits_grid[y][x]
     return None
+
+
+# ---- v5.6: MVP finish -------------------------------------------------------
+# Event log, map validator, PNG export, map management (rename/duplicate/
+# delete-to-trash/import/metadata), play-session save slots.
+
+_events = deque(maxlen=200)
+def _log_event(msg):
+    _events.append({"t": time.strftime("%H:%M:%S"), "msg": str(msg)[:160]})
+
+def _map_png(scale=4, data=None, objects=None, w=None, h=None):
+    """Composite tiles + objects layers into a PIL image. None without Pillow."""
+    if not core.PIL_AVAILABLE:
+        return None
+    data = world.data if data is None else data
+    objects = world.object_layer if objects is None else objects
+    w = world.width if w is None else w
+    h = world.height if h is None else h
+    ts = 32 * scale
+    img = core.Image.new("RGBA", (w * ts, h * ts), (0, 0, 0, 255))
+    for y in range(h):
+        for x in range(w):
+            for tid in (data[y][x], objects[y][x]):
+                if not tid:
+                    continue
+                th = assets.get_thumbnail(tid, size=32)
+                if th is None:
+                    continue
+                th = th.resize((ts, ts), core.Image.NEAREST)
+                if th.mode == "RGBA":
+                    img.alpha_composite(th, (x * ts, y * ts))
+                else:
+                    img.paste(th, (x * ts, y * ts))
+    return img.convert("RGB")
+
+def _validate_map():
+    """One-tap map check: spawn exists, regions reachable, tile ids valid."""
+    issues = []
+    sx, sy = _find_spawn()
+    if not _walkable(sx, sy):
+        issues.append({"kind": "no_spawn", "msg": "No walkable spawn point found."})
+    else:
+        seen = {(sx, sy)}
+        dq = deque([(sx, sy)])
+        while dq:
+            cx, cy = dq.popleft()
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nx, ny = cx + dx, cy + dy
+                if (0 <= nx < world.width and 0 <= ny < world.height
+                        and (nx, ny) not in seen and _walkable(nx, ny)):
+                    seen.add((nx, ny))
+                    dq.append((nx, ny))
+        unreachable = sum(
+            1 for y in range(world.height) for x in range(world.width)
+            if world.data[y][x] and not world.collision_layer[y][x]
+            and (x, y) not in seen)
+        if unreachable:
+            issues.append({"kind": "unreachable",
+                           "msg": f"{unreachable} floor tile(s) can't be reached from spawn."})
+    bad = sum(
+        1 for y in range(world.height) for x in range(world.width)
+        for tid in (world.data[y][x], world.object_layer[y][x])
+        if tid and tid not in assets.tiles)
+    if bad:
+        issues.append({"kind": "bad_tile",
+                       "msg": f"{bad} cell(s) reference missing tile ids."})
+    return issues
+
+_TRASH_DIR = os.path.join(SCRIPT_DIR, "_trash")
+_NON_MAPS = {"custom_tiles.json", "sprite_library.json", "shared_library.json",
+             "hud_patrols.json"}
+
+def _map_sidecars(name):
+    base = name[:-5] if name.endswith(".json") else name
+    return [os.path.join(SCRIPT_DIR, base + ext)
+            for ext in (".json", ".rules.json", ".traits.json", ".names.json")]
+
+def _slots_path():
+    base = _current_map or DEFAULT_SAVE
+    base = base[:-5] if base.endswith(".json") else base
+    return os.path.join(SCRIPT_DIR, base + ".slots.json")
+
+def _load_slots():
+    try:
+        return (json.load(open(_slots_path())) or {}).get("slots", [])
+    except (OSError, ValueError):
+        return []
+
+def _save_slots(slots):
+    try:
+        json.dump({"slots": slots}, open(_slots_path(), "w"))
+        return True
+    except OSError:
+        return False
+
+hero_override = None  # v5.6: a loaded save slot's hero position, used by next Play
 
 
 # ---- v5.0: universal undo/redo -------------------------------------------
@@ -1239,9 +1339,37 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
         elif path == "/api/maps":
-            files = sorted(f for f in os.listdir(SCRIPT_DIR)
-                           if f.endswith((".json", ".txt")) and os.path.isfile(os.path.join(SCRIPT_DIR, f)))
-            self._send_json({"maps": files})
+            # v5.6: rich entries — dims, modified time, description — for the picker
+            out = []
+            for f in sorted(os.listdir(SCRIPT_DIR)):
+                if f in _NON_MAPS or not os.path.isfile(os.path.join(SCRIPT_DIR, f)):
+                    continue
+                if not (f.endswith(".json") or f.endswith(".txt")):
+                    continue
+                if f.endswith((".rules.json", ".traits.json", ".names.json",
+                               ".slots.json")):
+                    continue
+                p = os.path.join(SCRIPT_DIR, f)
+                w = h = None
+                if f.endswith(".json"):
+                    try:
+                        m = json.load(open(p))
+                        w, h = m.get("width"), m.get("height")
+                    except (OSError, ValueError):
+                        pass
+                meta = {}
+                try:
+                    meta = (json.load(open(_rules_path(f))) or {}).get("meta") or {}
+                except (OSError, ValueError):
+                    pass
+                try:
+                    mtime = int(os.path.getmtime(p))
+                except OSError:
+                    mtime = 0
+                out.append({"file": f, "width": w, "height": h,
+                            "modified": meta.get("modified") or mtime,
+                            "description": meta.get("description") or ""})
+            self._send_json({"maps": out})
         elif path == "/api/biomes":
             self._send_json({"biomes": [{"id": k, "name": v["name"]} for k, v in core.BIOMES.items()]})
         elif path == "/api/rules":
@@ -1275,11 +1403,79 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"dirty": _save_state["dirty"],
                              "last_save": _save_state["last"],
                              "play": play["active"]})
+        elif path == "/api/log":
+            # v5.6: server event log for debugging without watching the terminal
+            q = parse_qs(urlparse(self.path).query)
+            try:
+                n = min(200, max(1, int((q.get("n") or ["100"])[0])))
+            except ValueError:
+                n = 100
+            self._send_json({"events": list(_events)[-n:]})
+        elif path == "/api/export/png":
+            # v5.6: full-res render of the map as a downloadable PNG
+            q = parse_qs(urlparse(self.path).query)
+            try:
+                scale = min(8, max(1, int((q.get("scale") or ["4"])[0])))
+            except ValueError:
+                scale = 4
+            img = _map_png(scale)
+            if img is None:
+                return self._send_json({"ok": False, "error": "Pillow unavailable"}, 500)
+            buf = io.BytesIO()
+            img.save(buf, "PNG")
+            data = buf.getvalue()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Content-Disposition",
+                             'attachment; filename="crumbs-map.png"')
+            self.end_headers()
+            self.wfile.write(data)
+        elif path == "/api/map/thumb":
+            # v5.6: small PNG preview of any saved map, for the picker
+            q = parse_qs(urlparse(self.path).query)
+            name = _safe_name((q.get("file") or [""])[0])
+            if not name:
+                return self._send_json({"ok": False, "error": "file required"}, 400)
+            p = os.path.join(SCRIPT_DIR, name)
+            try:
+                m = json.load(open(p))
+                img = _map_png(1, m["tiles"], m.get("objects"),
+                               m["width"], m["height"])
+            except (OSError, ValueError, KeyError, IndexError, TypeError):
+                img = None
+            if img is None:
+                return self._send_json({"ok": False, "error": "cannot render"}, 404)
+            buf = io.BytesIO()
+            img.save(buf, "PNG")
+            data = buf.getvalue()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        elif path == "/api/slots":
+            # v5.6: play-session save slots for the current map
+            self._send_json({"slots": _load_slots(), "map": _current_map})
+        elif path in ("/icon-512.png", "/favicon.ico"):
+            # v5.6: app icon / favicon (splash + home-screen icon)
+            try:
+                with open(os.path.join(SCRIPT_DIR, "icon-512.png"), "rb") as f:
+                    data = f.read()
+            except OSError:
+                return self._send_json({"ok": False, "error": "no icon yet"}, 404)
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "max-age=3600")
+            self.end_headers()
+            self.wfile.write(data)
         else:
             self._send_json({"ok": False, "error": "not found"}, 404)
 
     # -- POST --------------------------------------------------------------
     def do_POST(self):
+        global traits_grid, hero_override  # v5.6: slots/load rebinds these
         path = urlparse(self.path).path
         body = self._read_json()
         if body is None:
@@ -1748,6 +1944,7 @@ class Handler(BaseHTTPRequestHandler):
                 _save_traits(_current_map)
                 _mark_dirty()
             _undoable("generate " + biome, _do)  # v5.0: whole build, one step
+            _log_event(f"generated {biome} (seed {seed})")  # v5.6
             return self._send_json({"ok": True, "biome": biome, "seed": seed,
                                     "rules": rules})
 
@@ -1798,9 +1995,13 @@ class Handler(BaseHTTPRequestHandler):
                 name += ".json"
             _revert_rule_mods()  # v3.9: a playtest never permanently edits the build
             _revert_nature_mods()  # v4.0: gathered wood / built fires neither
+            now = int(time.time())
+            map_meta.setdefault("created", now)  # v5.6: map metadata
+            map_meta["modified"] = now
             ok = world.save(os.path.join(SCRIPT_DIR, name))
             if ok:
                 _save_rules(name)  # v3.7
+                _log_event(f"saved {name}")
             return self._send_json({"ok": ok, "file": name})
 
         if path == "/api/load":
@@ -1817,15 +2018,202 @@ class Handler(BaseHTTPRequestHandler):
                 _load_rules(name)  # v3.7: this build's rules come with it
                 _load_traits(name)  # v4.0: this build's nature comes with it
                 _load_names(name)  # v5.1: this build's names come with it
+                _log_event(f"loaded {name}")
             return self._send_json({"ok": ok, "width": world.width,
                                     "height": world.height, "rules": rules})
 
+        if path == "/api/validate":
+            # v5.6: one-tap map check — spawn, reachability, tile ids
+            return self._send_json({"ok": True, "issues": _validate_map()})
+
+        if path == "/api/maps/rename":
+            # v5.6: rename a map + its sidecars
+            src = _safe_name(body.get("from"))
+            dst = _safe_name(body.get("to"))
+            if not src or not dst:
+                return self._send_json({"ok": False, "error": "from/to required"}, 400)
+            if not dst.endswith(".json"):
+                dst += ".json"
+            if os.path.exists(os.path.join(SCRIPT_DIR, dst)):
+                return self._send_json({"ok": False, "error": "name taken"}, 409)
+            moved = 0
+            for p in _map_sidecars(src):
+                if os.path.isfile(p):
+                    base = dst[:-5] if dst.endswith(".json") else dst
+                    ext = p[len(os.path.join(SCRIPT_DIR,
+                                             src[:-5] if src.endswith(".json") else src)):]
+                    os.rename(p, os.path.join(SCRIPT_DIR, base + ext))
+                    moved += 1
+            global _current_map
+            if _current_map == src:
+                _current_map = dst
+            _log_event(f"renamed {src} -> {dst}")
+            return self._send_json({"ok": moved > 0, "file": dst})
+
+        if path == "/api/maps/duplicate":
+            # v5.6: copy a map + its sidecars
+            import shutil
+            src = _safe_name(body.get("from"))
+            dst = _safe_name(body.get("to"))
+            if not src:
+                return self._send_json({"ok": False, "error": "from required"}, 400)
+            if not dst:
+                base = src[:-5] if src.endswith(".json") else src
+                dst = base + " copy.json"
+            if not dst.endswith(".json"):
+                dst += ".json"
+            if os.path.exists(os.path.join(SCRIPT_DIR, dst)):
+                return self._send_json({"ok": False, "error": "name taken"}, 409)
+            copied = 0
+            src_base = src[:-5] if src.endswith(".json") else src
+            dst_base = dst[:-5] if dst.endswith(".json") else dst
+            for p in _map_sidecars(src):
+                if os.path.isfile(p):
+                    ext = p[len(os.path.join(SCRIPT_DIR, src_base)):]
+                    shutil.copy2(p, os.path.join(SCRIPT_DIR, dst_base + ext))
+                    copied += 1
+            _log_event(f"duplicated {src} -> {dst}")
+            return self._send_json({"ok": copied > 0, "file": dst})
+
+        if path == "/api/maps/delete":
+            # v5.6: delete moves to _trash/ — never permanent (house rule)
+            name = _safe_name(body.get("file"))
+            if not name:
+                return self._send_json({"ok": False, "error": "file required"}, 400)
+            if name == DEFAULT_SAVE:
+                return self._send_json({"ok": False, "error": "cannot delete the default map"}, 400)
+            os.makedirs(_TRASH_DIR, exist_ok=True)
+            moved = 0
+            src_base = name[:-5] if name.endswith(".json") else name
+            for p in _map_sidecars(name):
+                if os.path.isfile(p):
+                    ext = p[len(os.path.join(SCRIPT_DIR, src_base)):]
+                    dest = os.path.join(_TRASH_DIR, src_base + ext)
+                    n = 1
+                    while os.path.exists(dest):
+                        dest = os.path.join(_TRASH_DIR, f"{src_base}.{n}{ext}")
+                        n += 1
+                    os.rename(p, dest)
+                    moved += 1
+            _log_event(f"trashed {name}")
+            return self._send_json({"ok": moved > 0})
+
+        if path == "/api/maps/import":
+            # v5.6: load a map JSON someone sends you (validated on the way in)
+            name = _safe_name(body.get("filename"))
+            data = body.get("data")
+            if not name or not isinstance(data, dict):
+                return self._send_json({"ok": False, "error": "filename + data required"}, 400)
+            if not name.endswith(".json"):
+                name += ".json"
+            try:
+                w, h = int(data["width"]), int(data["height"])
+                assert 1 <= w <= 256 and 1 <= h <= 256
+                for key in ("tiles", "objects", "collision"):
+                    rows = data[key]
+                    assert isinstance(rows, list) and len(rows) == h
+                    for row in rows:
+                        assert isinstance(row, list) and len(row) == w
+                        for v in row:
+                            assert v is None or isinstance(v, (int, bool))
+            except (KeyError, TypeError, ValueError, AssertionError):
+                return self._send_json({"ok": False, "error": "bad map shape"}, 400)
+            try:
+                json.dump({"version": data.get("version", 3.0), "width": w, "height": h,
+                           "tiles": data["tiles"], "objects": data["objects"],
+                           "collision": data["collision"]},
+                          open(os.path.join(SCRIPT_DIR, name), "w"))
+            except OSError:
+                return self._send_json({"ok": False, "error": "cannot write"}, 500)
+            _log_event(f"imported {name}")
+            return self._send_json({"ok": True, "file": name})
+
+        if path == "/api/maps/meta":
+            # v5.6: author/description for a map (stored in its rules sidecar)
+            name = _safe_name(body.get("file"))
+            if not name:
+                return self._send_json({"ok": False, "error": "file required"}, 400)
+            rp = _rules_path(name)
+            try:
+                saved = json.load(open(rp)) or {}
+            except (OSError, ValueError):
+                saved = {}
+            meta = saved.get("meta") or {}
+            if "author" in body:
+                meta["author"] = str(body["author"])[:60]
+            if "description" in body:
+                meta["description"] = str(body["description"])[:280]
+            saved["meta"] = meta
+            try:
+                json.dump(saved, open(rp, "w"))
+                ok = True
+            except OSError:
+                ok = False
+            if ok and name == _current_map:
+                map_meta.update(meta)
+            return self._send_json({"ok": ok})
+
+        if path == "/api/slots/save":
+            # v5.6: snapshot a play session — hero pos, traits, world
+            try:
+                slot = int(body.get("slot"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "slot int required"}, 400)
+            label = str(body.get("label") or f"Slot {slot}")[:40]
+            snap = {"slot": slot, "label": label,
+                    "saved_at": time.strftime("%Y-%m-%d %H:%M"),
+                    "hero": [play["tx"], play["ty"]] if play["active"]
+                            else list(_find_spawn()),
+                    "traits": [row[:] for row in traits_grid],
+                    "world": copy.deepcopy(world_profile)}
+            slots = [s for s in _load_slots()
+                     if s.get("slot") != slot] + [snap]
+            ok = _save_slots(slots)
+            if ok:
+                _log_event(f"slot {slot} saved ({label})")
+            return self._send_json({"ok": ok})
+
+        if path == "/api/slots/load":
+            # v5.6: restore a play session — traits + world now, hero at next Play
+            try:
+                slot = int(body.get("slot"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "slot int required"}, 400)
+            snap = next((s for s in _load_slots() if s.get("slot") == slot), None)
+            if not snap:
+                return self._send_json({"ok": False, "error": "slot empty"}, 404)
+            try:
+                rows = snap["traits"]
+                assert isinstance(rows, list) and len(rows) == world.height
+                traits_grid = [list(r[:world.width]) for r in rows]
+                wblk = snap.get("world") or {}
+                if isinstance(wblk.get("meters"), dict):
+                    for k in world_profile["meters"]:
+                        if isinstance(wblk["meters"].get(k), bool):
+                            world_profile["meters"][k] = wblk["meters"][k]
+                if wblk.get("weather") in WEATHERS:
+                    world_profile["weather"] = wblk["weather"]
+                hx, hy = snap.get("hero") or [None, None]
+                hero_override = [hx, hy] if isinstance(hx, int) and isinstance(hy, int) else None
+            except (AssertionError, TypeError, KeyError):
+                return self._send_json({"ok": False, "error": "slot corrupt"}, 400)
+            _save_traits(_current_map)
+            _save_rules(_current_map)
+            _log_event(f"slot {slot} loaded ({snap.get('label', '')})")
+            return self._send_json({"ok": True})
+
         if path == "/api/play/start":
             sx, sy = _find_spawn()
+            if hero_override:  # v5.6: a loaded save slot picks the hero's start
+                hx, hy = hero_override
+                if isinstance(hx, int) and isinstance(hy, int) and _walkable(hx, hy):
+                    sx, sy = hx, hy
+                hero_override = None
             play["active"] = True
             play["tx"], play["ty"] = sx, sy
             _reset_rule_session()  # v3.9: fresh keys, messages, win/lose
                                    # v4.0: fresh meters + inventory
+            _log_event("play started")
             return self._send_json({"ok": True, "x": sx, "y": sy,
                                     "nature": _nature_state()})
 
@@ -2063,6 +2451,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/play/stop":
             play["active"] = False
             _reset_rule_session()  # v3.9: put picked-up keys / opened doors back
+            _log_event("play stopped")  # v5.6
             return self._send_json({"ok": True})
 
         if path == "/api/jslog":

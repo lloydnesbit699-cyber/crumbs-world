@@ -1,0 +1,50 @@
+{
+  "tweaks": {
+    "walk_ms": 140,
+    "swim_mult": 3,
+    "ghost": false,
+    "touch": true,
+    "hero_tile": 25
+  },
+  "game": [
+    {
+      "kind": "message",
+      "id": 1,
+      "x": 2,
+      "y": 2,
+      "text": "Welcome to the Vault, wanderer. Grab the old chest, then head east through the door."
+    },
+    {
+      "kind": "keydoor",
+      "id": 2,
+      "key": 84,
+      "door": 83,
+      "text": "The chest holds an iron key - ahead, a door swings open!"
+    },
+    {
+      "kind": "hazard",
+      "id": 3,
+      "tile": 1,
+      "text": "The floodwater was deeper than it looked..."
+    },
+    {
+      "kind": "goal",
+      "id": 4,
+      "x": 24,
+      "y": 9,
+      "text": "You reached the heart of the vault - you win!"
+    }
+  ],
+  "world": {
+    "meters": {
+      "health": true,
+      "warmth": false,
+      "belly": false
+    },
+    "weather": "clear"
+  },
+  "meta": {
+    "biome": "dungeon",
+    "seed": null
+  }
+}

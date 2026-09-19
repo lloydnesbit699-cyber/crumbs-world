@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<link rel="icon" href="/icon-512.png">
+<link rel="apple-touch-icon" href="/icon-512.png">
 <title>Crumbs HUD — Tile Painter</title>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -88,6 +90,40 @@
   #load-list button { display: block; width: 100%; text-align: left;
                       margin-bottom: 6px; padding: 10px 12px; }
   #load-list button.cur { border-color: #4da3ff; color: #4da3ff; }
+  /* v5.6: rich map rows — thumbnail, name, dims, per-map actions */
+  .maprow { display: flex; gap: 10px; align-items: center; margin-bottom: 8px;
+            background: #1b1b1b; border: 1px solid #333; border-radius: 10px;
+            padding: 8px; }
+  .maprow.cur { border-color: #4da3ff; }
+  .maprow img.thumb { width: 72px; height: 48px; object-fit: contain;
+                      background: #000; border-radius: 6px; flex: none; }
+  .maprow .minfo { flex: 1; min-width: 0; }
+  .maprow .mname { font-size: 14px; color: #eee; word-break: break-all;
+                   background: none; border: none; padding: 0; text-align: left;
+                   width: 100%; }
+  .maprow .mmeta { font-size: 11px; color: #888; }
+  .maprow .macts { display: flex; gap: 4px; flex: none; }
+  .maprow .macts button { font-size: 11px; padding: 6px 8px; }
+  #slots-list .slotrow, #check-list .checkrow { margin-bottom: 8px; padding: 8px;
+            background: #1b1b1b; border: 1px solid #333; border-radius: 10px; }
+  #slots-list .slotrow { display: flex; gap: 8px; align-items: center; }
+  #slots-list .sinfo { flex: 1; }
+  #slots-list .slabel { font-size: 14px; color: #eee; }
+  #slots-list .smeta { font-size: 11px; color: #888; }
+  #log-list { font-size: 12px; font-family: monospace; }
+  #log-list .logrow { padding: 4px 0; border-bottom: 1px solid #222; color: #ccc; }
+  #log-list .logrow .lt { color: #666; margin-right: 8px; }
+  #check-list .checkrow.bad { border-color: #a33; color: #f88; font-size: 13px; }
+  #check-list .checkrow.good { border-color: #3a3; color: #8f8; font-size: 13px; }
+  /* v5.6: splash screen */
+  #splash { position: fixed; inset: 0; z-index: 200; background: #0d0d12;
+            display: flex; flex-direction: column; align-items: center;
+            justify-content: center; gap: 10px;
+            transition: opacity .5s ease; }
+  #splash.gone { opacity: 0; pointer-events: none; }
+  #splash img { width: 128px; height: 128px; border-radius: 28px; }
+  #splash .splash-title { font-size: 28px; color: #ffd75f; font-weight: bold; }
+  #splash .splash-sub { font-size: 14px; color: #888; }
   .lbl { color: #888; font-size: 12px; margin-right: 6px; }
   #map-name { color: #eee; font-size: 14px; word-break: break-all; }
 
@@ -287,7 +323,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v5.5</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v5.6</small></span>
   <span id="topbar-undo">
     <button id="btn-undo2" title="Undo">&#8617;</button>
     <button id="btn-redo2" title="Redo">&#8618;</button>
@@ -309,6 +345,11 @@
   <button id="menu-save">Save</button>
   <button id="menu-saveas">Save As&hellip;</button>
   <button id="menu-load">Load&hellip;</button>
+  <button id="menu-export" title="Download this map as a PNG picture">Export PNG</button>
+  <button id="menu-slots" title="Save and load play sessions">Save slots&hellip;</button>
+  <button id="menu-validate" title="Check the map: spawn, reachability, tile ids">Check map</button>
+  <button id="menu-collide" title="Show walls over the map while painting">Walls: off</button>
+  <button id="menu-log" title="Server event log (debugging)">Server log</button>
   <hr>
   <button id="btn-stop" class="danger" title="Stop the HUD server">Stop server</button>
 </div>
@@ -431,7 +472,35 @@
 <div id="sheet-load" class="sheet">
   <div class="grab"></div>
   <div class="tray-head">Load map</div>
+  <div class="row2">
+    <button id="btn-import-map" title="Load a map JSON someone sent you">Import&hellip;</button>
+    <input type="file" id="file-import-map" accept=".json,application/json" hidden>
+  </div>
   <div id="load-list"></div>
+</div>
+
+<div id="sheet-slots" class="sheet">
+  <div class="grab"></div>
+  <div class="tray-head">Save slots <span class="tray-hint">this map only</span></div>
+  <div id="slots-list"></div>
+</div>
+
+<div id="sheet-log" class="sheet">
+  <div class="grab"></div>
+  <div class="tray-head">Server log <button id="btn-log-refresh" class="ghost">Refresh</button></div>
+  <div id="log-list" class="loglist"></div>
+</div>
+
+<div id="sheet-check" class="sheet">
+  <div class="grab"></div>
+  <div class="tray-head">Map check</div>
+  <div id="check-list"></div>
+</div>
+
+<div id="splash">
+  <img src="/icon-512.png" alt="" onerror="this.style.display='none'">
+  <div class="splash-title">Crumbs HUD</div>
+  <div class="splash-sub">tile painter &middot; v5.6</div>
 </div>
 
 <div id="sheet-rules" class="sheet">
@@ -850,7 +919,8 @@ function render() {
   }
   // collision overlay — v3.1: edit mode only. Play mode keeps the solidity
   // but hides the red X (and amber diamonds for locked).
-  if (layer === "collision") {
+  // v5.6: showCollide paints the overlay over any layer, no layer switch.
+  if (layer === "collision" || showCollide) {
     ctx.lineWidth = 2;
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       const cv = coll[y][x];
@@ -2848,19 +2918,78 @@ async function renderLoadList() {
   try {
     const m = await api("/api/maps");
     if (!m.maps.length) list.innerHTML = "<small>no saved maps yet</small>";
-    m.maps.forEach(f => {
-      const b = document.createElement("button");
-      b.textContent = f;
-      if (f === currentFile) b.classList.add("cur");
-      b.onclick = async () => {
-        const r = await api("/api/load", { filename: f });
-        if (r.ok) { setFile(f); panX = 0; panY = 0; await refresh(); await refreshRules(); await loadWorld(); await loadNatural(); await loadPatrols(); closeOverlays(); toast("loaded " + f); }
+    m.maps.forEach(mp => {
+      const row = document.createElement("div");
+      row.className = "maprow" + (mp.file === currentFile ? " cur" : "");
+      const dims = (mp.width && mp.height) ? ` ${mp.width}\u00d7${mp.height}` : "";
+      const desc = mp.description ? `<div class="mmeta">${escHtml(mp.description)}</div>` : "";
+      row.innerHTML =
+        `<img class="thumb" src="/api/map/thumb?file=${encodeURIComponent(mp.file)}" alt="">` +
+        `<div class="minfo"><button class="mname">${escHtml(mp.file)}</button>` +
+        `<div class="mmeta">${dims}</div>${desc}</div>` +
+        `<div class="macts"></div>`;
+      row.querySelector(".mname").onclick = async () => {
+        const r = await api("/api/load", { filename: mp.file });
+        if (r.ok) { setFile(mp.file); panX = 0; panY = 0; await refresh(); await refreshRules(); await loadWorld(); await loadNatural(); await loadPatrols(); closeOverlays(); toast("loaded " + mp.file); }
         else toast("load failed: " + (r.error || ""));
       };
-      list.appendChild(b);
+      const acts = row.querySelector(".macts");
+      const mk = (label, fn) => {
+        const b = document.createElement("button");
+        b.textContent = label; b.className = "ghost";
+        b.onclick = e => { e.stopPropagation(); fn(); };
+        acts.appendChild(b);
+      };
+      mk("Rename", async () => {
+        const to = prompt("Rename to:", mp.file);
+        if (!to || to === mp.file) return;
+        const r = await api("/api/maps/rename", { from: mp.file, to });
+        if (r.ok) { if (mp.file === currentFile) setFile(r.file); renderLoadList(); toast("renamed"); }
+        else toast("rename failed: " + (r.error || ""));
+      });
+      mk("Copy", async () => {
+        const r = await api("/api/maps/duplicate", { from: mp.file });
+        if (r.ok) { renderLoadList(); toast("copied to " + r.file); }
+        else toast("copy failed: " + (r.error || ""));
+      });
+      mk("Info", async () => {
+        const author = prompt("Author (blank keeps):", "");
+        const description = prompt("Description (blank keeps):", mp.description || "");
+        if (author === null && description === null) return;
+        const r = await api("/api/maps/meta", { file: mp.file,
+          author: author || "", description: description || "" });
+        if (r.ok) { renderLoadList(); toast("saved"); }
+        else toast("info failed");
+      });
+      const del = document.createElement("button");
+      del.textContent = "Del"; del.className = "ghost";
+      del.onclick = async e => {
+        e.stopPropagation();
+        if (!confirm("Move " + mp.file + " to trash? (recoverable, never permanent)")) return;
+        const r = await api("/api/maps/delete", { file: mp.file });
+        if (r.ok) { renderLoadList(); toast("trashed"); }
+        else toast("delete failed: " + (r.error || ""));
+      };
+      acts.appendChild(del);
+      list.appendChild(row);
     });
   } catch (e) { list.innerHTML = "<small>couldn't reach server</small>"; }
 }
+function escHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+$("btn-import-map").onclick = () => $("file-import-map").click();
+$("file-import-map").onchange = async e => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  try {
+    const data = JSON.parse(await f.text());
+    const r = await api("/api/maps/import", { filename: f.name, data });
+    if (r.ok) { renderLoadList(); toast("imported " + r.file); }
+    else toast("import failed: " + (r.error || ""));
+  } catch (err) { toast("that file isn't a map"); }
+};
 $("btn-resize").onclick = async () => {
   const r = await api("/api/resize", { width: parseInt($("rw").value, 10), height: parseInt($("rh").value, 10) });
   if (r.ok) { panX = 0; panY = 0; await refresh(); await loadNatural(); toast("resized " + r.width + "x" + r.height + " \u2014 map kept"); }
@@ -2906,13 +3035,94 @@ $("menu-setup").onclick = () => toggleOverlay("sheet-setup");
 $("menu-save").onclick = () => { closeOverlays(); doSave(); };
 $("menu-saveas").onclick = () => { closeOverlays(); doSaveAs(); };
 $("menu-load").onclick = () => { toggleOverlay("sheet-load"); renderLoadList(); };
+// ---- v5.6: MVP finish — export, slots, validate, collision overlay, server log
+$("menu-export").onclick = () => {
+  closeOverlays();
+  // attachment download — the page stays put
+  window.location.href = "/api/export/png?scale=4";
+  toast("rendering PNG\u2026");
+};
+let showCollide = false;   // v5.6: walls overlay while painting, no layer switch
+$("menu-collide").onclick = () => {
+  showCollide = !showCollide;
+  $("menu-collide").textContent = "Walls: " + (showCollide ? "on" : "off");
+  $("menu-collide").classList.toggle("on", showCollide);
+  render();
+};
+$("menu-validate").onclick = async () => {
+  closeOverlays();
+  const r = await api("/api/validate", {});
+  const list = $("check-list");
+  list.innerHTML = "";
+  if (r.ok && !r.issues.length) {
+    list.innerHTML = '<div class="checkrow good">Map checks out — spawn found, every floor reachable, all tile ids valid.</div>';
+  } else {
+    (r.issues || [{ msg: "check failed" }]).forEach(i => {
+      const d = document.createElement("div");
+      d.className = "checkrow bad";
+      d.textContent = i.msg;
+      list.appendChild(d);
+    });
+  }
+  toggleOverlay("sheet-check");
+};
+async function renderSlots() {
+  const list = $("slots-list");
+  list.innerHTML = "";
+  const m = await api("/api/slots");
+  const have = {};
+  (m.slots || []).forEach(s => have[s.slot] = s);
+  for (let i = 1; i <= 3; i++) {
+    const s = have[i];
+    const row = document.createElement("div");
+    row.className = "slotrow";
+    row.innerHTML = `<div class="sinfo"><div class="slabel">${s ? escHtml(s.label) : "Slot " + i + " — empty"}</div>` +
+      (s ? `<div class="smeta">${escHtml(s.saved_at || "")}</div>` : "") + `</div>`;
+    const bs = document.createElement("button");
+    bs.textContent = "Save"; bs.className = "ghost";
+    bs.onclick = async () => {
+      const label = prompt("Label this save:", s ? s.label : "Slot " + i);
+      if (label === null) return;
+      const r = await api("/api/slots/save", { slot: i, label: label || ("Slot " + i) });
+      if (r.ok) { renderSlots(); toast("slot " + i + " saved"); }
+      else toast("slot save failed");
+    };
+    const bl = document.createElement("button");
+    bl.textContent = "Load"; bl.className = "ghost"; bl.disabled = !s;
+    bl.onclick = async () => {
+      const r = await api("/api/slots/load", { slot: i });
+      if (r.ok) { await refresh(); await loadWorld(); renderSlots(); closeOverlays(); toast("slot " + i + " loaded — hit Play"); }
+      else toast("slot load failed: " + (r.error || ""));
+    };
+    row.appendChild(bs); row.appendChild(bl);
+    list.appendChild(row);
+  }
+}
+$("menu-slots").onclick = () => { toggleOverlay("sheet-slots"); renderSlots(); };
+async function renderLog() {
+  const list = $("log-list");
+  list.innerHTML = "<small>loading\u2026</small>";
+  try {
+    const m = await fetch("/api/log?n=100").then(r => r.json());
+    list.innerHTML = "";
+    if (!m.events.length) list.innerHTML = "<small>no events yet</small>";
+    m.events.slice().reverse().forEach(e => {
+      const d = document.createElement("div");
+      d.className = "logrow";
+      d.innerHTML = `<span class="lt">${escHtml(e.t)}</span>${escHtml(e.msg)}`;
+      list.appendChild(d);
+    });
+  } catch (e) { list.innerHTML = "<small>couldn't reach server</small>"; }
+}
+$("menu-log").onclick = () => { toggleOverlay("sheet-log"); renderLog(); };
+$("btn-log-refresh").onclick = renderLog;
 // dismiss the menu after any of its action buttons fire — but never while a
 // sheet it just opened is still being read (v4.9: Rules/World were flashing
 // open then getting closed 60ms later by this very timer)
 $("menu-dropdown").addEventListener("click", e => {
   const b = e.target.closest("button");
   if (b && !["menu-setup", "menu-save", "menu-saveas", "menu-load",
-             "menu-rules", "menu-world"].includes(b.id)) setTimeout(closeOverlays, 60);
+             "menu-rules", "menu-world", "menu-slots", "menu-log"].includes(b.id)) setTimeout(closeOverlays, 60);
 });
 
 // ---- v2.0: catch unsaved work before the tab closes ---------------------------
@@ -2988,8 +3198,22 @@ async function pollStatus() {
     applyUiClean(); syncMenuDpad();
     pollStatus();
     setInterval(pollStatus, 10000);
+    // v5.6: splash out, then the first-run tour (once ever)
+    setTimeout(() => $("splash").classList.add("gone"), 900);
+    setTimeout(() => $("splash").remove(), 1600);
+    if (!localStorage.crumbs_tour) {
+      localStorage.crumbs_tour = "1";
+      const steps = [
+        "Welcome to Crumbs HUD \u2014 pick a tile from the left tray.",
+        "Paint with one finger. Two fingers drag to pan, pinch to zoom.",
+        "Menu \u2192 Generate builds a whole map from a seed.",
+        "Hit \u25b6 Play to walk it. Menu \u2192 Check map keeps it honest."
+      ];
+      steps.forEach((s, i) => setTimeout(() => toast(s), 1800 + i * 2600));
+    }
   } catch (e) {
     toast("can't reach the HUD server — is crumbs_hud.py running?");
+    const sp = $("splash"); if (sp) sp.classList.add("gone");
   }
 })();
 </script>

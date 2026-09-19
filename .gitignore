@@ -6,5 +6,14 @@ custom_tiles.json
 hud_patrols.json
 custom_tiles/
 *.rules.json
+# shipped content: tutorial + starter maps (their rules are the product,
+# not user data; hud_map.rules.json and other user maps stay ignored)
+!starter-dungeon.rules.json
+!starter-village.rules.json
+!starter-maze.rules.json
+!tutorial-dungeon.rules.json
 *.backup
 *.traits.json
+*.names.json
+*.slots.json
+_trash/

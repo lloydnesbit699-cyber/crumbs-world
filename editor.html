@@ -143,6 +143,10 @@
   #paint-strip .pack-head { cursor: pointer; border: 1px solid #444;
     border-radius: 8px; padding: 8px 12px; background: #1b1b26; color: #ffd75f;
     font-size: 11px; letter-spacing: 1px; white-space: nowrap; }
+  /* v5.3: the virtualized pack window — one wide relative box, swatches
+     absolutely positioned inside it; only the visible window is mounted */
+  #paint-strip .pack-window { position: relative; flex: 0 0 auto; align-self: stretch; }
+  #paint-strip .pack-window .sw { position: absolute; top: 0; }
   /* v5.1: the selected one's card */
   #sel-card { display: flex; gap: 10px; align-items: center; background: #16181d;
     border: 1px solid #2c2f36; border-radius: 12px; padding: 10px; margin: 6px 0;
@@ -283,7 +287,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v5.1</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v5.3</small></span>
   <span id="topbar-undo">
     <button id="btn-undo2" title="Undo">&#8617;</button>
     <button id="btn-redo2" title="Redo">&#8618;</button>
@@ -746,12 +750,37 @@ function cellColor(x, y) {
   return colorOf[id] || "#000";
 }
 
-function render() {
-  // v1.5: thumbnails can finish loading before /api/map returns — don't
-  // crash on the empty grid, just wait for refresh() to draw for real.
-  if (!tiles.length || tiles.length < H) return;
-  canvas.width = W * tilePx; canvas.height = H * tilePx;
-  const tallTiles = [];   // v3.1: [x, y] of tall custom tiles needing extruded faces
+// v5.3: the static base layer — tiles, shadows, tall faces, grid lines.
+// Rebuilt only when the tiles grid, tile size, or theme actually changes
+// (detected by checksum, so no call site can forget to invalidate it);
+// everything dynamic composites on top each frame.
+let baseCv = null, baseSig = null;
+function tilesChecksum() {
+  let h = 0;
+  for (let y = 0; y < H; y++) {
+    const row = tiles[y];
+    for (let x = 0; x < W; x++) h = ((h * 31) + (row[x] | 0)) | 0;
+  }
+  return h + ":" + tilePx + ":" + currentTheme;
+}
+function drawTallFace(b, im, px, py) {
+  // v3.1: fake 2.5D — the bottom of the sprite, stretched down and darkened,
+  // drawn after the base pass so it overlaps the tile below.
+  if (!im || !im.complete || !im.naturalWidth) return;
+  const faceH = Math.round(tilePx * 0.38);
+  b.drawImage(im, 0, im.naturalHeight * 0.62, im.naturalWidth, im.naturalHeight * 0.38,
+              px, py + tilePx - 1, tilePx, faceH);
+  b.fillStyle = "rgba(0,0,0,0.35)";
+  b.fillRect(px, py + tilePx - 1, tilePx, faceH);
+}
+function renderBase() {
+  const sig = tilesChecksum();
+  const cw = W * tilePx, ch = H * tilePx;
+  if (baseCv && baseSig === sig && baseCv.width === cw && baseCv.height === ch) return;
+  if (!baseCv) baseCv = document.createElement("canvas");
+  baseCv.width = cw; baseCv.height = ch;
+  const b = baseCv.getContext("2d");
+  b.imageSmoothingEnabled = false;
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const id = tiles[y][x];
     const im = tileFrameImage(id);   // v3.0: animated custom tiles draw current frame
@@ -759,30 +788,64 @@ function render() {
     if (im) {
       // v3.1: depth cues — soft shadow under art tiles
       if (customById[id] || thumbImg[id]) {
-        ctx.fillStyle = "rgba(0,0,0,0.30)";
-        ctx.beginPath();
-        ctx.ellipse(px + tilePx / 2, py + tilePx * 0.88, tilePx * 0.34, tilePx * 0.13, 0, 0, Math.PI * 2);
-        ctx.fill();
+        b.fillStyle = "rgba(0,0,0,0.30)";
+        b.beginPath();
+        b.ellipse(px + tilePx / 2, py + tilePx * 0.88, tilePx * 0.34, tilePx * 0.13, 0, 0, Math.PI * 2);
+        b.fill();
       }
-      ctx.drawImage(im, px, py, tilePx, tilePx);
+      b.drawImage(im, px, py, tilePx, tilePx);
       const ct = customById[id];
-      if (ct && ct.height === "tall") tallTiles.push([x, y]);   // v3.1: tall wall face, drawn below
+      if (ct && ct.height === "tall") drawTallFace(b, im, px, py);
     } else {
-      ctx.fillStyle = customById[id] ? "#1c1c1c" : (colorOf[id] || "#000");
-      ctx.fillRect(px, py, tilePx, tilePx);
+      b.fillStyle = customById[id] ? "#1c1c1c" : (colorOf[id] || "#000");
+      b.fillRect(px, py, tilePx, tilePx);
     }
   }
-  // v3.1: tall faces — the bottom of the sprite, stretched down and darkened,
-  // drawn after the base pass so they overlap the tile below (fake 2.5D)
-  for (const [x, y] of tallTiles) {
-    const id = tiles[y][x];
-    const fr = customFrames[id], im = fr && fr[frameIdx(id)];
-    if (!im || !im.complete || !im.naturalWidth) continue;
-    const px = x * tilePx, py = y * tilePx, faceH = Math.round(tilePx * 0.38);
-    ctx.drawImage(im, 0, im.naturalHeight * 0.62, im.naturalWidth, im.naturalHeight * 0.38,
-                  px, py + tilePx - 1, tilePx, faceH);
-    ctx.fillStyle = "rgba(0,0,0,0.35)";
-    ctx.fillRect(px, py + tilePx - 1, tilePx, faceH);
+  // grid lines — pre-rendered here instead of rebuilt every frame
+  b.strokeStyle = "rgba(0,0,0,0.25)"; b.lineWidth = 1;
+  b.beginPath();
+  for (let x = 0; x <= W; x++) { b.moveTo(x * tilePx + .5, 0); b.lineTo(x * tilePx + .5, H * tilePx); }
+  for (let y = 0; y <= H; y++) { b.moveTo(0, y * tilePx + .5); b.lineTo(W * tilePx, y * tilePx + .5); }
+  b.stroke();
+  baseSig = sig;
+}
+
+// v5.3: render diet — high-frequency paths (paint strokes, NPC movement,
+// weather + animation ticks) coalesce into one render per animation frame
+// instead of one render per event.
+let renderQueued = false;
+function queueRender() {
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(() => { renderQueued = false; render(); });
+}
+
+function render() {
+  // v1.5: thumbnails can finish loading before /api/map returns — don't
+  // crash on the empty grid, just wait for refresh() to draw for real.
+  if (!tiles.length || tiles.length < H) return;
+  // v5.3: resetting canvas.width wipes the whole canvas — only pay for it
+  // when the size actually changed.
+  const cw = W * tilePx, ch = H * tilePx;
+  if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
+  ctx.imageSmoothingEnabled = false;
+  renderBase();                 // the cached static layer (tiles, grid)
+  ctx.drawImage(baseCv, 0, 0);
+  // v5.3: animated tiles stay live — overdrawn with the current frame.
+  if (animOnMap.size) {
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const id = tiles[y][x];
+      if (!animOnMap.has(id)) continue;
+      const im = tileFrameImage(id);
+      if (!im) continue;
+      const px = x * tilePx, py = y * tilePx;
+      ctx.fillStyle = "rgba(0,0,0,0.30)";
+      ctx.beginPath();
+      ctx.ellipse(px + tilePx / 2, py + tilePx * 0.88, tilePx * 0.34, tilePx * 0.13, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.drawImage(im, px, py, tilePx, tilePx);
+      if (customById[id] && customById[id].height === "tall") drawTallFace(ctx, im, px, py);
+    }
   }
   // collision overlay — v3.1: edit mode only. Play mode keeps the solidity
   // but hides the red X (and amber diamonds for locked).
@@ -917,12 +980,7 @@ function render() {
       ctx.closePath(); ctx.fill(); ctx.stroke();
     }
   }
-  // grid lines
-  ctx.strokeStyle = "rgba(0,0,0,0.25)"; ctx.lineWidth = 1;
-  ctx.beginPath();
-  for (let x = 0; x <= W; x++) { ctx.moveTo(x * tilePx + .5, 0); ctx.lineTo(x * tilePx + .5, H * tilePx); }
-  for (let y = 0; y <= H; y++) { ctx.moveTo(0, y * tilePx + .5); ctx.lineTo(W * tilePx, y * tilePx + .5); }
-  ctx.stroke();
+  // v5.3: grid lines live in the base layer now — pre-rendered, not rebuilt.
   // v3.1: fog/lighting — darkness over the map with a pool of light around
   // the hero, so dungeons feel like dungeons.
   // v4.2: the dark listens to the sky — a clear day stays bright, a storm
@@ -992,7 +1050,7 @@ function strokeAdd(cell) {
   const bt = customById[bv];          // v3.0: track animated placements
   if (bt && bt.frames > 1) animOnMap.add(bv);
   dirtyFlag = true;   // v2.0: assume unsaved until the server says otherwise
-  render();
+  queueRender();      // v5.3: strokes coalesce into one render per frame
 }
 canvas.addEventListener("pointerdown", e => {
   e.preventDefault();
@@ -1392,7 +1450,7 @@ function drawWeather() {
 function wxStart() {
   wxStop();
   if (worldWeather === "clear") return;
-  wxTimer = setInterval(() => { wxFrame++; render(); }, 150);
+  wxTimer = setInterval(() => { wxFrame++; queueRender(); }, 150);   // v5.3: batched
 }
 function wxStop() { if (wxTimer) { clearInterval(wxTimer); wxTimer = null; } }
 
@@ -2126,7 +2184,7 @@ function npcTick(dt) {
       if (step >= d - 1e-9) n.seg = (n.seg + 1) % n.loop.length;
     }
   });
-  if (moved) render();
+  if (moved) queueRender();   // v5.3: batched with the frame
 }
 function drawNpc(n) {
   const im = n.away ? npcSilhouette(n.tile_id) : tileFrameImage(n.tile_id);
@@ -2195,6 +2253,7 @@ function buildPalette() {
   colorOf = {};
   palette.forEach(t => colorOf[t.id] = t.color);
   const box = $("paint-strip"); box.innerHTML = "";
+  packWin = null;   // v5.3: strip rebuilt — drop any virtualized pack window
   // v5.1: one elongated strip — everything paintable for this layer.
   // The WHOLE swatch taps (no more tiny-target hunting on phones).
   const sw = (sel, title, inner, onclick) => {
@@ -2252,7 +2311,7 @@ function ensureFrames(t) {
     for (let i = 0; i < t.frames; i++) {
       const im = new Image();
       // v4.7: the tray chip is a still — frame 0 paints it once it arrives
-      im.onload = () => { render(); renderSelCard();
+      im.onload = () => { baseSig = null; render(); renderSelCard();   // v5.3: a newly-arrived tile image invalidates the cached base layer
         paintSwatch(document.querySelector('#paint-strip canvas[data-tid="' + t.id + '"]'), t.id); };
       im.src = "/api/thumb/" + t.id + "?frame=" + i;
       fr.push(im);
@@ -2273,6 +2332,7 @@ function buildCustomTiles() {
   // collapsed so the strip stays usable; search matches across everything.
   const box = $("paint-strip");
   box.innerHTML = "";
+  packWin = null;   // v5.3: any rebuild drops the virtualized pack window
   const q = stripQuery.trim().toLowerCase();
   const match = t => !q || t.name.toLowerCase().includes(q);
   const groups = [["shared", "SHARED"], ["local", "DEVICE"]];
@@ -2301,7 +2361,12 @@ function buildCustomTiles() {
       h.title = "tap to " + (collapsed ? "expand" : "collapse");
       h.onclick = () => { packCollapsed[pk] = !packCollapsed[pk]; buildCustomTiles(); };
       box.appendChild(h);
-      if (!collapsed) for (const m of members) box.appendChild(customSwatch(m));
+      if (!collapsed) {
+        // v5.3: big expanded packs render windowed — only the swatches near
+        // the visible scroll area get DOM nodes, not all 6k.
+        if (members.length > 300) mountPackWindow(box, pk, members);
+        else for (const m of members) box.appendChild(customSwatch(m));
+      }
       i = j;
     }
   }
@@ -2317,6 +2382,36 @@ function buildCustomTiles() {
 // v5.2: strip search state + pack collapse state
 let stripQuery = "";
 const packCollapsed = {};
+// v5.3: windowed pack rendering — an expanded 6k-tile pack only mounts the
+// swatches near the visible scroll window (+overscan), so the strip never
+// holds 6k DOM nodes at once.
+const PACK_SW_PITCH = 84;   // approx swatch pitch in the strip (px)
+const PACK_OVERSCAN = 12;   // swatches rendered past each visible edge
+let packWin = null;         // {pk, members, el} | null
+function mountPackWindow(box, pk, members) {
+  const el = document.createElement("div");
+  el.className = "pack-window";
+  el.style.width = (members.length * PACK_SW_PITCH) + "px";
+  box.appendChild(el);
+  packWin = { pk, members, el };
+  paintPackWindow();
+}
+function paintPackWindow() {
+  if (!packWin) return;
+  const strip = $("paint-strip");
+  const { members, el } = packWin;
+  const lo = Math.max(0, Math.floor(strip.scrollLeft / PACK_SW_PITCH) - PACK_OVERSCAN);
+  const hi = Math.min(members.length,
+    Math.ceil((strip.scrollLeft + strip.clientWidth) / PACK_SW_PITCH) + PACK_OVERSCAN);
+  if (el._lo === lo && el._hi === hi) return;   // window didn't move — nothing to do
+  el._lo = lo; el._hi = hi;
+  el.innerHTML = "";
+  for (let i = lo; i < hi; i++) {
+    const sw = customSwatch(members[i]);
+    sw.style.left = (i * PACK_SW_PITCH) + "px";
+    el.appendChild(sw);
+  }
+}
 function customSwatch(t) {
   ensureFrames(t);   // v5.2: lazy — only rendered swatches fetch thumbnails
   const d = document.createElement("div");
@@ -2461,7 +2556,7 @@ setInterval(() => {
     if (t && t.frames > 1) sig += "p" + frameIdx(t) + ",";
   });
   if (!sig) return;
-  if (sig !== lastAnimSig) { lastAnimSig = sig; render(); }
+  if (sig !== lastAnimSig) { lastAnimSig = sig; queueRender(); }   // v5.3: batched
 }, 150);
 
 // ---- v3.0: image import ------------------------------------------------------
@@ -2841,7 +2936,7 @@ async function pollStatus() {
     spriteTiles = s.tiles;
     spriteTiles.forEach(t => {
       const im = new Image();
-      im.onload = () => { render(); renderSelCard(); };   // v5.1: card thumb too
+      im.onload = () => { baseSig = null; render(); renderSelCard(); };   // v5.1: card thumb too; v5.3: invalidate cached base
       im.src = "/api/thumb/" + t.id;
       thumbImg[t.id] = im;
     });
@@ -2849,6 +2944,13 @@ async function pollStatus() {
     await loadCustomTiles();      // v3.0: imported tiles before first render
     // v5.2: strip search — filters the palette as he types
     $("strip-search").addEventListener("input", e => { stripQuery = e.target.value; buildCustomTiles(); });
+    // v5.3: the virtualized pack window follows the strip's scroll
+    let stripScrollQ = false;
+    $("paint-strip").addEventListener("scroll", () => {
+      if (stripScrollQ || !packWin) return;
+      stripScrollQ = true;
+      requestAnimationFrame(() => { stripScrollQ = false; paintPackWindow(); });
+    }, { passive: true });
     await loadPatrols();          // v3.4: patrol routes back
     await loadTraits();           // v4.0: nature traits before first render
     await loadNames();            // v5.1: per-instance names before first render

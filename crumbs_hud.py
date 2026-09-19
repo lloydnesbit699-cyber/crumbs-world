@@ -411,7 +411,18 @@ def _valid_game_rule(d):
 
     def _tid(v):
         return isinstance(v, int) and v > 0 and v in assets.tiles
-    if kind in ("goal", "message"):
+    if kind == "goal":
+        x, y = d.get("x"), d.get("y")
+        if not isinstance(x, int) or not isinstance(y, int):
+            return None
+        if not (0 <= x < world.width and 0 <= y < world.height):
+            return None
+        return {"kind": kind, "x": x, "y": y, "text": text}
+    if kind == "message":
+        # v4.6: words can ride a cell (x, y) or a character/object tile —
+        # bump into him and he talks.
+        if _tid(d.get("tile")):
+            return {"kind": kind, "tile": int(d["tile"]), "text": text}
         x, y = d.get("x"), d.get("y")
         if not isinstance(x, int) or not isinstance(y, int):
             return None
@@ -771,7 +782,13 @@ def _check_rules(x, y):
     for r in game_rules:
         kind = r["kind"]
         if kind == "message":
-            if r["x"] == x and r["y"] == y and r["id"] not in _rule_shown:
+            if "tile" in r:
+                # v4.6: words riding a character/object — the hero bumps into him
+                if _tile_at_any_layer(x, y) == r["tile"] and r["id"] not in _rule_shown:
+                    _rule_shown.add(r["id"])
+                    events.append({"t": "message",
+                                   "text": r["text"] or "He nods at you."})
+            elif r["x"] == x and r["y"] == y and r["id"] not in _rule_shown:
                 _rule_shown.add(r["id"])
                 events.append({"t": "message",
                                "text": r["text"] or "Something catches your eye…"})

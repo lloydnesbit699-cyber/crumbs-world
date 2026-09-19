@@ -241,7 +241,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v4.5</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v4.6</small></span>
 </div>
 
 <div id="menu-dropdown">
@@ -331,6 +331,13 @@
   <div class="grab"></div>
   <div class="tray-head">Inspect <span id="inspect-xy" class="tray-hint"></span></div>
   <div id="inspect-body"></div>
+  <div id="inspect-textedit" hidden>
+    <input id="inspect-textinput" maxlength="140" placeholder="what does he say…">
+    <div class="opt-row">
+      <button id="inspect-textsave">Save</button>
+      <button id="inspect-textcancel" class="ghost">Cancel</button>
+    </div>
+  </div>
 </div>
 
 <div id="sheet-setup" class="sheet">
@@ -744,6 +751,17 @@ function render() {
       ctx.fillStyle = "#ffd75f"; ctx.strokeStyle = "#000"; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     }
+    // v4.6: the PC is unmistakable — gold ring + tag; walkers keep the dark shadow
+    ctx.strokeStyle = "#ffd75f"; ctx.lineWidth = Math.max(2, tilePx * 0.07);
+    ctx.beginPath();
+    ctx.ellipse(hx + tilePx / 2, hy + tilePx * 0.88, tilePx * 0.38, tilePx * 0.15,
+                0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.save();
+    ctx.font = "bold " + Math.round(tilePx * 0.32) + "px sans-serif";
+    ctx.textAlign = "center"; ctx.fillStyle = "#ffd75f";
+    ctx.fillText("YOU", hx + tilePx / 2, hy - Math.round(tilePx * 0.06));
+    ctx.restore();
   }
   // v3.4: patrol NPCs — moving walkers in play mode, standing figures + routes
   // while editing
@@ -1294,7 +1312,11 @@ const COLL_WORDS = { 1: "solid ⛔", 2: "locked 🔶" };
 const TRAIT_WORDS = { hot: "🔥 hot", cold: "❄️ cold", sharp: "🗡️ sharp", wood: "🪵 wood", food: "🍖 food" };
 function ruleWords(r) {
   if (r.kind === "goal") return "🏁 goal — you win here";
-  if (r.kind === "message") return "💬 message — “" + (r.text || "") + "”";
+  if (r.kind === "message") {
+    // v4.6: words can ride a cell or a character
+    if (r.tile != null) return "💬 " + tileLabel(r.tile) + " says: “" + (r.text || "") + "”";
+    return "💬 message — “" + (r.text || "") + "”";
+  }
   if (r.kind === "hazard") return "☠️ hazard — " + tileLabel(r.tile) + (r.text ? " · " + r.text : "");
   if (r.kind === "keydoor") return "🗝️ " + tileLabel(r.key) + " opens " + tileLabel(r.door);
   return r.kind;
@@ -1304,7 +1326,13 @@ function ruleWords(r) {
 function rulesOnCell(x, y) {
   const tv = tiles[y][x], ov = objects[y][x];
   return gameRules.filter(r => {
-    if (r.kind === "goal" || r.kind === "message") return r.x === x && r.y === y;
+    if (r.kind === "goal") return r.x === x && r.y === y;
+    if (r.kind === "message") {
+      // v4.6: cell-bound messages live on the cell; character-bound ones
+      // ride whatever tile they're tied to, ground or object
+      if (r.tile != null) return r.tile === tv || r.tile === ov;
+      return r.x === x && r.y === y;
+    }
     if (r.kind === "hazard") return r.tile === tv;
     if (r.kind === "keydoor") return r.key === tv || r.key === ov || r.door === tv || r.door === ov;
     return false;
@@ -1312,6 +1340,7 @@ function rulesOnCell(x, y) {
 }
 function inspectTap(cell) {
   inspectPos = cell;
+  textEdit = null; $("inspect-textedit").hidden = true;   // a fresh tile, a fresh editor
   $("inspect-xy").textContent = "(" + cell.x + ", " + cell.y + ")";
   renderInspect();
   toggleOverlay("sheet-inspect");
@@ -1329,11 +1358,17 @@ function renderInspect() {
   h += inspRow("tile", esc(tileLabel(tv)), "");
   if (ov != null) {
     const p = patrols.find(p => p.tile_id === ov);
+    const said = gameRules.find(r => r.kind === "message" && r.tile === ov);
     let v = "🚶 " + esc(tileLabel(ov));
     if (p) v += '<br><small>patrol — ' + p.points.length + ' stops</small>';
+    if (said) v += '<br><small>💬 “' + esc(said.text) + '”</small>';
     let btns = '<button data-act="delobj" class="danger">Remove</button>';
     if (p) btns += '<button data-act="reroute" data-pid="' + p.id + '">Re-route</button>' +
                    '<button data-act="delpatrol" data-pid="' + p.id + '" class="danger">End patrol</button>';
+    else btns += '<button data-act="givepatrol">Give patrol</button>';
+    btns += said ? '<button data-act="edittext" data-rid="' + said.id + '">Edit text</button>' +
+                   '<button data-act="cleartext" data-rid="' + said.id + '" class="danger">Clear text</button>'
+                 : '<button data-act="settext">Set text</button>';
     h += inspRow("object", v, btns);
   } else {
     h += inspRow("object", '<span style="color:#777">nothing here</span>', "");
@@ -1364,7 +1399,7 @@ function renderInspect() {
   });
 }
 async function inspectAction(act, d) {
-  const x = inspectPos.x, y = inspectPos.y;
+  const x = inspectPos.x, y = inspectPos.y, ov = objects[y][x];
   if (act === "delobj") {
     const r = await api("/api/paint", { layer: "objects", x, y, tile_id: null });
     if (!r.ok) { toast("couldn't remove that"); return; }
@@ -1383,6 +1418,32 @@ async function inspectAction(act, d) {
     await loadGameRules();
   } else if (act === "delpatrol") {
     await removePatrol(+d.pid);   // reloads patrols + toasts
+  } else if (act === "settext" || act === "edittext") {
+    // v4.6: words for the character — the little editor opens under the rows
+    const rid = +(d.rid || 0);
+    const old = rid ? gameRules.find(r => r.id === rid) : null;
+    textEdit = { tile: ov, rid: rid || null };
+    $("inspect-textinput").value = old ? (old.text || "") : "";
+    $("inspect-textedit").hidden = false;
+    setTimeout(() => $("inspect-textinput").focus(), 60);
+    return;   // the editor stays open; no re-render
+  } else if (act === "cleartext") {
+    const r = await api("/api/game-rules", { action: "delete", id: +d.rid });
+    if (!r.ok) { toast("couldn't clear that"); return; }
+    await loadGameRules();
+  } else if (act === "givepatrol") {
+    // v4.6: the placed character becomes the walker — lift him off the map,
+    // hand the patrol tool his tile, and start his route where he stood.
+    const r = await api("/api/paint", { layer: "objects", x, y, tile_id: null });
+    if (!r.ok) { toast("couldn't lift him"); return; }
+    await refresh();
+    selTile = ov; buildPalette();
+    selectTool = false; $("btn-select").classList.remove("on");
+    patrolTool = true; $("btn-patrol").classList.add("on");
+    draftPoints = [[x, y]]; $("btn-patrol-done").hidden = true;
+    closeOverlays(); render();
+    toast("tap where he should walk, then Done ✓");
+    return;
   } else if (act === "reroute") {
     const p = patrols.find(p => p.id === +d.pid);
     const r = await api("/api/patrols/delete", { id: +d.pid });
@@ -1399,6 +1460,23 @@ async function inspectAction(act, d) {
   }
   renderInspect(); render();
 }
+// v4.6: the inspector's little text editor — words riding a character
+let textEdit = null;   // {tile, rid} while open
+$("inspect-textsave").onclick = async () => {
+  if (!textEdit) return;
+  const text = $("inspect-textinput").value.trim();
+  if (textEdit.rid) await api("/api/game-rules", { action: "delete", id: textEdit.rid });
+  let r = { ok: true };
+  if (text) r = await api("/api/game-rules",
+    { action: "add", rule: { kind: "message", tile: textEdit.tile, text } });
+  textEdit = null; $("inspect-textedit").hidden = true;
+  if (!r.ok) { toast("couldn't save that"); return; }
+  await loadGameRules(); renderInspect(); render();
+  toast("he'll say it when you bump into him");
+};
+$("inspect-textcancel").onclick = () => {
+  textEdit = null; $("inspect-textedit").hidden = true;
+};
 $("btn-traits").onclick = () => {
   traitTool = !traitTool;
   $("btn-traits").classList.toggle("on", traitTool);

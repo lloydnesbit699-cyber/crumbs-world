@@ -64,6 +64,12 @@ sweeps, save chirp, error buzz, NPC simlish-style mumbles (tap a placed
 character), bird chirps, water splash, looped wind ambience. Setup sheet
 gains Sound: mute, volume slider, wind toggle, demo button; choices
 persist in localStorage.
+v5.9 (2026-09-20): curated starter tile pack — 92 hand-picked Project Utumno
+(CC0) cells packed into one shared_library/starter_pack.png strip, registered
+as pack "starter" (ids 70000+). The full 6,038-cell Utumno library stays in
+shared_library.json but is opt-in (ENABLE_FULL_UTUMNO); the palette opens on
+the Starter pack only, so the app is fun immediately. Starter tiles are
+built-in: the delete/scope endpoints refuse them (they share one strip).
 
 Run:   python3 crumbs_hud.py
 Open:  http://127.0.0.1:8778   (same phone's browser)
@@ -121,6 +127,11 @@ TILE_PRESETS = {
 
 _custom_tiles = []  # registry mirror: [{id,name,preset,solid,frame_ms,files,scope}]
 _shared_tiles = []  # v3.8: the shared shelf — same shape, scope="shared"
+_shared_skipped = []  # v5.9: registry entries kept on disk but NOT registered (opt-in full library)
+# v5.9: the full 6,038-cell Utumno library ships in shared_library.json but stays
+# dormant — only the curated "starter" pack (plus local imports) loads into the
+# palette. Flip to True (or ship a build with it True) to restore the full shelf.
+ENABLE_FULL_UTUMNO = False
 
 
 def _custom_public(entry):
@@ -147,6 +158,10 @@ def _find_custom(tid):
 def _save_custom_registry(scope="local"):
     path = SHARED_REG if scope == "shared" else CUSTOM_REG
     tiles = _shared_tiles if scope == "shared" else _custom_tiles
+    if scope == "shared":
+        # v5.9: keep dormant full-library entries in the JSON so they are not
+        # wiped by a rewrite — they just stay unregistered until opted in.
+        tiles = list(tiles) + list(_shared_skipped)
     try:
         # v5.2: preserve top-level metadata (e.g. "packs") across rewrites
         try:
@@ -172,6 +187,11 @@ def _register_custom_tile(entry, tile_dir):
             frames.append(core.Image.open(p).convert("RGBA"))
     if not frames:
         return False
+    # v5.9: starter-pack entries name a cell of a packed 32px strip — crop it.
+    if "cell" in entry:
+        ci = int(entry["cell"])
+        strip = frames[0]
+        frames = [strip.crop((ci * 32, 0, (ci + 1) * 32, 32)).copy()]
     tid = int(entry["id"])
     assets.add_tile(tid, "custom", {
         "name": entry["name"],
@@ -223,6 +243,12 @@ def _load_custom_tiles():
         for entry in reg.get("tiles", []):
             try:
                 entry["scope"] = scope
+                # v5.9: full Utumno library is opt-in — keep its entries on disk
+                # but out of memory and out of the palette until enabled.
+                if (scope == "shared" and not ENABLE_FULL_UTUMNO
+                        and entry.get("pack") == "utumno"):
+                    _shared_skipped.append(entry)
+                    continue
                 if _register_custom_tile(entry, tile_dir):
                     store.append(entry)
             except Exception as e:
@@ -1888,6 +1914,9 @@ class Handler(BaseHTTPRequestHandler):
             entry, cur = _find_custom(tid)
             if entry is None:
                 return self._send_json({"ok": False, "error": "not found"}, 404)
+            if entry.get("pack") == "starter":
+                # v5.9: starter tiles share one packed strip — built in, can't move
+                return self._send_json({"ok": False, "error": "starter tiles are built in"}, 403)
             if cur != scope:
                 src_dir = SHARED_DIR if cur == "shared" else CUSTOM_DIR
                 dst_dir = SHARED_DIR if scope == "shared" else CUSTOM_DIR
@@ -1916,6 +1945,9 @@ class Handler(BaseHTTPRequestHandler):
             entry, scope = _find_custom(tid)
             if entry is None:
                 return self._send_json({"ok": False, "error": "not found"}, 404)
+            if entry.get("pack") == "starter":
+                # v5.9: starter tiles share one packed strip — built in, can't delete
+                return self._send_json({"ok": False, "error": "starter tiles are built in"}, 403)
             tile_dir = SHARED_DIR if scope == "shared" else CUSTOM_DIR
             if scope == "shared":
                 _shared_tiles[:] = [e for e in _shared_tiles if int(e["id"]) != tid]
@@ -2536,7 +2568,7 @@ if __name__ == "__main__":
     srv = ThreadingHTTPServer((host, PORT), Handler)
     threading.Thread(target=_autosave_loop, daemon=True).start()
     print("=" * 52)
-    print("  Crumbs HUD v5.8 — synthesized sound effects (Web Audio, zero files)")
+    print("  Crumbs HUD v5.9 — curated starter tile pack (Utumno, opt-in full library)")
     if public:
         ip = _lan_ip()
         print("  PUBLIC mode: anyone on your Wi-Fi can open the HUD.")

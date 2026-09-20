@@ -4401,7 +4401,7 @@ if __name__ == "__main__":
     srv = ThreadingHTTPServer((host, PORT), Handler)
     threading.Thread(target=_autosave_loop, daemon=True).start()
     print("=" * 52)
-    print("  Crumbs HUD v5.16 — shareable bundles, Tiled export, backup restore")
+    print("  Crumbs HUD v5.17 — Crumbs World splash, honest boot progress")
     if public:
         ip = _lan_ip()
         print("  PUBLIC mode: anyone on your Wi-Fi can open the HUD (read-only by default).")

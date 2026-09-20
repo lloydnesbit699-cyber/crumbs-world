@@ -3,6 +3,23 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.17 — 2026-09-20
+
+Crumbs World splash + honest boot progress. Verified on desktop/server;
+not yet run on Lloyd's iPhone.
+
+- **Crumbs World splash.** The signature shield now fills the whole
+  title screen as the background (dark scrim keeps the title readable),
+  in a Crumbs World variant — same shield, red/blue neon, planet ring,
+  compass star and crossed wrenches, but the shield reads CRUMBS WORLD
+  instead of the Nesbits business text. The Fixit site's logo is untouched.
+- **Boot progress bar.** The splash used to vanish on a fixed timer, so a
+  slow or stuck load looked dead. Now a progress bar advances through
+  real boot milestones (server → biomes → recipes → tiles → sprites →
+  your tiles → map data → painting), the splash fades only when boot
+  actually finishes, and if it's still stuck after 12s the label says
+  so and reminds that a-Shell must stay awake.
+
 ## v5.16 — 2026-09-20
 
 Trust + sellable outputs. Verified on desktop/server; not yet run on

@@ -430,6 +430,262 @@ def _save_patrols():
         print(f"[hud] could not save patrols: {e}")
 
 
+# ---- v5.12: Melody's mission workshop ---------------------------------------
+# She designs missions from presets + a short questionnaire, builds the enemy
+# flows the difficulty calls for, and playtests every objective herself.
+_missions = []          # [{id,name,preset,difficulty,reward,objectives,
+                        #   hazard_count,active,won,placed,danger}]
+_mission_seq = {"next": 1}
+mission_run = None      # live run state while play mode is active
+
+
+def _missions_path(name):
+    base = name[:-5] if name.endswith(".json") else name
+    return os.path.join(SCRIPT_DIR, base + ".missions.json")
+
+
+def _load_missions(name):
+    global _missions, _mission_seq
+    try:
+        d = json.load(open(_missions_path(name)))
+        _missions = d.get("missions", [])
+        _mission_seq["next"] = d.get("next", len(_missions) + 1)
+    except (OSError, ValueError):
+        _missions, _mission_seq = [], {"next": 1}
+
+
+def _save_missions(name):
+    try:
+        with open(_missions_path(name), "w") as f:
+            json.dump({"missions": _missions, "next": _mission_seq["next"]}, f)
+    except OSError as e:
+        print(f"[hud] could not save missions: {e}")
+
+
+def _mission_by_id(mid):
+    return next((m for m in _missions if m["id"] == mid), None)
+
+
+# Melody's Tier-0 voice: deterministic lines (picked by mission id so she's
+# consistent, not random). Warm, a little playful — Lloyd's kid.
+_MELODY_LINES = {
+    "built": [
+        "Ooh, '{name}' — I like it. {diff} it is.",
+        "'{name}' is ready, builder. {diff} — brave choice.",
+        "Done! '{name}' is on the board. {diff}, just how you asked.",
+    ],
+    "tested_ok": [
+        "I walked it myself — every mark is reachable. You've got this.",
+        "Ran the route as a ghost: all clear. Go get '{name}'.",
+        "Playtested and beatable. The {hazards} hazard(s) are the spicy part.",
+    ],
+    "tested_bad": [
+        "Hmm, I tried to run it and got stuck: {issue} Want me to move the mark?",
+        "My ghost couldn't finish it — {issue} Let's fix the map first.",
+    ],
+    "won": [
+        "You did it! '{name}' complete! {reward}",
+        "'{name}' — cleared! {reward} I'm proud of you, builder.",
+    ],
+}
+_DIFF_WORDS = {1: "Gentle", 2: "Bold", 3: "Brave", 4: "Fierce", 5: "Legend"}
+
+
+def _melody_says(kind, seed=0, **kw):
+    lines = _MELODY_LINES[kind]
+    line = lines[seed % len(lines)]
+    try:
+        return line.format(**kw)
+    except (KeyError, IndexError):
+        return line
+
+
+def _mission_enemy_tile():
+    """Melody drafts her challengers: mean-looking critters first."""
+    pool = [t for t in _shared_tiles + _custom_tiles
+            if t.get("preset") == "character"]
+    if not pool:
+        return None
+    prefs = ("spider", "hound", "rat", "imp", "bat", "wolf", "goblin",
+             "orc", "snake", "scorpion")
+    for want in prefs:
+        for t in pool:
+            if want in t.get("name", "").lower():
+                return t["id"]
+    return pool[0]["id"]
+
+
+def _mission_clear_hazards(mission):
+    """Pull this mission's enemy flows off the map."""
+    global _patrols
+    mid = mission["id"]
+    _patrols = [p for p in _patrols if p.get("mission_id") != mid]
+    for x, y in mission.get("placed", []):
+        if 0 <= x < world.width and 0 <= y < world.height:
+            if world.object_layer[y][x] == mission.get("enemy_tile"):
+                world.object_layer[y][x] = None
+    mission["placed"] = []
+    mission["danger"] = []
+    _save_patrols()
+
+
+def _mission_place_hazards(mission):
+    """Build the enemy flows this difficulty calls for: hazard patrols near
+    the objectives. Returns (placed_count, danger_cells)."""
+    _mission_clear_hazards(mission)
+    n = mission.get("hazard_count", 0)
+    if not n:
+        return 0, []
+    tid = _mission_enemy_tile()
+    if tid is None:
+        return 0, []
+    mission["enemy_tile"] = tid
+    targets = core.mission_target_cells(mission) or [(world.width // 2,
+                                                      world.height // 2)]
+    rng = random.Random(mission["id"] * 7919 + 13)  # deterministic per mission
+    placed, danger = [], set()
+    tries = 0
+    while len(placed) < n and tries < 60:
+        tries += 1
+        tx, ty = targets[rng.randrange(len(targets))]
+        ax = tx + rng.randint(-4, 4)
+        ay = ty + rng.randint(-4, 4)
+        if not (0 <= ax < world.width and 0 <= ay < world.height):
+            continue
+        if not _walkable(ax, ay) or world.object_layer[ay][ax] is not None:
+            continue
+        if any(abs(ax - px) + abs(ay - py) < 3 for px, py in placed):
+            continue
+        # route: anchor + 2-3 nearby walkable stops
+        pts = [[ax, ay]]
+        for _ in range(rng.randint(2, 3)):
+            bx, by = pts[-1]
+            cands = [(bx + dx, by + dy) for dx, dy in
+                     ((1, 0), (-1, 0), (0, 1), (0, -1))]
+            cands = [(x, y) for x, y in cands
+                     if 0 <= x < world.width and 0 <= y < world.height
+                     and _walkable(x, y) and [x, y] not in pts]
+            if not cands:
+                break
+            pts.append(list(rng.choice(cands)))
+        if len(pts) < 2:
+            continue
+        world.object_layer[ay][ax] = tid
+        pid = _patrol_seq["next"]
+        _patrol_seq["next"] += 1
+        _patrols.append({"id": pid, "tile_id": tid, "x": ax, "y": ay,
+                         "points": pts, "hazard": True,
+                         "mission_id": mission["id"]})
+        placed.append((ax, ay))
+        danger.update((x, y) for x, y in pts)
+    mission["placed"] = placed
+    mission["danger"] = sorted(danger)
+    _save_patrols()
+    return len(placed), sorted(danger)
+
+
+def _mission_playtest(mission):
+    sx, sy = _find_spawn()
+    return core.mission_playtest(
+        world, mission, (sx, sy), _walkable,
+        lambda ax, ay, bx, by: bool(_find_path(ax, ay, bx, by)[0]))
+
+
+def _mission_start_run(mission):
+    """Snapshot a fresh run when play mode starts."""
+    global mission_run
+    mission_run = {
+        "mission_id": mission["id"],
+        "objectives": copy.deepcopy(mission["objectives"]),
+        "tick0": _tick_n,
+        "inv0": dict(_inv),
+        "won": False,
+        "failed": False,
+    }
+
+
+def _mission_bump_meters(d_health=0):
+    m = world_profile.get("meters", {})
+    if m.get("health") and d_health:
+        _meters["health"] = max(0, min(10, _meters["health"] + d_health))
+
+
+def _check_mission(x, y):
+    """Per hero step: hazard damage + objective progress. Returns events."""
+    global mission_run
+    events = []
+    if not mission_run or mission_run["won"] or mission_run["failed"]:
+        return events
+    mission = _mission_by_id(mission_run["mission_id"])
+    if mission is None:
+        return events
+    danger = {tuple(c) for c in mission.get("danger", [])}
+    if (x, y) in danger:
+        _mission_bump_meters(d_health=-1)
+        _log_event("hazard hit")
+        events.append({"t": "toast",
+                       "text": "⚠ hazard patrol's ground — ouch!"})
+        if _meters.get("health", 10) <= 0:
+            mission_run["failed"] = True
+            events.append({"t": "message",
+                           "text": "The hazards got you… mission failed."})
+            return events
+    elapsed = _tick_n - mission_run["tick0"]
+    gathered = {k: _inv.get(k, 0) - mission_run["inv0"].get(k, 0)
+                for k in ("wood", "food")}
+    for o in mission_run["objectives"]:
+        if o.get("done") or o.get("failed"):
+            continue
+        k = o["kind"]
+        if k == "reach" and (x, y) == (o["x"], o["y"]):
+            o["done"] = True
+            events.append({"t": "toast", "text": "📍 waypoint reached!"})
+        elif k == "timed":
+            o["elapsed"] = elapsed
+            if (x, y) == (o["x"], o["y"]):
+                o["done"] = True
+                events.append({"t": "toast", "text": "⏱ made it in time!"})
+            elif elapsed >= o["ticks"]:
+                o["failed"] = True
+                mission_run["failed"] = True
+                events.append({"t": "message",
+                               "text": "⏱ out of time… mission failed."})
+                return events
+        elif k == "collect":
+            o["have"] = max(0, gathered.get(o["what"], 0))
+            if o["have"] >= o["count"]:
+                o["done"] = True
+                events.append({"t": "toast",
+                               "text": f"🌾 gathered {o['count']} {o['what']}!"})
+        elif k == "survive":
+            o["elapsed"] = elapsed
+            if elapsed >= o["ticks"]:
+                o["done"] = True
+                events.append({"t": "toast", "text": "❤ survived!"})
+    if all(o.get("done") for o in mission_run["objectives"]):
+        mission_run["won"] = True
+        mission["won"] = True
+        _save_missions(_current_map)
+        reward = mission.get("reward") or "bragging rights"
+        msg = _melody_says("won", mission["id"], name=mission["name"],
+                           reward=f"Reward: {reward}.")
+        events.append({"t": "message", "text": "🏆 " + msg})
+        _log_event(f"mission won: {mission['name']}")
+    return events
+
+
+def _mission_run_text():
+    if not mission_run:
+        return ""
+    m = _mission_by_id(mission_run["mission_id"])
+    if not m:
+        return ""
+    tmp = dict(m)
+    tmp["objectives"] = mission_run["objectives"]
+    txt, _, _ = core.mission_progress_text(tmp)
+    return txt
+
+
 def _load_patrols():
     if not os.path.exists(PATROL_SAVE):
         return
@@ -729,7 +985,8 @@ _NON_MAPS = {"custom_tiles.json", "sprite_library.json", "shared_library.json",
 def _map_sidecars(name):
     base = name[:-5] if name.endswith(".json") else name
     return [os.path.join(SCRIPT_DIR, base + ext)
-            for ext in (".json", ".rules.json", ".traits.json", ".names.json")]
+            for ext in (".json", ".rules.json", ".traits.json", ".names.json",
+                        ".missions.json")]  # v5.12
 
 def _slots_path():
     base = _current_map or DEFAULT_SAVE
@@ -1020,6 +1277,7 @@ _load_patrols()       # v3.4: patrol routes back (needs tiles loaded first)
 _load_rules(DEFAULT_SAVE)  # v3.7: this build's rules (or defaults)
 _load_traits(DEFAULT_SAVE)  # v4.0: this build's nature traits (or blank)
 _load_names(DEFAULT_SAVE)   # v5.1: per-instance names (or none)
+_load_missions(DEFAULT_SAVE)  # v5.12: Melody's missions (or none)
 
 # v3.2: built-in water/ocean colors are swimmable — slow the hero, don't block
 for _tid, _t in assets.tiles.items():
@@ -1404,6 +1662,35 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/patrols":
             # v3.4: patrol routes — [{id, tile_id, points}]
             self._send_json({"patrols": _patrols})
+        elif path == "/api/missions/presets":
+            # v5.12: Melody's preset library + difficulty tiers
+            self._send_json({
+                "ok": True,
+                "presets": core.MISSION_PRESETS,
+                "difficulties": [
+                    {"n": n, "label": t["label"], "hazards": t["hazards"]}
+                    for n, t in sorted(core.DIFFICULTY_TIERS.items())],
+            })
+        elif path == "/api/missions":
+            # v5.12: missions for this map
+            self._send_json({"ok": True, "missions": [
+                {k: m[k] for k in ("id", "name", "preset", "difficulty",
+                                   "reward", "objectives", "hazard_count",
+                                   "active", "won")}
+                for m in _missions]})
+        elif path == "/api/missions/state":
+            # v5.12: live run progress for the play HUD
+            active = next((m for m in _missions if m.get("active")), None)
+            self._send_json({
+                "ok": True,
+                "active": ({k: active[k] for k in
+                            ("id", "name", "preset", "difficulty", "reward")}
+                           if active else None),
+                "progress": _mission_run_text(),
+                "danger": active.get("danger", []) if active else [],
+                "won": bool(mission_run and mission_run["won"]),
+                "failed": bool(mission_run and mission_run["failed"]),
+            })
         elif path.startswith("/api/thumb/"):
             try:
                 tid = int(path.rsplit("/", 1)[1])
@@ -1570,6 +1857,7 @@ class Handler(BaseHTTPRequestHandler):
     # -- POST --------------------------------------------------------------
     def do_POST(self):
         global traits_grid, hero_override  # v5.6: slots/load rebinds these
+        global _current_map, mission_run  # v5.12: rename + mission runs
         path = urlparse(self.path).path
         body = self._read_json()
         if body is None or not isinstance(body, dict):
@@ -1980,6 +2268,95 @@ class Handler(BaseHTTPRequestHandler):
             _undoable("delete patrol", _do)  # v5.0
             return self._send_json({"ok": True})
 
+        if path == "/api/missions/create":
+            # v5.12: Melody designs a mission from preset + questionnaire.
+            # {preset, answers: {name, difficulty, reward, target/targets,
+            #  what, count, ticks}}
+            preset = body.get("preset")
+            answers = body.get("answers") or {}
+            try:
+                m = core.build_mission(preset, answers)
+            except ValueError as e:
+                return self._send_json({"ok": False, "error": str(e)}, 400)
+            m["id"] = _mission_seq["next"]
+            _mission_seq["next"] += 1
+            m["placed"] = []
+            m["danger"] = []
+            _missions.append(m)
+            _save_missions(_current_map)
+            _log_event(f"mission created: {m['name']}")
+            diff = _DIFF_WORDS[m["difficulty"]]
+            return self._send_json({
+                "ok": True, "mission": m,
+                "melody_says": _melody_says("built", m["id"], name=m["name"],
+                                            diff=diff)})
+
+        if path == "/api/missions/apply":
+            # v5.12: Melody builds it — places enemy flows per difficulty,
+            # playtests every objective herself, reports back.
+            try:
+                mid = int(body.get("id"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "bad id"}, 400)
+            m = _mission_by_id(mid)
+            if m is None:
+                return self._send_json({"ok": False, "error": "not found"}, 404)
+            for other in _missions:
+                other["active"] = (other["id"] == mid)
+            placed, danger = _mission_place_hazards(m)
+            issues = _mission_playtest(m)
+            _save_missions(_current_map)
+            _mark_dirty()
+            _log_event(f"mission applied: {m['name']} ({placed} hazards)")
+            if issues:
+                says = _melody_says("tested_bad", m["id"],
+                                    issue=issues[0])
+            else:
+                says = _melody_says("tested_ok", m["id"], name=m["name"],
+                                    hazards=placed)
+            return self._send_json({"ok": True, "mission": m,
+                                    "hazards": placed, "danger": danger,
+                                    "issues": issues, "melody_says": says})
+
+        if path == "/api/missions/delete":
+            # v5.12: {id} — pulls its enemy flows off the map too
+            try:
+                mid = int(body.get("id"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "bad id"}, 400)
+            m = _mission_by_id(mid)
+            if m is None:
+                return self._send_json({"ok": False, "error": "not found"}, 404)
+            _mission_clear_hazards(m)
+            _missions[:] = [x for x in _missions if x["id"] != mid]
+            _save_missions(_current_map)
+            _mark_dirty()
+            return self._send_json({"ok": True})
+
+        if path == "/api/missions/suggest-target":
+            # v5.12: Melody picks her own marks — walkable cells far from
+            # spawn and from each other. {n}
+            try:
+                n = max(1, min(4, int(body.get("n", 1))))
+            except (TypeError, ValueError):
+                n = 1
+            sx, sy = _find_spawn()
+            rng = random.Random()
+            cands = [(x, y) for y in range(world.height)
+                     for x in range(world.width)
+                     if _walkable(x, y)
+                     and abs(x - sx) + abs(y - sy) >= 4]
+            rng.shuffle(cands)
+            picked = []
+            for c in cands:
+                if len(picked) >= n:
+                    break
+                if all(abs(c[0] - p[0]) + abs(c[1] - p[1]) >= 5
+                       for p in picked):
+                    picked.append(c)
+            return self._send_json({"ok": True,
+                                    "targets": [list(c) for c in picked]})
+
         if path == "/api/patrol-paths":
             # v3.4: {legs: [[[x1,y1],[x2,y2]], ...]} -> {paths: [[[x,y],...]]}.
             # NPC legs ride the same Dijkstra the hero uses (walls avoided,
@@ -2202,6 +2579,7 @@ class Handler(BaseHTTPRequestHandler):
             ok = world.save(os.path.join(SCRIPT_DIR, name))
             if ok:
                 _save_rules(name)  # v3.7
+                _save_missions(name)  # v5.12: Melody's missions ride along
                 _log_event(f"saved {name}")
             return self._send_json({"ok": ok, "file": name})
 
@@ -2219,6 +2597,7 @@ class Handler(BaseHTTPRequestHandler):
                 _load_rules(name)  # v3.7: this build's rules come with it
                 _load_traits(name)  # v4.0: this build's nature comes with it
                 _load_names(name)  # v5.1: this build's names come with it
+                _load_missions(name)  # v5.12: Melody's missions come with it
                 _log_event(f"loaded {name}")
             return self._send_json({"ok": ok, "width": world.width,
                                     "height": world.height, "rules": rules})
@@ -2245,7 +2624,6 @@ class Handler(BaseHTTPRequestHandler):
                                              src[:-5] if src.endswith(".json") else src)):]
                     os.rename(p, os.path.join(SCRIPT_DIR, base + ext))
                     moved += 1
-            global _current_map
             if _current_map == src:
                 _current_map = dst
             _log_event(f"renamed {src} -> {dst}")
@@ -2414,9 +2792,15 @@ class Handler(BaseHTTPRequestHandler):
             play["tx"], play["ty"] = sx, sy
             _reset_rule_session()  # v3.9: fresh keys, messages, win/lose
                                    # v4.0: fresh meters + inventory
+            active = next((m for m in _missions if m.get("active")), None)
+            if active:  # v5.12: Melody's mission run starts here
+                _mission_start_run(active)
+            else:
+                mission_run = None
             _log_event("play started")
             return self._send_json({"ok": True, "x": sx, "y": sy,
-                                    "nature": _nature_state()})
+                                    "nature": _nature_state(),
+                                    "mission": _mission_run_text()})
 
         if path == "/api/play/move":
             if not play["active"]:
@@ -2433,9 +2817,13 @@ class Handler(BaseHTTPRequestHandler):
             for i, (cx, cy) in enumerate(cells):
                 ev = _check_rules(cx, cy)
                 ev += _apply_nature(cx, cy)  # v4.0: the world's nature
+                ev += _check_mission(cx, cy)  # v5.12: Melody's objectives
                 events.append(ev)
                 kept = i + 1
                 if _rule_over:
+                    break
+                if mission_run and (mission_run["won"] or  # v5.12: a win or
+                                    mission_run["failed"]):  # fail ends walk
                     break
             cells = cells[:kept]
             if cells:
@@ -2462,6 +2850,7 @@ class Handler(BaseHTTPRequestHandler):
             events = _check_rules(play["tx"], play["ty"]) if can else []
             if can:
                 events += _apply_nature(play["tx"], play["ty"])  # v4.0
+                events += _check_mission(play["tx"], play["ty"])  # v5.12
             return self._send_json({"ok": True, "x": play["tx"], "y": play["ty"],
                                     "swim": _swim_at(play["tx"], play["ty"]),
                                     "deep": _deep_at(play["tx"], play["ty"]),
@@ -2617,6 +3006,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": False,
                                         "error": "play mode not active"}, 400)
             events = _apply_nature(play["tx"], play["ty"])
+            events += _check_mission(play["tx"], play["ty"])  # v5.12: the
+            # clock runs even standing still — survive/timed keep counting
             return self._send_json({"ok": True, "events": events,
                                     "nature": _nature_state(),
                                     "over": bool(_rule_over)})

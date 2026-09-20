@@ -1061,6 +1061,195 @@ def sprite_import_plan(cells, picks):
             frames, frame_ms = [cells[idx]], 400
         else:
             raise ValueError(f"unknown pick kind {kind!r}")
+def sprite_import_plan(cells, picks):
+    """Turn user picks into import jobs. `picks` is a list of:
+        {kind: "tile", index, name, preset}
+        {kind: "anim", start, count, name, preset, frame_ms?}
+    Returns [{name, preset, frame_ms, frames: [cell, ...]}, ...] with frames
+    still at sheet resolution — upscale with upscale_nearest() before saving.
+    Raises ValueError on the first bad pick."""
+    if len(picks) > SPRITE_MAX_PICKS:
+        raise ValueError(f"too many picks (max {SPRITE_MAX_PICKS})")
+    jobs = []
+    for p in picks:
+        kind = p.get("kind", "tile")
+        name = str(p.get("name", "")).strip()[:24] or "sprite"
+        preset = p.get("preset", "decor")
+        if kind == "anim":
+            try:
+                frame_ms = max(80, min(2000, int(p.get("frame_ms", 400))))
+            except (TypeError, ValueError):
+                frame_ms = 400
+            frames = anim_cells(cells, int(p["start"]), int(p.get("count", 2)))
+            if len(frames) < 2:
+                raise ValueError("animation needs at least 2 frames")
+        elif kind == "tile":
+            idx = int(p["index"])
+            if not (0 <= idx < len(cells)):
+                raise ValueError(f"cell {idx} out of range")
+            frames, frame_ms = [cells[idx]], 400
+        else:
+            raise ValueError(f"unknown pick kind {kind!r}")
         jobs.append({"name": name, "preset": preset,
                      "frame_ms": frame_ms, "frames": frames})
     return jobs
+
+
+# ---- v5.12: mission system (GUI-free) ---------------------------------------
+# Melody's workshop: a preset library of mission templates, a short
+# questionnaire (answers dict), difficulty tiers that scale the enemy flows,
+# and a playtest that proves every objective is beatable before the player
+# ever taps play. The server owns run state; this module owns the shape.
+MISSION_PRESETS = [
+    {"id": "reach", "label": "Reach the shrine",
+     "hint": "Get your hero to one marked spot.",
+     "fields": ["target", "difficulty", "reward"]},
+    {"id": "visit", "label": "Waypoints",
+     "hint": "Touch every marked waypoint, any order.",
+     "fields": ["targets", "difficulty", "reward"]},
+    {"id": "collect", "label": "Gatherer",
+     "hint": "Gather wood or food from the land.",
+     "fields": ["what", "count", "difficulty", "reward"]},
+    {"id": "survive", "label": "Survivor",
+     "hint": "Keep your meters alive for N ticks.",
+     "fields": ["ticks", "difficulty", "reward"]},
+    {"id": "timed", "label": "Beat the clock",
+     "hint": "Reach the mark before time runs out.",
+     "fields": ["target", "ticks", "difficulty", "reward"]},
+]
+MISSION_PRESET_IDS = [p["id"] for p in MISSION_PRESETS]
+
+# Difficulty tiers: how hard Melody makes the enemy flows. hazards = number of
+# hazard patrols she places near the objective; drain = extra meter pressure
+# she expects the hero to handle (informational for now).
+DIFFICULTY_TIERS = {
+    1: {"label": "Gentle", "hazards": 0},
+    2: {"label": "Bold", "hazards": 1},
+    3: {"label": "Brave", "hazards": 2},
+    4: {"label": "Fierce", "hazards": 3},
+    5: {"label": "Legend", "hazards": 4},
+}
+MISSION_MAX_WAYPOINTS = 4
+
+
+def _mission_xy(v, name):
+    try:
+        x, y = int(v[0]), int(v[1])
+    except (TypeError, ValueError, IndexError):
+        raise ValueError(f"bad {name}")
+    return x, y
+
+
+def build_mission(preset_id, answers):
+    """Build a mission dict from a preset + questionnaire answers.
+    answers: {name?, difficulty? (1-5), reward?, target? [x,y],
+              targets? [[x,y]...], what? ("wood"/"food"), count?, ticks?}
+    Returns a mission dict with objectives (all done=False). Raises
+    ValueError on the first bad answer."""
+    if preset_id not in MISSION_PRESET_IDS:
+        raise ValueError(f"unknown mission preset {preset_id!r}")
+    try:
+        difficulty = int(answers.get("difficulty", 2))
+    except (TypeError, ValueError):
+        raise ValueError("difficulty must be 1-5")
+    if difficulty not in DIFFICULTY_TIERS:
+        raise ValueError("difficulty must be 1-5")
+    name = str(answers.get("name", "")).strip()[:32] or \
+        next(p["label"] for p in MISSION_PRESETS if p["id"] == preset_id)
+    reward = str(answers.get("reward", "")).strip()[:48]
+
+    objectives = []
+    if preset_id in ("reach", "timed"):
+        x, y = _mission_xy(answers.get("target"), "target")
+        if preset_id == "reach":
+            objectives.append({"kind": "reach", "x": x, "y": y, "done": False})
+        else:
+            try:
+                ticks = max(20, min(600, int(answers.get("ticks", 120))))
+            except (TypeError, ValueError):
+                raise ValueError("ticks must be a number")
+            objectives.append({"kind": "timed", "x": x, "y": y,
+                               "ticks": ticks, "elapsed": 0, "done": False,
+                               "failed": False})
+    elif preset_id == "visit":
+        tgts = answers.get("targets") or []
+        if not (2 <= len(tgts) <= MISSION_MAX_WAYPOINTS):
+            raise ValueError(f"visit needs 2-{MISSION_MAX_WAYPOINTS} waypoints")
+        for t in tgts:
+            x, y = _mission_xy(t, "waypoint")
+            objectives.append({"kind": "reach", "x": x, "y": y, "done": False})
+    elif preset_id == "collect":
+        what = answers.get("what", "wood")
+        if what not in ("wood", "food"):
+            raise ValueError('collect "what" must be wood or food')
+        try:
+            count = max(1, min(20, int(answers.get("count", 5))))
+        except (TypeError, ValueError):
+            raise ValueError("count must be a number")
+        objectives.append({"kind": "collect", "what": what, "count": count,
+                           "have": 0, "done": False})
+    elif preset_id == "survive":
+        try:
+            ticks = max(20, min(600, int(answers.get("ticks", 90))))
+        except (TypeError, ValueError):
+            raise ValueError("ticks must be a number")
+        objectives.append({"kind": "survive", "ticks": ticks, "elapsed": 0,
+                           "done": False})
+    return {"name": name, "preset": preset_id, "difficulty": difficulty,
+            "reward": reward, "objectives": objectives,
+            "hazard_count": DIFFICULTY_TIERS[difficulty]["hazards"],
+            "active": False, "won": False}
+
+
+def mission_target_cells(mission):
+    """Every (x, y) the hero must physically reach for this mission."""
+    cells = []
+    for o in mission["objectives"]:
+        if o["kind"] in ("reach", "timed"):
+            cells.append((o["x"], o["y"]))
+    return cells
+
+
+def mission_playtest(world, mission, spawn, walkable, path_exists):
+    """Can every objective actually be completed? `spawn` is (x, y);
+    `walkable(x, y)` and `path_exists(sx, sy, tx, ty)` are callables.
+    Returns a list of human-readable issue strings (empty = beatable)."""
+    issues = []
+    sx, sy = spawn
+    if not walkable(sx, sy):
+        return ["no walkable spawn — Melody can't even start the run"]
+    for o in mission["objectives"]:
+        if o["kind"] in ("reach", "timed"):
+            if not (0 <= o["x"] < world.width and 0 <= o["y"] < world.height):
+                issues.append(f"target ({o['x']},{o['y']}) is off the map")
+            elif not walkable(o["x"], o["y"]):
+                issues.append(f"target ({o['x']},{o['y']}) can't be stood on")
+            elif not path_exists(sx, sy, o["x"], o["y"]):
+                issues.append(f"target ({o['x']},{o['y']}) can't be reached "
+                              f"from spawn — a cliff or wall cuts it off")
+        # collect/survive need no path check — the land and the clock decide
+    return issues
+
+
+def mission_progress_text(mission):
+    """One-line HUD text + (done, total)."""
+    obs = mission["objectives"]
+    total = len(obs)
+    done = sum(1 for o in obs if o.get("done"))
+    bits = []
+    for o in obs:
+        if o["kind"] == "reach":
+            bits.append("📍 reach (%d,%d)%s" % (o["x"], o["y"],
+                                                " ✓" if o["done"] else ""))
+        elif o["kind"] == "timed":
+            bits.append("⏱ reach (%d,%d) %d/%d%s" % (
+                o["x"], o["y"], o.get("elapsed", 0), o["ticks"],
+                " ✓" if o["done"] else (" ✗" if o.get("failed") else "")))
+        elif o["kind"] == "collect":
+            bits.append("🌾 %s %d/%d%s" % (o["what"], o.get("have", 0),
+                                           o["count"],
+                                           " ✓" if o["done"] else ""))
+        elif o["kind"] == "survive":
+            bits.append("❤ survive %d/%d%s" % (o.get("elapsed", 0), o["ticks"],
+                                               " ✓" if o["done"] else ""))
+    return "; ".join(bits), done, total

@@ -212,6 +212,29 @@
   #import-presets button { flex: 1 1 28%; margin: 0; padding: 8px 4px; font-size: 12px; }
   #import-presets button.on { border-color: #4da3ff; color: #4da3ff; }
   /* v5.11: sprite-sheet importer */
+
+  /* v5.12: Melody's workshop */
+  .melody-says { background: #2a2140; border: 1px solid #8a6dd7; border-radius: 10px;
+    padding: 8px 10px; margin: 6px 0; font-size: 13px; line-height: 1.45; color: #e8defc; }
+  .melody-empty { color: #8d87a0; font-size: 12px; padding: 6px 2px; }
+  #melody-missions { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; max-height: 30vh; overflow-y: auto; }
+  .mrow { display: flex; align-items: center; gap: 6px; background: #221d33; border: 1px solid #4a4370;
+    border-radius: 8px; padding: 6px 8px; }
+  .mrow.on { border-color: #8a6dd7; }
+  .mrow-main { flex: 1; min-width: 0; }
+  .mrow-main b { font-size: 13px; }
+  .mrow-sub { display: block; font-size: 11px; color: #a89cc9; }
+  .mpreset { display: block; width: 100%; text-align: left; margin: 4px 0; padding: 8px 10px;
+    background: #221d33; border: 1px solid #4a4370; border-radius: 8px; color: #e8defc; }
+  .mpreset b { display: block; font-size: 13px; }
+  .mpreset span { font-size: 11px; color: #a89cc9; }
+  .mlab { display: block; font-size: 12px; color: #c9b8ff; margin: 8px 0 2px; }
+  .mlab input[type="text"], .mlab input[type="number"] { display: block; width: 100%; margin-top: 4px;
+    background: #191423; border: 1px solid #4a4370; border-radius: 6px; color: #fff; padding: 7px 8px; font-size: 14px; }
+  #mission-hud { position: fixed; top: 8px; left: 50%; transform: translateX(-50%); z-index: 60;
+    background: rgba(30, 22, 55, 0.92); border: 1px solid #8a6dd7; border-radius: 10px;
+    padding: 6px 12px; font-size: 12px; color: #e8defc; max-width: 92vw; text-align: center; }
+  #mission-hud b { display: block; font-size: 13px; }
   #sheet-form { background: #1c1c1c; border: 1px solid #444; border-radius: 10px;
       padding: 10px; margin-bottom: 10px; }
   #sheet-tabs { margin-bottom: 8px; }
@@ -364,7 +387,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v5.11</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v5.12</small></span>
   <span id="topbar-undo">
     <button id="btn-undo2" title="Undo">&#8617;</button>
     <button id="btn-redo2" title="Redo">&#8618;</button>
@@ -376,6 +399,7 @@
   <button id="btn-record" title="Record the screen as a video">&#9679; Record</button>
   <button id="menu-rules" title="Game rules for this build">Rules&hellip;</button>
   <button id="menu-world" title="This world's nature: meters and traits">World&hellip;</button>
+  <button id="menu-melody" title="Melody's workshop: missions, goals & playtests">&#128156; Melody&hellip;</button>
   <button id="btn-light" title="Fog/lighting overlay in play mode">Lighting: on</button>
   <button id="menu-dpad" title="Show or hide the on-screen controls">D-pad: on</button>
   <button id="menu-clean" title="Hide every play button for a clean screen">Hide buttons</button>
@@ -588,10 +612,22 @@
   <div id="check-list"></div>
 </div>
 
+<div id="sheet-melody" class="sheet">
+  <div class="grab"></div>
+  <div class="tray-head">&#128156; Melody's workshop <span class="tray-hint">missions, goals &amp; playtests</span></div>
+  <div id="melody-says" class="melody-says"></div>
+  <div id="melody-missions"></div>
+  <button id="melody-new" class="widebtn">＋ New mission…</button>
+  <div id="melody-presets" hidden></div>
+  <div id="melody-form" hidden></div>
+</div>
+
+<div id="mission-hud" hidden></div>
+
 <div id="splash">
   <img src="/icon-512.png" alt="" onerror="this.style.display='none'">
   <div class="splash-title">Crumbs HUD</div>
-  <div class="splash-sub">tile painter &middot; v5.11</div>
+  <div class="splash-sub">tile painter &middot; v5.12</div>
 </div>
 
 <div id="sheet-rules" class="sheet">
@@ -1261,6 +1297,13 @@ function render() {
   // placed character is already on the map; only anchorless (pre-v5.0)
   // patrols draw their figure so the route stays visible.
   if (playMode) {
+    if (missionDanger.size) {   // v5.12: hazard ground glows faintly red
+      ctx.fillStyle = "rgba(255,60,60,0.10)";
+      missionDanger.forEach(k => {
+        const [dx, dy] = k.split(",").map(Number);
+        ctx.fillRect(dx * tilePx, dy * tilePx, tilePx, tilePx);
+      });
+    }
     npcs.forEach(drawNpc);
   } else {
     patrols.forEach(p => {
@@ -1426,6 +1469,7 @@ canvas.addEventListener("pointerdown", e => {
   if (patrolTool) { patrolTap(cell); return; }   // v3.4: patrol stops, not paint
   if (ruleDraft) { ruleTap(cell); return; }      // v3.9: binding a game rule
   if (traitTool) { traitTap(cell); return; }    // v4.0: stamping nature
+  if (melodyPick) { melodyPickTap(cell); return; }  // v5.12: marking a mission target
   stroke = { cells: new Map(), linkCells: new Map(), layer };
   strokeAdd(cell);
 });
@@ -1553,7 +1597,7 @@ async function playTap(cell) {
     const evs = evts[i] || [];
     i++; render();
     if (await playEvents(evs)) { heroTimer = null; return; }
-    if (i >= path.length) { heroTimer = null; heroSwimming = false; heroInDeep = false; refreshSight(); return; }
+    if (i >= path.length) { heroTimer = null; heroSwimming = false; heroInDeep = false; refreshSight(); syncMissionHud(); return; }
     const wms = RULES.walk_ms;   // v3.7: tap-to-walk obeys this build's rules
     heroTimer = setTimeout(step, (swim[i] || deep[i]) ? wms * RULES.swim_mult : wms);
   };
@@ -1578,6 +1622,7 @@ $("btn-play").onclick = async () => {
     runHintShown = false;   // v4.5: the run hint teaches once per run
     await buildNpcs();
     if (npcs.length) npcTimer = setInterval(() => npcTick(0.1), 100);
+    await syncMissionHud();   // v5.12: Melody's objective HUD for this run
     // "can't reach" confusion was play mode intercepting taps — paint tools rest now
     $("btn-play").classList.add("on");
     await refreshRules();   // v3.7: this build's rules + touch controls
@@ -1592,6 +1637,7 @@ $("btn-play").onclick = async () => {
     wxStop();   // v4.1: the sky rests
     npcs = [];
     clearTimeout(stepTimer); stepTimer = null;   // v3.7: D-pad repeat stops
+    $("mission-hud").hidden = true; missionDanger = new Set();  // v5.12
     updateDpad();   // v3.7: hide the touch controls (pad loop self-stops)
     $("btn-play").classList.remove("on");
     playOver = false; $("end-overlay").hidden = true;   // v3.9
@@ -2155,6 +2201,7 @@ async function natureTick() {
     const r = await api("/api/play/tick", {});
     if (!r.ok) return;
     syncNature(r);
+    syncMissionHud();   // v5.12: survive/timed count down standing still too
     await playEvents(r.events);
   } catch (e) {}
 }
@@ -2358,6 +2405,7 @@ async function doStep(dx, dy, repeat) {
   heroSwimming = !!r.swim; heroInDeep = !!r.deep;
   syncNature(r);   // v4.0: meters move on every step
   render();
+  syncMissionHud();   // v5.12: objectives update per step
   clearTimeout(stepTimer); stepTimer = null;
   if (await playEvents(r.events)) return;   // v3.9: win/lose ends the walk
   if (repeat && !r.blocked) {
@@ -2521,7 +2569,8 @@ async function buildNpcs() {
     const loop = [];
     legs.forEach((l, li) => { if (l.pi === pi && paths[li] && paths[li].length) loop.push(...paths[li]); });
     if (loop.length) npcs.push({ tile_id: starts[pi].tile_id, loop, seg: 0,
-      x: starts[pi].x, y: starts[pi].y, flip: false, away: false });
+      x: starts[pi].x, y: starts[pi].y, flip: false, away: false,
+      hazard: !!patrols[pi].hazard });  // v5.12: Melody's hazard patrols
   });
 }
 function npcTick(dt) {
@@ -2559,6 +2608,10 @@ function drawNpc(n) {
     ctx.drawImage(im, 0, 0, tilePx, tilePx); ctx.restore();
   } else {
     ctx.drawImage(im, px, py, tilePx, tilePx);
+  }
+  if (n.hazard) {   // v5.12: Melody's challengers wear a red ring
+    ctx.strokeStyle = "rgba(255,90,90,0.95)"; ctx.lineWidth = Math.max(2, tilePx / 16);
+    ctx.beginPath(); ctx.arc(px + tilePx / 2, py + tilePx / 2, tilePx * 0.44, 0, Math.PI * 2); ctx.stroke();
   }
 }
 // v3.4: the "silo" trick — a back view faked from the front picture.
@@ -3799,6 +3852,197 @@ async function pollStatus() {
       ];
       steps.forEach((s, i) => setTimeout(() => toast(s), 1800 + i * 2600));
     }
+// ---- v5.12: Melody's workshop ------------------------------------------------
+// She designs missions from presets + a short questionnaire, builds the
+// enemy flows the difficulty calls for, and playtests every objective.
+let melodyPresets = [], melodyDiffs = [];
+let melodyForm = null;    // {preset, name, difficulty, reward, target, targets, what, count, ticks}
+let melodyPick = null;    // "target" | "waypoint" — next map tap marks it
+let missionDanger = new Set();
+const MELODY_HELLOS = [
+  "Hey builder 💜 — pick a mission preset below, or tap “New mission” and answer my little questionnaire. I'll design it, build the challengers, and playtest it myself.",
+  "Welcome to my workshop! Missions, goals, playtests — I keep the flows running. What are we building today?",
+  "Got a dungeon that needs a purpose? Give me the goal, the difficulty, the reward — I'll handle the board.",
+];
+function melodySay(t) { $("melody-says").textContent = t; }
+$("menu-melody").onclick = () => { toggleOverlay("sheet-melody"); openMelody(); };
+
+async function openMelody() {
+  melodySay(MELODY_HELLOS[Math.floor(Math.random() * MELODY_HELLOS.length)]);
+  const r = await api("/api/missions/presets");
+  if (r.ok) { melodyPresets = r.presets || []; melodyDiffs = r.difficulties || []; }
+  $("melody-presets").hidden = true; $("melody-form").hidden = true;
+  $("melody-new").hidden = false; melodyPick = null;
+  await loadMelodyMissions();
+}
+function diffLabel(n) {
+  const d = melodyDiffs.find(d => d.n === n);
+  return d ? `${d.label} — ${d.hazards} hazard patrol${d.hazards === 1 ? "" : "s"}` : "";
+}
+async function loadMelodyMissions() {
+  const r = await api("/api/missions");
+  const box = $("melody-missions");
+  const ms = (r.ok && r.missions) || [];
+  if (!ms.length) {
+    box.innerHTML = `<div class="melody-empty">no missions yet — start one below and I'll build it</div>`;
+    return;
+  }
+  box.innerHTML = ms.map(m => {
+    const p = melodyPresets.find(p => p.id === m.preset);
+    const d = melodyDiffs.find(d => d.n === m.difficulty);
+    return `<div class="mrow${m.active ? " on" : ""}">
+      <div class="mrow-main"><b>${esc(m.name)}</b>
+        <span class="mrow-sub">${p ? p.label : m.preset} · ${"★".repeat(m.difficulty)}${d ? " " + d.label : ""}${m.won ? " · 🏆 won" : ""}</span>
+      </div>
+      <button data-act="apply" data-id="${m.id}" title="Melody builds the enemy flows and playtests">Build</button>
+      <button data-act="del" data-id="${m.id}" class="ghost" title="Delete">✕</button>
+    </div>`;
+  }).join("");
+  box.querySelectorAll("button").forEach(b => b.onclick = () => {
+    const id = +b.dataset.id;
+    if (b.dataset.act === "apply") applyMission(id); else deleteMission(id);
+  });
+}
+$("melody-new").onclick = () => {
+  const box = $("melody-presets");
+  box.hidden = false; $("melody-new").hidden = true;
+  box.innerHTML = `<div class="tray-head">Pick a starting point</div>` +
+    melodyPresets.map(p => `<button class="mpreset" data-id="${p.id}"><b>${esc(p.label)}</b><span>${esc(p.hint)}</span></button>`).join("");
+  box.querySelectorAll(".mpreset").forEach(b => b.onclick = () => showMissionForm(b.dataset.id));
+};
+function targetPickerHtml(kind) {
+  const multi = kind === "targets";
+  return `<div class="mlab">${multi ? "Waypoints (tap 2–4)" : "Target"}<div class="row2">
+    <button id="mf-pick">📍 Tap map${multi ? " to add" : ""}</button>
+    <button id="mf-suggest" class="ghost">✨ Melody picks</button>
+    ${multi ? `<button id="mf-clear" class="ghost">Clear</button>` : ""}
+  </div><div id="mf-targetlab" class="tray-hint">none yet</div></div>`;
+}
+function updateTargetLab() {
+  const lab = $("mf-targetlab");
+  if (!lab || !melodyForm) return;
+  if (melodyForm.target) lab.textContent = `target: (${melodyForm.target[0]}, ${melodyForm.target[1]})`;
+  else if (melodyForm.targets.length) lab.textContent = `waypoints: ${melodyForm.targets.map(t => `(${t[0]},${t[1]})`).join(" ")}`;
+  else lab.textContent = "none yet";
+}
+function showMissionForm(pid) {
+  const p = melodyPresets.find(p => p.id === pid);
+  if (!p) return;
+  melodyForm = { preset: pid, name: "", difficulty: 2, reward: "",
+                 target: null, targets: [], what: "wood", count: 5, ticks: 90 };
+  const f = $("melody-form");
+  f.hidden = false; $("melody-presets").hidden = true;
+  let h = `<div class="tray-head">${esc(p.label)} <span class="tray-hint">${esc(p.hint)}</span></div>`;
+  h += `<label class="mlab">Mission name<input id="mf-name" type="text" maxlength="32" placeholder="${esc(p.label)}"></label>`;
+  h += `<div class="mlab">Difficulty<div id="mf-diff" class="seg">` +
+       melodyDiffs.map(d => `<button data-n="${d.n}" class="${d.n === 2 ? "on" : ""}">${d.n}★</button>`).join("") +
+       `</div><div id="mf-difflab" class="tray-hint">${diffLabel(2)}</div></div>`;
+  if (p.fields.includes("target")) h += targetPickerHtml("target");
+  if (p.fields.includes("targets")) h += targetPickerHtml("targets");
+  if (p.fields.includes("what"))
+    h += `<div class="mlab">Gather<div id="mf-what" class="seg"><button data-w="wood" class="on">🪵 wood</button><button data-w="food">🍎 food</button></div></div>
+          <label class="mlab">How many<input id="mf-count" type="number" value="5" min="1" max="20"></label>`;
+  if (p.fields.includes("ticks"))
+    h += `<label class="mlab">Ticks<input id="mf-ticks" type="number" value="${pid === "timed" ? 120 : 90}" min="20" max="600"></label>`;
+  h += `<label class="mlab">Reward<input id="mf-reward" type="text" maxlength="48" placeholder="e.g. 100 gold stars"></label>`;
+  h += `<div class="row2"><button id="mf-create">✨ Create mission</button><button id="mf-cancel" class="ghost">Cancel</button></div>`;
+  f.innerHTML = h;
+  $("mf-name").oninput = e => melodyForm.name = e.target.value;
+  $("mf-reward").oninput = e => melodyForm.reward = e.target.value;
+  $("mf-diff").querySelectorAll("button").forEach(b => b.onclick = () => {
+    $("mf-diff").querySelectorAll("button").forEach(x => x.classList.remove("on"));
+    b.classList.add("on");
+    melodyForm.difficulty = +b.dataset.n;
+    $("mf-difflab").textContent = diffLabel(melodyForm.difficulty);
+  });
+  const what = $("mf-what");
+  if (what) what.querySelectorAll("button").forEach(b => b.onclick = () => {
+    what.querySelectorAll("button").forEach(x => x.classList.remove("on"));
+    b.classList.add("on"); melodyForm.what = b.dataset.w;
+  });
+  const cnt = $("mf-count");
+  if (cnt) cnt.oninput = e => melodyForm.count = Math.max(1, Math.min(20, +e.target.value || 5));
+  const tks = $("mf-ticks");
+  if (tks) tks.oninput = e => melodyForm.ticks = Math.max(20, Math.min(600, +e.target.value || 90));
+  const pk = $("mf-pick");
+  if (pk) pk.onclick = () => {
+    melodyPick = p.fields.includes("targets") ? "waypoint" : "target";
+    toast(melodyPick === "target" ? "tap the map to set the target" : "tap the map to add a waypoint");
+  };
+  const sg = $("mf-suggest");
+  if (sg) sg.onclick = async () => {
+    const n = p.fields.includes("targets") ? 3 : 1;
+    const r = await api("/api/missions/suggest-target", { n });
+    const tg = (r.ok && r.targets) || [];
+    if (!tg.length) { toast("no good spots — the map might be all walls"); return; }
+    if (p.fields.includes("targets")) melodyForm.targets = tg.slice(0, 4);
+    else melodyForm.target = tg[0];
+    updateTargetLab();
+    melodySay("Picked my favorites — far from spawn, nicely spread. Tap Build when you're ready.");
+  };
+  const cl = $("mf-clear");
+  if (cl) cl.onclick = () => { melodyForm.targets = []; updateTargetLab(); };
+  $("mf-cancel").onclick = () => { f.hidden = true; $("melody-new").hidden = false; melodyForm = null; melodyPick = null; };
+  $("mf-create").onclick = createMission;
+}
+function melodyPickTap(cell) {
+  if (!melodyForm) { melodyPick = null; return; }
+  if (melodyPick === "target") {
+    melodyForm.target = [cell.x, cell.y];
+  } else {
+    if (melodyForm.targets.length >= 4) { toast("4 waypoints max"); return; }
+    melodyForm.targets.push([cell.x, cell.y]);
+  }
+  melodyPick = null;
+  updateTargetLab();
+  toast("marked ✓");
+}
+async function createMission() {
+  const f = melodyForm, p = melodyPresets.find(p => p.id === f.preset);
+  const answers = { name: f.name, difficulty: f.difficulty, reward: f.reward };
+  if (p.fields.includes("target")) {
+    if (!f.target) { toast("pick a target first 📍"); return; }
+    answers.target = f.target;
+  }
+  if (p.fields.includes("targets")) {
+    if (f.targets.length < 2) { toast("add at least 2 waypoints 📍"); return; }
+    answers.targets = f.targets;
+  }
+  if (p.fields.includes("what")) { answers.what = f.what; answers.count = f.count; }
+  if (p.fields.includes("ticks")) answers.ticks = f.ticks;
+  const r = await api("/api/missions/create", { preset: f.preset, answers });
+  if (!r.ok) { toast(r.error || "mission failed"); return; }
+  melodySay(r.melody_says);
+  $("melody-form").hidden = true; $("melody-new").hidden = false;
+  melodyForm = null; melodyPick = null;
+  await loadMelodyMissions();
+  toast("designed ✓ — tap Build and I'll set the board + playtest it");
+}
+async function applyMission(id) {
+  const r = await api("/api/missions/apply", { id });
+  if (!r.ok) { toast(r.error || "build failed"); return; }
+  melodySay(r.melody_says + (r.issues && r.issues.length ? " Problem: " + r.issues.join(" ") : ""));
+  await loadPatrols(); await loadMelodyMissions();
+  render();
+}
+async function deleteMission(id) {
+  const r = await api("/api/missions/delete", { id });
+  if (!r.ok) { toast(r.error || "delete failed"); return; }
+  await loadPatrols(); await loadMelodyMissions();
+  render();
+  toast("mission deleted");
+}
+// v5.12: the play-mode objective HUD — Melody keeps score while you run
+async function syncMissionHud() {
+  const hud = $("mission-hud");
+  const r = await api("/api/missions/state").catch(() => null);
+  if (!r || !r.ok || !r.active || !playMode) {
+    hud.hidden = true; missionDanger = new Set(); return;
+  }
+  missionDanger = new Set((r.danger || []).map(c => c[0] + "," + c[1]));
+  hud.hidden = false;
+  hud.innerHTML = `<b>💜 ${esc(r.active.name)}</b><span>${esc(r.progress || "")}</span>`;
+}
   } catch (e) {
     toast("can't reach the HUD server — is crumbs_hud.py running?");
     const sp = $("splash"); if (sp) sp.classList.add("gone");

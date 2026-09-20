@@ -3,6 +3,17 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.17.1 — 2026-09-20
+
+Tap-during-boot race fix. Verified on desktop/server; not yet run on
+Lloyd's iPhone.
+
+- **Fixed `melodyPick` unhandled rejection.** Tapping the map while the
+  app was still booting threw "Can't find variable: melodyPick" — the
+  tap handler could run during init's awaits, before the `let` that
+  declares it executed (Safari reports the temporal dead zone that way).
+  Melody's state now declares before boot starts, so early taps are safe.
+
 ## v5.17 — 2026-09-20
 
 Crumbs World splash + honest boot progress. Verified on desktop/server;

@@ -3956,8 +3956,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"ok": moved > 0, "file": dst})
 
         if path == "/api/maps/duplicate":
-            # v5.6: copy a map + its sidecars
-            import shutil
+            # v5.6: copy a map + its sidecars (shutil is imported at module top)
             src = _safe_name(body.get("from"))
             dst = _safe_name(body.get("to"))
             if not src:

@@ -3,6 +3,22 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.18 — 2026-09-20
+
+In-app self-update. Verified on desktop/server; not yet run on
+Lloyd's iPhone.
+
+- **Menu → Check for updates.** Lloyd's rule, now a feature: updates
+  overwrite the old files in place — no more downloading a suffixed copy
+  and renaming it by hand. The app asks GitHub for the latest build,
+  shows current vs latest, and on confirm pulls editor.html,
+  crumbs_hud.py and crumbs_core.py from the repo's main branch, backing
+  up each current file as `.update-backup` first and swapping the bytes
+  in atomically. Local mode only; a public link can never rewrite the
+  server. After install, stop and restart `python3 crumbs_hud.py`.
+- **Banner reads APP_VERSION** so the printed version can't drift from
+  the real one again.
+
 ## v5.17.1 — 2026-09-20
 
 Tap-during-boot race fix. Verified on desktop/server; not yet run on

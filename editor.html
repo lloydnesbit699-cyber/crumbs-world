@@ -417,7 +417,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v5.17.1</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v5.18</small></span>
   <span id="topbar-undo">
     <button id="btn-undo2" title="Undo">&#8617;</button>
     <button id="btn-redo2" title="Redo">&#8618;</button>
@@ -450,6 +450,7 @@
   <button id="menu-height" title="Tint the map by elevation">&#9978; Height: off</button>
   <button id="menu-sight" title="Dim what the hero can't see (play mode)">&#128065; Sight: off</button>
   <button id="menu-log" title="Server event log (debugging)">Server log</button>
+  <button id="menu-update" title="Pull the latest app files over this install">&#128260; Check for updates</button>
   <hr>
   <button id="btn-stop" class="danger" title="Stop the HUD server">Stop server</button>
 </div>
@@ -702,7 +703,7 @@
 
 <div id="splash">
   <div class="splash-title">Crumbs HUD</div>
-  <div class="splash-sub">tile painter &middot; v5.17.1</div>
+  <div class="splash-sub">tile painter &middot; v5.18</div>
   <div class="load-bar"><i id="splash-fill"></i></div>
   <div class="load-label" id="splash-label">Waking the server&hellip;</div>
 </div>
@@ -3786,6 +3787,23 @@ $("menu-key").onclick = () => {
     else localStorage.removeItem("crumbsKey");
   } catch (e) {}
   toast(k ? "share key saved on this device" : "share key cleared");
+};
+// v5.18: self-update — new files overwrite the old ones in place, no renaming.
+$("menu-update").onclick = async () => {
+  closeOverlays();
+  toast("checking for updates\u2026");
+  let r;
+  try { r = await api("/api/update/check"); }
+  catch (e) { toast("couldn't reach GitHub \u2014 are you online?"); return; }
+  if (!r.ok) { toast("update check failed: " + (r.error || "unknown")); return; }
+  if (!r.available) { toast("already on v" + r.current + " \u2014 you're up to date"); return; }
+  if (!confirm("Crumbs HUD v" + r.latest + " is ready (you have v" + r.current + ").\nInstall now? Your current files are backed up first.")) return;
+  toast("installing v" + r.latest + "\u2026");
+  let a;
+  try { a = await api("/api/update/apply", {}); }
+  catch (e) { a = { ok: false, error: "network" }; }
+  if (a && a.ok) toast("updated \u2014 stop the server, run python3 crumbs_hud.py again, then reload");
+  else toast("update failed: " + ((a && a.error) || "unknown"));
 };
 $("btn-export-tiled").onclick = () => {
   // Tiled JSON for other engines; the tileset art strip rides the Share bundle

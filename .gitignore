@@ -24,3 +24,4 @@ _trash/
 
 entitlements.json
 *.pre-restore-*
+*.update-backup

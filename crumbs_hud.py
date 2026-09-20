@@ -114,6 +114,7 @@ import threading
 import time
 import heapq
 import zipfile
+import urllib.request
 from collections import deque
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -122,7 +123,27 @@ from urllib.parse import urlparse, parse_qs
 import crumbs_core as core
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.16"
+APP_VERSION = "5.18"
+
+# ---- v5.18: in-app self-update -------------------------------------------------
+# Lloyd's rule: updates overwrite the old files in place — no more downloading a
+# suffixed copy and renaming it by hand. Menu -> Check for updates pulls the
+# latest editor.html / crumbs_hud.py / crumbs_core.py from the repo's main
+# branch and swaps them in atomically, keeping one .update-backup of each.
+UPDATE_REPO = "lloydnesbit699-cyber/crumbs-world"
+UPDATE_BRANCH = "main"
+UPDATE_FILES = ["editor.html", "crumbs_hud.py", "crumbs_core.py"]
+
+def _update_fetch(name):
+    url = f"https://raw.githubusercontent.com/{UPDATE_REPO}/{UPDATE_BRANCH}/{name}"
+    req = urllib.request.Request(url, headers={"User-Agent": "crumbs-hud-updater"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return r.read()
+
+def _update_remote_version():
+    raw = _update_fetch("crumbs_hud.py").decode("utf-8", "replace")
+    m = re.search(r'^APP_VERSION\s*=\s*"([^"]+)"', raw, re.M)
+    return m.group(1) if m else None
 SCHEMA_VERSION = 1  # v5.16: stamped on every save; migrations run on load
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 HTML_PATH = os.path.join(SCRIPT_DIR, "editor.html")
@@ -2655,6 +2676,18 @@ class Handler(BaseHTTPRequestHandler):
                             "label": f[len("template-"):-len(".json")]
                             .replace("-", " ").title()})
             return self._send_json({"ok": True, "templates": out})
+        elif path == "/api/update/check":
+            # v5.18: is there a newer build on the repo's main branch?
+            try:
+                latest = _update_remote_version()
+            except Exception as e:
+                return self._send_json({"ok": False,
+                                        "error": f"couldn't reach GitHub ({e.__class__.__name__})"})
+            if not latest:
+                return self._send_json({"ok": False, "error": "remote version unreadable"})
+            return self._send_json({"ok": True, "current": APP_VERSION,
+                                    "latest": latest,
+                                    "available": latest != APP_VERSION})
         elif path == "/api/export/tiled":
             # v5.16: Tiled (mapeditor.org) JSON + companion tileset.
             q = parse_qs(urlparse(self.path).query)
@@ -2792,6 +2825,29 @@ class Handler(BaseHTTPRequestHandler):
             # dropped connection and a terminal traceback.
             return self._send_json({"ok": False, "error": "bad JSON"}, 400)
 
+        if path == "/api/update/apply":
+            # v5.18: local mode only — a public link must never rewrite the server.
+            if PUBLIC_MODE:
+                return self._send_json({"ok": False, "error": "updates are local-mode only"}, 403)
+            try:
+                blobs = {n: _update_fetch(n) for n in UPDATE_FILES}
+            except Exception as e:
+                return self._send_json({"ok": False, "error": f"download failed ({e.__class__.__name__}) — old files untouched"})
+            updated = []
+            try:
+                for n, blob in blobs.items():
+                    p = os.path.join(SCRIPT_DIR, n)
+                    if os.path.exists(p):
+                        shutil.copy2(p, p + ".update-backup")
+                    tmp = p + ".update-tmp"
+                    with open(tmp, "wb") as f:
+                        f.write(blob)
+                    os.replace(tmp, p)  # atomic: the same name just gets the new bytes
+                    updated.append(n)
+            except OSError as e:
+                return self._send_json({"ok": False, "error": f"write failed ({e}) — backups kept"})
+            return self._send_json({"ok": True, "updated": updated,
+                                    "note": "restart the server to run the new build"})
         if path == "/api/paint":
             x, y, layer = body.get("x"), body.get("y"), body.get("layer", "tiles")
             if layer not in LAYERS or not isinstance(x, int) or not isinstance(y, int):
@@ -4401,7 +4457,7 @@ if __name__ == "__main__":
     srv = ThreadingHTTPServer((host, PORT), Handler)
     threading.Thread(target=_autosave_loop, daemon=True).start()
     print("=" * 52)
-    print("  Crumbs HUD v5.17.1 — Crumbs World splash, boot progress, tap-race fix")
+    print(f"  Crumbs HUD v{APP_VERSION} — Menu > Check for updates keeps it fresh")
     if public:
         ip = _lan_ip()
         print("  PUBLIC mode: anyone on your Wi-Fi can open the HUD (read-only by default).")

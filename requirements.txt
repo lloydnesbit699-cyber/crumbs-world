@@ -1,2 +1,2 @@
 # Crumbs HUD dependencies — Replit installs these automatically on run/deploy
-pillow
+pillow==11.0.0

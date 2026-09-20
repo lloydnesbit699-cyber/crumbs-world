@@ -1,0 +1,12 @@
+{
+  "id": "unity",
+  "name": "Unity Friendly Pack",
+  "map_format": { "min": 3.0, "max": 3.0 },
+  "bundle_format": { "version": 1 },
+  "outputs": [
+    "map.json",
+    "tileset-atlas.png",
+    "unity-import-hints.json"
+  ],
+  "notes": "Starter profile for Unity grid/tile pipelines."
+}

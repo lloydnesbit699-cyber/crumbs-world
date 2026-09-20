@@ -1,0 +1,12 @@
+{
+  "id": "tiled",
+  "name": "Tiled JSON Pack",
+  "map_format": { "min": 3.0, "max": 3.0 },
+  "bundle_format": { "version": 1 },
+  "outputs": [
+    "map.json",
+    "tileset-atlas.png",
+    "tileset.json"
+  ],
+  "notes": "Bridge profile for Tiled-compatible pipelines."
+}

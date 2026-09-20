@@ -1,0 +1,10 @@
+{
+  "bundle_version": 1,
+  "app_version": "5.15",
+  "template_id": "survival",
+  "description": "Starter survival template bundle",
+  "requires": {
+    "map_format": { "min": 3.0, "max": 3.0 }
+  },
+  "starter_file": "starter-village.json"
+}

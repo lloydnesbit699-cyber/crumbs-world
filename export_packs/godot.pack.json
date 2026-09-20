@@ -1,0 +1,12 @@
+{
+  "id": "godot",
+  "name": "Godot Ready Pack",
+  "map_format": { "min": 3.0, "max": 3.0 },
+  "bundle_format": { "version": 1 },
+  "outputs": [
+    "map.json",
+    "tileset-atlas.png",
+    "godot-import-hints.json"
+  ],
+  "notes": "Starter profile for Godot TileMap ingestion."
+}

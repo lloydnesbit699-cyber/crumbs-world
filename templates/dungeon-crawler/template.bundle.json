@@ -1,0 +1,10 @@
+{
+  "bundle_version": 1,
+  "app_version": "5.15",
+  "template_id": "dungeon-crawler",
+  "description": "Starter dungeon crawler template bundle",
+  "requires": {
+    "map_format": { "min": 3.0, "max": 3.0 }
+  },
+  "starter_file": "starter-dungeon.json"
+}

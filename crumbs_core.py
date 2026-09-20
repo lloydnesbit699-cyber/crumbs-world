@@ -108,6 +108,46 @@ BIOMES = {
     }
 }
 
+# v5.16: deterministic generation presets — named recipes with a fixed biome
+# plus noise overrides, so the same seed always rebuilds the same map with
+# a distinct identity. {preset: {biome, noise overrides, label, blurb}}.
+GENERATION_PRESETS = {
+    "archipelago": {
+        "label": "Archipelago", "biome": "ocean",
+        "noise": {"water_level": 0.58, "sand_level": 0.66, "grass_level": 0.78},
+        "blurb": "Scattered isles in open water — boats and bridges country.",
+    },
+    "highlands": {
+        "label": "Highlands", "biome": "grassland",
+        "noise": {"water_level": 0.30, "sand_level": 0.38, "grass_level": 0.58,
+                  "stone_level": 0.78},
+        "blurb": "Rolling ridges and rocky tors; cliffs everywhere.",
+    },
+    "dune-sea": {
+        "label": "Dune Sea", "biome": "desert",
+        "noise": {"water_level": 0.12, "sand_level": 0.45, "grass_level": 0.75,
+                  "stone_level": 0.92},
+        "blurb": "Endless sand with rare stone teeth. Bring water.",
+    },
+    "frostwild": {
+        "label": "Frostwild", "biome": "arctic",
+        "noise": {"water_level": 0.34, "sand_level": 0.48, "grass_level": 0.62,
+                  "stone_level": 0.80},
+        "blurb": "Frozen lakes, ice fields, and snow-drowned rock.",
+    },
+    "deepwood": {
+        "label": "Deepwood", "biome": "forest",
+        "noise": {"water_level": 0.32, "sand_level": 0.40, "grass_level": 0.68,
+                  "stone_level": 0.86},
+        "blurb": "Thick dark forest cut by muddy streams.",
+    },
+    "undercrypt": {
+        "label": "Undercrypt", "biome": "dungeon",
+        "noise": {},
+        "blurb": "Classic dungeon floors, walls, and doors.",
+    },
+}
+
 
 # ==========================================
 # IMAGE PROCESSOR (requires Pillow)
@@ -723,10 +763,12 @@ class WorldMap:
         self.collision_layer = [[old_col[y][x] if y < old_h and x < old_w else False
                                 for x in range(w)] for y in range(h)]
 
-    def generate_biome(self, biome_name, seed=None):
+    def generate_biome(self, biome_name, seed=None, noise_overrides=None):
         biome = BIOMES.get(biome_name, BIOMES["grassland"])
         noise = NoiseGenerator(seed)
-        settings = biome["noise_settings"]
+        settings = dict(biome["noise_settings"])
+        if noise_overrides:  # v5.16: preset recipes tweak the noise
+            settings.update(noise_overrides)
         color_map, fallback = _build_color_map(self.assets.tiles, biome_name)
         for y in range(self.height):
             for x in range(self.width):
@@ -735,7 +777,7 @@ class WorldMap:
                 self.data[y][x] = _biome_cell(
                     biome_name, color_map, fallback, settings, noise, x, y)
 
-    def save(self, filepath):
+    def save(self, filepath, schema=None):
         try:
             if os.path.exists(filepath):
                 shutil.copy2(filepath, filepath + ".backup")
@@ -747,6 +789,8 @@ class WorldMap:
                 'objects': self.object_layer,
                 'collision': self.collision_layer
             }
+            if schema is not None:  # v5.16: data-schema stamp for migrations
+                data['schema'] = schema
             with open(filepath, 'w') as f:
                 json.dump(data, f, indent=2)
             return True
@@ -759,9 +803,21 @@ class WorldMap:
             with open(filepath, 'r') as f:
                 data = json.load(f)
             self.width, self.height = data['width'], data['height']
-            self.data = data['tiles']
-            self.object_layer = data.get('objects', [[None]*self.width for _ in range(self.height)])
-            self.collision_layer = data.get('collision', [[False]*self.width for _ in range(self.height)])
+            w, h = self.width, self.height
+
+            def _grid(key, fill):
+                # v5.16: a present-but-malformed layer (hand-edited JSON)
+                # normalizes to a blank grid instead of crashing later.
+                g = data.get(key)
+                if (isinstance(g, list) and len(g) == h
+                        and all(isinstance(r, list) and len(r) == w
+                                for r in g)):
+                    return [row[:] for row in g]
+                return [[fill] * w for _ in range(h)]
+
+            self.data = _grid('tiles', 0)
+            self.object_layer = _grid('objects', None)
+            self.collision_layer = _grid('collision', False)
             return True
         except Exception as e:
             print(f"ERROR loading map: {e}")

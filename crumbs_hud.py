@@ -77,6 +77,21 @@ soft shadows, scaled 2.5D tall faces, climb movement costs, cliff blocking
 (can't step up more than one level), line of sight (/api/visibility powers
 a play-mode 👁 fog-of-war toggle), and a ⛰ height overlay. Starter pack
 grows to 100 with 4 hills + 4 mountains.
+v5.16 (2026-09-20): the sellable-build pass —
+- public-mode security: --share-key= write token for writes (a random key
+  is generated when you share without one), Content-Type + Origin/Host
+  checks on POSTs, per-IP rate limits, JSON/bundle/image size caps,
+  hardened image uploads;
+- backup/restore: /api/backups lists .backup files, /api/restore rolls a
+  map or sidecar back; corrupt sidecars are quarantined, never fatal;
+- schema versioning: SCHEMA_VERSION stamped on saves, migrations run on
+  load, bundles refuse (with a clear message) when they need a newer app;
+- sellable outputs: /api/export/tiled (Tiled JSON) + /api/export/tileset.png,
+  shareable .crumbs.zip map bundles (/api/bundle/export + /api/bundle/import),
+  template starter maps, deterministic generation presets (/api/generate
+  takes preset=, /api/generation-presets lists them);
+- entitlement-aware art packs: *.pack.json may declare "entitlement":
+  "paid"; paid packs load only when entitlements.json grants them.
 
 Run:   python3 crumbs_hud.py
 Open:  http://127.0.0.1:8778   (same phone's browser)
@@ -84,6 +99,7 @@ Open:  http://127.0.0.1:8778   (same phone's browser)
 import json
 import io
 import glob
+import hmac
 import os
 import base64
 import copy
@@ -92,17 +108,22 @@ import random
 import re
 import secrets
 import socket
+import shutil
 import sys
 import threading
 import time
 import heapq
+import zipfile
 from collections import deque
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 import crumbs_core as core
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
+APP_VERSION = "5.16"
+SCHEMA_VERSION = 1  # v5.16: stamped on every save; migrations run on load
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 HTML_PATH = os.path.join(SCRIPT_DIR, "editor.html")
 DEFAULT_SAVE = "hud_map.json"
@@ -111,6 +132,34 @@ PUBLIC_MODE = False
 PUBLIC_WRITE_KEY = ""
 WRITE_KEY_HEADER = "X-Crumbs-Key"
 WRITE_KEY_QUERY = "key"
+
+# ---- v5.16: abuse guards (rate limits, size caps) ---------------------------
+# PUBLIC_MODE / PUBLIC_WRITE_KEY are set in __main__ (--public / --share-key= / $CRUMBS_SHARE_KEY).
+MAX_JSON_BYTES = 64 * 1024 * 1024   # JSON bodies; base64 inflates bundles
+                                  # ~4/3, and the decoded zip is still capped
+                                  # at MAX_BUNDLE_BYTES below
+MAX_BUNDLE_BYTES = 48 * 1024 * 1024  # .crumbs.zip bundle imports
+MAX_IMAGE_DIM = 2048                 # per-side cap on uploaded tile art
+MAX_IMAGE_PIXELS = 2048 * 2048
+# per-IP sliding-window rate limits: (max hits, window seconds)
+_RL_POST = (120, 60)
+_RL_GET = (600, 60)
+_rl_buckets = {}
+_rl_lock = threading.Lock()
+
+
+def _rate_ok(kind, ip):
+    """Tiny in-memory token bucket. Generous for a human, stops floods."""
+    limit, window = _RL_POST if kind == "POST" else _RL_GET
+    now = time.monotonic()
+    with _rl_lock:
+        arr = [t for t in _rl_buckets.get((kind, ip), []) if now - t < window]
+        if len(arr) >= limit:
+            _rl_buckets[(kind, ip)] = arr
+            return False
+        arr.append(now)
+        _rl_buckets[(kind, ip)] = arr
+        return True
 
 # ---- v3.0: custom imported tiles -------------------------------------------
 CUSTOM_DIR = os.path.join(SCRIPT_DIR, "custom_tiles")
@@ -295,11 +344,20 @@ def _load_custom_tiles():
     # additively. Pack entries are never merged into custom_tiles.json, so
     # deleting the pack files uninstalls the pack cleanly.
     n_pack = 0
+    # v5.16: paid packs load only when entitlements.json grants them.
+    granted = _load_entitlements()
     for pack_path in sorted(glob.glob(os.path.join(CUSTOM_DIR, "*.pack.json"))):
         try:
             doc = json.load(open(pack_path))
         except Exception as e:
             print(f"[hud] art pack unreadable {pack_path}: {e}")
+            continue
+        pack_name = (doc.get("name")
+                     or os.path.basename(pack_path)[:-len(".pack.json")])
+        if doc.get("entitlement", "free") == "paid" \
+                and pack_name not in granted:
+            print(f"[hud] art pack '{pack_name}' is paid and not entitled "
+                  "— skipped")
             continue
         for entry in doc.get("tiles", []):
             try:
@@ -454,7 +512,7 @@ _patrol_seq = {"next": 1}
 def _save_patrols():
     try:
         with open(PATROL_SAVE, "w") as f:
-            json.dump({"patrols": _patrols, "next": _patrol_seq["next"]}, f)
+            json.dump(_stamp({"patrols": _patrols, "next": _patrol_seq["next"]}), f)
     except Exception as e:
         print(f"[hud] could not save patrols: {e}")
 
@@ -468,6 +526,104 @@ _mission_seq = {"next": 1}
 mission_run = None      # live run state while play mode is active
 
 
+# ---- v5.16: schema versioning + corrupt-sidecar recovery ---------------------
+# Every sidecar save is stamped {"schema": SCHEMA_VERSION}. On load, older
+# docs are migrated forward; docs newer than this build refuse with a clear
+# message; corrupt JSON is quarantined (never fatal, never silently lost).
+
+
+def _stamp(doc):
+    """Stamp the data-schema version on a sidecar doc before saving."""
+    doc["schema"] = SCHEMA_VERSION
+    return doc
+
+
+def _migrate_sidecar(kind, doc):
+    """Bring a sidecar doc up to SCHEMA_VERSION. Returns the doc, or a
+    {"error": ...} dict when the doc needs a newer app than this one."""
+    if not isinstance(doc, dict):
+        return {}
+    v = doc.get("schema", 0)
+    try:
+        v = int(v)
+    except (TypeError, ValueError):
+        v = 0
+    if v > SCHEMA_VERSION:
+        return {"error": "needs newer Crumbs",
+                "detail": f"this {kind} file was written by schema {v}; "
+                          f"this build understands schema {SCHEMA_VERSION}. "
+                          "Update the app to open it."}
+    if v < 1:
+        # v0 -> v1: nothing structural changed; stamp and fill the keys
+        # each loader already defaults, so just record the migration.
+        doc["schema"] = 1
+        doc["_migrated_from"] = v
+    return doc
+
+
+def _quarantine(path, exc):
+    """Move a corrupt sidecar aside with a timestamp; never delete data."""
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    dest = f"{path}.corrupt-{stamp}"
+    try:
+        os.replace(path, dest)
+    except OSError:
+        dest = path + " (rename failed)"
+    _log_event(f"quarantined corrupt {os.path.basename(path)} -> "
+               f"{os.path.basename(dest)}: {exc}")
+    print(f"[hud] quarantined corrupt {path}: {exc}")
+    return dest
+
+
+def _load_json_file(path, kind, default):
+    """Load a JSON sidecar: migrate old schemas, quarantine corrupt files.
+
+    Returns (doc, error). error is None on success (fresh or migrated);
+    on a too-new schema, doc is {} and error names the problem.
+    """
+    try:
+        with open(path) as f:
+            doc = json.load(f)
+    except FileNotFoundError:
+        return default, None
+    except ValueError as e:  # corrupt JSON — quarantine, start fresh
+        _quarantine(path, e)
+        return default, None
+    except OSError as e:
+        print(f"[hud] could not read {path}: {e}")
+        return default, None
+    doc = _migrate_sidecar(kind, doc)
+    if isinstance(doc, dict) and doc.get("error"):
+        return {}, doc
+    return doc if isinstance(doc, dict) else default, None
+
+
+def _load_entitlements():
+    """Pack names this device is granted (entitlements.json is user data,
+    gitignored — the storefront that sells grants is a Later item)."""
+    try:
+        d = json.load(open(os.path.join(SCRIPT_DIR, "entitlements.json")))
+        packs = d.get("packs", [])
+        return set(packs) if isinstance(packs, list) else set()
+    except (OSError, ValueError):
+        return set()
+
+
+def _pack_catalog():
+    catalog, granted = [], _load_entitlements()
+    for pack_path in sorted(glob.glob(os.path.join(CUSTOM_DIR, "*.pack.json"))):
+        try:
+            doc = json.load(open(pack_path))
+        except Exception:
+            continue
+        name = doc.get("name") or os.path.basename(pack_path)[:-len(".pack.json")]
+        ent = doc.get("entitlement", "free")
+        catalog.append({"pack": name, "entitlement": ent,
+                        "granted": ent != "paid" or name in granted,
+                        "tiles": len(doc.get("tiles", []))})
+    return catalog, granted
+
+
 def _missions_path(name):
     base = name[:-5] if name.endswith(".json") else name
     return os.path.join(SCRIPT_DIR, base + ".missions.json")
@@ -475,18 +631,20 @@ def _missions_path(name):
 
 def _load_missions(name):
     global _missions, _mission_seq
-    try:
-        d = json.load(open(_missions_path(name)))
-        _missions = d.get("missions", [])
-        _mission_seq["next"] = d.get("next", len(_missions) + 1)
-    except (OSError, ValueError):
-        _missions, _mission_seq = [], {"next": 1}
+    d, err = _load_json_file(_missions_path(name), "missions",
+                             {"missions": [], "next": 1})
+    if err:
+        _log_event(f"missions sidecar: {err['detail']}")
+        d = {"missions": [], "next": 1}
+    _missions = d.get("missions", [])
+    _mission_seq["next"] = d.get("next", len(_missions) + 1)
 
 
 def _save_missions(name):
     try:
         with open(_missions_path(name), "w") as f:
-            json.dump({"missions": _missions, "next": _mission_seq["next"]}, f)
+            json.dump(_stamp({"missions": _missions,
+                              "next": _mission_seq["next"]}), f)
     except OSError as e:
         print(f"[hud] could not save missions: {e}")
 
@@ -795,8 +953,12 @@ def _gear_path(name):
 def _load_gear(name):
     """Fill the hero's pack from this map's gear sidecar (fresh if none)."""
     global _hero_inv, _gold, _equipped
+    d, err = _load_json_file(_gear_path(name), "gear",
+                             {"inv": [], "gold": 25, "equipped": {}})
+    if err:
+        _log_event(f"gear sidecar: {err['detail']}")
+        d = {"inv": [], "gold": 25, "equipped": {}}
     try:
-        d = json.load(open(_gear_path(name)))
         _hero_inv = [r for r in d.get("inv", [])
                      if isinstance(r, dict) and _item_by_id(r.get("item"))]
         _gold = max(0, int(d.get("gold", 25)))
@@ -806,7 +968,7 @@ def _load_gear(name):
             iid = eq.get(slot)
             if iid is not None and _item_by_id(iid):
                 _equipped[slot] = iid
-    except (OSError, ValueError, TypeError):
+    except (TypeError, ValueError):
         _hero_inv, _gold = [], 25
         _equipped = {"weapon": None, "tool": None}
     _npc_near.clear()
@@ -817,50 +979,55 @@ def _save_gear(name):
         return
     try:
         with open(_gear_path(name), "w") as f:
-            json.dump({"inv": _hero_inv, "gold": _gold,
-                       "equipped": _equipped}, f)
+            json.dump(_stamp({"inv": _hero_inv, "gold": _gold,
+                       "equipped": _equipped}), f)
     except OSError as e:
         print(f"[hud] could not save gear: {e}")
 
 
 def _load_items(name):
     global _items, _item_seq, _item_cells
+    d, err = _load_json_file(_items_path(name), "items",
+                             {"items": [], "next": 1, "cells": {}})
+    if err:
+        _log_event(f"items sidecar: {err['detail']}")
+        d = {"items": [], "next": 1, "cells": {}}
     try:
-        d = json.load(open(_items_path(name)))
         _items = d.get("items", [])
         _item_seq["next"] = d.get("next", len(_items) + 1)
         _item_cells = {str(k): [int(v[0]), int(v[1])]
                        for k, v in (d.get("cells") or {}).items()}
-    except (OSError, ValueError):
+    except (TypeError, ValueError):
         _items, _item_seq, _item_cells = [], {"next": 1}, {}
 
 
 def _save_items(name):
     try:
         with open(_items_path(name), "w") as f:
-            json.dump({"items": _items, "next": _item_seq["next"],
-                       "cells": _item_cells}, f)
+            json.dump(_stamp({"items": _items, "next": _item_seq["next"],
+                       "cells": _item_cells}), f)
     except OSError as e:
         print(f"[hud] could not save items: {e}")
 
 
 def _load_npcs(name):
     global _npcs, _npc_seq
-    try:
-        d = json.load(open(_npcs_path(name)))
-        _npcs = d.get("npcs", [])
-        for n in _npcs:
-            g = n.get("gear") or {}
-            n["gear"] = {"weapon": g.get("weapon"), "tool": g.get("tool")}
-        _npc_seq["next"] = d.get("next", len(_npcs) + 1)
-    except (OSError, ValueError):
-        _npcs, _npc_seq = [], {"next": 1}
+    d, err = _load_json_file(_npcs_path(name), "npcs",
+                             {"npcs": [], "next": 1})
+    if err:
+        _log_event(f"npcs sidecar: {err['detail']}")
+        d = {"npcs": [], "next": 1}
+    _npcs = d.get("npcs", [])
+    for n in _npcs:
+        g = n.get("gear") or {}
+        n["gear"] = {"weapon": g.get("weapon"), "tool": g.get("tool")}
+    _npc_seq["next"] = d.get("next", len(_npcs) + 1)
 
 
 def _save_npcs(name):
     try:
         with open(_npcs_path(name), "w") as f:
-            json.dump({"npcs": _npcs, "next": _npc_seq["next"]}, f)
+            json.dump(_stamp({"npcs": _npcs, "next": _npc_seq["next"]}), f)
     except OSError as e:
         print(f"[hud] could not save npcs: {e}")
 
@@ -1003,12 +1170,9 @@ def _mission_reconcile_patrols():
 def _load_patrols():
     global _patrols
     _patrols = []
-    if not os.path.exists(PATROL_SAVE):
-        return
-    try:
-        reg = json.load(open(PATROL_SAVE))
-    except Exception as e:
-        print(f"[hud] patrol registry unreadable: {e}")
+    reg, err = _load_json_file(PATROL_SAVE, "patrols", {"patrols": []})
+    if err:
+        _log_event(f"patrols: {err['detail']}")
         return
     for p in reg.get("patrols", []):
         try:
@@ -1180,9 +1344,9 @@ def _fit_traits():
 def _load_traits(name):
     global traits_grid
     traits_grid = _blank_traits()
-    try:
-        saved = json.load(open(_traits_path(name)))
-    except (OSError, ValueError):
+    saved, err = _load_json_file(_traits_path(name), "traits", {})
+    if err:
+        _log_event(f"traits sidecar: {err['detail']}")
         return
     rows = (saved or {}).get("traits", [])
     for y in range(min(world.height, len(rows))):
@@ -1193,7 +1357,7 @@ def _load_traits(name):
 def _save_traits(name):
     try:
         with open(_traits_path(name), "w") as f:
-            json.dump({"traits": traits_grid}, f)
+            json.dump(_stamp({"traits": traits_grid}), f)
     except OSError as e:
         print(f"[hud] could not save traits: {e}")
 
@@ -1212,9 +1376,10 @@ def _name_key(x, y):
 def _load_names(name):
     global object_names
     object_names = {}
-    try:
-        saved = json.load(open(_names_path(name)))
-    except (OSError, ValueError):
+    # v5.16: quarantine corrupt files instead of silently starting empty.
+    saved, err = _load_json_file(_names_path(name), "names", {})
+    if err:
+        _log_event(f"names sidecar: {err['detail']}")
         return
     rows = (saved or {}).get("names", {})
     if isinstance(rows, dict):
@@ -1225,7 +1390,7 @@ def _load_names(name):
 def _save_names(name):
     try:
         with open(_names_path(name), "w") as f:
-            json.dump({"names": object_names}, f)
+            json.dump(_stamp({"names": object_names}), f)
     except OSError as e:
         print(f"[hud] could not save names: {e}")
 
@@ -1274,6 +1439,19 @@ def _map_png(scale=4, data=None, objects=None, w=None, h=None):
 def _validate_map():
     """One-tap map check: spawn exists, regions reachable, tile ids valid."""
     issues = []
+    # v5.16: a degenerate/hand-edited layer shape must report an issue,
+    # not drop the connection with a traceback.
+    for _lname, _layer in (("tiles", world.data),
+                           ("objects", world.object_layer),
+                           ("collision", world.collision_layer)):
+        if (not isinstance(_layer, list) or len(_layer) != world.height
+                or any(not isinstance(_r, list) or len(_r) != world.width
+                       for _r in _layer)):
+            issues.append({"kind": "bad_layers",
+                           "msg": f"Layer '{_lname}' is malformed "
+                                  f"(expected {world.width}x{world.height}); "
+                                  "re-save the map to repair it."})
+            return issues
     sx, sy = _find_spawn()
     if not _walkable(sx, sy):
         issues.append({"kind": "no_spawn", "msg": "No walkable spawn point found."})
@@ -1323,14 +1501,15 @@ def _slots_path():
     return os.path.join(SCRIPT_DIR, base + ".slots.json")
 
 def _load_slots():
-    try:
-        return (json.load(open(_slots_path())) or {}).get("slots", [])
-    except (OSError, ValueError):
+    slots, err = _load_json_file(_slots_path(), "slots", {"slots": []})
+    if err:
+        _log_event(f"slots sidecar: {err['detail']}")
         return []
+    return slots.get("slots", [])
 
 def _save_slots(slots):
     try:
-        json.dump({"slots": slots}, open(_slots_path(), "w"))
+        json.dump(_stamp({"slots": slots}), open(_slots_path(), "w"))
         return True
     except OSError:
         return False
@@ -1557,12 +1736,14 @@ def _load_rules(name):
     map_meta = {"biome": None, "seed": None}  # v5.0
     world_profile["meters"] = dict(DEFAULT_WORLD["meters"])
     world_profile["weather"] = DEFAULT_WORLD["weather"]  # v4.1
-    try:
-        saved = json.load(open(_rules_path(name)))
-    except (OSError, ValueError):
+    # v5.16: migrate old schemas, quarantine corrupt files (never silently
+    # reset — the broken file is kept as *.corrupt-* for recovery).
+    saved, err = _load_json_file(_rules_path(name), "rules", {})
+    if err:
+        _log_event(f"rules sidecar: {err['detail']}")
+    if not saved:
         _load_game_rules([])
         return
-    saved = saved or {}
     if "tweaks" in saved or "game" in saved or "world" in saved:
         tweaks = saved.get("tweaks") or {}
         game = saved.get("game") or []
@@ -1595,8 +1776,8 @@ def _load_rules(name):
 def _save_rules(name):
     try:
         with open(_rules_path(name), "w") as f:
-            json.dump({"tweaks": rules, "game": game_rules,
-                       "world": world_profile, "meta": map_meta}, f)  # v5.0: meta
+            json.dump(_stamp({"tweaks": rules, "game": game_rules,
+                       "world": world_profile, "meta": map_meta}), f)  # v5.0: meta
     except OSError as e:
         print(f"[hud] could not save rules: {e}")
 
@@ -1850,12 +2031,244 @@ def _mark_dirty():
 
 def _save_now(name=DEFAULT_SAVE):
     p = os.path.join(SCRIPT_DIR, name)
-    if world.save(p):
+    if world.save(p, schema=SCHEMA_VERSION):  # v5.16: stamp the data schema
         _save_state["dirty"] = False
         _save_state["last"] = time.strftime("%H:%M:%S")
         _save_rules(name)  # v3.7: rules ride alongside the map
         return True
     return False
+
+
+# ---- v5.16: exports, bundles -----------------------------------------------
+# (entitlement helpers live near the schema block, above — pack discovery
+# runs at import time and needs them early)
+
+
+def _export_map_doc(name):
+    """Load a saved map file for export. Dict or None."""
+    try:
+        m = json.load(open(os.path.join(SCRIPT_DIR, name)))
+        return {"name": name, "w": int(m["width"]), "h": int(m["height"]),
+                "tiles": m["tiles"], "objects": m.get("objects"),
+                "collision": m.get("collision")}
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def _export_used_tiles(doc):
+    """Tile ids used by the map, first-seen order — the gid authority."""
+    used = []
+    for layer in (doc["tiles"], doc.get("objects") or []):
+        for row in layer:
+            for t in row:
+                if t and t not in used:
+                    used.append(t)
+    return used
+
+
+def _tiled_doc(name, doc, used):
+    """Tiled (mapeditor.org) JSON. gid = index+1 over used tiles; the
+    companion crumbs-tileset.png (8 columns of 32px) carries the art."""
+    w, h = doc["w"], doc["h"]
+    gid = {t: i + 1 for i, t in enumerate(used)}
+    data = [gid.get(t, 0) for row in doc["tiles"] for t in row]
+    objs, oid = [], 1
+    for y, row in enumerate(doc.get("objects") or []):
+        for x, t in enumerate(row):
+            if t:
+                objs.append({"gid": gid[t], "height": 32, "id": oid,
+                             "name": str(t), "type": "", "visible": True,
+                             "width": 32, "x": x * 32, "y": (y + 1) * 32})
+                oid += 1
+    cols = 8
+    rows = max(1, (len(used) + cols - 1) // cols)
+    base = name[:-5] if name.endswith(".json") else name
+    return {
+        "compressionlevel": -1, "height": h, "infinite": False,
+        "layers": [
+            {"data": data, "height": h, "id": 1, "name": "tiles",
+             "opacity": 1, "type": "tilelayer", "visible": True,
+             "width": w, "x": 0, "y": 0},
+            {"draworder": "index", "id": 2, "name": "objects",
+             "objects": objs, "opacity": 1, "type": "objectgroup",
+             "visible": True, "x": 0, "y": 0}],
+        "nextlayerid": 3, "nextobjectid": oid,
+        "orientation": "orthogonal", "renderorder": "right-down",
+        "tiledversion": "1.10.2", "tileheight": 32, "tilewidth": 32,
+        "tilesets": [{"columns": cols, "firstgid": 1,
+                      "image": "crumbs-tileset.png",
+                      "imageheight": rows * 32, "imagewidth": cols * 32,
+                      "margin": 0, "name": "crumbs", "spacing": 0,
+                      "tilecount": len(used), "tileheight": 32,
+                      "tilewidth": 32, "type": "tileset"}],
+        "type": "map", "version": "1.10", "width": w,
+        "editorsettings": {"export": {"target": base + ".tiled.json"}},
+    }
+
+
+def _tileset_png_bytes(used):
+    """Render the used tiles into the 8-column strip the Tiled export names."""
+    if not core.PIL_AVAILABLE or not used:
+        return None
+    cols = 8
+    rows = (len(used) + cols - 1) // cols
+    img = core.Image.new("RGBA", (cols * 32, rows * 32), (0, 0, 0, 0))
+    for i, tid in enumerate(used):
+        th = assets.get_thumbnail(tid, size=32)
+        if th is None:
+            continue
+        img.paste(th.convert("RGBA"), ((i % cols) * 32, (i // cols) * 32))
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()
+
+
+_BUNDLE_EXTS = (".rules.json", ".traits.json", ".names.json",
+                ".missions.json", ".items.json", ".npcs.json",
+                ".gear.json", ".slots.json")  # v5.16: gear rides the bundle
+
+
+def _build_bundle(name):
+    """Shareable .crumbs.zip: native map + sidecars + Tiled JSON + tileset
+    + manifest (app version + schema stamp). Returns (bytes, filename)."""
+    doc = _export_map_doc(name)
+    if not doc:
+        return None, None
+    base = name[:-5] if name.endswith(".json") else name
+    used = _export_used_tiles(doc)
+    manifest = {"app": "crumbs-hud", "app_version": APP_VERSION,
+                "schema": SCHEMA_VERSION, "map": name,
+                "exported_at": datetime.now(timezone.utc).isoformat(),
+                "tiles_used": len(used), "sidecars": []}
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(base + ".json", json.dumps(
+            {"version": "3.0", "schema": SCHEMA_VERSION, "width": doc["w"],
+             "height": doc["h"], "tiles": doc["tiles"],
+             "objects": doc["objects"], "collision": doc["collision"]}))
+        for ext in _BUNDLE_EXTS:
+            fn = base + ext
+            p = os.path.join(SCRIPT_DIR, fn)
+            if not os.path.isfile(p):
+                continue
+            try:
+                side = _migrate_sidecar(ext, json.load(open(p)))
+                if isinstance(side, dict) and side.get("error"):
+                    continue
+                zf.writestr(fn, json.dumps(side))
+                manifest["sidecars"].append(fn)
+            except (OSError, ValueError):
+                continue
+        zf.writestr(base + ".tiled.json",
+                    json.dumps(_tiled_doc(name, doc, used)))
+        tset = _tileset_png_bytes(used)
+        if tset:
+            zf.writestr("crumbs-tileset.png", tset)
+        zf.writestr("manifest.json", json.dumps(manifest, indent=2))
+    return buf.getvalue(), base + ".crumbs.zip"
+
+
+def _import_bundle(raw, want_name):
+    """Validate + install a .crumbs.zip. Never overwrites: lands on a fresh
+    unique name. Returns (ok, payload) — payload is the result dict or an
+    error string."""
+    if len(raw) > MAX_BUNDLE_BYTES:
+        return False, "bundle too large"
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(raw))
+        manifest = json.loads(zf.read("manifest.json"))
+    except Exception as e:
+        return False, f"not a crumbs bundle: {e}"
+    if manifest.get("app") != "crumbs-hud":
+        return False, "not a crumbs bundle"
+    mschema = manifest.get("schema", 0)
+    if mschema > SCHEMA_VERSION:
+        return False, (f"bundle needs newer Crumbs "
+                       f"(bundle schema {mschema}, this app reads "
+                       f"{SCHEMA_VERSION}) — update the app first")
+    src_map = manifest.get("map") or "map.json"
+    src_base = src_map[:-5] if src_map.endswith(".json") else src_map
+    want = _safe_name(want_name) or (src_base + ".json")
+    base = want[:-5] if want.endswith(".json") else want
+    base = re.sub(r"[^A-Za-z0-9_-]+", "-", base).strip("-") or "imported"
+    candidate, i = base + ".json", 2
+    while os.path.exists(os.path.join(SCRIPT_DIR, candidate)):
+        candidate, i = f"{base}-{i}.json", i + 1
+    dst_base = candidate[:-5]
+    allowed = {src_base + ".json"} | {src_base + e for e in _BUNDLE_EXTS}
+    wrote = []
+    try:
+        for arc in zf.namelist():
+            if arc in ("manifest.json",) or arc.endswith(".tiled.json") \
+                    or arc == "crumbs-tileset.png":
+                continue
+            if arc not in allowed:
+                continue  # never write anything unexpected
+            data = json.loads(zf.read(arc))  # must be valid JSON
+            data = _migrate_sidecar(arc, data)
+            if isinstance(data, dict) and data.get("error"):
+                continue
+            out = (dst_base + arc[len(src_base):]
+                   if arc != src_base + ".json" else candidate)
+            with open(os.path.join(SCRIPT_DIR, out), "w") as f:
+                json.dump(data, f)
+            wrote.append(out)
+    except Exception as e:
+        return False, f"bundle unreadable: {e}"
+    if candidate not in wrote:
+        return False, "bundle has no map"
+    _log_event(f"imported bundle as {candidate}"
+               + (" (migrated)" if mschema < SCHEMA_VERSION else ""))
+    return True, {"file": candidate, "sidecars": [w for w in wrote
+                                                 if w != candidate],
+                  "migrated": mschema < SCHEMA_VERSION}
+
+
+def _restore_backup(name):
+    """Copy <name>.backup over <name>; refresh live state when the file
+    belongs to the current map. Returns (ok, message)."""
+    p = os.path.join(SCRIPT_DIR, name)
+    src = p + ".backup"
+    if not os.path.isfile(src):
+        return False, "no backup for that file"
+    try:
+        if os.path.isfile(p):
+            # v5.16: the thing being replaced gets its own snapshot first —
+            # a restore is always undoable.
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+            shutil.copy2(p, f"{p}.pre-restore-{stamp}")
+        shutil.copy2(src, p)
+    except OSError as e:
+        return False, str(e)
+    cur = _current_map or ""
+    cb = cur[:-5] if cur.endswith(".json") else cur
+    nb = name[:-5] if name.endswith(".json") else name
+    if nb == cb:
+        if name == cur or name.endswith(".json"):
+            # the live map itself — reload everything like /api/load
+            history.undo_stack.clear()
+            history.redo_stack.clear()
+            world.load(p)
+            _load_rules(name)
+            _load_traits(name)
+            _load_names(name)
+            _load_missions(name)
+            _load_items(name)
+            _load_npcs(name)
+            _mission_reconcile_patrols()
+        else:
+            for ext, loader in ((".rules.json", _load_rules),
+                                (".traits.json", _load_traits),
+                                (".names.json", _load_names),
+                                (".missions.json", _load_missions),
+                                (".items.json", _load_items),
+                                (".npcs.json", _load_npcs),
+                                (".gear.json", _load_gear)):
+                if name == cb + ext:
+                    loader(_current_map)
+                    break
+    _log_event(f"restored {name} from backup")
+    return True, "restored"
 
 
 def _autosave_loop():
@@ -1931,13 +2344,15 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _read_json(self):
+    def _read_json(self, max_bytes=MAX_JSON_BYTES):
         try:
             n = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             n = 0
         if not n:
             return {}
+        if n > max_bytes:  # v5.16: reject oversized bodies before reading
+            return None
         try:
             return json.loads(self.rfile.read(n).decode("utf-8") or "{}")
         except Exception:
@@ -1977,8 +2392,28 @@ class Handler(BaseHTTPRequestHandler):
             key = (q.get(WRITE_KEY_QUERY) or [""])[0]
         return bool(key) and hmac.compare_digest(key, PUBLIC_WRITE_KEY)
 
+    def _client_ip(self):
+        return (self.client_address[0] if self.client_address else "?")
+
+    def _safe_open_image(self, raw, what="image"):
+        """v5.16: hardened upload decode — real image, sane dimensions,
+        bounded pixels (decompression-bomb guard). Returns RGBA or raises."""
+        if not core.PIL_AVAILABLE:
+            raise ValueError("image support unavailable")
+        if len(raw) > MAX_IMAGE_PIXELS * 4:
+            raise ValueError(f"{what}: file too large")
+        img = core.Image.open(io.BytesIO(raw))
+        if img.format not in ("PNG", "JPEG", "GIF", "WEBP", "BMP"):
+            raise ValueError(f"{what}: unsupported format {img.format}")
+        w, h = img.size
+        if w > MAX_IMAGE_DIM or h > MAX_IMAGE_DIM or w * h > MAX_IMAGE_PIXELS:
+            raise ValueError(f"{what}: dimensions too large ({w}x{h})")
+        return img.convert("RGBA")
+
     # -- GET ---------------------------------------------------------------
     def do_GET(self):
+        if not _rate_ok("GET", self._client_ip()):
+            return self._send_json({"ok": False, "error": "slow down"}, 429)
         path = urlparse(self.path).path
         if path == "/":
             try:
@@ -2180,6 +2615,99 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 n = 100
             self._send_json({"events": list(_events)[-n:]})
+        elif path == "/api/backups":
+            # v5.16: every save rotates a .backup — list them for restore.
+            out = []
+            for f in sorted(os.listdir(SCRIPT_DIR)):
+                if not f.endswith(".backup"):
+                    continue
+                try:
+                    st = os.stat(os.path.join(SCRIPT_DIR, f))
+                except OSError:
+                    continue
+                out.append({"file": f[:-len(".backup")], "bytes": st.st_size,
+                            "modified": int(st.st_mtime)})
+            return self._send_json({"ok": True, "backups": out})
+        elif path == "/api/entitlements":
+            # v5.16: which art packs this device may load.
+            catalog, granted = _pack_catalog()
+            return self._send_json({"ok": True, "granted": sorted(granted),
+                                    "catalog": catalog})
+        elif path == "/api/generation-presets":
+            # v5.16: deterministic recipes — same seed, same map, every time.
+            return self._send_json({
+                "ok": True,
+                "presets": [{"id": pid, "label": p["label"],
+                             "biome": p["biome"], "blurb": p["blurb"]}
+                            for pid, p in core.GENERATION_PRESETS.items()]})
+        elif path == "/api/templates":
+            # v5.16: template-* starter maps ship instant outcomes.
+            out = []
+            for f in sorted(os.listdir(SCRIPT_DIR)):
+                if not (f.startswith("template-") and f.endswith(".json")):
+                    continue
+                try:
+                    m = json.load(open(os.path.join(SCRIPT_DIR, f)))
+                    w, h = int(m["width"]), int(m["height"])
+                except (OSError, ValueError, KeyError, TypeError):
+                    continue
+                out.append({"file": f, "width": w, "height": h,
+                            "label": f[len("template-"):-len(".json")]
+                            .replace("-", " ").title()})
+            return self._send_json({"ok": True, "templates": out})
+        elif path == "/api/export/tiled":
+            # v5.16: Tiled (mapeditor.org) JSON + companion tileset.
+            q = parse_qs(urlparse(self.path).query)
+            name = _safe_name((q.get("file") or [""])[0]) or _current_map
+            doc = _export_map_doc(name)
+            if not doc:
+                return self._send_json({"ok": False,
+                                        "error": "cannot load map"}, 404)
+            body = json.dumps(
+                _tiled_doc(name, doc, _export_used_tiles(doc))).encode()
+            base = name[:-5] if name.endswith(".json") else name
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Disposition",
+                             f'attachment; filename="{base}.tiled.json"')
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            return self.wfile.write(body)
+        elif path == "/api/export/tileset.png":
+            # v5.16: the 8-column art strip the Tiled export's gids name.
+            q = parse_qs(urlparse(self.path).query)
+            name = _safe_name((q.get("file") or [""])[0]) or _current_map
+            doc = _export_map_doc(name)
+            if not doc:
+                return self._send_json({"ok": False,
+                                        "error": "cannot load map"}, 404)
+            png = _tileset_png_bytes(_export_used_tiles(doc))
+            if not png:
+                return self._send_json({"ok": False,
+                                        "error": "no tiles or Pillow "
+                                                 "unavailable"}, 400)
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Disposition",
+                             'attachment; filename="crumbs-tileset.png"')
+            self.send_header("Content-Length", str(len(png)))
+            self.end_headers()
+            return self.wfile.write(png)
+        elif path == "/api/bundle/export":
+            # v5.16: shareable .crumbs.zip — map + sidecars + Tiled + manifest.
+            q = parse_qs(urlparse(self.path).query)
+            name = _safe_name((q.get("file") or [""])[0]) or _current_map
+            data, arcname = _build_bundle(name)
+            if not data:
+                return self._send_json({"ok": False,
+                                        "error": "cannot build bundle"}, 404)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Disposition",
+                             f'attachment; filename="{arcname}"')
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            return self.wfile.write(data)
         elif path == "/api/export/png":
             # v5.6: full-res render of the map as a downloadable PNG
             q = parse_qs(urlparse(self.path).query)
@@ -2247,6 +2775,9 @@ class Handler(BaseHTTPRequestHandler):
         global traits_grid, hero_override  # v5.6: slots/load rebinds these
         global _current_map, mission_run  # v5.12: rename + mission runs
         global _gold, _item_cells  # v5.13: coin + ground items
+        # v5.16: abuse guards run before any mutation.
+        if not _rate_ok("POST", self._client_ip()):
+            return self._send_json({"ok": False, "error": "slow down"}, 429)
         path = urlparse(self.path).path
         if not self._is_json_request():
             return self._send_json({"ok": False, "error": "Content-Type must be application/json"}, 415)
@@ -2450,7 +2981,7 @@ class Handler(BaseHTTPRequestHandler):
                     if len(durl) > CUSTOM_MAX_FILE_CHARS:
                         raise ValueError(f"frame {i}: too large (keep each under ~1MB)")
                     raw = base64.b64decode(durl.split(",", 1)[1])
-                    pil_images.append(core.Image.open(io.BytesIO(raw)))
+                    pil_images.append(self._safe_open_image(raw, f"frame {i}"))
                 entry = _store_custom_tile(name, preset, frame_ms, pil_images,
                                            _body_scope(body))
             except Exception as e:
@@ -2477,7 +3008,7 @@ class Handler(BaseHTTPRequestHandler):
                 if len(durl) > CUSTOM_MAX_FILE_CHARS:
                     raise ValueError("too large (keep under ~1MB)")
                 raw = base64.b64decode(durl.split(",", 1)[1])
-                frames = _autoslice_pil(core.Image.open(io.BytesIO(raw)))
+                frames = _autoslice_pil(self._safe_open_image(raw, "autoslice"))
                 entry = _store_custom_tile(name, preset, frame_ms, frames,
                                            _body_scope(body))
             except Exception as e:
@@ -2506,7 +3037,7 @@ class Handler(BaseHTTPRequestHandler):
                 if len(durl) > CUSTOM_MAX_FILE_CHARS:
                     raise ValueError("too large (keep under ~1MB)")
                 raw = base64.b64decode(durl.split(",", 1)[1])
-                img = core.Image.open(io.BytesIO(raw))
+                img = self._safe_open_image(raw, "sheet")
                 frames = _autoslice_pil(img)
                 method = "sliced"
                 if len(frames) == 1:
@@ -2561,7 +3092,7 @@ class Handler(BaseHTTPRequestHandler):
                     except (TypeError, ValueError):
                         raise ValueError("bad offset")
                     raw = base64.b64decode(durl.split(",", 1)[1])
-                    img = core.Image.open(io.BytesIO(raw)).convert("RGBA")
+                    img = self._safe_open_image(raw, "sheet")
                     sw, sh_px = img.size
                     if sw > 1024 or sh_px > 1024:
                         raise ValueError("sheet too big (max 1024px)")
@@ -3220,7 +3751,18 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"ok": ok})
 
         if path == "/api/generate":
+            # v5.16: a named preset is a deterministic recipe — same seed,
+            # same map, every time. A raw biome still works on its own.
+            preset_id = str(body.get("preset", "") or "")
+            noise_over = None
             biome = str(body.get("biome", "dungeon"))
+            if preset_id:
+                preset = core.GENERATION_PRESETS.get(preset_id)
+                if not preset:
+                    return self._send_json({"ok": False,
+                                            "error": "unknown preset"}, 400)
+                biome = preset["biome"]
+                noise_over = preset["noise"] or None
             if biome not in core.BIOMES:
                 return self._send_json({"ok": False, "error": "unknown biome"}, 400)
             seed = body.get("seed")
@@ -3230,9 +3772,11 @@ class Handler(BaseHTTPRequestHandler):
                 # build can't be reproduced or restored by the eraser.
                 seed = random.randrange(1_000_000_000)
             def _do():
-                world.generate_biome(biome, seed)
+                world.generate_biome(biome, seed, noise_over)
                 map_meta["biome"] = biome  # v5.0: the eraser needs the seed
                 map_meta["seed"] = seed
+                if preset_id:
+                    map_meta["preset"] = preset_id  # v5.16: which recipe
                 rules.clear()
                 rules.update(DEFAULT_RULES)  # v3.7: fresh build, fresh rules
                 world_profile["meters"] = dict(DEFAULT_WORLD["meters"])  # v4.0
@@ -3298,7 +3842,8 @@ class Handler(BaseHTTPRequestHandler):
             now = int(time.time())
             map_meta.setdefault("created", now)  # v5.6: map metadata
             map_meta["modified"] = now
-            ok = world.save(os.path.join(SCRIPT_DIR, name))
+            ok = world.save(os.path.join(SCRIPT_DIR, name),
+                            schema=SCHEMA_VERSION)  # v5.16: stamp the schema
             if ok:
                 _save_rules(name)  # v3.7
                 _save_missions(name)  # v5.12: Melody's missions ride along
@@ -3787,6 +4332,30 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             return self._send_json({"ok": True})
 
+        if path == "/api/restore":
+            # v5.16: roll a map or sidecar back to its .backup snapshot.
+            name = _safe_name(body.get("file"))
+            if not name:
+                return self._send_json({"ok": False,
+                                        "error": "file required"}, 400)
+            ok, msg = _restore_backup(name)
+            return self._send_json({"ok": ok,
+                                    "error": None if ok else msg,
+                                    "message": msg if ok else None})
+        if path == "/api/bundle/import":
+            # v5.16: install a shared .crumbs.zip under a fresh name.
+            dz = str(body.get("zip", ""))
+            if "," in dz:
+                dz = dz.split(",", 1)[1]
+            try:
+                raw = base64.b64decode(dz, validate=True)
+            except Exception:
+                return self._send_json({"ok": False,
+                                        "error": "zip data unreadable"}, 400)
+            ok, payload = _import_bundle(raw, body.get("name"))
+            if not ok:
+                return self._send_json({"ok": False, "error": payload}, 400)
+            return self._send_json({"ok": True, **payload})
         if path == "/api/shutdown":
             # v1.8: stop the server from the page. Answer first, then shut
             # down from another thread (shutdown() can't run inside the
@@ -3832,7 +4401,7 @@ if __name__ == "__main__":
     srv = ThreadingHTTPServer((host, PORT), Handler)
     threading.Thread(target=_autosave_loop, daemon=True).start()
     print("=" * 52)
-    print("  Crumbs HUD v5.9 — curated starter tile pack (Utumno, opt-in full library)")
+    print("  Crumbs HUD v5.16 — shareable bundles, Tiled export, backup restore")
     if public:
         ip = _lan_ip()
         print("  PUBLIC mode: anyone on your Wi-Fi can open the HUD (read-only by default).")

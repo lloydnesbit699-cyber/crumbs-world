@@ -1,0 +1,55 @@
+Crumbs HUD — Edition License
+Copyright (c) 2026 Lloyd David Nesbit. All rights reserved.
+
+This license covers the Crumbs HUD software: the server (crumbs_hud.py),
+the map engine (crumbs_core.py), the editor page (editor.html), and the
+bundled starter art and template maps. Your maps and your imported art
+are yours — this license governs the software and the art packs it ships.
+
+1. EDITIONS
+
+   FREE — the core editor. Personal and non-commercial use. You may run
+   it on as many of your own devices as you like. You may not sell,
+   rent, or redistribute the software itself.
+
+   CREATOR — [PRICE], one-time. Everything in Free, plus: the curated
+   starter art packs, the advanced toolset (sprite-sheet importer,
+   generation presets, mission workshop), and commercial use of maps and
+   games you make with it, up to $[REVENUE CAP] gross revenue per year
+   across all your projects combined.
+
+   PRO — [PRICE], one-time. Everything in Creator, plus: full commercial
+   use with no revenue cap, including redistribution of exported bundles
+   (PNG maps, map bundles, exported data files) as part of your own
+   products, and priority support.
+
+2. WHAT "COMMERCIAL USE OF MAPS YOU MAKE" MEANS
+
+   Your maps are your work. On Creator and Pro you may sell games built
+   on maps you made, show them in monetized videos, and use them in
+   client work. On Free you may not — maps stay personal.
+
+3. WHAT YOU MAY NOT DO (all editions)
+
+   - Resell, sublicense, or redistribute the Crumbs HUD software itself.
+   - Remove or alter the splash-screen credit.
+   - Use the software to make anything illegal. (Had to say it.)
+
+4. ART YOU DIDN'T MAKE
+
+   Tile art has its own licenses, which travel with the art, not with
+   this license. See COMMERCIAL_TERMS.md: the starter pack is original
+   art by Lloyd; the Utumno sheet is CC0 public domain; art you import
+   is your responsibility; the Minecraft InvSprite pack is personal-use
+   only and is never licensed for redistribution.
+
+5. NO WARRANTY
+
+   The software is provided "as is", without warranty of any kind. It
+   is built and maintained by one person; support is best-effort (see
+   COMMERCIAL_TERMS.md for what that means per edition).
+
+6. CHANGES
+
+   If these terms change, the version shipped with your download
+   governs. New purchases are governed by the terms at purchase time.

@@ -21,3 +21,6 @@ custom_tiles/
 *.npcs.json
 *.gear.json
 _trash/
+
+entitlements.json
+*.pre-restore-*

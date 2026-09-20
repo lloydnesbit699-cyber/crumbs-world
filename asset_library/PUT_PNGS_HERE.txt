@@ -1,4 +1,4 @@
-Copy your sprite PNGs here from the old PC:
-  C:\Users\lloyd\OneDrive\Desktop\VaultsWorldEditor\asset_library\
-Needed by sprite_library.json: hero4.png, 3.png
-(Old sprite source folder was D:\VaultSdc120\sprites)
+Drop your own sprite PNGs in this folder to use them as tiles.
+
+Each PNG becomes one tile. 32x32 pixels works best, but any square
+size will do — the importer handles the rest.

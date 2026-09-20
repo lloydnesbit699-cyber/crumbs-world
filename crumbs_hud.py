@@ -1478,7 +1478,10 @@ class Handler(BaseHTTPRequestHandler):
         global traits_grid, hero_override  # v5.6: slots/load rebinds these
         path = urlparse(self.path).path
         body = self._read_json()
-        if body is None:
+        if body is None or not isinstance(body, dict):
+            # QA 2026-09-19: a JSON list/string/number parsed fine but has no
+            # .get — reject it here instead of dying mid-handler with a bare
+            # dropped connection and a terminal traceback.
             return self._send_json({"ok": False, "error": "bad JSON"}, 400)
 
         if path == "/api/paint":
@@ -2502,7 +2505,7 @@ if __name__ == "__main__":
     srv = ThreadingHTTPServer((host, PORT), Handler)
     threading.Thread(target=_autosave_loop, daemon=True).start()
     print("=" * 52)
-    print("  Crumbs HUD v3.9 — game rules: goals, hazards, keys & doors, messages")
+    print("  Crumbs HUD v5.6 — game rules: goals, hazards, keys & doors, messages")
     if public:
         ip = _lan_ip()
         print("  PUBLIC mode: anyone on your Wi-Fi can open the HUD.")

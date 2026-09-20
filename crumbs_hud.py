@@ -87,8 +87,10 @@ import glob
 import os
 import base64
 import copy
+import hmac
 import random
 import re
+import secrets
 import socket
 import sys
 import threading
@@ -105,6 +107,10 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 HTML_PATH = os.path.join(SCRIPT_DIR, "editor.html")
 DEFAULT_SAVE = "hud_map.json"
 LAYERS = ("tiles", "objects", "collision")
+PUBLIC_MODE = False
+PUBLIC_WRITE_KEY = ""
+WRITE_KEY_HEADER = "X-Crumbs-Key"
+WRITE_KEY_QUERY = "key"
 
 # ---- v3.0: custom imported tiles -------------------------------------------
 CUSTOM_DIR = os.path.join(SCRIPT_DIR, "custom_tiles")
@@ -1937,6 +1943,40 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return None
 
+    def _is_json_request(self):
+        ctype = (self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+        return ctype == "application/json"
+
+    def _same_origin_ok(self):
+        host = (self.headers.get("Host") or "").strip().lower()
+        if not host:
+            return False
+
+        def _host_matches(url_value):
+            parsed = urlparse(url_value or "")
+            if not parsed.scheme or not parsed.netloc:
+                return False
+            return parsed.netloc.strip().lower() == host
+
+        origin = self.headers.get("Origin")
+        referer = self.headers.get("Referer")
+        if origin and not _host_matches(origin):
+            return False
+        if referer and not _host_matches(referer):
+            return False
+        return True
+
+    def _write_key_ok(self):
+        if not PUBLIC_MODE:
+            return True
+        if not PUBLIC_WRITE_KEY:
+            return False
+        key = self.headers.get(WRITE_KEY_HEADER) or ""
+        if not key:
+            q = parse_qs(urlparse(self.path).query)
+            key = (q.get(WRITE_KEY_QUERY) or [""])[0]
+        return bool(key) and hmac.compare_digest(key, PUBLIC_WRITE_KEY)
+
     # -- GET ---------------------------------------------------------------
     def do_GET(self):
         path = urlparse(self.path).path
@@ -2208,6 +2248,12 @@ class Handler(BaseHTTPRequestHandler):
         global _current_map, mission_run  # v5.12: rename + mission runs
         global _gold, _item_cells  # v5.13: coin + ground items
         path = urlparse(self.path).path
+        if not self._is_json_request():
+            return self._send_json({"ok": False, "error": "Content-Type must be application/json"}, 415)
+        if not self._same_origin_ok():
+            return self._send_json({"ok": False, "error": "origin/host check failed"}, 403)
+        if path != "/api/jslog" and not self._write_key_ok():
+            return self._send_json({"ok": False, "error": "read-only in public mode (write key required)"}, 403)
         body = self._read_json()
         if body is None or not isinstance(body, dict):
             # QA 2026-09-19: a JSON list/string/number parsed fine but has no
@@ -3772,7 +3818,16 @@ def _lan_ip():
 
 
 if __name__ == "__main__":
-    public = "--public" in sys.argv[1:]  # v1.9: serve the Wi-Fi network
+    args = sys.argv[1:]
+    public = "--public" in args  # v1.9: serve the Wi-Fi network
+    share_key = (os.environ.get("CRUMBS_SHARE_KEY") or "").strip()
+    for a in args:
+        if a.startswith("--share-key="):
+            share_key = a.split("=", 1)[1].strip()
+    if public and not share_key:
+        share_key = secrets.token_urlsafe(12)
+    PUBLIC_MODE = public
+    PUBLIC_WRITE_KEY = share_key if public else ""
     host = "0.0.0.0" if public else HOST
     srv = ThreadingHTTPServer((host, PORT), Handler)
     threading.Thread(target=_autosave_loop, daemon=True).start()
@@ -3780,12 +3835,15 @@ if __name__ == "__main__":
     print("  Crumbs HUD v5.9 — curated starter tile pack (Utumno, opt-in full library)")
     if public:
         ip = _lan_ip()
-        print("  PUBLIC mode: anyone on your Wi-Fi can open the HUD.")
+        print("  PUBLIC mode: anyone on your Wi-Fi can open the HUD (read-only by default).")
+        print(f"  Write key: {PUBLIC_WRITE_KEY}")
         if ip:
             print(f"  Friend opens:  http://{ip}:{PORT}")
+            print(f"  Builder URL:   http://{ip}:{PORT}/?{WRITE_KEY_QUERY}={PUBLIC_WRITE_KEY}")
         else:
             print(f"  Friend opens:  http://<this-device's-WiFi-IP>:{PORT}")
-        print(f"  You open:      http://{HOST}:{PORT}")
+            print(f"  Builder URL:   http://<this-device's-WiFi-IP>:{PORT}/?{WRITE_KEY_QUERY}={PUBLIC_WRITE_KEY}")
+        print(f"  You open:      http://{HOST}:{PORT}/?{WRITE_KEY_QUERY}={PUBLIC_WRITE_KEY}")
     else:
         print(f"  Open this on the phone:  http://{HOST}:{PORT}")
         print("  Share on Wi-Fi with:  python3 crumbs_hud.py --public")
@@ -3795,7 +3853,8 @@ if __name__ == "__main__":
         # v1.6: on a real computer this opens the page by itself.
         # On iPhone/a-Shell it quietly does nothing — open the URL by hand.
         import webbrowser
-        webbrowser.open(f"http://{HOST}:{PORT}")
+        open_url = f"http://{HOST}:{PORT}/?{WRITE_KEY_QUERY}={PUBLIC_WRITE_KEY}" if public else f"http://{HOST}:{PORT}"
+        webbrowser.open(open_url)
     except Exception:
         pass
     try:

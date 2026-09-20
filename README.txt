@@ -39,13 +39,17 @@ SHARE FROM YOUR PHONE (your friend needs nothing installed):
 
   1. On your phone, in this folder, run:
        python3 crumbs_hud.py --public
-     The server prints an address like http://192.168.1.5:8778
+     The server prints:
+       - Friend URL (read-only), and
+       - Builder URL with ?key=... (required for edits/saves/deletes)
   2. Both devices on the same Wi-Fi.
-  3. Your friend opens that address in any browser. That's it —
-     the whole HUD runs in their browser, painting and all.
+  3. Your friend opens the Friend URL in any browser to view/play.
+     Anyone editing must use the Builder URL (or send X-Crumbs-Key).
   Notes: iOS may ask a-Shell for Local Network permission — allow it.
   Keep a-Shell in the foreground while sharing. Anyone on the Wi-Fi
   can open it, so only use --public on networks you trust.
+  Optional: set your own key with
+    python3 crumbs_hud.py --public --share-key=YOURKEY
 
 WHAT'S INSIDE:
 

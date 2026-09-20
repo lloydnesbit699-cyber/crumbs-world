@@ -801,6 +801,7 @@
 
 <script>
 "use strict";
+const WRITE_KEY = (new URLSearchParams(location.search).get("key") || "").trim();
 // ---- v1.3 remote debug: mirror page errors to the server terminal + on-page
 (function () {
   const dbg = document.getElementById("dbg");
@@ -812,8 +813,10 @@
   function report(msg, src, line, col, stack) {
     show(String(msg).slice(0, 200) + " @ " + (src || "") + ":" + (line || "?"));
     try {
+      const headers = { "Content-Type": "application/json" };
+      if (WRITE_KEY) headers["X-Crumbs-Key"] = WRITE_KEY;
       fetch("/api/jslog", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers,
         body: JSON.stringify({ msg: String(msg).slice(0, 300),
           src: String(src || "").slice(0, 120), line: line || 0,
           col: col || 0, stack: String(stack || "").slice(0, 500) })
@@ -925,7 +928,11 @@ async function api(path, body) {
   // mid-freeze throws "Load failed". Retry a few times before giving up —
   // all our endpoints are idempotent so a retry is always safe.
   const opt = { headers: { "Content-Type": "application/json" } };
-  if (body !== undefined) { opt.method = "POST"; opt.body = JSON.stringify(body); }
+  if (body !== undefined) {
+    opt.method = "POST";
+    opt.body = JSON.stringify(body);
+    if (WRITE_KEY) opt.headers["X-Crumbs-Key"] = WRITE_KEY;
+  }
   let lastErr = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {

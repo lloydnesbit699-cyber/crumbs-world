@@ -235,6 +235,28 @@
     background: rgba(30, 22, 55, 0.92); border: 1px solid #8a6dd7; border-radius: 10px;
     padding: 6px 12px; font-size: 12px; color: #e8defc; max-width: 92vw; text-align: center; }
   #mission-hud b { display: block; font-size: 13px; }
+  /* v5.13: gear — items, folks, pack, shop */
+  .irow { display: flex; align-items: center; gap: 8px; background: #1d2b22;
+    border: 1px solid #3f5a4a; border-radius: 8px; padding: 6px 8px; margin: 4px 0; }
+  .irow-main { flex: 1; min-width: 0; }
+  .irow-main b { font-size: 13px; }
+  .irow-sub { display: block; font-size: 11px; color: #9fc3a8; }
+  .gear-ico { width: 30px; height: 30px; flex: none; background: #10150f;
+    border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; }
+  .gear-ico img, .gear-ico canvas { width: 26px; height: 26px; image-rendering: pixelated; }
+  .kindtag { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: #2c4636; color: #cfe8d4; }
+  .kindtag.merch { background: #4a3d1e; color: #ffd76d; }
+  .stockrow { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
+  .stockrow select, .stockrow input { background: #191423; border: 1px solid #4a4370;
+    border-radius: 6px; color: #fff; padding: 6px; font-size: 13px; }
+  .stockrow select { flex: 1; min-width: 0; }
+  .stockrow input { width: 52px; }
+  #gear-hud { position: fixed; top: 8px; right: 8px; z-index: 60;
+    background: rgba(20, 30, 22, 0.92); border: 1px solid #3f5a4a; border-radius: 10px;
+    padding: 6px 10px; font-size: 13px; color: #e8f5e9; }
+  #pack-btn { position: fixed; right: 10px; bottom: 96px; z-index: 60;
+    background: #1d2b22; border: 1px solid #3f5a4a; color: #e8f5e9;
+    border-radius: 10px; padding: 10px 12px; font-size: 15px; }
   #sheet-form { background: #1c1c1c; border: 1px solid #444; border-radius: 10px;
       padding: 10px; margin-bottom: 10px; }
   #sheet-tabs { margin-bottom: 8px; }
@@ -387,7 +409,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v5.12</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v5.13</small></span>
   <span id="topbar-undo">
     <button id="btn-undo2" title="Undo">&#8617;</button>
     <button id="btn-redo2" title="Redo">&#8618;</button>
@@ -400,6 +422,8 @@
   <button id="menu-rules" title="Game rules for this build">Rules&hellip;</button>
   <button id="menu-world" title="This world's nature: meters and traits">World&hellip;</button>
   <button id="menu-melody" title="Melody's workshop: missions, goals & playtests">&#128156; Melody&hellip;</button>
+  <button id="menu-items" title="Weapons, tools and things to carry">&#127890; Items&hellip;</button>
+  <button id="menu-npcs" title="Villagers and merchants">&#129489; Folks&hellip;</button>
   <button id="btn-light" title="Fog/lighting overlay in play mode">Lighting: on</button>
   <button id="menu-dpad" title="Show or hide the on-screen controls">D-pad: on</button>
   <button id="menu-clean" title="Hide every play button for a clean screen">Hide buttons</button>
@@ -622,12 +646,48 @@
   <div id="melody-form" hidden></div>
 </div>
 
+<div id="sheet-items" class="sheet">
+  <div class="grab"></div>
+  <div class="tray-head">&#127890; Gear <span class="tray-hint">weapons, tools &amp; things</span></div>
+  <div id="items-list"></div>
+  <button id="items-new" class="widebtn">＋ New from selected tile…</button>
+  <div id="items-form" hidden></div>
+</div>
+
+<div id="sheet-npcs" class="sheet">
+  <div class="grab"></div>
+  <div class="tray-head">&#129489; Folks <span class="tray-hint">villagers &amp; merchants</span></div>
+  <div class="tray-hint">Place mode uses the selected tile — tap the map to put someone down.</div>
+  <button id="npcs-place" class="widebtn">📍 Place someone…</button>
+  <div id="npcs-list"></div>
+  <div id="npcs-form" hidden></div>
+</div>
+
+<div id="sheet-pack" class="sheet">
+  <div class="grab"></div>
+  <div class="tray-head">&#127890; Pack <span class="tray-hint" id="pack-gold"></span></div>
+  <div class="tray-hint" id="pack-hands"></div>
+  <div id="pack-list"></div>
+</div>
+
+<div id="sheet-shop" class="sheet">
+  <div class="grab"></div>
+  <div class="tray-head">🏪 <span id="shop-name"></span> <span class="tray-hint" id="shop-gold"></span></div>
+  <div class="tray-hint">Buy</div>
+  <div id="shop-stock"></div>
+  <div class="tray-hint">Sell (half price)</div>
+  <div id="shop-sell"></div>
+</div>
+
+<div id="gear-hud" hidden></div>
+<button id="pack-btn" hidden>&#127890; Pack</button>
+
 <div id="mission-hud" hidden></div>
 
 <div id="splash">
   <img src="/icon-512.png" alt="" onerror="this.style.display='none'">
   <div class="splash-title">Crumbs HUD</div>
-  <div class="splash-sub">tile painter &middot; v5.12</div>
+  <div class="splash-sub">tile painter &middot; v5.13</div>
 </div>
 
 <div id="sheet-rules" class="sheet">
@@ -1040,6 +1100,8 @@ async function refreshAll() {
   await refresh();
   await loadNatural();
   try { await loadPatrols(); } catch (e) {}
+  try { await loadItems(); } catch (e) {}    // v5.13: gear sidecars
+  try { await loadNpcs(); } catch (e) {}
   await loadTraits();
   await loadNames();   // v5.1: per-instance names
   await refreshRules();
@@ -1296,6 +1358,28 @@ function render() {
   // while editing. v5.0: assigned patrols don't draw a standing figure — the
   // placed character is already on the map; only anchorless (pre-v5.0)
   // patrols draw their figure so the route stays visible.
+  // v5.13: gear on the ground + folks standing around (both modes)
+  itemCells.forEach(c => {
+    const d = itemById(c[2]); if (!d) return;
+    const im = tileFrameImage(d.tile_id); if (!im) return;
+    ctx.drawImage(im, c[0] * tilePx + tilePx * 0.2, c[1] * tilePx + tilePx * 0.2, tilePx * 0.6, tilePx * 0.6);
+    if (c[3] > 1) {
+      ctx.fillStyle = "#fff"; ctx.strokeStyle = "rgba(0,0,0,0.7)"; ctx.lineWidth = 2;
+      ctx.font = `${Math.max(10, Math.round(tilePx * 0.3))}px sans-serif`;
+      const lx = c[0] * tilePx + 2, ly = c[1] * tilePx + tilePx - 2;
+      ctx.strokeText("×" + c[3], lx, ly); ctx.fillText("×" + c[3], lx, ly);
+    }
+  });
+  npcsReal.forEach(n => {
+    const im = tileFrameImage(n.tile_id); if (!im) return;
+    ctx.drawImage(im, n.x * tilePx, n.y * tilePx, tilePx, tilePx);
+    ctx.font = `${Math.max(10, Math.round(tilePx * 0.26))}px sans-serif`;
+    const w = ctx.measureText(n.name).width, nx = n.x * tilePx + tilePx / 2 - w / 2 - 3;
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillRect(nx, n.y * tilePx - 15, w + 6, 14);
+    ctx.fillStyle = n.role === "merchant" ? "#ffd76d" : "#cfe8d4";
+    ctx.fillText(n.name, nx + 3, n.y * tilePx - 4);
+  });
   if (playMode) {
     if (missionDanger.size) {   // v5.12: hazard ground glows faintly red
       ctx.fillStyle = "rgba(255,60,60,0.10)";
@@ -1444,7 +1528,7 @@ function strokeAdd(cell) {
   queueRender();      // v5.3: strokes coalesce into one render per frame
   Sfx.paint();        // v5.8: throttled brush tick while dragging
 }
-canvas.addEventListener("pointerdown", e => {
+canvas.addEventListener("pointerdown", async e => {
   e.preventDefault();
   ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
   try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
@@ -1470,6 +1554,9 @@ canvas.addEventListener("pointerdown", e => {
   if (ruleDraft) { ruleTap(cell); return; }      // v3.9: binding a game rule
   if (traitTool) { traitTap(cell); return; }    // v4.0: stamping nature
   if (melodyPick) { melodyPickTap(cell); return; }  // v5.12: marking a mission target
+  if (itemPlace) { itemPlaceTap(cell); return; }      // v5.13: dropping gear
+  if (npcPlace) { npcPlaceTap(cell); return; }        // v5.13: placing folks
+  if (erasing && await eraseGearTap(cell)) return;    // v5.13: eraser lifts gear/folks
   stroke = { cells: new Map(), linkCells: new Map(), layer };
   strokeAdd(cell);
 });
@@ -1556,6 +1643,10 @@ async function playEvents(evs) {
     } else if (e.t === "win" || e.t === "lose") {
       over = true;
       endPlay(e.t, e.text);
+    } else if (e.t === "shop") {   // v5.13: merchant time
+      await syncInv(); await openShop(e.npc);
+    } else if (e.t === "npcs") {   // v5.13: villager moved around
+      await loadNpcs();
     }
   }
   return over;
@@ -1623,6 +1714,7 @@ $("btn-play").onclick = async () => {
     await buildNpcs();
     if (npcs.length) npcTimer = setInterval(() => npcTick(0.1), 100);
     await syncMissionHud();   // v5.12: Melody's objective HUD for this run
+    await syncInv();   // v5.13: pack + gold onto the HUD
     // "can't reach" confusion was play mode intercepting taps — paint tools rest now
     $("btn-play").classList.add("on");
     await refreshRules();   // v3.7: this build's rules + touch controls
@@ -1642,6 +1734,8 @@ $("btn-play").onclick = async () => {
     $("btn-play").classList.remove("on");
     playOver = false; $("end-overlay").hidden = true;   // v3.9
     await syncMap();   // v3.9: picked-up keys / opened doors come back
+    $("gear-hud").hidden = true; $("pack-btn").hidden = true;   // v5.13: pack rests
+    packState = null;
     toast("back to editing");
   }
   render();
@@ -3512,7 +3606,7 @@ async function renderLoadList() {
         `<div class="macts"></div>`;
       row.querySelector(".mname").onclick = async () => {
         const r = await api("/api/load", { filename: mp.file });
-        if (r.ok) { setFile(mp.file); panX = 0; panY = 0; await refresh(); await refreshRules(); await loadWorld(); await loadNatural(); await loadPatrols(); closeOverlays(); toast("loaded " + mp.file); }
+        if (r.ok) { setFile(mp.file); panX = 0; panY = 0; await refresh(); await refreshRules(); await loadWorld(); await loadNatural(); await loadPatrols(); await loadItems(); await loadNpcs(); closeOverlays(); toast("loaded " + mp.file); }
         else toast("load failed: " + (r.error || ""));
       };
       const acts = row.querySelector(".macts");
@@ -4043,6 +4137,391 @@ async function syncMissionHud() {
   hud.hidden = false;
   hud.innerHTML = `<b>💜 ${esc(r.active.name)}</b><span>${esc(r.progress || "")}</span>`;
 }
+
+// ---- v5.13: gear — items on the ground, packs on backs, folks in town --------
+let itemsLib = [], itemCells = [], npcsReal = [];
+let itemPlace = null, npcPlace = false;
+let packState = null, shopNpcId = null;
+const KIND_EMOJI = { weapon: "🗡️", tool: "🛠️", food: "🍖", trinket: "🔮" };
+
+function itemById(id) { return itemsLib.find(t => t.id === id); }
+function npcById(id) { return npcsReal.find(n => n.id === id); }
+
+function gearIcon(tid) {
+  const im = tileFrameImage(tid);
+  const sp = document.createElement("span");
+  sp.className = "gear-ico";
+  if (im) {
+    let el;
+    if (im.tagName === "CANVAS") {
+      el = document.createElement("canvas");
+      el.width = im.width || 32; el.height = im.height || 32;
+      el.getContext("2d").drawImage(im, 0, 0);
+    } else { el = document.createElement("img"); el.src = im.src; }
+    sp.appendChild(el);
+  }
+  return sp;
+}
+
+async function loadItems() {
+  const r = await api("/api/items");
+  if (r && r.ok) { itemsLib = r.items || []; itemCells = r.cells || []; }
+  renderItems(); queueRender();
+}
+
+function itemDesc(d) {
+  const bits = [`${KIND_EMOJI[d.kind] || "📦"} ${d.kind}`];
+  if (d.kind === "weapon") bits.push(`${d.power} dmg`);
+  if (d.kind === "food") bits.push(`+${d.power} belly`);
+  if (d.kind === "tool" && d.effect !== "none") bits.push(d.effect);
+  if (d.stack > 1) bits.push(`stacks ×${d.stack}`);
+  if (d.price) bits.push(`${d.price}g`);
+  return bits.join(" · ");
+}
+
+function renderItems() {
+  const box = $("items-list"); box.innerHTML = "";
+  if (!itemsLib.length) box.innerHTML = `<div class="melody-empty">no gear yet — make some below</div>`;
+  itemsLib.forEach(d => {
+    const row = document.createElement("div"); row.className = "irow";
+    row.appendChild(gearIcon(d.tile_id));
+    const main = document.createElement("div"); main.className = "irow-main";
+    const b = document.createElement("b"); b.textContent = d.name;
+    const sub = document.createElement("span"); sub.className = "irow-sub";
+    sub.textContent = itemDesc(d);
+    main.appendChild(b); main.appendChild(sub); row.appendChild(main);
+    const pb = document.createElement("button");
+    pb.textContent = itemPlace === d.id ? "Placing…" : "Place";
+    pb.onclick = () => {
+      itemPlace = itemPlace === d.id ? null : d.id;
+      npcPlace = false; syncNpcPlaceBtn();
+      renderItems();
+      toast(itemPlace ? `tap the map to drop ${d.name}` : "place off");
+    };
+    const db = document.createElement("button"); db.textContent = "✕"; db.className = "ghost";
+    db.onclick = async () => {
+      if (!confirm(`Delete ${d.name}?`)) return;
+      await api("/api/items/delete", { id: d.id });
+      if (itemPlace === d.id) itemPlace = null;
+      await loadItems(); await loadNpcs();
+    };
+    row.appendChild(pb); row.appendChild(db);
+    box.appendChild(row);
+  });
+}
+
+$("items-new").onclick = () => {
+  if (selTile == null) { toast("pick a tile first — the gear is made from it"); return; }
+  showItemForm();
+};
+
+function showItemForm() {
+  const f = $("items-form"); f.hidden = false;
+  const st = { kind: "trinket", effect: "none" };
+  f.innerHTML =
+    `<div class="tray-head">New gear <span class="tray-hint">from the selected tile</span></div>
+     <div id="if-preview" style="margin:4px 0"></div>
+     <label class="mlab">Name<input id="if-name" type="text" maxlength="32" placeholder="Iron sword"></label>
+     <div class="mlab">Kind<div id="if-kind" class="seg">` +
+       ["weapon", "tool", "food", "trinket"].map(k =>
+         `<button data-k="${k}" class="${k === "trinket" ? "on" : ""}">${KIND_EMOJI[k]} ${k}</button>`).join("") +
+     `</div></div>
+     <label class="mlab">Power (damage / belly+)<input id="if-power" type="number" value="1" min="0" max="99"></label>
+     <div class="mlab">Tool effect<div id="if-effect" class="seg">
+       <button data-e="none" class="on">none</button><button data-e="ward">ward</button>
+     </div><div class="tray-hint">ward: −1 hazard damage while held</div></div>
+     <label class="mlab">Stack max<input id="if-stack" type="number" value="10" min="1" max="99"></label>
+     <label class="mlab">Price (gold)<input id="if-price" type="number" value="5" min="0" max="9999"></label>
+     <div class="row2"><button id="if-create">✨ Make it</button><button id="if-cancel" class="ghost">Cancel</button></div>`;
+  $("if-preview").appendChild(gearIcon(selTile));
+  $("if-kind").querySelectorAll("button").forEach(b => b.onclick = () => {
+    $("if-kind").querySelectorAll("button").forEach(x => x.classList.remove("on"));
+    b.classList.add("on"); st.kind = b.dataset.k;
+  });
+  $("if-effect").querySelectorAll("button").forEach(b => b.onclick = () => {
+    $("if-effect").querySelectorAll("button").forEach(x => x.classList.remove("on"));
+    b.classList.add("on"); st.effect = b.dataset.e;
+  });
+  $("if-cancel").onclick = () => { f.hidden = true; };
+  $("if-create").onclick = async () => {
+    const r = await api("/api/items/create", {
+      name: $("if-name").value, tile_id: selTile, kind: st.kind,
+      power: +$("if-power").value || 0, effect: st.effect,
+      stack: +$("if-stack").value || 10, price: +$("if-price").value || 0 });
+    if (!r || !r.ok) { toast((r && r.error) || "couldn't make it"); return; }
+    f.hidden = true; await loadItems(); toast(`${r.item.name} made`);
+  };
+}
+
+async function itemPlaceTap(cell) {
+  const r = await api("/api/items/place", { item: itemPlace, x: cell.x, y: cell.y, qty: 1 });
+  if (!r.ok) toast(r.error || "can't drop it there"); else await loadItems();
+}
+
+// ---- folks ------------------------------------------------------------------
+async function loadNpcs() {
+  const r = await api("/api/npcs");
+  if (r && r.ok) npcsReal = r.npcs || [];
+  renderNpcs(); queueRender();
+}
+
+function renderNpcs() {
+  const box = $("npcs-list"); box.innerHTML = "";
+  if (!npcsReal.length) box.innerHTML = `<div class="melody-empty">nobody lives here yet</div>`;
+  npcsReal.forEach(n => {
+    const row = document.createElement("div"); row.className = "irow";
+    row.appendChild(gearIcon(n.tile_id));
+    const main = document.createElement("div"); main.className = "irow-main";
+    const b = document.createElement("b"); b.textContent = n.name;
+    const tag = document.createElement("span");
+    tag.className = "kindtag" + (n.role === "merchant" ? " merch" : "");
+    tag.textContent = n.role === "merchant" ? "🏪 merchant" : "🧑 villager";
+    b.appendChild(document.createTextNode(" ")); b.appendChild(tag);
+    const sub = document.createElement("span"); sub.className = "irow-sub";
+    const held = [];
+    const gw = n.gear && n.gear.weapon != null ? itemById(n.gear.weapon) : null;
+    const gt = n.gear && n.gear.tool != null ? itemById(n.gear.tool) : null;
+    if (gw) held.push("🗡️ " + gw.name);
+    if (gt) held.push("🛠️ " + gt.name);
+    sub.textContent = (n.line || "…") + (held.length ? " · holds " + held.join(", ") : "");
+    main.appendChild(b); main.appendChild(sub); row.appendChild(main);
+    const eb = document.createElement("button"); eb.textContent = "Edit";
+    eb.onclick = () => editNpc(n.id);
+    const db = document.createElement("button"); db.textContent = "✕"; db.className = "ghost";
+    db.onclick = async () => {
+      if (!confirm(`${n.name} moves away?`)) return;
+      await api("/api/npcs/delete", { id: n.id }); await loadNpcs();
+    };
+    row.appendChild(eb); row.appendChild(db);
+    box.appendChild(row);
+  });
+}
+
+$("npcs-place").onclick = () => {
+  if (selTile == null) { toast("pick a tile first — that's their look"); return; }
+  npcPlace = !npcPlace; itemPlace = null; renderItems(); syncNpcPlaceBtn();
+  toast(npcPlace ? "tap the map to put someone down" : "place off");
+  if (!npcPlace) closeOverlays();
+};
+function syncNpcPlaceBtn() {
+  const b = $("npcs-place"); if (b) b.textContent = npcPlace ? "📍 Placing… (tap to cancel)" : "📍 Place someone…";
+}
+
+async function npcPlaceTap(cell) {
+  const r = await api("/api/npcs/create", { tile_id: selTile, x: cell.x, y: cell.y });
+  if (!r.ok) { toast(r.error || "can't place them"); return; }
+  npcPlace = false; syncNpcPlaceBtn(); closeOverlays();
+  await loadNpcs(); toast(`${r.npc.name} moved in`);
+}
+
+function stockRowHtml(ln) {
+  const d = itemById(ln.item);
+  return `<div class="stockrow" data-iid="${ln.item}">
+    <select>${itemsLib.map(t =>
+      `<option value="${t.id}" ${t.id === ln.item ? "selected" : ""}>${esc(t.name)}${t.price ? ` (${t.price}g)` : ""}</option>`).join("")}</select>
+    <input type="number" class="st-price" value="${ln.price}" min="0" max="9999" title="price">
+    <input type="number" class="st-qty" value="${ln.qty < 0 ? "" : ln.qty}" min="0" max="999" title="qty (blank = ∞)" placeholder="∞">
+    <button class="st-del ghost">✕</button>
+  </div>`;
+}
+
+function editNpc(id) {
+  const n = npcById(id); if (!n) return;
+  const f = $("npcs-form"); f.hidden = false;
+  let role = n.role;
+  f.innerHTML =
+    `<div class="tray-head">Edit ${esc(n.name)}</div>
+     <label class="mlab">Name<input id="nf-name" type="text" maxlength="24" value="${esc(n.name)}"></label>
+     <div class="mlab">Role<div id="nf-role" class="seg">
+       <button data-r="villager" class="${role === "villager" ? "on" : ""}">🧑 villager</button>
+       <button data-r="merchant" class="${role === "merchant" ? "on" : ""}">🏪 merchant</button>
+     </div></div>
+     <label class="mlab">Greeting<input id="nf-line" type="text" maxlength="120" value="${esc(n.line)}"></label>
+     <div class="mlab">In their hands<div class="stockrow">
+       <select id="nf-weapon"><option value="">no weapon</option>${itemsLib.filter(t => t.kind === "weapon").map(t =>
+         `<option value="${t.id}" ${n.gear && n.gear.weapon === t.id ? "selected" : ""}>🗡️ ${esc(t.name)}</option>`).join("")}</select>
+       <select id="nf-tool"><option value="">no tool</option>${itemsLib.filter(t => t.kind === "tool").map(t =>
+         `<option value="${t.id}" ${n.gear && n.gear.tool === t.id ? "selected" : ""}>🛠️ ${esc(t.name)}</option>`).join("")}</select>
+     </div></div>
+     <div id="nf-stockwrap" ${role === "merchant" ? "" : "hidden"}>
+       <div class="tray-hint">Stock (blank qty = endless)</div>
+       <div id="nf-stock">${(n.stock || []).map(stockRowHtml).join("")}</div>
+       <button id="nf-addstock" class="ghost">＋ stock something…</button>
+     </div>
+     <div class="row2"><button id="nf-save">Save</button><button id="nf-cancel" class="ghost">Cancel</button></div>`;
+  $("nf-role").querySelectorAll("button").forEach(b => b.onclick = () => {
+    $("nf-role").querySelectorAll("button").forEach(x => x.classList.remove("on"));
+    b.classList.add("on"); role = b.dataset.r;
+    $("nf-stockwrap").hidden = role !== "merchant";
+  });
+  $("nf-addstock").onclick = () => {
+    if (!itemsLib.length) { toast("make some gear first"); return; }
+    const tmp = document.createElement("div");
+    tmp.innerHTML = stockRowHtml({ item: itemsLib[0].id, price: itemsLib[0].price || 5, qty: -1 });
+    $("nf-stock").appendChild(tmp.firstChild);
+    bindStockDels();
+  };
+  const bindStockDels = () => $("nf-stock").querySelectorAll(".st-del").forEach(b =>
+    b.onclick = () => b.closest(".stockrow").remove());
+  bindStockDels();
+  $("nf-cancel").onclick = () => { f.hidden = true; };
+  $("nf-save").onclick = async () => {
+    const wv = $("nf-weapon").value, tv = $("nf-tool").value;
+    let r = await api("/api/npcs/update", { id, name: $("nf-name").value, role, line: $("nf-line").value,
+      gear: { weapon: wv === "" ? null : +wv, tool: tv === "" ? null : +tv } });
+    if (!r.ok) { toast(r.error || "couldn't save"); return; }
+    if (role === "merchant") {
+      const stock = [...$("nf-stock").querySelectorAll(".stockrow")].map(row => ({
+        item: +row.querySelector("select").value,
+        price: +row.querySelector(".st-price").value || 0,
+        qty: row.querySelector(".st-qty").value === "" ? -1 : Math.max(0, +row.querySelector(".st-qty").value || 0)
+      }));
+      r = await api("/api/npcs/stock", { id, stock });
+      if (!r.ok) { toast(r.error || "stock wouldn't save"); return; }
+    }
+    f.hidden = true; await loadNpcs(); toast("saved");
+  };
+}
+
+async function eraseGearTap(cell) {
+  const hit = itemCells.find(c => c[0] === cell.x && c[1] === cell.y);
+  if (hit) { await api("/api/items/unplace", { x: cell.x, y: cell.y }); await loadItems(); return true; }
+  const n = npcsReal.find(n => n.x === cell.x && n.y === cell.y);
+  if (n) { await api("/api/npcs/delete", { id: n.id }); await loadNpcs(); toast(`${n.name} moved away`); return true; }
+  return false;
+}
+
+// ---- the pack (play mode) ----------------------------------------------------
+async function syncInv() {
+  const r = await api("/api/inv").catch(() => null);
+  if (!r || !r.ok) return;
+  packState = r;
+  const g = $("gear-hud");
+  const row = id => r.inv.find(i => i.item === id);
+  const w = r.equipped.weapon != null ? row(r.equipped.weapon) : null;
+  const t = r.equipped.tool != null ? row(r.equipped.tool) : null;
+  g.hidden = !playMode; $("pack-btn").hidden = !playMode;
+  g.innerHTML = `🪙 <b>${r.gold}</b> &nbsp; 🎒 ${r.inv.reduce((a, i) => a + i.qty, 0)}` +
+    (w ? ` &nbsp; 🗡️ ${esc(w.name)}` : "") + (t ? ` &nbsp; 🛠️ ${esc(t.name)}` : "");
+  renderPack();
+}
+
+function renderPack() {
+  const r = packState; if (!r) return;
+  $("pack-gold").textContent = `${r.gold} gold`;
+  const row = id => r.inv.find(i => i.item === id);
+  const w = r.equipped.weapon != null ? row(r.equipped.weapon) : null;
+  const t = r.equipped.tool != null ? row(r.equipped.tool) : null;
+  $("pack-hands").textContent =
+    `hands: ${w ? "🗡️ " + w.name : "empty"} · ${t ? "🛠️ " + t.name : "empty"}`;
+  const box = $("pack-list"); box.innerHTML = "";
+  if (!r.inv.length) box.innerHTML = `<div class="melody-empty">empty pockets — pick things up</div>`;
+  r.inv.forEach(it => {
+    const d = itemById(it.item) || { name: it.name, kind: "trinket", tile_id: 0 };
+    const isW = r.equipped.weapon === it.item, isT = r.equipped.tool === it.item;
+    const el = document.createElement("div"); el.className = "irow";
+    el.appendChild(gearIcon(d.tile_id));
+    const main = document.createElement("div"); main.className = "irow-main";
+    const b = document.createElement("b"); b.textContent = `${it.name} ×${it.qty}`;
+    const sub = document.createElement("span"); sub.className = "irow-sub";
+    sub.textContent = (isW ? "in hand · " : "") + (isT ? "in hand · " : "") + itemDesc(d);
+    main.appendChild(b); main.appendChild(sub); el.appendChild(main);
+    const mk = (label, act) => {
+      const btn = document.createElement("button"); btn.textContent = label;
+      btn.onclick = () => packAct(act, it.item); el.appendChild(btn);
+    };
+    if (d.kind === "weapon") mk(isW ? "Sheathe" : "Wield", isW ? "unequipw" : "equip");
+    if (d.kind === "tool") mk(isT ? "Stow" : "Hold", isT ? "unequipt" : "equip");
+    if (d.kind === "food") mk("Eat", "use");
+    mk("Drop", "drop");
+    box.appendChild(el);
+  });
+}
+
+async function packAct(act, id) {
+  let r;
+  if (act === "unequipw") r = await api("/api/inv/unequip", { slot: "weapon" });
+  else if (act === "unequipt") r = await api("/api/inv/unequip", { slot: "tool" });
+  else r = await api("/api/inv/" + act, { item: id });
+  if (!r || !r.ok) { toast((r && r.error) || "that didn't work"); return; }
+  if (r.nature) syncNature(r);
+  if (r.events) playEvents(r.events);
+  await syncInv();
+  if (shopNpcId != null && $("sheet-shop").classList.contains("open")) await renderShopById();
+}
+
+// ---- the shop ----------------------------------------------------------------
+async function openShop(npcId) {
+  shopNpcId = npcId;
+  await loadItems();
+  await loadNpcs();
+  await renderShopById();
+  closeOverlays();
+  $("sheet-shop").classList.add("open"); $("scrim").classList.add("on");
+}
+
+async function renderShopById() {
+  const n = npcById(shopNpcId);
+  if (!n) { closeOverlays(); return; }
+  $("shop-name").textContent = n.name;
+  $("shop-gold").textContent = `${packState ? packState.gold : 0} gold`;
+  const box = $("shop-stock"); box.innerHTML = "";
+  if (!n.stock || !n.stock.length) box.innerHTML = `<div class="melody-empty">bare shelves</div>`;
+  (n.stock || []).forEach(ln => {
+    const d = itemById(ln.item); if (!d) return;
+    const row = document.createElement("div"); row.className = "irow";
+    row.appendChild(gearIcon(d.tile_id));
+    const main = document.createElement("div"); main.className = "irow-main";
+    const b = document.createElement("b"); b.textContent = d.name + (ln.qty >= 0 ? ` ×${ln.qty}` : "");
+    const sub = document.createElement("span"); sub.className = "irow-sub";
+    sub.textContent = itemDesc(d);
+    main.appendChild(b); main.appendChild(sub); row.appendChild(main);
+    const buy = document.createElement("button");
+    buy.textContent = `Buy ${ln.price}g`;
+    const broke = !packState || packState.gold < ln.price, out = ln.qty === 0;
+    buy.disabled = broke || out;
+    if (out) buy.textContent = "Sold out";
+    buy.onclick = () => shopBuy(d.id);
+    row.appendChild(buy); box.appendChild(row);
+  });
+  const sell = $("shop-sell"); sell.innerHTML = "";
+  const inv = packState ? packState.inv : [];
+  if (!inv.length) sell.innerHTML = `<div class="melody-empty">nothing to sell</div>`;
+  inv.forEach(it => {
+    const d = itemById(it.item) || { name: it.name, price: 0, tile_id: 0 };
+    const val = Math.max(1, Math.floor((d.price || 0) / 2));
+    const row = document.createElement("div"); row.className = "irow";
+    row.appendChild(gearIcon(d.tile_id));
+    const main = document.createElement("div"); main.className = "irow-main";
+    const b = document.createElement("b"); b.textContent = `${it.name} ×${it.qty}`;
+    const sub = document.createElement("span"); sub.className = "irow-sub";
+    sub.textContent = itemDesc(d);
+    main.appendChild(b); main.appendChild(sub); row.appendChild(main);
+    const sb = document.createElement("button"); sb.textContent = `Sell +${val}g`;
+    sb.onclick = () => shopSell(d.id || it.item);
+    row.appendChild(sb); sell.appendChild(row);
+  });
+}
+
+async function shopBuy(iid) {
+  const r = await api("/api/shop/buy", { npc: shopNpcId, item: iid });
+  if (!r || !r.ok) { toast((r && r.error) || "no deal"); return; }
+  if (r.events) await playEvents(r.events);
+  await syncInv(); await loadNpcs(); await renderShopById();
+}
+
+async function shopSell(iid) {
+  const r = await api("/api/shop/sell", { npc: shopNpcId, item: iid });
+  if (!r || !r.ok) { toast((r && r.error) || "no deal"); return; }
+  if (r.events) await playEvents(r.events);
+  await syncInv(); await loadNpcs(); await renderShopById();
+}
+
+// ---- menu wiring --------------------------------------------------------------
+$("menu-items").onclick = () => { toggleOverlay("sheet-items"); loadItems(); };
+$("menu-npcs").onclick = () => { toggleOverlay("sheet-npcs"); loadItems(); loadNpcs(); };
+$("pack-btn").onclick = () => { toggleOverlay("sheet-pack"); syncInv(); };
+
   } catch (e) {
     toast("can't reach the HUD server — is crumbs_hud.py running?");
     const sp = $("splash"); if (sp) sp.classList.add("gone");

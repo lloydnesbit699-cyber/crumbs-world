@@ -17,4 +17,7 @@ custom_tiles/
 *.names.json
 *.slots.json
 *.missions.json
+*.items.json
+*.npcs.json
+*.gear.json
 _trash/

@@ -87,6 +87,7 @@ import os
 import base64
 import copy
 import random
+import re
 import socket
 import sys
 import threading
@@ -575,7 +576,8 @@ def _mission_place_hazards(mission):
         _patrol_seq["next"] += 1
         _patrols.append({"id": pid, "tile_id": tid, "x": ax, "y": ay,
                          "points": pts, "hazard": True,
-                         "mission_id": mission["id"]})
+                         "mission_id": mission["id"],
+                         "map": _current_map})
         placed.append((ax, ay))
         danger.update((x, y) for x, y in pts)
     mission["placed"] = placed
@@ -612,7 +614,7 @@ def _mission_bump_meters(d_health=0):
 
 def _check_mission(x, y):
     """Per hero step: hazard damage + objective progress. Returns events."""
-    global mission_run
+    global mission_run, _gold
     events = []
     if not mission_run or mission_run["won"] or mission_run["failed"]:
         return events
@@ -621,15 +623,53 @@ def _check_mission(x, y):
         return events
     danger = {tuple(c) for c in mission.get("danger", [])}
     if (x, y) in danger:
-        _mission_bump_meters(d_health=-1)
-        _log_event("hazard hit")
-        events.append({"t": "toast",
-                       "text": "⚠ hazard patrol's ground — ouch!"})
-        if _meters.get("health", 10) <= 0:
-            mission_run["failed"] = True
-            events.append({"t": "message",
-                           "text": "The hazards got you… mission failed."})
-            return events
+        # v5.13: a drawn weapon keeps hazard ground at bay; a ward charm
+        # softens it. Bare hands still bleed.
+        w = _equipped_def("weapon")
+        if w:
+            events.append({"t": "toast",
+                           "text": f"🗡️ your {w['name']} keeps them at bay!"})
+        else:
+            hurt = 1
+            tool = _equipped_def("tool")
+            if tool and tool.get("effect") == "ward":
+                hurt = 0
+                events.append({"t": "toast",
+                               "text": f"🛡️ your {tool['name']} wards them off!"})
+            if hurt:
+                _mission_bump_meters(d_health=-hurt)
+                _log_event("hazard hit")
+                events.append({"t": "toast",
+                               "text": "⚠ hazard patrol's ground — ouch!"})
+            if _meters.get("health", 10) <= 0:
+                mission_run["failed"] = True
+                events.append({"t": "message",
+                               "text": "The hazards got you… mission failed."})
+                return events
+    # v5.13: step onto a hazard's own anchor with a weapon drawn and you
+    # drive it off the map for good.
+    w = _equipped_def("weapon")
+    if w:
+        for hp in list(_patrols):
+            if hp.get("hazard") and hp.get("mission_id") == mission["id"] \
+                    and (hp.get("x"), hp.get("y")) == (x, y):
+                _patrols.remove(hp)
+                et = mission.get("enemy_tile")
+                if et is not None and world.object_layer[y][x] == et:
+                    world.object_layer[y][x] = None
+                mission["danger"] = sorted(
+                    {tuple(c) for q in _patrols
+                     if q.get("mission_id") == mission["id"]
+                     for c in q.get("points", [])})
+                _save_patrols()
+                _save_missions(_current_map)
+                _mark_dirty()
+                events.append({"t": "npcs"})  # client rebuilds the walkers
+                events.append({"t": "toast",
+                               "text": f"⚔️ you drove it off with your "
+                                       f"{w['name']}!"})
+                _log_event("hazard defeated")
+                break
     elapsed = _tick_n - mission_run["tick0"]
     gathered = {k: _inv.get(k, 0) - mission_run["inv0"].get(k, 0)
                 for k in ("wood", "food")}
@@ -670,6 +710,12 @@ def _check_mission(x, y):
         msg = _melody_says("won", mission["id"], name=mission["name"],
                            reward=f"Reward: {reward}.")
         events.append({"t": "message", "text": "🏆 " + msg})
+        # v5.13: a number in the reward ("100 gold stars") pays out in coin.
+        mg = re.search(r"(\d+)", reward)
+        if mg:
+            g = min(9999, int(mg.group(1)))
+            _gold += g
+            events.append({"t": "toast", "text": f"🪙 +{g} gold!"})
         _log_event(f"mission won: {mission['name']}")
     return events
 
@@ -686,7 +732,249 @@ def _mission_run_text():
     return txt
 
 
+# ---- v5.13: gear — items on the ground, packs on backs, folks in town -------
+# Weapons and tools are objects: defined from tiles, dropped on the map,
+# picked up into a stacking inventory, equipped on the hero — and stocked
+# by merchant NPCs for stores and markets.
+_items = []          # [{id,name,tile_id,kind,power,effect,stack,price}]
+_item_seq = {"next": 1}
+_item_cells = {}     # "x,y" -> [item_id, qty] — the stuff lying on the map
+_npcs = []           # [{id,name,tile_id,x,y,role,line,stock:[{item,price,qty}]}]
+_npc_seq = {"next": 1}
+_hero_inv = []       # [{item, qty}] — this run's pack, stacking
+_gold = 25           # this run's coin
+_equipped = {"weapon": None, "tool": None}  # item ids, or None
+_npc_near = set()    # npc ids the hero is already beside (no repeat hellos)
+
+
+def _items_path(name):
+    base = name[:-5] if name.endswith(".json") else name
+    return os.path.join(SCRIPT_DIR, base + ".items.json")
+
+
+def _npcs_path(name):
+    base = name[:-5] if name.endswith(".json") else name
+    return os.path.join(SCRIPT_DIR, base + ".npcs.json")
+
+
+def _gear_path(name):
+    # v5.13: the hero's own pack — coin, carried gear, and hands — rides
+    # with the map so it survives stop/start. User data, never committed.
+    base = name[:-5] if name.endswith(".json") else name
+    return os.path.join(SCRIPT_DIR, base + ".gear.json")
+
+
+def _load_gear(name):
+    """Fill the hero's pack from this map's gear sidecar (fresh if none)."""
+    global _hero_inv, _gold, _equipped
+    try:
+        d = json.load(open(_gear_path(name)))
+        _hero_inv = [r for r in d.get("inv", [])
+                     if isinstance(r, dict) and _item_by_id(r.get("item"))]
+        _gold = max(0, int(d.get("gold", 25)))
+        eq = d.get("equipped", {}) or {}
+        _equipped = {"weapon": None, "tool": None}
+        for slot in ("weapon", "tool"):
+            iid = eq.get(slot)
+            if iid is not None and _item_by_id(iid):
+                _equipped[slot] = iid
+    except (OSError, ValueError, TypeError):
+        _hero_inv, _gold = [], 25
+        _equipped = {"weapon": None, "tool": None}
+    _npc_near.clear()
+
+
+def _save_gear(name):
+    if not name:
+        return
+    try:
+        with open(_gear_path(name), "w") as f:
+            json.dump({"inv": _hero_inv, "gold": _gold,
+                       "equipped": _equipped}, f)
+    except OSError as e:
+        print(f"[hud] could not save gear: {e}")
+
+
+def _load_items(name):
+    global _items, _item_seq, _item_cells
+    try:
+        d = json.load(open(_items_path(name)))
+        _items = d.get("items", [])
+        _item_seq["next"] = d.get("next", len(_items) + 1)
+        _item_cells = {str(k): [int(v[0]), int(v[1])]
+                       for k, v in (d.get("cells") or {}).items()}
+    except (OSError, ValueError):
+        _items, _item_seq, _item_cells = [], {"next": 1}, {}
+
+
+def _save_items(name):
+    try:
+        with open(_items_path(name), "w") as f:
+            json.dump({"items": _items, "next": _item_seq["next"],
+                       "cells": _item_cells}, f)
+    except OSError as e:
+        print(f"[hud] could not save items: {e}")
+
+
+def _load_npcs(name):
+    global _npcs, _npc_seq
+    try:
+        d = json.load(open(_npcs_path(name)))
+        _npcs = d.get("npcs", [])
+        for n in _npcs:
+            g = n.get("gear") or {}
+            n["gear"] = {"weapon": g.get("weapon"), "tool": g.get("tool")}
+        _npc_seq["next"] = d.get("next", len(_npcs) + 1)
+    except (OSError, ValueError):
+        _npcs, _npc_seq = [], {"next": 1}
+
+
+def _save_npcs(name):
+    try:
+        with open(_npcs_path(name), "w") as f:
+            json.dump({"npcs": _npcs, "next": _npc_seq["next"]}, f)
+    except OSError as e:
+        print(f"[hud] could not save npcs: {e}")
+
+
+def _item_by_id(iid):
+    return next((t for t in _items if t["id"] == iid), None)
+
+
+def _npc_by_id(nid):
+    return next((n for n in _npcs if n["id"] == nid), None)
+
+
+def _item_cell_key(x, y):
+    return f"{x},{y}"
+
+
+def _inv_add(iid, qty):
+    """Stack iid into the hero's pack, honoring the item's stack max."""
+    d = _item_by_id(iid)
+    if not d or qty <= 0:
+        return
+    cap = d.get("stack", core.ITEM_MAX_STACK)
+    for row in _hero_inv:
+        if row["item"] == iid and row["qty"] < cap:
+            take = min(cap - row["qty"], qty)
+            row["qty"] += take
+            qty -= take
+            if qty <= 0:
+                return
+    while qty > 0:
+        take = min(cap, qty)
+        _hero_inv.append({"item": iid, "qty": take})
+        qty -= take
+    _save_gear(_current_map)
+
+
+def _inv_count(iid):
+    return sum(r["qty"] for r in _hero_inv if r["item"] == iid)
+
+
+def _inv_take(iid, qty):
+    """Remove qty of iid from the pack. Returns False if not enough."""
+    if _inv_count(iid) < qty:
+        return False
+    left = qty
+    for row in list(_hero_inv):
+        if row["item"] != iid:
+            continue
+        take = min(row["qty"], left)
+        row["qty"] -= take
+        left -= take
+        if row["qty"] <= 0:
+            _hero_inv.remove(row)
+        if left <= 0:
+            break
+    _save_gear(_current_map)
+    return True
+
+
+def _equipped_def(slot):
+    iid = _equipped.get(slot)
+    return _item_by_id(iid) if iid else None
+
+
+def _inv_state():
+    """The hero's pack, coin, and hands for the client."""
+    out = []
+    for row in _hero_inv:
+        d = _item_by_id(row["item"])
+        if d:
+            out.append({"item": row["item"], "qty": row["qty"],
+                        "name": d["name"], "tile_id": d["tile_id"],
+                        "kind": d["kind"], "power": d["power"],
+                        "effect": d["effect"], "price": d["price"]})
+    return {"ok": True, "inv": out, "gold": _gold,
+            "equipped": {"weapon": (_equipped_def("weapon") or {}).get("id"),
+                         "tool": (_equipped_def("tool") or {}).get("id")}}
+
+
+def _check_items(x, y):
+    """Per hero step: pick up whatever's lying at (x, y)."""
+    key = _item_cell_key(x, y)
+    cell = _item_cells.pop(key, None)
+    if not cell:
+        return []
+    iid, qty = cell
+    d = _item_by_id(iid)
+    if not d:
+        return []
+    _inv_add(iid, qty)
+    _save_items(_current_map)
+    _mark_dirty()
+    return [{"t": "toast",
+             "text": f"🎒 picked up {d['name']}"
+                     + (f" ×{qty}" if qty > 1 else "")}]
+
+
+def _check_npcs(x, y):
+    """Per hero step: greet folks nearby; merchants open their stores."""
+    events = []
+    near = {n["id"] for n in _npcs
+            if max(abs(n["x"] - x), abs(n["y"] - y)) <= 1}
+    new = near - _npc_near
+    _npc_near.clear()
+    _npc_near.update(near)
+    for n in _npcs:
+        if n["id"] not in new:
+            continue
+        if n.get("role") == "merchant":
+            events.append({"t": "shop", "npc": n["id"], "name": n["name"]})
+        else:
+            line = (n.get("line") or "").strip()
+            if line:
+                events.append({"t": "toast",
+                               "text": f"🧑 {n['name']}: “{line}”"})
+    return events
+
+
+def _mission_reconcile_patrols():
+    """Mission patrols belong to the map they were placed on. On load:
+    drop any whose map isn't this one (or whose mission is gone), and
+    rebuild the active mission's flows only if it has none here —
+    placement is deterministic per mission, so rebuilds land where
+    Melody put them."""
+    global _patrols
+    mids = {m.get("id") for m in _missions}
+    _patrols = [p for p in _patrols
+                if not p.get("mission_id")
+                or (p.get("map", _current_map) == _current_map
+                    and p.get("mission_id") in mids)]
+    for m in _missions:
+        if m.get("active"):
+            here = [p for p in _patrols if p.get("mission_id") == m.get("id")]
+            if not here:
+                _mission_place_hazards(m)
+            break
+    _save_patrols()
+
+
 def _load_patrols():
+    global _patrols
+    _patrols = []
     if not os.path.exists(PATROL_SAVE):
         return
     try:
@@ -699,7 +987,19 @@ def _load_patrols():
             pts = [[int(a), int(b)] for a, b in p["points"]]
             tid = int(p["tile_id"])
             if len(pts) >= 2 and tid in assets.tiles:
-                _patrols.append({"id": int(p["id"]), "tile_id": tid, "points": pts})
+                # v5.13: keep the whole record — mission_id/hazard/x/y are
+                # what let mission hazards survive a restart on their own map
+                rec = {"id": int(p["id"]), "tile_id": tid, "points": pts}
+                for k in ("x", "y"):
+                    if p.get(k) is not None:
+                        rec[k] = int(p[k])
+                if p.get("hazard"):
+                    rec["hazard"] = True
+                if p.get("mission_id") is not None:
+                    rec["mission_id"] = int(p["mission_id"])
+                if p.get("map"):
+                    rec["map"] = str(p["map"])
+                _patrols.append(rec)
         except (KeyError, TypeError, ValueError):
             continue
     _patrol_seq["next"] = max([p["id"] for p in _patrols] + [0]) + 1
@@ -828,7 +1128,7 @@ WEATHER_MIND = None
 # Per-play-run nature state: meters, gathered wood, trait edits made during
 # play (reverted afterwards, like keys/doors in v3.9).
 _meters = {"health": 10, "warmth": 10, "belly": 10}
-_inv = {"wood": 0}
+_inv = {"wood": 0, "food": 0}
 _nature_mods = []  # [(x, y, previous_trait, kind)] — kind is "gather",
 # "fire", or "snow" so the sky can tell its own work apart on revert.
 _tick_n = 0
@@ -986,7 +1286,8 @@ def _map_sidecars(name):
     base = name[:-5] if name.endswith(".json") else name
     return [os.path.join(SCRIPT_DIR, base + ext)
             for ext in (".json", ".rules.json", ".traits.json", ".names.json",
-                        ".missions.json")]  # v5.12
+                        ".missions.json", ".items.json",
+                        ".npcs.json")]  # v5.12, v5.13
 
 def _slots_path():
     base = _current_map or DEFAULT_SAVE
@@ -1107,8 +1408,10 @@ def _reset_nature_session():
     # fresh meters + inventory; undo trait changes made during this run
     global _tick_n
     _revert_nature_mods()
+    _load_gear(_current_map)  # v5.13: the hero keeps their own pack
     _meters.update({"health": 10, "warmth": 10, "belly": 10})
-    _inv["wood"] = 0
+    for _k in _inv:
+        _inv[_k] = 0
     _tick_n = 0
 
 def _apply_nature(x, y):
@@ -1141,12 +1444,19 @@ def _apply_nature(x, y):
         traits_grid[y][x] = None
         notes.append({"t": "toast",
                       "text": "Wood gathered (%d)" % _inv["wood"]})
-    elif t == "food" and m["belly"]:
-        if _meters["belly"] < 10:
+    elif t == "food":
+        # v5.13: food goes in the pack (gather missions can count it); if
+        # the belly meter is on and there's room, one gets eaten on the spot.
+        _inv["food"] += 1
+        _nature_mods.append((x, y, "food", "gather"))
+        traits_grid[y][x] = None
+        if m["belly"] and _meters["belly"] < 10:
             bump("belly", 1)
-            _nature_mods.append((x, y, "food", "gather"))
-            traits_grid[y][x] = None
-            notes.append({"t": "toast", "text": "Tasty."})
+            notes.append({"t": "toast",
+                          "text": "Tasty. (food: %d)" % _inv["food"]})
+        else:
+            notes.append({"t": "toast",
+                          "text": "Food gathered (%d)" % _inv["food"]})
     # v4.1: the sky has its nature too. If a mind is driving (WEATHER_MIND),
     # it gets the sky; otherwise this script is the weather. Rain is cold
     # and kills built fires; snow is cold that stays and piles up; fog is
@@ -1274,10 +1584,13 @@ else:
 
 _load_custom_tiles()  # v3.0: imported tiles back into the asset manager
 _load_patrols()       # v3.4: patrol routes back (needs tiles loaded first)
+_mission_reconcile_patrols()  # v5.13: only this map's hazards stay
 _load_rules(DEFAULT_SAVE)  # v3.7: this build's rules (or defaults)
 _load_traits(DEFAULT_SAVE)  # v4.0: this build's nature traits (or blank)
 _load_names(DEFAULT_SAVE)   # v5.1: per-instance names (or none)
 _load_missions(DEFAULT_SAVE)  # v5.12: Melody's missions (or none)
+_load_items(DEFAULT_SAVE)    # v5.13: this map's gear (or none)
+_load_npcs(DEFAULT_SAVE)     # v5.13: this map's folks (or none)
 
 # v3.2: built-in water/ocean colors are swimmable — slow the hero, don't block
 for _tid, _t in assets.tiles.items():
@@ -1678,6 +1991,19 @@ class Handler(BaseHTTPRequestHandler):
                                    "reward", "objectives", "hazard_count",
                                    "active", "won")}
                 for m in _missions]})
+        elif path == "/api/items":
+            # v5.13: this map's item library + what's lying on the ground
+            cells = []
+            for k, v in _item_cells.items():
+                x, y = k.split(",")
+                cells.append([int(x), int(y), v[0], v[1]])
+            self._send_json({"ok": True, "items": _items, "cells": cells})
+        elif path == "/api/npcs":
+            # v5.13: this map's folks
+            self._send_json({"ok": True, "npcs": _npcs})
+        elif path == "/api/inv":
+            # v5.13: the hero's pack, coin, and hands
+            self._send_json(_inv_state())
         elif path == "/api/missions/state":
             # v5.12: live run progress for the play HUD
             active = next((m for m in _missions if m.get("active")), None)
@@ -1858,6 +2184,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         global traits_grid, hero_override  # v5.6: slots/load rebinds these
         global _current_map, mission_run  # v5.12: rename + mission runs
+        global _gold, _item_cells  # v5.13: coin + ground items
         path = urlparse(self.path).path
         body = self._read_json()
         if body is None or not isinstance(body, dict):
@@ -2357,6 +2684,329 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"ok": True,
                                     "targets": [list(c) for c in picked]})
 
+        # ---- v5.13: gear -------------------------------------------------
+        if path == "/api/items/create":
+            # {name, tile_id, kind, power, effect, stack, price}
+            try:
+                d = core.build_item(body.get("name"), body.get("tile_id"),
+                                    body.get("kind", "trinket"),
+                                    body.get("power", 0),
+                                    body.get("effect", "none"),
+                                    body.get("stack", core.ITEM_MAX_STACK),
+                                    body.get("price", 0))
+            except ValueError as e:
+                return self._send_json({"ok": False, "error": str(e)}, 400)
+            d["id"] = _item_seq["next"]
+            _item_seq["next"] += 1
+            _items.append(d)
+            _save_items(_current_map)
+            _log_event(f"item created: {d['name']}")
+            return self._send_json({"ok": True, "item": d})
+
+        if path == "/api/items/delete":
+            try:
+                iid = int(body.get("id"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "bad id"}, 400)
+            _items[:] = [t for t in _items if t["id"] != iid]
+            _item_cells = {k: v for k, v in _item_cells.items()
+                           if v[0] != iid}
+            for n in _npcs:  # merchants stop stocking it too
+                n["stock"] = [ln for ln in n.get("stock", [])
+                              if ln.get("item") != iid]
+                g = n.get("gear") or {}
+                if g.get("weapon") == iid:
+                    g["weapon"] = None
+                if g.get("tool") == iid:
+                    g["tool"] = None
+            if _equipped.get("weapon") == iid:
+                _equipped["weapon"] = None
+            if _equipped.get("tool") == iid:
+                _equipped["tool"] = None
+            _save_items(_current_map)
+            _save_npcs(_current_map)
+            _save_gear(_current_map)
+            _mark_dirty()
+            return self._send_json({"ok": True})
+
+        if path == "/api/items/place":
+            # {item, x, y, qty?} — drop gear on the map
+            try:
+                iid = int(body.get("item"))
+                x, y = int(body.get("x")), int(body.get("y"))
+                qty = max(1, min(99, int(body.get("qty", 1))))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False,
+                                        "error": "item/x/y required"}, 400)
+            if _item_by_id(iid) is None:
+                return self._send_json({"ok": False,
+                                        "error": "unknown item"}, 404)
+            if not (0 <= x < world.width and 0 <= y < world.height):
+                return self._send_json({"ok": False,
+                                        "error": "off the map"}, 400)
+            key = _item_cell_key(x, y)
+            have = _item_cells.get(key, [iid, 0])
+            if have[0] != iid:
+                return self._send_json({"ok": False,
+                                        "error": "something else is there"},
+                                       409)
+            _item_cells[key] = [iid, have[1] + qty]
+            _save_items(_current_map)
+            _mark_dirty()
+            return self._send_json({"ok": True})
+
+        if path == "/api/items/unplace":
+            try:
+                x, y = int(body.get("x")), int(body.get("y"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False,
+                                        "error": "x/y required"}, 400)
+            _item_cells.pop(_item_cell_key(x, y), None)
+            _save_items(_current_map)
+            _mark_dirty()
+            return self._send_json({"ok": True})
+
+        if path == "/api/npcs/create":
+            # {tile_id, x, y} — put a folk on the map
+            try:
+                tid = int(body.get("tile_id"))
+                x, y = int(body.get("x")), int(body.get("y"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False,
+                                        "error": "tile_id/x/y required"}, 400)
+            if not (0 <= x < world.width and 0 <= y < world.height):
+                return self._send_json({"ok": False,
+                                        "error": "off the map"}, 400)
+            nid = _npc_seq["next"]
+            _npc_seq["next"] += 1
+            n = {"id": nid, "name": f"Traveler {nid}", "tile_id": tid,
+                 "x": x, "y": y, "role": "villager",
+                 "line": "Mind the roads, traveler.", "stock": [],
+                 "gear": {"weapon": None, "tool": None}}
+            _npcs.append(n)
+            _save_npcs(_current_map)
+            _mark_dirty()
+            _log_event(f"npc placed: {n['name']}")
+            return self._send_json({"ok": True, "npc": n})
+
+        if path == "/api/npcs/update":
+            # {id, name?, role?, line?}
+            try:
+                nid = int(body.get("id"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "bad id"}, 400)
+            n = _npc_by_id(nid)
+            if n is None:
+                return self._send_json({"ok": False,
+                                        "error": "not found"}, 404)
+            if "name" in body:
+                n["name"] = str(body.get("name") or "").strip()[:32] \
+                    or n["name"]
+            if "role" in body:
+                if body.get("role") not in ("villager", "merchant"):
+                    return self._send_json({"ok": False,
+                                            "error": "bad role"}, 400)
+                n["role"] = body.get("role")
+            if "line" in body:
+                n["line"] = str(body.get("line") or "").strip()[:120]
+            if "gear" in body:
+                # {weapon: id|null, tool: id|null} — what's in their hands
+                g = body.get("gear") or {}
+                gear = {"weapon": None, "tool": None}
+                for slot, kind in (("weapon", "weapon"), ("tool", "tool")):
+                    iid = g.get(slot)
+                    if iid is None:
+                        continue
+                    try:
+                        iid = int(iid)
+                    except (TypeError, ValueError):
+                        return self._send_json(
+                            {"ok": False, "error": "bad gear id"}, 400)
+                    d = _item_by_id(iid)
+                    if d is None or d.get("kind") != kind:
+                        return self._send_json(
+                            {"ok": False,
+                             "error": f"{slot} must be a {kind}"}, 400)
+                    gear[slot] = iid
+                n["gear"] = gear
+            _save_npcs(_current_map)
+            _mark_dirty()
+            return self._send_json({"ok": True, "npc": n})
+
+        if path == "/api/npcs/delete":
+            try:
+                nid = int(body.get("id"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "bad id"}, 400)
+            _npcs[:] = [n for n in _npcs if n["id"] != nid]
+            _save_npcs(_current_map)
+            _mark_dirty()
+            return self._send_json({"ok": True})
+
+        if path == "/api/npcs/stock":
+            # {id, stock: [{item, price, qty}]} — a merchant's shelves
+            try:
+                nid = int(body.get("id"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "bad id"}, 400)
+            n = _npc_by_id(nid)
+            if n is None:
+                return self._send_json({"ok": False,
+                                        "error": "not found"}, 404)
+            if n.get("role") != "merchant":
+                return self._send_json({"ok": False,
+                                        "error": "not a merchant"}, 400)
+            stock = body.get("stock") or []
+            if not isinstance(stock, list) or len(stock) > 24:
+                return self._send_json({"ok": False,
+                                        "error": "bad stock"}, 400)
+            clean = []
+            for ln in stock:
+                try:
+                    iid = int(ln.get("item"))
+                    price = max(0, min(9999, int(ln.get("price", 0))))
+                    qty = int(ln.get("qty", 1))
+                    qty = -1 if qty < 0 else min(99, qty)
+                except (TypeError, ValueError, AttributeError):
+                    return self._send_json({"ok": False,
+                                            "error": "bad stock line"}, 400)
+                if _item_by_id(iid) is None:
+                    return self._send_json({"ok": False,
+                                            "error": "unknown item"}, 404)
+                clean.append({"item": iid, "price": price, "qty": qty})
+            n["stock"] = clean
+            _save_npcs(_current_map)
+            return self._send_json({"ok": True, "npc": n})
+
+        if path == "/api/inv/equip":
+            # {item} — put a weapon or tool in the hero's hands
+            try:
+                iid = int(body.get("item"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "bad id"}, 400)
+            d = _item_by_id(iid)
+            if d is None or d["kind"] not in ("weapon", "tool"):
+                return self._send_json({"ok": False,
+                                        "error": "not equipable"}, 400)
+            if _inv_count(iid) < 1:
+                return self._send_json({"ok": False,
+                                        "error": "not in your pack"}, 400)
+            _equipped[d["kind"]] = iid
+            _save_gear(_current_map)
+            return self._send_json(_inv_state())
+
+        if path == "/api/inv/unequip":
+            slot = body.get("slot")
+            if slot not in ("weapon", "tool"):
+                return self._send_json({"ok": False, "error": "bad slot"},
+                                       400)
+            _equipped[slot] = None
+            _save_gear(_current_map)
+            return self._send_json(_inv_state())
+
+        if path == "/api/inv/use":
+            # {item} — eat food (belly+), quaff a draught is food-kind too
+            try:
+                iid = int(body.get("item"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "bad id"}, 400)
+            d = _item_by_id(iid)
+            if d is None or d["kind"] != "food":
+                return self._send_json({"ok": False,
+                                        "error": "can't use that"}, 400)
+            if not _inv_take(iid, 1):
+                return self._send_json({"ok": False,
+                                        "error": "none left"}, 400)
+            if world_profile.get("meters", {}).get("belly"):
+                _meters["belly"] = max(0, min(10,
+                                              _meters["belly"] + d["power"]))
+            return self._send_json({**_inv_state(), "nature": _nature_state(),
+                                    "events": [{"t": "toast",
+                                                "text": f"😋 ate {d['name']}"}]})
+
+        if path == "/api/inv/drop":
+            # {item} — set one down at the hero's feet
+            try:
+                iid = int(body.get("item"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "bad id"}, 400)
+            if _item_by_id(iid) is None or not _inv_take(iid, 1):
+                return self._send_json({"ok": False,
+                                        "error": "not in your pack"}, 400)
+            hx, hy = play["tx"], play["ty"]
+            key = _item_cell_key(hx, hy)
+            have = _item_cells.get(key)
+            if have and have[0] != iid:
+                _inv_add(iid, 1)  # put it back — can't drop here
+                return self._send_json({"ok": False,
+                                        "error": "something else is there"},
+                                       409)
+            _item_cells[key] = [iid, (have[1] if have else 0) + 1]
+            if _inv_count(iid) == 0:
+                if _equipped.get("weapon") == iid:
+                    _equipped["weapon"] = None
+                if _equipped.get("tool") == iid:
+                    _equipped["tool"] = None
+            _save_items(_current_map)
+            _mark_dirty()
+            return self._send_json(_inv_state())
+
+        if path == "/api/shop/buy":
+            # {npc, item} — buy one off a merchant's shelf
+            try:
+                nid, iid = int(body.get("npc")), int(body.get("item"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "bad id"},
+                                       400)
+            n = _npc_by_id(nid)
+            if n is None or n.get("role") != "merchant":
+                return self._send_json({"ok": False,
+                                        "error": "not a merchant"}, 404)
+            ln = next((s for s in n.get("stock", [])
+                       if s.get("item") == iid and s.get("qty", 0) != 0),
+                      None)
+            if ln is None:
+                return self._send_json({"ok": False,
+                                        "error": "sold out"}, 404)
+            if _gold < ln["price"]:
+                return self._send_json({"ok": False,
+                                        "error": "not enough gold"}, 400)
+            _gold -= ln["price"]
+            if ln["qty"] > 0:
+                ln["qty"] -= 1  # -1 = endless shelf, never runs out
+            _inv_add(iid, 1)
+            _save_npcs(_current_map)
+            _save_gear(_current_map)
+            d = _item_by_id(iid)
+            return self._send_json({**_inv_state(), "npc": n,
+                                    "events": [{"t": "toast",
+                                                "text": f"🪙 bought "
+                                                        f"{d['name']}"}]})
+
+        if path == "/api/shop/sell":
+            # {item} — sell one from the pack at half price
+            try:
+                iid = int(body.get("item"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "bad id"}, 400)
+            d = _item_by_id(iid)
+            if d is None or not _inv_take(iid, 1):
+                return self._send_json({"ok": False,
+                                        "error": "not in your pack"}, 400)
+            gain = max(1, d.get("price", 0) // 2)
+            _gold += gain
+            _save_gear(_current_map)
+            if _inv_count(iid) == 0:
+                if _equipped.get("weapon") == iid:
+                    _equipped["weapon"] = None
+                if _equipped.get("tool") == iid:
+                    _equipped["tool"] = None
+            return self._send_json({**_inv_state(), "gained": gain,
+                                    "events": [{"t": "toast",
+                                                "text": f"🪙 sold "
+                                                        f"{d['name']} "
+                                                        f"(+{gain})"}]})
+
         if path == "/api/patrol-paths":
             # v3.4: {legs: [[[x1,y1],[x2,y2]], ...]} -> {paths: [[[x,y],...]]}.
             # NPC legs ride the same Dijkstra the hero uses (walls avoided,
@@ -2598,6 +3248,9 @@ class Handler(BaseHTTPRequestHandler):
                 _load_traits(name)  # v4.0: this build's nature comes with it
                 _load_names(name)  # v5.1: this build's names come with it
                 _load_missions(name)  # v5.12: Melody's missions come with it
+                _load_items(name)  # v5.13: this map's gear
+                _load_npcs(name)  # v5.13: this map's folks
+                _mission_reconcile_patrols()  # v5.13: hazards stay on their map
                 _log_event(f"loaded {name}")
             return self._send_json({"ok": ok, "width": world.width,
                                     "height": world.height, "rules": rules})
@@ -2818,6 +3471,8 @@ class Handler(BaseHTTPRequestHandler):
                 ev = _check_rules(cx, cy)
                 ev += _apply_nature(cx, cy)  # v4.0: the world's nature
                 ev += _check_mission(cx, cy)  # v5.12: Melody's objectives
+                ev += _check_items(cx, cy)  # v5.13: pick up gear
+                ev += _check_npcs(cx, cy)  # v5.13: say hi
                 events.append(ev)
                 kept = i + 1
                 if _rule_over:
@@ -2851,6 +3506,8 @@ class Handler(BaseHTTPRequestHandler):
             if can:
                 events += _apply_nature(play["tx"], play["ty"])  # v4.0
                 events += _check_mission(play["tx"], play["ty"])  # v5.12
+                events += _check_items(play["tx"], play["ty"])  # v5.13
+                events += _check_npcs(play["tx"], play["ty"])  # v5.13
             return self._send_json({"ok": True, "x": play["tx"], "y": play["ty"],
                                     "swim": _swim_at(play["tx"], play["ty"]),
                                     "deep": _deep_at(play["tx"], play["ty"]),

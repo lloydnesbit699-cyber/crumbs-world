@@ -1253,3 +1253,45 @@ def mission_progress_text(mission):
             bits.append("❤ survive %d/%d%s" % (o.get("elapsed", 0), o["ticks"],
                                                " ✓" if o["done"] else ""))
     return "; ".join(bits), done, total
+
+
+# ---- v5.13: gear — weapons, tools, and things to carry -----------------------
+# Items are objects: a tile for a face, a kind for behavior, a price for
+# the market. Heroes stack them, equip them, eat them, sell them.
+ITEM_KINDS = ("weapon", "tool", "food", "trinket")
+ITEM_TOOL_EFFECTS = ("none", "ward")  # ward: -1 hazard damage while equipped
+ITEM_MAX_STACK = 99
+
+
+def build_item(name, tile_id, kind="trinket", power=0, effect="none",
+               stack=ITEM_MAX_STACK, price=0):
+    """Validate questionnaire answers into an item dict. Raises ValueError."""
+    name = str(name or "").strip()[:32] or "Odd thing"
+    try:
+        tile_id = int(tile_id)
+    except (TypeError, ValueError):
+        raise ValueError("item needs a tile")
+    if kind not in ITEM_KINDS:
+        raise ValueError(f"kind must be one of {', '.join(ITEM_KINDS)}")
+    try:
+        power = int(power)
+    except (TypeError, ValueError):
+        raise ValueError("power must be a number")
+    power = max(0, min(99, power))
+    if effect not in ITEM_TOOL_EFFECTS:
+        raise ValueError(f"effect must be one of "
+                         f"{', '.join(ITEM_TOOL_EFFECTS)}")
+    try:
+        stack = int(stack)
+    except (TypeError, ValueError):
+        raise ValueError("stack must be a number")
+    stack = max(1, min(ITEM_MAX_STACK, stack))
+    if kind in ("weapon", "tool"):
+        stack = 1  # gear doesn't pile up; food and trinkets do
+    try:
+        price = int(price)
+    except (TypeError, ValueError):
+        raise ValueError("price must be a number")
+    price = max(0, min(9999, price))
+    return {"name": name, "tile_id": tile_id, "kind": kind, "power": power,
+            "effect": effect, "stack": stack, "price": price}

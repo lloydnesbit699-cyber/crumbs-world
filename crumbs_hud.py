@@ -52,6 +52,12 @@ v5.6 (2026-09-19): MVP finish — server event log (/api/log), one-tap map
 validator (/api/validate), PNG export (/api/export/png), map thumbnails
 (/api/map/thumb), map management (rename/duplicate/delete-to-trash/import/
 metadata), play-session save slots (/api/slots*).
+v5.7 (2026-09-19): speed-run batch — Generate busy indicator (button
+disables + "generating…" toast so slow 64x64 builds never look dead);
+top-bar menu scrolls within the viewport (Stop server reachable again);
+bottom sheet capped at 60dvh with internal scroll; linked collision
+stamps are atomic — /api/stroke takes link_cells in one call and pushes
+a single MultiCommand, so undo/redo move tiles+collision together.
 
 Run:   python3 crumbs_hud.py
 Open:  http://127.0.0.1:8778   (same phone's browser)
@@ -1561,6 +1567,25 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": True, "painted": len(paints)})
             cmds = [core.SetTileCommand(world, x, y, _grid(layer)[y][x], nv, layer)
                     for (x, y, nv) in paints]
+            # v5.7: linked collision stamps ride in the SAME undo step — one
+            # stroke, one history entry, so undo/redo move tiles+collision
+            # together instead of stranding the collision behind.
+            if layer != "collision":
+                seen_link = set()
+                for c in body.get("link_cells") or []:
+                    lx, ly = c.get("x"), c.get("y")
+                    if not isinstance(lx, int) or not isinstance(ly, int):
+                        continue
+                    if not (0 <= lx < world.width and 0 <= ly < world.height):
+                        continue
+                    if (lx, ly) in seen_link:
+                        continue
+                    seen_link.add((lx, ly))
+                    lnv = _paint_value("collision", c.get("tile_id"))
+                    if world.collision_layer[ly][lx] != lnv:
+                        cmds.append(core.SetTileCommand(
+                            world, lx, ly, world.collision_layer[ly][lx], lnv,
+                            "collision"))
             multi = core.MultiCommand(cmds)
             history.push(multi)
             multi.execute()
@@ -2505,7 +2530,8 @@ if __name__ == "__main__":
     srv = ThreadingHTTPServer((host, PORT), Handler)
     threading.Thread(target=_autosave_loop, daemon=True).start()
     print("=" * 52)
-    print("  Crumbs HUD v5.6 — game rules: goals, hazards, keys & doors, messages")
+    print("  Crumbs HUD v5.7 — speed-run batch: busy generate, scrolling menu,")
+    print("  shorter sheets, atomic linked-collision undo")
     if public:
         ip = _lan_ip()
         print("  PUBLIC mode: anyone on your Wi-Fi can open the HUD.")

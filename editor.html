@@ -44,6 +44,8 @@
   #menu-dropdown { position: fixed; top: 52px; right: 8px; z-index: 60; background: #222;
                    border: 1px solid #444; border-radius: 12px; padding: 6px;
                    display: none; min-width: 210px;
+                   max-height: calc(100dvh - 64px); overflow-y: auto;
+                   overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
                    box-shadow: 0 8px 24px rgba(0,0,0,.5); }
   #menu-dropdown.open { display: block; }
   #menu-dropdown button { display: block; width: 100%; text-align: left; border: none;
@@ -81,8 +83,8 @@
            background: #161616; border-top: 1px solid #333;
            border-radius: 16px 16px 0 0;
            padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
-           max-height: 72dvh; overflow-y: auto; transform: translateY(103%);
-           transition: transform .22s ease-out;
+           max-height: 60dvh; overflow-y: auto; transform: translateY(103%);
+           transition: transform .22s ease-out; overscroll-behavior: contain;
            -webkit-overflow-scrolling: touch; }
   .sheet.open { transform: none; }
   .sheet .grab { width: 40px; height: 4px; border-radius: 2px; background: #444;
@@ -323,7 +325,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v5.6</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v5.7</small></span>
   <span id="topbar-undo">
     <button id="btn-undo2" title="Undo">&#8617;</button>
     <button id="btn-redo2" title="Redo">&#8618;</button>
@@ -500,7 +502,7 @@
 <div id="splash">
   <img src="/icon-512.png" alt="" onerror="this.style.display='none'">
   <div class="splash-title">Crumbs HUD</div>
-  <div class="splash-sub">tile painter &middot; v5.6</div>
+  <div class="splash-sub">tile painter &middot; v5.7</div>
 </div>
 
 <div id="sheet-rules" class="sheet">
@@ -1188,13 +1190,9 @@ async function endStroke() {
   if (!stroke) return;
   const s = stroke; stroke = null;
   if (!s.cells.size) return;
-  const r = await api("/api/stroke", { layer: s.layer, cells: [...s.cells.values()] });
+  const r = await api("/api/stroke", { layer: s.layer, cells: [...s.cells.values()],
+    link_cells: [...s.linkCells.values()] });   // v5.7: one call, one undo step
   if (!r.ok) { toast("paint failed"); await refresh(); return; }
-  // v3.1: linked collision stamps ride along as their own stroke
-  if (s.linkCells.size) {
-    const r2 = await api("/api/stroke", { layer: "collision", cells: [...s.linkCells.values()] });
-    if (!r2.ok) toast("collision stamp failed");
-  }
   // server is source of truth; light re-sync keeps undo/redo exact
   await refresh();
 }
@@ -2877,6 +2875,14 @@ $("zoom-in").onclick  = () => zoomCenter(8);
 $("zoom-out").onclick = () => zoomCenter(-8);
 $("zoom-fit").onclick = () => { manualZoom = false; panX = 0; panY = 0; fitTiles(); render(); toast("fit to screen"); };
 $("btn-gen").onclick = async () => {
+  // v5.7: busy indicator — at 64x64 the post-generate chain takes seconds
+  // on the phone with zero feedback, which reads as "broken". Disable the
+  // button and toast immediately so a tap always answers.
+  const genBtn = $("btn-gen");
+  if (genBtn.disabled) return;
+  genBtn.disabled = true;
+  toast("generating…");
+  try {
   const seedRaw = $("seed").value.trim();
   const r = await api("/api/generate", { biome: $("biome").value, seed: seedRaw === "" ? null : parseInt(seedRaw, 10) });
   if (r.ok) {
@@ -2893,6 +2899,9 @@ $("btn-gen").onclick = async () => {
     if (def) await setRules(def);
     toast("generated " + r.biome);
   } else toast("generate failed");
+  } finally {
+    genBtn.disabled = false;
+  }
 };
 // ---- v2.3: explicit Save / Save As / Load ------------------------------------
 let currentFile = "hud_map.json";

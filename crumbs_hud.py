@@ -83,6 +83,7 @@ Open:  http://127.0.0.1:8778   (same phone's browser)
 """
 import json
 import io
+import glob
 import os
 import base64
 import copy
@@ -184,6 +185,8 @@ def _find_custom(tid):
 def _save_custom_registry(scope="local"):
     path = SHARED_REG if scope == "shared" else CUSTOM_REG
     tiles = _shared_tiles if scope == "shared" else _custom_tiles
+    # v5.14: drop-in art packs live in their *.pack.json — never merge them here.
+    tiles = [t for t in tiles if not t.get("_from_pack")]
     if scope == "shared":
         # v5.9: keep dormant full-library entries in the JSON so they are not
         # wiped by a rewrite — they just stay unregistered until opted in.
@@ -282,8 +285,27 @@ def _load_custom_tiles():
                     store.append(entry)
             except Exception as e:
                 print(f"[hud] skipping {scope} tile {entry.get('id')}: {e}")
+    # v5.14: drop-in art packs — any *.pack.json in custom_tiles/ loads
+    # additively. Pack entries are never merged into custom_tiles.json, so
+    # deleting the pack files uninstalls the pack cleanly.
+    n_pack = 0
+    for pack_path in sorted(glob.glob(os.path.join(CUSTOM_DIR, "*.pack.json"))):
+        try:
+            doc = json.load(open(pack_path))
+        except Exception as e:
+            print(f"[hud] art pack unreadable {pack_path}: {e}")
+            continue
+        for entry in doc.get("tiles", []):
+            try:
+                entry["scope"] = "local"
+                entry["_from_pack"] = True
+                if _register_custom_tile(entry, CUSTOM_DIR):
+                    _custom_tiles.append(entry)
+                    n_pack += 1
+            except Exception as e:
+                print(f"[hud] skipping pack tile {entry.get('id')}: {e}")
     if _custom_tiles or _shared_tiles:
-        print(f"[hud] loaded {len(_custom_tiles)} local + {len(_shared_tiles)} shared tile(s)")
+        print(f"[hud] loaded {len(_custom_tiles)} local + {len(_shared_tiles)} shared tile(s) ({n_pack} from art packs)")
     _save_custom_registry("local")   # v3.2: persist water→swim migrations, if any
     _save_custom_registry("shared")
 
@@ -3110,6 +3132,10 @@ class Handler(BaseHTTPRequestHandler):
             if entry.get("pack") == "starter":
                 # v5.9: starter tiles share one packed strip — built in, can't delete
                 return self._send_json({"ok": False, "error": "starter tiles are built in"}, 403)
+            if entry.get("_from_pack"):
+                # v5.14: art-pack tiles share packed strips — delete the pack's
+                # files to uninstall it, not tile by tile
+                return self._send_json({"ok": False, "error": "pack tiles uninstall with their pack"}, 403)
             tile_dir = SHARED_DIR if scope == "shared" else CUSTOM_DIR
             if scope == "shared":
                 _shared_tiles[:] = [e for e in _shared_tiles if int(e["id"]) != tid]

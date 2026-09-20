@@ -211,7 +211,31 @@
   #import-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
   #import-presets button { flex: 1 1 28%; margin: 0; padding: 8px 4px; font-size: 12px; }
   #import-presets button.on { border-color: #4da3ff; color: #4da3ff; }
-  /* v3.8: import shelf picker */
+  /* v5.11: sprite-sheet importer */
+  #sheet-form { background: #1c1c1c; border: 1px solid #444; border-radius: 10px;
+      padding: 10px; margin-bottom: 10px; }
+  #sheet-tabs { margin-bottom: 8px; }
+  #sheet-cellsizes { margin-bottom: 6px; }
+  #sheet-hint { font-size: 12px; color: #999; margin-bottom: 6px; }
+  #sheet-emptyrow { font-size: 12px; color: #999; display: block; margin-bottom: 6px; }
+  #sheet-grid { display: flex; flex-wrap: wrap; gap: 3px; max-height: 300px;
+      overflow-y: auto; background: #141414; border-radius: 8px; padding: 6px;
+      margin-bottom: 8px; }
+  #sheet-grid canvas { width: 40px; height: 40px; image-rendering: pixelated;
+      background: #222; border-radius: 4px; border: 2px solid transparent; }
+  #sheet-grid canvas.sel { border-color: #4da3ff; }
+  #sheet-selinfo { font-size: 12px; color: #999; margin-bottom: 6px; }
+  #sheet-roles { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  #sheet-roles button { flex: 1 1 28%; margin: 0; padding: 8px 4px; font-size: 12px; }
+  #sheet-roles button.on { border-color: #4da3ff; color: #4da3ff; }
+  #sheet-name { width: 100%; box-sizing: border-box; margin: 8px 0; }
+  #sheet-picks { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  #sheet-picks .pick { font-size: 12px; background: #2a2a2a; border: 1px solid #555;
+      border-radius: 12px; padding: 4px 8px; }
+  #sheet-picks .pick b { color: #b9a7f2; }
+  #sheet-picks .pick span { color: #ff8a8a; margin-left: 6px; cursor: pointer; }
+  #sheet-speed { font-size: 12px; color: #999; margin-bottom: 8px; }
+  #sheet-speed input { width: 70px; }
   #import-scope { display: flex; gap: 6px; margin: 8px 0; }
   #import-scope button { flex: 1; margin: 0; padding: 8px 4px; font-size: 12px; }
   #import-scope button.on { border-color: #8a6dd7; color: #b9a7f2; }
@@ -340,7 +364,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v5.10</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v5.11</small></span>
   <span id="topbar-undo">
     <button id="btn-undo2" title="Undo">&#8617;</button>
     <button id="btn-redo2" title="Redo">&#8618;</button>
@@ -430,6 +454,30 @@
     <div class="row2">
       <button id="import-add">Add tile</button>
       <button id="import-cancel" class="ghost">Cancel</button>
+    </div>
+  </div>
+  <button id="btn-sheet" class="widebtn">🧩 Sprite sheet…</button>
+  <input type="file" id="sheet-files" accept="image/*" multiple hidden>
+  <div id="sheet-form" hidden>
+    <div id="sheet-tabs" class="seg"></div>
+    <div id="sheet-cellsizes" class="seg">
+      <button data-c="8">8px</button><button data-c="16" class="on">16px</button><button data-c="32">32px</button><button data-c="pico" title="PICO-8: a 128×128 sheet of 8×8 sprites">PICO-8</button>
+    </div>
+    <div id="sheet-hint"></div>
+    <label id="sheet-emptyrow"><input type="checkbox" id="sheet-showempty"> show empty cells</label>
+    <div id="sheet-grid"></div>
+    <div id="sheet-selinfo">tap cells to select them</div>
+    <div id="sheet-roles"></div>
+    <div class="row2">
+      <button id="sheet-addtiles">＋ Tiles</button>
+      <button id="sheet-mkanim">🎞 Animation</button>
+    </div>
+    <input id="sheet-name" maxlength="24" placeholder="name for picks">
+    <div id="sheet-picks"></div>
+    <div id="sheet-speed">anim frame <input id="sheet-ms" type="number" value="400" min="80" max="2000" step="40"> ms</div>
+    <div class="row2">
+      <button id="sheet-import">Import</button>
+      <button id="sheet-cancel" class="ghost">Cancel</button>
     </div>
   </div>
   <div class="seg" id="layer-seg">
@@ -543,7 +591,7 @@
 <div id="splash">
   <img src="/icon-512.png" alt="" onerror="this.style.display='none'">
   <div class="splash-title">Crumbs HUD</div>
-  <div class="splash-sub">tile painter &middot; v5.10</div>
+  <div class="splash-sub">tile painter &middot; v5.11</div>
 </div>
 
 <div id="sheet-rules" class="sheet">
@@ -2981,6 +3029,233 @@ $("import-add").onclick = async () => {
   toast(made + (made === 1 ? " character" : " characters") + " added" +
         (fail ? " — " + fail + " failed" : "") +
         (made ? " — tap the map to place " + (made === 1 ? "it" : "them") : ""));
+};
+
+// ---- v5.11: sprite-sheet importer -------------------------------------------
+// The browser slices with Canvas (instant preview); the server re-slices with
+// Pillow using the same math in crumbs_core, so preview and import agree.
+let sheetFiles = [];      // [{name, dataUrl, img, cell, grid:{cols,rows,cells}, sel:Set}]
+let sheetTab = 0;
+let sheetRole = "decor";
+let sheetPicks = [];      // [{sheet, kind, index|start, count, name, preset}]
+
+function normalizeSheet(dataUrl) {
+  // like normalizeImage but keeps pixels crisp: no smoothing, 512px cap.
+  // Resolves with an <img> decoded from the *downscaled* PNG so the slicer
+  // sees exactly what the server will decode.
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const scale = Math.min(1, 512 / Math.max(img.naturalWidth, img.naturalHeight));
+        const w = Math.max(1, Math.round(img.naturalWidth * scale));
+        const h = Math.max(1, Math.round(img.naturalHeight * scale));
+        const cv = document.createElement("canvas");
+        cv.width = w; cv.height = h;
+        const c = cv.getContext("2d");
+        c.imageSmoothingEnabled = false;
+        c.drawImage(img, 0, 0, w, h);
+        const durl = cv.toDataURL("image/png");
+        const im2 = new Image();
+        im2.onload = () => resolve({ dataUrl: durl, img: im2 });
+        im2.onerror = () => resolve(null);
+        im2.src = durl;
+      } catch (_) { resolve(null); }
+    };
+    img.onerror = () => resolve(null);
+    img.src = dataUrl;
+  });
+}
+function sliceSheetCells(img, cell) {
+  // mirrors crumbs_core.slice_sheet: row-major, index = row*cols+col,
+  // partial edge cells dropped.
+  const cv = document.createElement("canvas");
+  cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+  const c = cv.getContext("2d", { willReadFrequently: true });
+  c.drawImage(img, 0, 0);
+  const data = c.getImageData(0, 0, cv.width, cv.height).data;
+  const cols = Math.floor(cv.width / cell), rows = Math.floor(cv.height / cell);
+  const cells = [];
+  for (let r = 0; r < rows; r++) for (let q = 0; q < cols; q++) {
+    const ccv = document.createElement("canvas");
+    ccv.width = ccv.height = cell;
+    const cx = ccv.getContext("2d");
+    const imd = cx.createImageData(cell, cell);
+    let used = false;
+    for (let y = 0; y < cell; y++) for (let x = 0; x < cell; x++) {
+      const si = (((r * cell + y) * cv.width) + (q * cell + x)) * 4;
+      const di = (y * cell + x) * 4;
+      imd.data[di] = data[si]; imd.data[di + 1] = data[si + 1];
+      imd.data[di + 2] = data[si + 2]; imd.data[di + 3] = data[si + 3];
+      if (data[si + 3] >= 8) used = true;
+    }
+    cx.putImageData(imd, 0, 0);
+    cells.push({ index: r * cols + q, col: q, row: r, used, cv: ccv });
+  }
+  return { cols, rows, cells };
+}
+function sheetCur() { return sheetFiles[sheetTab]; }
+function resliceSheet(f) {
+  f.grid = sliceSheetCells(f.img, f.cell);
+  f.sel = new Set();
+}
+function renderSheetTabs() {
+  const box = $("sheet-tabs"); box.innerHTML = "";
+  sheetFiles.forEach((f, i) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = f.name.slice(0, 14) || ("Sheet " + (i + 1));
+    b.className = i === sheetTab ? "on" : "";
+    b.onclick = () => { sheetTab = i; renderSheetTabs(); renderSheetGrid(); syncSheetSizes(); };
+    box.appendChild(b);
+  });
+  box.style.display = sheetFiles.length > 1 ? "" : "none";
+}
+function syncSheetSizes() {
+  const f = sheetCur(); if (!f) return;
+  document.querySelectorAll("#sheet-cellsizes button").forEach(b => {
+    const v = b.dataset.c;
+    b.classList.toggle("on", (v === "pico" && f.pico) || (+v === f.cell && !f.pico));
+  });
+}
+function renderSheetGrid() {
+  const f = sheetCur(); if (!f) return;
+  const showEmpty = $("sheet-showempty").checked;
+  $("sheet-hint").textContent =
+    f.grid.cols + "×" + f.grid.rows + " = " + f.grid.cells.length + " cells" +
+    (f.pico ? " — PICO-8 sheet" : "") + " · " + f.cell + "px → 32px";
+  const g = $("sheet-grid"); g.innerHTML = "";
+  f.grid.cells.forEach(cell => {
+    if (!cell.used && !showEmpty) return;
+    const cv = cell.cv;
+    cv.classList.toggle("sel", f.sel.has(cell.index));
+    cv.title = "cell " + cell.index;
+    cv.onclick = () => {
+      f.sel.has(cell.index) ? f.sel.delete(cell.index) : f.sel.add(cell.index);
+      cv.classList.toggle("sel");
+      renderSheetSelInfo();
+    };
+    g.appendChild(cv);
+  });
+  renderSheetSelInfo();
+}
+function renderSheetSelInfo() {
+  const f = sheetCur();
+  const n = f ? f.sel.size : 0;
+  $("sheet-selinfo").textContent = n
+    ? n + " selected — role: " + sheetRole
+    : "tap cells to select them";
+}
+async function buildSheetRoles() {
+  if (!presets.length) {
+    const r = await api("/api/presets");
+    presets = r.presets || [];
+  }
+  const box = $("sheet-roles"); box.innerHTML = "";
+  presets.forEach(p => {
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = p.label; b.title = p.hint;
+    b.className = p.id === sheetRole ? "on" : "";
+    b.onclick = () => { sheetRole = p.id; buildSheetRoles(); renderSheetSelInfo(); };
+    box.appendChild(b);
+  });
+}
+function renderSheetPicks() {
+  const box = $("sheet-picks"); box.innerHTML = "";
+  sheetPicks.forEach((p, i) => {
+    const d = document.createElement("div");
+    d.className = "pick";
+    d.innerHTML = "<b>" + (p.kind === "anim" ? "🎞" : "▦") + "</b> " +
+      p.name + " <i>(" + p.preset + (p.kind === "anim" ? ", " + p.count + "f" : "") + ")</i> ";
+    const x = document.createElement("span");
+    x.textContent = "×"; x.title = "remove";
+    x.onclick = () => { sheetPicks.splice(i, 1); renderSheetPicks(); };
+    d.appendChild(x);
+    box.appendChild(d);
+  });
+  $("sheet-import").textContent = "Import" + (sheetPicks.length ? " (" + sheetPicks.length + ")" : "");
+}
+function sheetPickName(base, n) {
+  base = (base || "sprite").slice(0, 24);
+  return n > 1 ? (base + " " + n).slice(0, 24) : base;
+}
+$("btn-sheet").onclick = () => $("sheet-files").click();
+$("sheet-files").onchange = async e => {
+  sheetFiles = []; sheetPicks = []; sheetTab = 0;
+  const files = [...e.target.files].slice(0, 4);
+  for (const f of files) {
+    if (f.size > 8000000) { toast(f.name + " too big — skipped"); continue; }
+    const norm = await normalizeSheet(await readFile(f));
+    if (!norm) { toast("couldn't read " + f.name); continue; }
+    const sf = { name: f.name.replace(/\.[^.]+$/, ""), dataUrl: norm.dataUrl,
+                 img: norm.img, cell: 16, pico: false, sel: new Set() };
+    // wait for the image to be fully decodable at natural size
+    await new Promise(res => {
+      if (norm.img.complete && norm.img.naturalWidth) res();
+      else { norm.img.onload = res; norm.img.onerror = res; }
+    });
+    if (!norm.img.naturalWidth) { toast("couldn't read " + f.name); continue; }
+    resliceSheet(sf);
+    sheetFiles.push(sf);
+  }
+  e.target.value = "";
+  if (!sheetFiles.length) return;
+  $("sheet-form").hidden = false;
+  $("sheet-name").value = sheetFiles[0].name.slice(0, 24);
+  renderSheetTabs(); renderSheetGrid(); syncSheetSizes();
+  buildSheetRoles(); renderSheetPicks();
+};
+document.querySelectorAll("#sheet-cellsizes button").forEach(b => {
+  b.onclick = () => {
+    const f = sheetCur(); if (!f) return;
+    if (b.dataset.c === "pico") { f.cell = 8; f.pico = true; }
+    else { f.cell = +b.dataset.c; f.pico = false; }
+    resliceSheet(f); renderSheetGrid(); syncSheetSizes();
+  };
+});
+$("sheet-showempty").onchange = renderSheetGrid;
+$("sheet-addtiles").onclick = () => {
+  const f = sheetCur(); if (!f || !f.sel.size) { toast("select some cells first"); return; }
+  const base = $("sheet-name").value.trim() || f.name;
+  const idx = [...f.sel].sort((a, b) => a - b);
+  idx.forEach((ci, i) => sheetPicks.push({
+    sheet: sheetTab, kind: "tile", index: ci,
+    name: sheetPickName(base, idx.length > 1 ? i + 1 : 1), preset: sheetRole }));
+  f.sel.clear(); renderSheetGrid(); renderSheetPicks();
+  toast(idx.length + (idx.length === 1 ? " tile" : " tiles") + " queued");
+};
+$("sheet-mkanim").onclick = () => {
+  const f = sheetCur(); if (!f || f.sel.size < 2) { toast("select 2+ cells in a row"); return; }
+  const idx = [...f.sel].sort((a, b) => a - b);
+  for (let i = 1; i < idx.length; i++)
+    if (idx[i] !== idx[i - 1] + 1) { toast("cells must be consecutive — pick a run"); return; }
+  sheetPicks.push({ sheet: sheetTab, kind: "anim", start: idx[0], count: idx.length,
+    name: ($("sheet-name").value.trim() || f.name).slice(0, 24), preset: sheetRole });
+  f.sel.clear(); renderSheetGrid(); renderSheetPicks();
+  toast("🎞 " + idx.length + "-frame animation queued");
+};
+$("sheet-cancel").onclick = () => {
+  $("sheet-form").hidden = true; sheetFiles = []; sheetPicks = [];
+};
+$("sheet-import").onclick = async () => {
+  if (!sheetPicks.length) { toast("queue some tiles first"); return; }
+  const bySheet = {};
+  sheetPicks.forEach(p => {
+    const q = { kind: p.kind, name: p.name, preset: p.preset };
+    if (p.kind === "anim") {
+      q.start = p.start; q.count = p.count;
+      q.frame_ms = Math.max(80, Math.min(2000, +$("sheet-ms").value || 400));
+    } else q.index = p.index;
+    (bySheet[p.sheet] = bySheet[p.sheet] || []).push(q);
+  });
+  const sheets = Object.entries(bySheet).map(([si, picks]) => ({
+    image: sheetFiles[si].dataUrl, cell: sheetFiles[si].cell, picks }));
+  const r = await api("/api/sprite/import", { sheets, scope: importScope });
+  if (!r.ok) { toast("import failed: " + (r.error || "unknown")); return; }
+  $("sheet-form").hidden = true; sheetFiles = []; sheetPicks = [];
+  await loadCustomTiles();
+  buildPalette();
+  toast("🧩 imported " + r.count + (r.count === 1 ? " tile" : " tiles") +
+        " — tap the palette to paint " + (r.count === 1 ? "it" : "them"));
 };
 
 // ---- v3.3: custom tile manager (rename / change type / delete) ---------------

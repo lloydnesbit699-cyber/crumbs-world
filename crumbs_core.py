@@ -954,3 +954,113 @@ def line_of_sight(world, x0, y0, x1, y1):
         if cell_height(world, x, y) + 1 > line_h + 1e-6:
             return False
     return True
+
+
+# ---- v5.11: sprite-sheet importer (GUI-free) ----------------------------------
+# A sprite sheet is decoded to a flat row-major list of (r, g, b, a) pixel
+# tuples. The browser decodes with Canvas (getImageData) for the live preview;
+# the server and desktop decode with Pillow (list(img.convert("RGBA")
+# .getdata())). Both feed the same slicer below, so preview and import agree
+# cell-for-cell.
+SPRITE_CELL_SIZES = (8, 16, 32)   # slice sizes we support; all upscale to 32
+SPRITE_TARGET_PX = 32             # every imported cell lands at 32x32
+PICO8_SHEET_PX = 128              # a PICO-8 sprite sheet is 128x128 px...
+PICO8_CELL_PX = 8                 # ...of 8x8 cells -> a 16x16 grid, 256 sprites
+SPRITE_MAX_PICKS = 64             # sanity cap per import request
+
+
+def sheet_grid(sheet_w, sheet_h, cell, ox=0, oy=0):
+    """(cols, rows) of whole `cell`-px cells that fit past the (ox, oy)
+    offset. Partial edge cells are dropped, never stretched."""
+    if cell not in SPRITE_CELL_SIZES:
+        raise ValueError(f"cell must be one of {SPRITE_CELL_SIZES}")
+    cols = max(0, (sheet_w - ox) // cell)
+    rows = max(0, (sheet_h - oy) // cell)
+    return cols, rows
+
+
+def slice_sheet(pixels, sheet_w, sheet_h, cell, ox=0, oy=0):
+    """Cut the sheet into cells. `pixels` is a flat row-major list of
+    (r, g, b, a) tuples of length sheet_w * sheet_h. Returns a list of
+    cell dicts in row-major order:
+      {index, col, row, w, h, pixels}  (pixels flat, row-major)
+    index == row * cols + col, so client and server address the same cell."""
+    cols, rows = sheet_grid(sheet_w, sheet_h, cell, ox, oy)
+    cells = []
+    for row in range(rows):
+        for col in range(cols):
+            cp = []
+            for dy in range(cell):
+                sy = oy + row * cell + dy
+                base = sy * sheet_w + ox + col * cell
+                cp.extend(pixels[base:base + cell])
+            cells.append({"index": row * cols + col, "col": col, "row": row,
+                          "w": cell, "h": cell, "pixels": cp})
+    return cells
+
+
+def upscale_nearest(cell, target=SPRITE_TARGET_PX):
+    """Integer nearest-neighbor upscale of a cell dict to `target` px.
+    8px -> 4x, 16px -> 2x, 32px -> 1x. Crisp pixels, no blur."""
+    w, h = cell["w"], cell["h"]
+    if w == target and h == target:
+        return dict(cell)
+    sx, sy = target // w, target // h
+    if sx < 1 or sy < 1 or w * sx != target or h * sy != target:
+        raise ValueError(f"cannot upscale {w}x{h} to {target}x{target}")
+    src = cell["pixels"]
+    out = []
+    for dy in range(target):
+        srow = src[(dy // sy) * w:(dy // sy) * w + w]
+        for dx in range(target):
+            out.append(srow[dx // sx])
+    return {"index": cell["index"], "col": cell["col"], "row": cell["row"],
+            "w": target, "h": target, "pixels": out}
+
+
+def cell_used(cell, alpha_min=8):
+    """False for fully-transparent cells — the importer skips these unless
+    the user explicitly shows and picks them."""
+    return any(p[3] >= alpha_min for p in cell["pixels"])
+
+
+def anim_cells(cells, start, count):
+    """Consecutive cells -> animation frames. `start` is a cell index,
+    `count` how many frames; clamps to the cells that exist."""
+    if start < 0 or start >= len(cells):
+        raise ValueError("animation start out of range")
+    return cells[start:start + max(1, count)]
+
+
+def sprite_import_plan(cells, picks):
+    """Turn user picks into import jobs. `picks` is a list of:
+        {kind: "tile", index, name, preset}
+        {kind: "anim", start, count, name, preset, frame_ms?}
+    Returns [{name, preset, frame_ms, frames: [cell, ...]}, ...] with frames
+    still at sheet resolution — upscale with upscale_nearest() before saving.
+    Raises ValueError on the first bad pick."""
+    if len(picks) > SPRITE_MAX_PICKS:
+        raise ValueError(f"too many picks (max {SPRITE_MAX_PICKS})")
+    jobs = []
+    for p in picks:
+        kind = p.get("kind", "tile")
+        name = str(p.get("name", "")).strip()[:24] or "sprite"
+        preset = p.get("preset", "decor")
+        if kind == "anim":
+            try:
+                frame_ms = max(80, min(2000, int(p.get("frame_ms", 400))))
+            except (TypeError, ValueError):
+                frame_ms = 400
+            frames = anim_cells(cells, int(p["start"]), int(p.get("count", 2)))
+            if len(frames) < 2:
+                raise ValueError("animation needs at least 2 frames")
+        elif kind == "tile":
+            idx = int(p["index"])
+            if not (0 <= idx < len(cells)):
+                raise ValueError(f"cell {idx} out of range")
+            frames, frame_ms = [cells[idx]], 400
+        else:
+            raise ValueError(f"unknown pick kind {kind!r}")
+        jobs.append({"name": name, "preset": preset,
+                     "frame_ms": frame_ms, "frames": frames})
+    return jobs

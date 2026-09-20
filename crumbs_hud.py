@@ -1836,6 +1836,76 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"ok": True, "tile": _custom_public(entry),
                                     "frames": len(frames), "method": method})
 
+        if path == "/api/sprite/import":
+            # v5.11: sprite-sheet importer. Body:
+            #   {sheets: [{image: dataURL, cell: 8|16|32, ox?, oy?, picks: [
+            #      {kind:"tile", index, name, preset} |
+            #      {kind:"anim", start, count, name, preset, frame_ms?}]}],
+            #    scope}
+            # Each sheet is sliced with the GUI-free core model (the same math
+            # the browser uses for its Canvas preview), cells upscale 8/16->32
+            # with nearest neighbor, and every pick becomes a tile. Multiple
+            # sheets = per-layer source mixing (ground from one sheet,
+            # creatures from another, one batch).
+            if not core.PIL_AVAILABLE:
+                return self._send_json({"ok": False,
+                                        "error": "image support unavailable"}, 500)
+            sheets = body.get("sheets")
+            if not isinstance(sheets, list) or not sheets:
+                return self._send_json({"ok": False, "error": "sheets required"},
+                                       400)
+            if len(sheets) > 4:
+                return self._send_json({"ok": False, "error": "max 4 sheets"},
+                                       400)
+            scope = _body_scope(body)
+            made = []
+            try:
+                for sh in sheets:
+                    durl = sh.get("image", "")
+                    if not isinstance(durl, str) or not durl.startswith("data:image/"):
+                        raise ValueError("not an image")
+                    if len(durl) > CUSTOM_MAX_FILE_CHARS:
+                        raise ValueError("too large (keep under ~1MB)")
+                    try:
+                        cell = int(sh.get("cell", 16))
+                    except (TypeError, ValueError):
+                        raise ValueError("cell must be 8, 16, or 32")
+                    if cell not in core.SPRITE_CELL_SIZES:
+                        raise ValueError("cell must be 8, 16, or 32")
+                    try:
+                        ox = max(0, int(sh.get("ox", 0)))
+                        oy = max(0, int(sh.get("oy", 0)))
+                    except (TypeError, ValueError):
+                        raise ValueError("bad offset")
+                    raw = base64.b64decode(durl.split(",", 1)[1])
+                    img = core.Image.open(io.BytesIO(raw)).convert("RGBA")
+                    sw, sh_px = img.size
+                    if sw > 1024 or sh_px > 1024:
+                        raise ValueError("sheet too big (max 1024px)")
+                    flat = list(img.getdata())
+                    cells = core.slice_sheet(flat, sw, sh_px, cell, ox, oy)
+                    if not cells:
+                        raise ValueError("no whole cells fit — check cell size")
+                    picks = sh.get("picks") or []
+                    for p in picks:
+                        if p.get("preset", "decor") not in TILE_PRESETS:
+                            raise ValueError("unknown preset")
+                    for job in core.sprite_import_plan(cells, picks):
+                        frames = []
+                        for c in job["frames"]:
+                            up = core.upscale_nearest(c)
+                            fim = core.Image.new("RGBA", (32, 32))
+                            fim.putdata([tuple(p) for p in up["pixels"]])
+                            frames.append(fim)
+                        entry = _store_custom_tile(
+                            job["name"], job["preset"], job["frame_ms"],
+                            frames, scope)
+                        made.append(_custom_public(entry))
+            except Exception as e:
+                return self._send_json({"ok": False, "error": str(e)}, 400)
+            return self._send_json({"ok": True, "tiles": made,
+                                    "count": len(made)})
+
         if path == "/api/patrols/create":
             # v3.4: {tile_id, points: [[x,y], ...]} — 2-8 walkable stops.
             # v5.0: patrols are ASSIGNED to already-placed characters, never

@@ -58,6 +58,12 @@ top-bar menu scrolls within the viewport (Stop server reachable again);
 bottom sheet capped at 60dvh with internal scroll; linked collision
 stamps are atomic — /api/stroke takes link_cells in one call and pushes
 a single MultiCommand, so undo/redo move tiles+collision together.
+v5.8 (2026-09-19): synthesized sound effects — Web Audio engine, zero
+audio files: UI blips, throttled brush ticks, generate whoosh, undo/redo
+sweeps, save chirp, error buzz, NPC simlish-style mumbles (tap a placed
+character), bird chirps, water splash, looped wind ambience. Setup sheet
+gains Sound: mute, volume slider, wind toggle, demo button; choices
+persist in localStorage.
 
 Run:   python3 crumbs_hud.py
 Open:  http://127.0.0.1:8778   (same phone's browser)
@@ -2530,8 +2536,7 @@ if __name__ == "__main__":
     srv = ThreadingHTTPServer((host, PORT), Handler)
     threading.Thread(target=_autosave_loop, daemon=True).start()
     print("=" * 52)
-    print("  Crumbs HUD v5.7 — speed-run batch: busy generate, scrolling menu,")
-    print("  shorter sheets, atomic linked-collision undo")
+    print("  Crumbs HUD v5.8 — synthesized sound effects (Web Audio, zero files)")
     if public:
         ip = _lan_ip()
         print("  PUBLIC mode: anyone on your Wi-Fi can open the HUD.")

@@ -7,6 +7,8 @@ linked-collision undo — all marked [DONE v5.7] below)
 
 ## QUEUED features (designed, not yet built)
 
+(7=sound effects — built in v5.8)
+
 1. [DONE v5.7] Generate button needs a busy indicator: at 64x64 the post-generate chain
    (refresh + traits + world + natural + palette + 4096-tile render) takes
    seconds on the phone with zero feedback — Lloyd thought it was broken.
@@ -48,7 +50,7 @@ linked-collision undo — all marked [DONE v5.7] below)
    file drop and auto-registered on first run. No separate download; the
    app is fully usable out of the box. Full library stays an optional add.
 
-7. FEATURE: sound effects. UI feedback (taps, paint strokes, generate whoosh),
+7. [DONE v5.8] FEATURE: sound effects. UI feedback (taps, paint strokes, generate whoosh),
    ambient dungeon audio, per-biome touches. Approach: synthesize with Web
    Audio API — zero audio files to download, works offline on the phone.
    Master mute toggle + volume in Setup. Keep it subtle; game first.

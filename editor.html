@@ -325,7 +325,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v5.7</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v5.8</small></span>
   <span id="topbar-undo">
     <button id="btn-undo2" title="Undo">&#8617;</button>
     <button id="btn-redo2" title="Redo">&#8618;</button>
@@ -469,6 +469,15 @@
   <div class="row">
     <small id="save-status">not saved yet</small>
   </div>
+  <div class="row">
+    <div class="field">
+      <span class="lbl">Sound:</span>
+      <button id="sfx-mute">Sound: on</button>
+      <input id="sfx-vol" type="range" min="0" max="100" value="70" title="Volume" style="flex:1;min-width:80px">
+      <button id="sfx-amb" title="Looping wind ambience">Wind: off</button>
+      <button id="sfx-test" title="Play a demo">&#9836;</button>
+    </div>
+  </div>
 </div>
 
 <div id="sheet-load" class="sheet">
@@ -502,7 +511,7 @@
 <div id="splash">
   <img src="/icon-512.png" alt="" onerror="this.style.display='none'">
   <div class="splash-title">Crumbs HUD</div>
-  <div class="splash-sub">tile painter &middot; v5.7</div>
+  <div class="splash-sub">tile painter &middot; v5.8</div>
 </div>
 
 <div id="sheet-rules" class="sheet">
@@ -757,6 +766,128 @@ function toast(msg) {
   t.textContent = msg; t.style.display = "block";
   clearTimeout(t._h); t._h = setTimeout(() => t.style.display = "none", 2200);
 }
+
+// ---- v5.8: synthesized sound effects — Web Audio, zero audio files --------
+// Every sound is generated: UI blips, paint ticks, generate whoosh, undo/redo
+// sweeps, save chirp, error buzz, NPC mumbles (simlish-style), bird chirps,
+// water splash, and a looped wind ambience. No downloads, works offline.
+const Sfx = (() => {
+  let ctx = null, master = null, noiseBuf = null, ambNodes = null, lastTick = 0;
+  const cfg = { muted: false, vol: 0.7, amb: false };
+  try { Object.assign(cfg, JSON.parse(localStorage.getItem("crumbs_sfx") || "{}")); } catch (e) {}
+  const save = () => { try { localStorage.setItem("crumbs_sfx", JSON.stringify(cfg)); } catch (e) {} };
+
+  function ensure() {
+    if (!ctx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return false;
+      ctx = new AC();
+      master = ctx.createGain();
+      master.connect(ctx.destination);
+      applyCfg();
+    }
+    if (ctx.state === "suspended") ctx.resume();
+    return true;
+  }
+  function applyCfg() {
+    if (master) master.gain.setTargetAtTime(cfg.muted ? 0 : cfg.vol * cfg.vol, ctx.currentTime, 0.02);
+  }
+  // iOS wakes audio only inside a user gesture — arm it on every touch.
+  window.addEventListener("pointerdown", ensure, { capture: true });
+
+  function tone(o) {
+    if (!ensure() || cfg.muted) return;
+    const t0 = ctx.currentTime + (o.at || 0);
+    const osc = ctx.createOscillator(), g = ctx.createGain();
+    osc.type = o.t || "sine";
+    osc.frequency.setValueAtTime(o.f, t0);
+    if (o.f2) osc.frequency.exponentialRampToValueAtTime(Math.max(1, o.f2), t0 + o.d);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(o.g || 0.15, t0 + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + o.d);
+    osc.connect(g); g.connect(master);
+    osc.start(t0); osc.stop(t0 + o.d + 0.05);
+  }
+  function noiseBufGet() {
+    if (!noiseBuf) {
+      noiseBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+      const ch = noiseBuf.getChannelData(0);
+      for (let i = 0; i < ch.length; i++) ch[i] = Math.random() * 2 - 1;
+    }
+    return noiseBuf;
+  }
+  function noise(o) {
+    if (!ensure() || cfg.muted) return;
+    const t0 = ctx.currentTime + (o.at || 0);
+    const src = ctx.createBufferSource(); src.buffer = noiseBufGet(); src.loop = true;
+    const flt = ctx.createBiquadFilter();
+    flt.type = o.type || "bandpass";
+    flt.frequency.setValueAtTime(o.fc || 1200, t0);
+    flt.Q.value = o.q || 0.8;
+    if (o.fc2) flt.frequency.exponentialRampToValueAtTime(o.fc2, t0 + o.d);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(o.g || 0.15, t0 + o.d * 0.25);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + o.d);
+    src.connect(flt); flt.connect(g); g.connect(master);
+    src.start(t0); src.stop(t0 + o.d + 0.05);
+  }
+
+  function ambStart() {
+    if (!ensure() || ambNodes) return;
+    const src = ctx.createBufferSource(); src.buffer = noiseBufGet(); src.loop = true;
+    const flt = ctx.createBiquadFilter(); flt.type = "lowpass"; flt.frequency.value = 320; flt.Q.value = 0.4;
+    const g = ctx.createGain(); g.gain.value = 0.05;
+    const lfo = ctx.createOscillator(); lfo.frequency.value = 0.07;
+    const lfoG = ctx.createGain(); lfoG.gain.value = 140;
+    lfo.connect(lfoG); lfoG.connect(flt.frequency);
+    src.connect(flt); flt.connect(g); g.connect(master);
+    src.start(); lfo.start();
+    const timer = setInterval(() => { if (!cfg.muted && Math.random() < 0.5) api.chirp(); }, 9000);
+    ambNodes = { src, lfo, timer };
+  }
+  function ambStop() {
+    if (!ambNodes) return;
+    try { ambNodes.src.stop(); ambNodes.lfo.stop(); } catch (e) {}
+    clearInterval(ambNodes.timer);
+    ambNodes = null;
+  }
+
+  const api = {
+    tap()      { tone({ f: 700, t: "square", d: 0.05, g: 0.07 }); },
+    paint()    { const n = performance.now(); if (n - lastTick < 110) return; lastTick = n;
+                 noise({ d: 0.06, g: 0.09, fc: 2600, q: 1.2 }); },
+    generate() { noise({ d: 0.7, g: 0.2, fc: 400, fc2: 3800, q: 1.5 });
+                 tone({ f: 180, f2: 720, t: "triangle", d: 0.5, g: 0.09, at: 0.1 }); },
+    undo()     { tone({ f: 520, f2: 260, d: 0.14, g: 0.13 }); },
+    redo()     { tone({ f: 260, f2: 520, d: 0.14, g: 0.13 }); },
+    save()     { tone({ f: 880, d: 0.09, g: 0.13 }); tone({ f: 1174, d: 0.12, g: 0.13, at: 0.09 }); },
+    error()    { tone({ f: 130, t: "sawtooth", d: 0.22, g: 0.15 }); },
+    splash()   { noise({ d: 0.25, g: 0.16, fc: 900, type: "lowpass" }); },
+    chirp()    { const f = 2200 + Math.random() * 1200;
+                 tone({ f, f2: f * 1.6, d: 0.09, g: 0.06 });
+                 tone({ f: f * 1.6, f2: f * 0.9, d: 0.11, g: 0.05, at: 0.09 }); },
+    // simlish-style NPC mumble: a few wobbly syllables at speech pitch
+    mumble(n)  {
+      if (!ensure() || cfg.muted) return;
+      let at = 0;
+      n = n || 3 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < n; i++) {
+        const f = 140 + Math.random() * 160, d = 0.09 + Math.random() * 0.12;
+        tone({ f, f2: f * (0.7 + Math.random() * 0.7), t: "triangle", d, g: 0.15, at });
+        at += d + 0.03 + Math.random() * 0.05;
+      }
+    },
+    isMuted()  { return cfg.muted; },
+    getVol()   { return cfg.vol; },
+    ambOn()    { return cfg.amb; },
+    toggleMute() { cfg.muted = !cfg.muted; ensure(); applyCfg(); save(); return cfg.muted; },
+    setVol(v)  { cfg.vol = Math.max(0, Math.min(1, v)); ensure(); applyCfg(); save(); },
+    toggleAmb() { cfg.amb = !cfg.amb; ensure(); if (cfg.amb) ambStart(); else ambStop(); save(); return cfg.amb; },
+    syncAmb()  { if (cfg.amb) ambStart(); },
+  };
+  return api;
+})();
 
 async function refresh() {
   const m = await api("/api/map");
@@ -1124,6 +1255,7 @@ function strokeAdd(cell) {
   if (bt && bt.frames > 1) animOnMap.add(bv);
   dirtyFlag = true;   // v2.0: assume unsaved until the server says otherwise
   queueRender();      // v5.3: strokes coalesce into one render per frame
+  Sfx.paint();        // v5.8: throttled brush tick while dragging
 }
 canvas.addEventListener("pointerdown", e => {
   e.preventDefault();
@@ -1601,8 +1733,10 @@ function inspectTap(cell) {
   textEdit = null; $("inspect-textedit").hidden = true;   // a fresh tile, a fresh editor
   $("inspect-xy").textContent = "(" + cell.x + ", " + cell.y + ")";
   // v5.1: tapping a placed character also parks him on the tray card
-  if (objects[cell.y] && objects[cell.y][cell.x] != null)
+  if (objects[cell.y] && objects[cell.y][cell.x] != null) {
     selectedInstance = { x: cell.x, y: cell.y };
+    Sfx.mumble();   // v5.8: he says hello (simlish-style)
+  }
   renderSelCard();
   renderInspect();
   toggleOverlay("sheet-inspect");
@@ -2850,12 +2984,12 @@ $("btn-eraser").onclick = () => {
 // aspect of the design they can change.
 async function doUndo() {
   const r = await api("/api/undo", {});
-  if (!r.ok) toast("nothing to undo");
+  if (!r.ok) toast("nothing to undo"); else Sfx.undo();
   await refreshAll();
 }
 async function doRedo() {
   const r = await api("/api/redo", {});
-  if (!r.ok) toast("nothing to redo");
+  if (!r.ok) toast("nothing to redo"); else Sfx.redo();
   await refreshAll();
 }
 $("btn-undo").onclick = doUndo;
@@ -2882,6 +3016,7 @@ $("btn-gen").onclick = async () => {
   if (genBtn.disabled) return;
   genBtn.disabled = true;
   toast("generating…");
+  Sfx.generate();
   try {
   const seedRaw = $("seed").value.trim();
   const r = await api("/api/generate", { biome: $("biome").value, seed: seedRaw === "" ? null : parseInt(seedRaw, 10) });
@@ -2898,7 +3033,7 @@ $("btn-gen").onclick = async () => {
     const def = myDefaults();
     if (def) await setRules(def);
     toast("generated " + r.biome);
-  } else toast("generate failed");
+  } else { toast("generate failed"); Sfx.error(); }
   } finally {
     genBtn.disabled = false;
   }
@@ -2911,8 +3046,8 @@ function setFile(name) {
 }
 async function doSave() {
   const r = await api("/api/save", { filename: currentFile });
-  if (r.ok) { setFile(r.file); toast("saved " + r.file); pollStatus(); }
-  else toast("save failed");
+  if (r.ok) { setFile(r.file); toast("saved " + r.file); pollStatus(); Sfx.save(); }
+  else { toast("save failed"); Sfx.error(); }
 }
 async function doSaveAs() {
   const name = prompt("Save map as\u2026", currentFile);
@@ -3041,6 +3176,18 @@ $("tab-left").onclick = () => toggleOverlay("tray-left");
 $("tab-right").onclick = () => toggleOverlay("tray-right");
 $("scrim").onclick = closeOverlays;
 $("menu-setup").onclick = () => toggleOverlay("sheet-setup");
+// ---- v5.8: sound controls (Setup sheet) ----
+function sfxPaintUI() {
+  $("sfx-mute").textContent = "Sound: " + (Sfx.isMuted() ? "off" : "on");
+  $("sfx-amb").textContent = "Wind: " + (Sfx.ambOn() ? "on" : "off");
+  $("sfx-vol").value = Math.round(Sfx.getVol() * 100);
+}
+$("sfx-mute").onclick = () => { Sfx.toggleMute(); sfxPaintUI(); };
+$("sfx-amb").onclick = () => { Sfx.toggleAmb(); sfxPaintUI(); };
+$("sfx-vol").oninput = (e) => Sfx.setVol(e.target.value / 100);
+$("sfx-test").onclick = () => { Sfx.mumble(); Sfx.chirp(); Sfx.splash(); };
+sfxPaintUI();
+Sfx.syncAmb();   // restore wind if it was on
 $("menu-save").onclick = () => { closeOverlays(); doSave(); };
 $("menu-saveas").onclick = () => { closeOverlays(); doSaveAs(); };
 $("menu-load").onclick = () => { toggleOverlay("sheet-load"); renderLoadList(); };

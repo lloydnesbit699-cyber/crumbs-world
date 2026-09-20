@@ -256,6 +256,11 @@
   #tile-edit-presets { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
   #tile-edit-presets button { flex: 1 1 28%; margin: 0; padding: 8px 4px; font-size: 12px; }
   #tile-edit-presets button.on { border-color: #4da3ff; color: #4da3ff; }
+  /* v5.10: per-tile height stepper */
+  #tile-edit-height { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+  #tile-edit-height .lbl { font-size: 12px; color: #aaa; }
+  #tile-edit-height button { flex: 0 0 auto; padding: 6px 12px; font-size: 15px; }
+  #tile-h-val { min-width: 28px; text-align: center; font-size: 15px; }
   #tile-edit-delete { background: #5c2b2b; border-color: #d76d6d; }
   /* v3.4: patrol tool */
   #btn-patrol.on { border-color: #8a6dd7; color: #c9b8ff; }
@@ -319,13 +324,23 @@
   #theme-row { margin: 4px 0 6px; }
   #theme-row select { background: #222; color: #eee; border: 1px solid #444;
                       border-radius: 8px; padding: 6px 8px; font-size: 13px; }
+  /* v5.10: height overlay legend */
+  #height-legend { position: fixed; right: 10px; bottom: 10px; z-index: 60;
+                   background: rgba(10,10,14,0.88); border: 1px solid #444;
+                   border-radius: 10px; padding: 8px 10px; font-size: 12px;
+                   color: #eee; pointer-events: none; }
+  #height-legend b { display: block; margin-bottom: 4px; font-size: 11px;
+                     text-transform: uppercase; letter-spacing: 1px; color: #aaa; }
+  #height-legend span { display: block; line-height: 1.7; white-space: nowrap; }
+  #height-legend i { display: inline-block; width: 12px; height: 12px;
+                     border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
 </style>
 </head>
 <body>
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v5.9</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v5.10</small></span>
   <span id="topbar-undo">
     <button id="btn-undo2" title="Undo">&#8617;</button>
     <button id="btn-redo2" title="Redo">&#8618;</button>
@@ -351,12 +366,22 @@
   <button id="menu-slots" title="Save and load play sessions">Save slots&hellip;</button>
   <button id="menu-validate" title="Check the map: spawn, reachability, tile ids">Check map</button>
   <button id="menu-collide" title="Show walls over the map while painting">Walls: off</button>
+  <button id="menu-height" title="Tint the map by elevation">&#9978; Height: off</button>
+  <button id="menu-sight" title="Dim what the hero can't see (play mode)">&#128065; Sight: off</button>
   <button id="menu-log" title="Server event log (debugging)">Server log</button>
   <hr>
   <button id="btn-stop" class="danger" title="Stop the HUD server">Stop server</button>
 </div>
 
 <div id="stage"><canvas id="grid"></canvas></div>
+<div id="height-legend" hidden>
+  <b>elevation</b>
+  <span><i style="background:#1a3a8f"></i>&minus;2 deep water</span>
+  <span><i style="background:#2a7fbf"></i>&minus;1 water</span>
+  <span><i style="background:#3d6b2e"></i>0 plains</span>
+  <span><i style="background:#7fbf3a"></i>+1 hills</span>
+  <span><i style="background:#8f6a3a"></i>+2 mountains</span>
+</div>
 
 <button class="edge-tab" id="tab-left" title="Tile palette">TILES</button>
 <button class="edge-tab" id="tab-right" title="Tools">TOOLS</button>
@@ -376,6 +401,13 @@
   <div id="tile-edit-form" hidden>
     <input id="tile-edit-name" maxlength="24" placeholder="tile name">
     <div id="tile-edit-presets"></div>
+    <div id="tile-edit-height">
+      <span class="lbl">height</span>
+      <button id="tile-h-minus" type="button" title="lower">&minus;</button>
+      <b id="tile-h-val">0</b>
+      <button id="tile-h-plus" type="button" title="raise">+</button>
+      <span id="tile-h-name" class="lbl"></span>
+    </div>
     <div class="row2">
       <button id="tile-edit-save">Save</button>
       <button id="tile-edit-share">Share</button>
@@ -511,7 +543,7 @@
 <div id="splash">
   <img src="/icon-512.png" alt="" onerror="this.style.display='none'">
   <div class="splash-title">Crumbs HUD</div>
-  <div class="splash-sub">tile painter &middot; v5.9</div>
+  <div class="splash-sub">tile painter &middot; v5.10</div>
 </div>
 
 <div id="sheet-rules" class="sheet">
@@ -903,6 +935,7 @@ async function refresh() {
     if (t && t.frames > 1) animOnMap.add(tiles[y][x]);
   }
   render();
+  refreshHeight();   // v5.10: elevation grid follows every map reload
 }
 
 // v5.0: the seed's own ground per cell — what the eraser restores.
@@ -964,13 +997,16 @@ function tilesChecksum() {
     const row = tiles[y];
     for (let x = 0; x < W; x++) h = ((h * 31) + (row[x] | 0)) | 0;
   }
-  return h + ":" + tilePx + ":" + currentTheme;
+  // v5.10: shadows and tall faces depend on the elevation grid too
+  return h + ":" + tilePx + ":" + currentTheme + ":" + heightSig;
 }
-function drawTallFace(b, im, px, py) {
+function drawTallFace(b, im, px, py, hgt) {
   // v3.1: fake 2.5D — the bottom of the sprite, stretched down and darkened,
   // drawn after the base pass so it overlaps the tile below.
+  // v5.10: the face grows with numeric height (walls +1, mountains +2).
   if (!im || !im.complete || !im.naturalWidth) return;
-  const faceH = Math.round(tilePx * 0.38);
+  const h = Math.max(1, Math.min(2, hgt || 1));
+  const faceH = Math.round(tilePx * 0.38 * h);
   b.drawImage(im, 0, im.naturalHeight * 0.62, im.naturalWidth, im.naturalHeight * 0.38,
               px, py + tilePx - 1, tilePx, faceH);
   b.fillStyle = "rgba(0,0,0,0.35)";
@@ -997,11 +1033,41 @@ function renderBase() {
         b.fill();
       }
       b.drawImage(im, px, py, tilePx, tilePx);
-      const ct = customById[id];
-      if (ct && ct.height === "tall") drawTallFace(b, im, px, py);
+      const th = tileHt(id);
+      // v5.10: the face shows when this tile stands at or above its
+      // southern neighbor — never buried under a taller tile below
+      const below = (heightGrid && y + 1 < H) ? heightGrid[y + 1][x] : -9;
+      if (th >= 1 && th >= below) drawTallFace(b, im, px, py, th);
     } else {
       b.fillStyle = customById[id] ? "#1c1c1c" : (colorOf[id] || "#000");
       b.fillRect(px, py, tilePx, tilePx);
+    }
+  }
+  // v5.10: height shadows — light falls from the northwest, so a taller
+  // cell throws a soft shadow onto lower neighbors south and east of it.
+  if (heightGrid && heightGrid.length === H && heightGrid[0] && heightGrid[0].length === W) {
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const h = heightGrid[y][x], px = x * tilePx, py = y * tilePx;
+      if (y + 1 < H) {
+        const dh = h - heightGrid[y + 1][x];
+        if (dh > 0) {
+          const g = b.createLinearGradient(0, py + tilePx, 0, py + tilePx * 1.5);
+          g.addColorStop(0, "rgba(0,0,0," + Math.min(0.42, 0.16 * dh).toFixed(2) + ")");
+          g.addColorStop(1, "rgba(0,0,0,0)");
+          b.fillStyle = g;
+          b.fillRect(px, py + tilePx, tilePx, tilePx * 0.5);
+        }
+      }
+      if (x + 1 < W) {
+        const dh = h - heightGrid[y][x + 1];
+        if (dh > 0) {
+          const g = b.createLinearGradient(px + tilePx, 0, px + tilePx * 1.5, 0);
+          g.addColorStop(0, "rgba(0,0,0," + Math.min(0.30, 0.11 * dh).toFixed(2) + ")");
+          g.addColorStop(1, "rgba(0,0,0,0)");
+          b.fillStyle = g;
+          b.fillRect(px + tilePx, py, tilePx * 0.5, tilePx);
+        }
+      }
     }
   }
   // grid lines — pre-rendered here instead of rebuilt every frame
@@ -1047,7 +1113,9 @@ function render() {
       ctx.ellipse(px + tilePx / 2, py + tilePx * 0.88, tilePx * 0.34, tilePx * 0.13, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.drawImage(im, px, py, tilePx, tilePx);
-      if (customById[id] && customById[id].height === "tall") drawTallFace(ctx, im, px, py);
+      const th2 = tileHt(id);
+      const below2 = (heightGrid && y + 1 < H) ? heightGrid[y + 1][x] : -9;
+      if (th2 >= 1 && th2 >= below2) drawTallFace(ctx, im, px, py, th2);
     }
   }
   // collision overlay — v3.1: edit mode only. Play mode keeps the solidity
@@ -1071,6 +1139,26 @@ function render() {
         ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + tilePx, py + tilePx);
         ctx.moveTo(px + tilePx, py); ctx.lineTo(px, py + tilePx); ctx.stroke();
       }
+    }
+  }
+  // v5.10: height overlay — tint cells by elevation, numbered levels
+  if (showHeight && heightGrid && heightGrid.length === H) {
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    const fs = Math.max(10, Math.round(tilePx * 0.30));
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const h = heightGrid[y][x];
+      if (!h) continue;
+      ctx.globalAlpha = 0.45;
+      ctx.fillStyle = HEIGHT_COLORS[String(h)] || "#888";
+      ctx.fillRect(x * tilePx, y * tilePx, tilePx, tilePx);
+      ctx.globalAlpha = 1;
+      const tx = x * tilePx + tilePx / 2, ty = y * tilePx + tilePx / 2;
+      const label = (h > 0 ? "+" : "") + h;
+      ctx.font = "bold " + fs + "px sans-serif";
+      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,0.65)";
+      ctx.strokeText(label, tx, ty);
+      ctx.fillStyle = h < 0 ? "#cfe6ff" : "#ffffff";
+      ctx.fillText(label, tx, ty);
     }
   }
   // v4.0: nature traits — a small emoji in the cell corner, edit + play
@@ -1212,6 +1300,14 @@ function render() {
     d.beginPath(); d.arc(hx, hy, lr, 0, Math.PI * 2); d.fill();
     d.globalCompositeOperation = "source-over";
     ctx.drawImage(lightCv, 0, 0);
+  }
+  // v5.10: sight — line-of-sight fog of war. Cells the hero can't see
+  // (a taller cell blocks the sight line) go dark. Refreshes when he stops.
+  if (playMode && showSight && visGrid && visGrid.length === H) {
+    ctx.fillStyle = "rgba(2,2,10,0.62)";
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      if (!visGrid[y][x]) ctx.fillRect(x * tilePx, y * tilePx, tilePx, tilePx);
+    }
   }
   if (playMode && worldWeather !== "clear") drawWeather();  // v4.1: the sky performs
   layout();   // v2.2: re-center + apply pan offset after every draw
@@ -1409,7 +1505,7 @@ async function playTap(cell) {
     const evs = evts[i] || [];
     i++; render();
     if (await playEvents(evs)) { heroTimer = null; return; }
-    if (i >= path.length) { heroTimer = null; heroSwimming = false; heroInDeep = false; return; }
+    if (i >= path.length) { heroTimer = null; heroSwimming = false; heroInDeep = false; refreshSight(); return; }
     const wms = RULES.walk_ms;   // v3.7: tap-to-walk obeys this build's rules
     heroTimer = setTimeout(step, (swim[i] || deep[i]) ? wms * RULES.swim_mult : wms);
   };
@@ -1420,6 +1516,7 @@ $("btn-play").onclick = async () => {
     const r = await api("/api/play/start", {});
     if (!r.ok) { toast("play failed"); return; }
     playMode = true; hero = { x: r.x, y: r.y };
+    refreshSight();   // v5.10: fog of war starts from the spawn
     erasing = false; $("btn-eraser").classList.remove("on");   // v3.1: the eraser
     // v3.4: patrol tool rests during play; NPCs start walking their routes
     cancelPatrol();
@@ -2898,6 +2995,8 @@ function openTileEditor(id) {
   editingTile = customById[id];
   if (!editingTile) return;
   editPreset = editingTile.preset;
+  editHeight = tileHt(editingTile.id);   // v5.10: per-tile height stepper
+  syncHeightUI();
   $("tile-edit-form").hidden = false;
   $("tile-edit-name").value = editingTile.name;
   // v3.8: Share publishes to the shared library; shared tiles can come home
@@ -2930,6 +3029,15 @@ function buildTileEditPresets() {
     box.appendChild(b);
   });
 }
+// v5.10: per-tile height stepper (-2..3) — explicit override, saved with the tile
+let editHeight = 0;
+function syncHeightUI() {
+  editHeight = Math.max(-2, Math.min(3, editHeight));
+  $("tile-h-val").textContent = (editHeight > 0 ? "+" : "") + editHeight;
+  $("tile-h-name").textContent = HEIGHT_NAMES[String(editHeight)] || "";
+}
+$("tile-h-minus").onclick = ev => { ev.preventDefault(); editHeight--; syncHeightUI(); };
+$("tile-h-plus").onclick = ev => { ev.preventDefault(); editHeight++; syncHeightUI(); };
 $("tile-edit-done").onclick = () => { $("tile-edit-form").hidden = true; editingTile = null; };
 $("tile-edit-save").onclick = async () => {
   if (!editingTile) return;
@@ -2937,11 +3045,13 @@ $("tile-edit-save").onclick = async () => {
     id: editingTile.id,
     name: $("tile-edit-name").value.trim().slice(0, 24),
     preset: editPreset,
+    height: editHeight,   // v5.10: explicit per-tile height
   });
   if (!r.ok) { toast("couldn't save: " + (r.error || "unknown")); return; }
   const renamed = editingTile.id;
   $("tile-edit-form").hidden = true; editingTile = null;
   await loadCustomTiles();
+  await refreshHeight();   // v5.10: faces/shadows/overlay follow the new height
   selTile = renamed;
   buildPalette();
   toast("saved");
@@ -3204,6 +3314,53 @@ $("menu-collide").onclick = () => {
   $("menu-collide").textContent = "Walls: " + (showCollide ? "on" : "off");
   $("menu-collide").classList.toggle("on", showCollide);
   render();
+};
+// v5.10: height/elevation — overlay tint, per-cell shadow grid, sight (fog of war lite)
+let showHeight = false, showSight = false;
+let heightGrid = null, heightSig = 0, visGrid = null;
+const HEIGHT_NAMES = {"-2": "deep water", "-1": "water", "0": "plains",
+                      "1": "hills", "2": "mountains", "3": "peaks"};
+const HEIGHT_COLORS = {"-2": "#1a3a8f", "-1": "#2a7fbf", "1": "#7fbf3a",
+                       "2": "#8f6a3a", "3": "#e8e8e8"};
+function tileHt(id) {
+  // numeric height of a custom tile for tall faces; built-ins resolve
+  // server-side into heightGrid (they have no sprite to stretch anyway)
+  const ct = customById[id];
+  if (!ct) return 0;
+  if (ct.height === "tall") return 1;   // legacy registry strings
+  const n = Number(ct.height);
+  return Number.isFinite(n) ? Math.max(-2, Math.min(3, Math.round(n))) : 0;
+}
+async function refreshHeight() {
+  // keep the elevation grid in step with the map — called from refresh()
+  try {
+    const g = await api("/api/height-grid");
+    if (g && g.w === W && g.h === H && g.grid) { heightGrid = g.grid; heightSig++; }
+  } catch (e) { /* offline — shadows/overlay wait for the next refresh */ }
+  queueRender();
+}
+async function refreshSight() {
+  visGrid = null;
+  if (showSight && playMode && hero) {
+    try {
+      const v = await api("/api/visibility?x=" + hero.x + "&y=" + hero.y);
+      if (v && v.w === W && v.h === H && v.vis) visGrid = v.vis;
+    } catch (e) {}
+  }
+  queueRender();
+}
+$("menu-height").onclick = () => {
+  showHeight = !showHeight;
+  $("menu-height").innerHTML = "&#9978; Height: " + (showHeight ? "on" : "off");
+  $("menu-height").classList.toggle("on", showHeight);
+  $("height-legend").hidden = !showHeight;
+  if (showHeight && !heightGrid) refreshHeight(); else queueRender();
+};
+$("menu-sight").onclick = async () => {
+  showSight = !showSight;
+  $("menu-sight").innerHTML = "&#128065; Sight: " + (showSight ? "on" : "off");
+  $("menu-sight").classList.toggle("on", showSight);
+  await refreshSight();
 };
 $("menu-validate").onclick = async () => {
   closeOverlays();

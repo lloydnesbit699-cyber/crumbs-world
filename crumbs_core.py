@@ -816,6 +816,10 @@ class Player:
         # the collision layer actually blocks the player
         if self.world.collision_layer[ty][tx]:
             return False
+        # v5.10: no climbing cliffs — one height level per step
+        fx, fy = int(self.x // DEFAULT_TILE_SIZE), int(self.y // DEFAULT_TILE_SIZE)
+        if climb_cost(self.world, fx, fy, tx, ty) is None:
+            return False
         tile = self.assets.tiles.get(self.world.data[ty][tx])
         return not (tile and tile.get("properties", {}).get("solid"))
 
@@ -825,3 +829,128 @@ class Player:
         nx, ny = self.x + self.move_dx * self.speed, self.y + self.move_dy * self.speed
         if self.can_move_to(nx, ny):
             self.x, self.y = nx, ny
+
+
+# ==========================================
+# HEIGHT / ELEVATION (v5.10)
+# ==========================================
+# One number per tile, derived from its preset (or an explicit override):
+#   deep water -2 < water -1 < plains 0 < hills 1 < mountains 2.
+# Walls sit one level above the terrain they stand on. Height drives
+# shadows, tall faces, movement cost, climb blocking, line of sight,
+# and the height overlay — all through the helpers below.
+HEIGHT_MIN, HEIGHT_MAX = -2, 3
+HEIGHT_DEFAULTS = {
+    "deepwater": -2,
+    "water": -1,
+    "floor": 0,
+    "decor": 0,
+    "door": 0,
+    "character": 0,
+    "wall": 1,
+    "hill": 1,
+    "mountain": 2,
+}
+HEIGHT_NAMES = {
+    -2: "deep water", -1: "water", 0: "plains",
+    1: "hills", 2: "mountains", 3: "peaks",
+}
+
+
+def _builtin_height_from_name(name):
+    """Height guess for built-in color tiles, which carry no preset —
+    their names look like 'forest_deep_water' or 'dungeon_wall'."""
+    n = (name or "").lower()
+    if "deep_water" in n:
+        return -2
+    if "water" in n:
+        return -1
+    if "mountain" in n:
+        return 2
+    if "hill" in n:
+        return 1
+    if "wall" in n:
+        return 1
+    return 0
+
+
+def tile_height(tile):
+    """Numeric height of one tile asset. An explicit integer 'height' in
+    properties wins; then a legacy top-level height; then the preset
+    default; then a name guess for preset-less built-ins; else 0."""
+    if not tile:
+        return 0
+    props = tile.get("properties", {}) or {}
+    h = props.get("height", None)
+    if isinstance(h, int):
+        return max(HEIGHT_MIN, min(HEIGHT_MAX, h))
+    th = tile.get("height", None)
+    if th == "tall":
+        return 1
+    if isinstance(th, int):
+        return max(HEIGHT_MIN, min(HEIGHT_MAX, th))
+    preset = props.get("preset") or tile.get("preset")
+    if preset in HEIGHT_DEFAULTS:
+        return HEIGHT_DEFAULTS[preset]
+    return _builtin_height_from_name(tile.get("name"))
+
+
+def cell_height(world, x, y):
+    """Effective height of a map cell: the tallest of its ground tile and
+    any object sitting on it. Out of bounds -> 0."""
+    if not (0 <= x < world.width and 0 <= y < world.height):
+        return 0
+    tiles = world.assets.tiles
+    h = tile_height(tiles.get(world.data[y][x]))
+    obj = world.object_layer[y][x]
+    if obj:
+        h = max(h, tile_height(tiles.get(obj)))
+    return h
+
+
+def height_grid(world):
+    """Full per-cell height map (for the overlay / shadows / visibility)."""
+    return [[cell_height(world, x, y) for x in range(world.width)]
+            for y in range(world.height)]
+
+
+def climb_cost(world, x0, y0, x1, y1):
+    """Extra movement cost stepping from (x0,y0) to (x1,y1).
+    Returns None when the step is unclimbable (more than one level up)."""
+    dh = cell_height(world, x1, y1) - cell_height(world, x0, y0)
+    if dh > 1:
+        return None
+    return max(0, dh)
+
+
+def line_of_sight(world, x0, y0, x1, y1):
+    """True when (x1,y1) is visible from (x0,y0). A cell blocks sight when
+    its top (height + 1, eye level) pokes above the sight line between the
+    two endpoints. Endpoints never block themselves."""
+    h0 = cell_height(world, x0, y0)
+    h1 = cell_height(world, x1, y1)
+    dx, dy = abs(x1 - x0), abs(y1 - y0)
+    if dx == 0 and dy == 0:
+        return True
+    sx = 1 if x0 < x1 else -1
+    sy = 1 if y0 < y1 else -1
+    err, x, y = dx - dy, x0, y0
+    total = max(dx, dy)
+    dist = 0
+    while (x, y) != (x1, y1):
+        e2 = 2 * err
+        if e2 > -dy:
+            err -= dy
+            x += sx
+        if e2 < dx:
+            err += dx
+            y += sy
+        dist += 1
+        if (x, y) == (x1, y1):
+            break
+        if not (0 <= x < world.width and 0 <= y < world.height):
+            return False
+        line_h = (h0 + 1) + ((h1 + 1) - (h0 + 1)) * dist / total
+        if cell_height(world, x, y) + 1 > line_h + 1e-6:
+            return False
+    return True

@@ -25,6 +25,12 @@ STRIP = os.path.join(HERE, "shared_library", "starter_pack.png")
 REG = os.path.join(HERE, "shared_library.json")
 BASE_ID = 70000
 
+# numeric height per preset — mirrors crumbs_core.HEIGHT_DEFAULTS
+PRESET_HEIGHT = {
+    "deepwater": -2, "water": -1, "floor": 0, "decor": 0,
+    "door": 0, "character": 0, "wall": 1, "hill": 1, "mountain": 2,
+}
+
 # (name, preset, solid, swim, row, col) — row/col are 32px cells on the sheet
 PICKS = [
     # ---- ground (12) ----
@@ -128,6 +134,16 @@ PICKS = [
     ("Skull", "decor", False, False, 28, 32),
     ("Elixir", "decor", False, False, 27, 54),
     ("Dagger", "decor", False, False, 29, 46),
+    # ---- hills (4): walkable, cost extra to climb ----
+    ("Green hill", "hill", False, False, 17, 17),
+    ("Moss hill", "hill", False, False, 17, 19),
+    ("Hill", "hill", False, False, 17, 21),
+    ("Rocky hill", "hill", False, False, 17, 23),
+    # ---- mountains (4): tall, blocking ----
+    ("Mountain", "mountain", True, False, 16, 21),
+    ("Peak", "mountain", True, False, 16, 23),
+    ("Crag", "mountain", True, False, 16, 25),
+    ("High peak", "mountain", True, False, 16, 27),
 ]
 
 
@@ -170,7 +186,7 @@ def build():
             "name": "Starter " + name,
             "preset": preset,
             "solid": solid,
-            "height": "tall" if preset == "wall" else "short",
+            "height": PRESET_HEIGHT.get(preset, 0),
             "swim": swim,
             "deep": preset == "deepwater",
             "frame_ms": 400,

@@ -3,7 +3,7 @@
 Crumbs HUD — touch-friendly web tile painter for the Crumbs Vault dungeon editor.
 
 Serves editor.html and a small JSON API backed by crumbs_core (headless engine).
-Stdlib only — no pip installs. Do NOT modify crumbs_core.py.
+Stdlib only — no pip installs. GUI-free model logic lives in crumbs_core.py.
 
 v1.1 (2026-09-18): playtest mode (tap-to-walk hero, BFS over collision layer),
 server autosave every 30s, /api/status, empty-palette paint guard.
@@ -70,6 +70,13 @@ as pack "starter" (ids 70000+). The full 6,038-cell Utumno library stays in
 shared_library.json but is opt-in (ENABLE_FULL_UTUMNO); the palette opens on
 the Starter pack only, so the app is fun immediately. Starter tiles are
 built-in: the delete/scope endpoints refuse them (they share one strip).
+v5.10 (2026-09-20): height/elevation system — every tile has a numeric
+height (deep water -2 < water -1 < plains 0 < hills 1 < mountains 2; walls
+stand +1). Per-tile height is editable in the tile panel. Height drives
+soft shadows, scaled 2.5D tall faces, climb movement costs, cliff blocking
+(can't step up more than one level), line of sight (/api/visibility powers
+a play-mode 👁 fog-of-war toggle), and a ⛰ height overlay. Starter pack
+grows to 100 with 4 hills + 4 mountains.
 
 Run:   python3 crumbs_hud.py
 Open:  http://127.0.0.1:8778   (same phone's browser)
@@ -110,20 +117,38 @@ CUSTOM_MAX_FILE_CHARS = 1500000  # ~1.1MB per frame dataURL
 # preset definitions: what each tile IS and what it DOES (collision baked in)
 # v3.1: height feeds the depth-cue renderer (tall walls get an extruded face)
 TILE_PRESETS = {
-    "wall":  {"label": "Wall",  "hint": "solid",    "solid": True,  "height": "tall"},
-    "floor": {"label": "Floor", "hint": "walkable", "solid": False, "height": "short"},
-    "water": {"label": "Water", "hint": "swim — slow", "solid": False, "height": "short",
+    # v5.10: height is numeric now — deep water -2 < water -1 < plains 0
+    # < hills 1 < mountains 2. Drives shadows, tall faces, movement cost,
+    # climb blocking, line of sight, and the height overlay.
+    "wall":  {"label": "Wall",  "hint": "solid, stands +1", "solid": True,  "height": 1},
+    "floor": {"label": "Floor", "hint": "walkable", "solid": False, "height": 0},
+    "water": {"label": "Water", "hint": "swim — slow", "solid": False, "height": -1,
               "swim": True},
     # v3.6: deep water — impassable WITHOUT the swim animation. Passable WITH
     # it once SWIM_UNLOCKED flips (see the SWIM HOOK below). Shallow water's
     # ripple wading is untouched.
     "deepwater": {"label": "Deep water", "hint": "needs swim", "solid": True,
-                  "height": "short", "deep": True},
-    "door":  {"label": "Door",  "hint": "walkable", "solid": False, "height": "short"},
-    "decor": {"label": "Decor", "hint": "walkable", "solid": False, "height": "short"},
+                  "height": -2, "deep": True},
+    "door":  {"label": "Door",  "hint": "walkable", "solid": False, "height": 0},
+    "decor": {"label": "Decor", "hint": "walkable", "solid": False, "height": 0},
     "character": {"label": "Character", "hint": "walkable sprite", "solid": False,
-                  "height": "short"},
+                  "height": 0},
+    "hill":  {"label": "Hill",  "hint": "walkable, slow climb", "solid": False,
+              "height": 1},
+    "mountain": {"label": "Mountain", "hint": "tall, blocking", "solid": True,
+                  "height": 2},
 }
+
+
+def _norm_height(entry):
+    """v5.10: registry height is an int. Migrates the old "tall"/"short"
+    strings and missing values to the preset default."""
+    h = entry.get("height", None)
+    if isinstance(h, int):
+        return max(core.HEIGHT_MIN, min(core.HEIGHT_MAX, h))
+    if h == "tall":
+        return 1
+    return TILE_PRESETS.get(entry.get("preset", "decor"), {}).get("height", 0)
 
 _custom_tiles = []  # registry mirror: [{id,name,preset,solid,frame_ms,files,scope}]
 _shared_tiles = []  # v3.8: the shared shelf — same shape, scope="shared"
@@ -136,7 +161,7 @@ ENABLE_FULL_UTUMNO = False
 
 def _custom_public(entry):
     return {"id": entry["id"], "name": entry["name"], "preset": entry["preset"],
-            "solid": entry["solid"], "height": entry.get("height", "short"),
+            "solid": entry["solid"], "height": _norm_height(entry),
             "swim": bool(entry.get("swim", False)),
             "deep": bool(entry.get("deep", False)),
             "scope": entry.get("scope", "local"),
@@ -193,14 +218,17 @@ def _register_custom_tile(entry, tile_dir):
         strip = frames[0]
         frames = [strip.crop((ci * 32, 0, (ci + 1) * 32, 32)).copy()]
     tid = int(entry["id"])
+    # v5.10: numeric height, migrated once — the registry saves back normalized.
+    entry["height"] = _norm_height(entry)
     assets.add_tile(tid, "custom", {
         "name": entry["name"],
         "category": "custom",
         "preset": entry.get("preset", "decor"),
-        "height": entry.get("height", "short"),
+        "height": entry["height"],
         "frames": frames,
         "frame_ms": int(entry.get("frame_ms", 400)),
     })
+    assets.tiles[tid]["properties"]["height"] = entry["height"]
     assets.tiles[tid]["properties"]["solid"] = bool(entry.get("solid", False))
     # v3.2: swim flag — water tiles slow the hero instead of blocking
     swim = bool(entry.get("swim", False))
@@ -668,12 +696,14 @@ def _validate_map():
     else:
         seen = {(sx, sy)}
         dq = deque([(sx, sy)])
+        hg = core.height_grid(world)  # v5.10: reachability obeys climb limits
         while dq:
             cx, cy = dq.popleft()
             for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
                 nx, ny = cx + dx, cy + dy
                 if (0 <= nx < world.width and 0 <= ny < world.height
-                        and (nx, ny) not in seen and _walkable(nx, ny)):
+                        and (nx, ny) not in seen and _walkable(nx, ny)
+                        and hg[ny][nx] - hg[cy][cx] <= 1):
                     seen.add((nx, ny))
                     dq.append((nx, ny))
         unreachable = sum(
@@ -1162,6 +1192,8 @@ def _find_path(sx, sy, tx, ty, ghost=False):
     v3.6: deep water is unwalkable until SWIM_UNLOCKED flips; then it costs
     4x like shallow water and its steps are flagged deep for the client.
     v3.7: ghost (builder noclip rule) walks straight through everything.
+    v5.10: climbing costs +1 per height level gained; a step up more than one
+    level is a cliff — unpathable (unless ghost).
     Returns ([(x,y), ...] excluding the start, [swim?, ...], [deep?, ...])."""
     def _ok(x, y):
         return (0 <= x < world.width and 0 <= y < world.height
@@ -1172,6 +1204,7 @@ def _find_path(sx, sy, tx, ty, ghost=False):
     dist = {(sx, sy): 0}
     prev = {(sx, sy): None}
     pq = [(0, sx, sy)]
+    hg = core.height_grid(world)  # v5.10: per-cell heights for climb costs
     while pq:
         d, x, y = heapq.heappop(pq)
         if d != dist[(x, y)]:
@@ -1181,7 +1214,14 @@ def _find_path(sx, sy, tx, ty, ghost=False):
         for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
             if not _ok(nx, ny):
                 continue
-            nd = d + (1 if ghost else (SWIM_COST if (_swim_at(nx, ny) or _deep_at(nx, ny)) else 1))
+            if ghost:
+                nd = d + 1
+            else:
+                dh = hg[ny][nx] - hg[y][x]
+                if dh > 1:
+                    continue  # cliff — can't climb it in one step
+                step = SWIM_COST if (_swim_at(nx, ny) or _deep_at(nx, ny)) else 1
+                nd = d + step + max(0, dh)
             if nd < dist.get((nx, ny), float("inf")):
                 dist[(nx, ny)] = nd
                 prev[(nx, ny)] = (x, y)
@@ -1323,6 +1363,22 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         elif path == "/api/map":
             self._send_json(_map_state())
+        elif path == "/api/height-grid":
+            # v5.10: per-cell numeric heights for shadows, tall faces,
+            # the height overlay, and line-of-sight.
+            self._send_json({"w": world.width, "h": world.height,
+                             "grid": core.height_grid(world)})
+        elif path == "/api/visibility":
+            # v5.10: ?x=&y= — 2D bool grid of cells visible from (x, y)
+            # via line_of_sight (fog-of-war lite for play mode).
+            try:
+                q = parse_qs(urlparse(self.path).query)
+                vx, vy = int(q.get("x", [0])[0]), int(q.get("y", [0])[0])
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "bad x/y"}, 400)
+            vis = [[core.line_of_sight(world, vx, vy, x, y)
+                    for x in range(world.width)] for y in range(world.height)]
+            self._send_json({"w": world.width, "h": world.height, "vis": vis})
         elif path == "/api/palette":
             sw = []
             for tid in sorted(assets.tiles):
@@ -1891,10 +1947,19 @@ class Handler(BaseHTTPRequestHandler):
                 entry["height"] = TILE_PRESETS[preset]["height"]
                 entry["swim"] = bool(TILE_PRESETS[preset].get("swim", False))
                 entry["deep"] = bool(TILE_PRESETS[preset].get("deep", False))
+            if "height" in body:
+                # v5.10: explicit per-tile height override (-2..3)
+                try:
+                    entry["height"] = max(core.HEIGHT_MIN,
+                                          min(core.HEIGHT_MAX, int(body.get("height"))))
+                except (TypeError, ValueError):
+                    return self._send_json({"ok": False, "error": "bad height"}, 400)
             t = assets.tiles.get(tid)
             if t is not None:
                 t["name"] = entry["name"]
                 t["preset"] = entry["preset"]
+                t["height"] = entry["height"]
+                t["properties"]["height"] = entry["height"]
                 t["properties"]["solid"] = bool(entry.get("solid", False))
                 t["properties"]["swim"] = bool(entry.get("swim", False))
                 t["properties"]["deep"] = bool(entry.get("deep", False))

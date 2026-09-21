@@ -1,6 +1,9 @@
 # v1.9: lets Replit (or any cloud host) run the HUD with one click.
 # Import this repo into Replit and it starts by itself — no downloads.
-run = "python3 crumbs_hud.py --public"
+# v5.22.9: use the workspace repl's webview URL, NOT a Deployment —
+# deployments get an ephemeral disk, so map saves would vanish on
+# restart. The workspace filesystem persists.
+run = "PORT=5000 python3 crumbs_hud.py --public"
 modules = ["python-3.12", "web", "bash"]
 
 [nix]
@@ -54,7 +57,3 @@ externalPort = 5000
 [[ports]]
 localPort = 8778
 externalPort = 3000
-
-[deployment]
-deploymentTarget = "cloudrun"
-run = "PORT=5000 python3 crumbs_hud.py --public"

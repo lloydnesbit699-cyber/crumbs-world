@@ -3,6 +3,26 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.22.9 — 2026-09-21
+
+The default tile library never reached Lloyd's phone: the updater and the
+pull script shipped only the four app files, so shared_library.json +
+shared_library/starter_pack.png were absent and the palette loaded empty
+(silently). pull_crumbs.py v2.0 now fetches and validates both library
+files; the server prints a boot census ("tile shelf: N local, M shared")
+and says out loud when the shared registry is missing. (The in-app
+updater still ships only the four app files — library gap stays open for
+phone-local mode; hosted mode gets everything via git.)
+
+Hosted mode (Lloyd's call — "host online free", no more server
+babysitting): in public mode the owner's write key now unlocks
+/api/update/apply, /api/update/apply-blobs, and /api/restart (was: blanket
+403 / ungated), so a Replit-hosted HUD updates and restarts from the page
+exactly like a local one; replit.md is now the real setup recipe and the
+cloudrun [deployment] block is gone (ephemeral disk would eat map saves —
+use the workspace repl). Verified on desktop/server; not yet run on
+Lloyd's iPhone.
+
 ## v5.22.8 — 2026-09-21
 
 Header status pills (Lloyd's "signs of life" ask): an update pill (live
@@ -11,7 +31,6 @@ update check, and a recovery pill (shield + risk level, dot breathes
 while healthy, tap opens the Recovery sheet) fed by a new lightweight
 `recovery` brief on /api/status. Verified on desktop/server; not yet run
 on Lloyd's iPhone.
-
 ## v5.22.7 — 2026-09-21
 
 Client-side fallback for the version placeholder: a new editor.html

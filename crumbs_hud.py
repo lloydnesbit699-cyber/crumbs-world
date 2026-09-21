@@ -143,7 +143,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.22.8"
+APP_VERSION = "5.22.9"
 
 # ---- v5.18: in-app self-update -------------------------------------------------
 # Lloyd's rule: updates overwrite the old files in place — no more downloading a
@@ -537,6 +537,11 @@ def _load_custom_tiles():
             (CUSTOM_REG, CUSTOM_DIR, _custom_tiles, "local"),
             (SHARED_REG, SHARED_DIR, _shared_tiles, "shared")):
         if not os.path.exists(reg_path):
+            # v5.22.9: say so out loud — a missing registry used to mean a
+            # silently empty palette and nobody knew why.
+            if scope == "shared":
+                print("[hud] no shared_library.json — default tile library "
+                      "absent (run pull_crumbs.py v2+ to fetch it)")
             continue
         try:
             reg = json.load(open(reg_path))
@@ -556,6 +561,11 @@ def _load_custom_tiles():
                     store.append(entry)
             except Exception as e:
                 print(f"[hud] skipping {scope} tile {entry.get('id')}: {e}")
+    # v5.22.9: boot census — the palette's signs of life, right in the log.
+    print(f"[hud] tile shelf: {len(_custom_tiles)} local, "
+          f"{len(_shared_tiles)} shared (starter pack)"
+          + (f", {len(_shared_skipped)} utumno dormant"
+             if _shared_skipped else ""))
     # v5.14: drop-in art packs — any *.pack.json in custom_tiles/ loads
     # additively. Pack entries are never merged into custom_tiles.json, so
     # deleting the pack files uninstalls the pack cleanly.
@@ -3387,9 +3397,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"ok": False, "error": "bad JSON"}, 400)
 
         if path == "/api/update/apply":
-            # v5.18: local mode only — a public link must never rewrite the server.
-            if PUBLIC_MODE:
-                return self._send_json({"ok": False, "error": "updates are local-mode only"}, 403)
+            # v5.18: a public link must never rewrite the server.
+            # v5.22.9: hosted mode — the owner's write key unlocks updates, so a
+            # hosted HUD updates from the page exactly like a local one.
+            if PUBLIC_MODE and not self._write_key_ok():
+                return self._send_json({"ok": False, "error": "updates need the write key"}, 403)
             # v5.21: save dirty map work before touching anything, so the
             # update can never eat an unsaved build.
             map_saved = bool(_save_state["dirty"] and _save_now())
@@ -3409,10 +3421,10 @@ class Handler(BaseHTTPRequestHandler):
             # v5.21.5: the PAGE downloaded the files and posts them here.
             # The browser is foreground, so iOS can't freeze it mid-download
             # the way it freezes this server — the server-side work is just
-            # the guarded swap, done in milliseconds. Same local-mode rule
-            # and same guards as /api/update/apply.
-            if PUBLIC_MODE:
-                return self._send_json({"ok": False, "error": "updates are local-mode only"}, 403)
+            # the guarded swap, done in milliseconds. Same hosted rule as
+            # /api/update/apply: the write key unlocks it, strangers get 403.
+            if PUBLIC_MODE and not self._write_key_ok():
+                return self._send_json({"ok": False, "error": "updates need the write key"}, 403)
             files = body.get("files")
             if not isinstance(files, dict):
                 return self._send_json({"ok": False, "error": "files must be a {name: text} object"}, 400)
@@ -5056,6 +5068,11 @@ class Handler(BaseHTTPRequestHandler):
             # shutdown (answer first, save dirty work), then re-exec the
             # process in place — the page polls /api/status and reloads
             # when the new process is up.
+            # v5.22.9: hosted mode — require the write key, so a stranger
+            # with the URL can't bounce Lloyd's server (the page sends it
+            # automatically via X-Crumbs-Key).
+            if PUBLIC_MODE and not self._write_key_ok():
+                return self._send_json({"ok": False, "error": "restart needs the write key"}, 403)
             def _restart():
                 time.sleep(0.3)  # let the "ok" reach the page first
                 if _save_state["dirty"]:

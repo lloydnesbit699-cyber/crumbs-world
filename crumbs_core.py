@@ -56,9 +56,9 @@ BIOMES = {
     "grassland": {
         "name": "Grassland",
         "colors": {
-            "deep_water": "#1a4d6b", "water": "#2d6b9e", "sand": "#c2b280",
-            "grass_dark": "#3d6b2e", "grass": "#4a7c23", "grass_light": "#5a9c33",
-            "dirt": "#6b4423", "stone": "#5a5a5a", "snow": "#f0f8ff"
+            "deep_water": "#2a6b9e", "water": "#3d8bce", "sand": "#d2c290",
+            "grass_dark": "#4a8c2e", "grass": "#5a9c33", "grass_light": "#6ab844",
+            "dirt": "#7b5233", "stone": "#6a6a6a", "snow": "#f0f8ff"
         },
         "noise_settings": {"water_level": 0.35, "sand_level": 0.42, "grass_level": 0.65, "stone_level": 0.85}
     },

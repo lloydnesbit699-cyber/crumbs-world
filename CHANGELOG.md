@@ -3,6 +3,16 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.21.11 — 2026-09-21
+
+Brightened the grassland palette too — the dark blues/greens were reading
+as black. Verified on desktop/server; not yet run on Lloyd's iPhone.
+
+- deep_water #2a6b9e, water #3d8bce, sand #d2c290, grass_dark #4a8c2e,
+  grass #5a9c33, grass_light #6ab844, dirt #7b5233, stone #6a6a6a.
+- If the swatches still show black after updating, the color isn't
+  reaching the HTML — that's a different bug to chase.
+
 ## v5.21.10 — 2026-09-21
 
 The dungeon palette was unusable — four near-black grays you couldn't

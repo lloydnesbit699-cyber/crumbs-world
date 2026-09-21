@@ -3,6 +3,18 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.21.15 — 2026-09-21
+
+Made the sprite-sheet picker less fragile when the imported image is
+smaller than the default 16px cell size. Verified on desktop/server; not
+yet run on Lloyd's iPhone.
+
+- The picker now chooses a smaller starting cell size automatically when a
+  sheet is too short or too narrow for 16px cells, instead of silently
+  producing zero selectable cells.
+- If it has to fall back, the sheet hint says `auto-fit to image` so the
+  phone can tell us that sizing fallback is active.
+
 ## v5.21.14 — 2026-09-21
 
 Stopped the sprite-sheet animator from going blank when the editor thinks

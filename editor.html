@@ -3419,8 +3419,23 @@ function sliceSheetCells(img, cell) {
   return { cols, rows, cells };
 }
 function sheetCur() { return sheetFiles[sheetTab]; }
+function bestSheetCell(img) {
+  const span = Math.min(img.naturalWidth || 0, img.naturalHeight || 0);
+  if (span >= 16) return 16;
+  if (span >= 8) return 8;
+  return Math.max(1, span || 1);
+}
 function resliceSheet(f) {
   f.grid = sliceSheetCells(f.img, f.cell);
+  f.autoFitCell = false;
+  if (!f.grid.cells.length) {
+    const fit = bestSheetCell(f.img);
+    if (fit !== f.cell) {
+      f.cell = fit;
+      f.grid = sliceSheetCells(f.img, f.cell);
+      f.autoFitCell = true;
+    }
+  }
   f.sel = new Set();
 }
 function renderSheetTabs() {
@@ -3448,6 +3463,7 @@ function renderSheetGrid() {
   $("sheet-hint").textContent =
     f.grid.cols + "×" + f.grid.rows + " = " + f.grid.cells.length + " cells" +
     (f.pico ? " — PICO-8 sheet" : "") + " · " + f.cell + "px → 32px" +
+    (f.autoFitCell ? " · auto-fit to image" : "") +
     (!showEmpty && !usedCount ? " · auto-showing all cells" : "");
   const g = $("sheet-grid"); g.innerHTML = "";
   const revealAll = !showEmpty && !usedCount;
@@ -3471,9 +3487,11 @@ function renderSheetSelInfo() {
   const usedCount = f ? f.grid.cells.reduce((m, cell) => m + (cell.used ? 1 : 0), 0) : 0;
   $("sheet-selinfo").textContent = n
     ? n + " selected — role: " + sheetRole
-    : (!usedCount && f && !$("sheet-showempty").checked)
-      ? "tap cells to select them — no solid cells were detected, so all cells are shown"
-      : "tap cells to select them";
+    : (!f || f.grid.cells.length)
+      ? (!usedCount && f && !$("sheet-showempty").checked)
+        ? "tap cells to select them — no solid cells were detected, so all cells are shown"
+        : "tap cells to select them"
+      : "no cells yet — try 8px, PICO-8, or a larger source image";
 }
 async function buildSheetRoles() {
   if (!presets.length) {
@@ -3517,7 +3535,8 @@ $("sheet-files").onchange = async e => {
     const norm = await normalizeSheet(await readFile(f));
     if (!norm) { toast("couldn't read " + f.name); continue; }
     const sf = { name: f.name.replace(/\.[^.]+$/, ""), dataUrl: norm.dataUrl,
-                 img: norm.img, cell: 16, pico: false, sel: new Set() };
+                 img: norm.img, cell: bestSheetCell(norm.img), pico: false,
+                 sel: new Set(), autoFitCell: false };
     // wait for the image to be fully decodable at natural size
     await new Promise(res => {
       if (norm.img.complete && norm.img.naturalWidth) res();

@@ -2911,7 +2911,8 @@ function buildPalette() {
     const d = document.createElement("div");
     d.className = "sw" + (sel ? " sel" : "");
     d.title = title;
-    d.innerHTML = inner;
+    if (typeof inner === "string") d.innerHTML = inner;
+    else if (inner) d.appendChild(inner);
     d.onclick = onclick;
     box.appendChild(d);
     return d;
@@ -2934,9 +2935,17 @@ function buildPalette() {
       seen.add(t.color);
       return true;
     }).forEach(t => {
+      const frag = document.createDocumentFragment();
+      const chip = document.createElement("div");
+      chip.className = "chip";
+      chip.dataset.color = t.color || "";
+      chip.style.backgroundColor = t.color || "#000";
+      const lbl = document.createElement("div");
+      lbl.className = "lbl";
+      lbl.textContent = shortName(t.name);
+      frag.append(chip, lbl);
       sw(t.id === selTile, t.name + " (#" + t.id + ")",
-         '<div class="chip" style="background:' + t.color + '"></div>' +
-         '<div class="lbl">' + shortName(t.name) + "</div>",
+         frag,
          () => selectTile(t.id));
     });
   } else {

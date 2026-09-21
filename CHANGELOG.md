@@ -3,6 +3,19 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.21.12 — 2026-09-21
+
+Chased the "palette API is right but the swatch fill turns black" bug on
+the HTML side. Verified on desktop/server; not yet run on Lloyd's iPhone.
+
+- Tile palette swatches no longer depend on inline HTML strings for their
+  color fill. The editor now builds each swatch node directly and sets the
+  chip color through DOM style assignment (`backgroundColor`), which is the
+  path most likely to survive Safari's quirks here.
+- Added a `data-color` copy on each chip too, so if it still goes black on
+  iPhone the next chase can inspect the rendered HTML and see whether the
+  color made it into the DOM.
+
 ## v5.21.11 — 2026-09-21
 
 Brightened the grassland palette too — the dark blues/greens were reading

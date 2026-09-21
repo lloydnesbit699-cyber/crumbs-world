@@ -1074,15 +1074,24 @@ async function api(path, body) {
       const r = await fetch(path, opt);
       const j = await r.json();
       // v5.16: public share key — ask once, remember on this device, retry.
-      if (r.status === 403 && j && j.error && /write key required|share key required/.test(j.error) && !opt._keyTried) {
-        const k = prompt("This shared HUD needs a key to save changes.\nEnter the share key (stored on this device only):");
-        if (k) {
-          crumbsKey = k;
-          try { localStorage.setItem("crumbsKey", k); } catch (e) {}
-          opt.headers["X-Crumbs-Key"] = k;
-          opt._keyTried = true;
-          attempt--;
-          continue;
+      if (r.status === 403 && j && j.error && /write key required|share key required/.test(j.error)) {
+        if (!opt._keyTried) {
+          const k = prompt("This shared HUD needs a key to save changes.\nEnter the share key (stored on this device only):");
+          if (k) {
+            crumbsKey = k;
+            try { localStorage.setItem("crumbsKey", k); } catch (e) {}
+            opt.headers["X-Crumbs-Key"] = k;
+            opt._keyTried = true;
+            attempt--;
+            continue;
+          }
+        } else {
+          // v5.22.3: the key just entered was rejected too — a wrong key
+          // must not be kept and re-asked on every action. Clear it, say so.
+          crumbsKey = "";
+          try { localStorage.removeItem("crumbsKey"); } catch (e) {}
+          toast("that share key was rejected \u2014 Setup \u2192 Key\u2026 to enter the right one");
+          Sfx.error();
         }
       }
       setServerDown(false);

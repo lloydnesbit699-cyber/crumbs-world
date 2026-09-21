@@ -3,6 +3,14 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.22.3 — 2026-09-21
+
+A wrong share key on a public HUD used to nag the key prompt on *every*
+action: the bad key was saved and re-asked forever. Now a rejected key is
+cleared immediately with a plain message pointing at Setup → Key…, so it
+asks once and stays quiet. Verified on desktop/server; not yet run on
+Lloyd's iPhone.
+
 ## v5.22.2 — 2026-09-21
 
 The in-app updater's file list missed `crumbs_recovery.py`, so phones that

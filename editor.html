@@ -3951,16 +3951,59 @@ $("menu-update").onclick = async () => {
     const c = await api("/api/update/changelog");
     if (c && c.ok) notes = c.entries || [];
   } catch (e) { /* notes are nice-to-have; the update stands on its own */ }
+  if (r.pending_restart) {
+    // v5.21.5: the files are already new — don't offer the install again,
+    // say restart. This kills the "update loop" when iOS froze a-Shell
+    // between the file swap and the restart.
+    $("update-title").textContent = "v" + r.disk_version + " is downloaded — restart the server to finish";
+    $("update-notes").innerHTML = "<div class='tray-hint'>The new files are already in place. The running server is still v" + r.current + " — restart it, then reload.</div>";
+    $("btn-update-install").textContent = "Restart server";
+    $("btn-update-install").onclick = async () => {
+      closeOverlays();
+      if (!confirm("Restart the HUD server? Dirty work is saved first.")) return;
+      try { await api("/api/restart", {}); } catch (e) { /* server is going away */ }
+      toast("restarting — waiting for the server to come back…");
+      for (let i = 0; i < 60; i++) {
+        await new Promise(res => setTimeout(res, 1000));
+        try { const s = await api("/api/status"); if (s) { location.reload(); return; } }
+        catch (e) { /* not up yet */ }
+      }
+      toast("server didn't come back — wake a-Shell, run python3 crumbs_hud.py, then reload.");
+    };
+    $("btn-update-later").onclick = () => closeOverlays();
+    toggleOverlay("sheet-update");
+    return;
+  }
   $("update-title").textContent = "v" + r.latest + " is ready (you have v" + r.current + ")";
   $("update-notes").innerHTML = notes.length
     ? notes.map(e => "<div class='upd-ver'>v" + escHtml(e.version) + (e.date ? " \u2014 " + escHtml(e.date) : "") + "</div><div>" + escHtml(e.notes) + "</div>").join("")
     : "<div class='tray-hint'>couldn't load the what's-new notes — the update itself is unaffected.</div>";
+  $("btn-update-install").textContent = "Install update";
   $("btn-update-install").onclick = async () => {
     closeOverlays();
     toast("installing v" + r.latest + "\u2026");
-    let a;
-    try { a = await api("/api/update/apply", {}); }
-    catch (e) { a = { ok: false, error: "HUD server stopped answering mid-update" }; }
+    let a = null, pageDlFailed = false;
+    // v5.21.5: download in the PAGE, not on the server — the browser is
+    // foreground, so iOS can't freeze it mid-download the way it freezes
+    // a-Shell. raw.githubusercontent.com allows cross-origin fetches.
+    try {
+      const t = Date.now();
+      const gh = "https://raw.githubusercontent.com/lloydnesbit699-cyber/crumbs-world/main/";
+      const names = ["editor.html", "crumbs_hud.py", "crumbs_core.py"];
+      const files = {};
+      const parts = await Promise.all(names.map(async n => {
+        const resp = await fetch(gh + n + "?t=" + t);
+        if (!resp.ok) throw new Error("http " + resp.status + " for " + n);
+        return [n, await resp.text()];
+      }));
+      for (const [n, text] of parts) files[n] = text;
+      a = await api("/api/update/apply-blobs", { files });
+    } catch (e) { pageDlFailed = true; }
+    if (pageDlFailed) {
+      // page-side download failed — fall back to the server doing it.
+      try { a = await api("/api/update/apply", {}); }
+      catch (e2) { a = { ok: false, error: "HUD server stopped answering mid-update" }; }
+    }
     if (a && a.ok) {
       toast("updated to v" + r.latest + (a.map_saved ? " (map saved)" : "") + " \u2014 stop the server, run python3 crumbs_hud.py again, then reload");
       syncRollback({ ok: true, can_rollback: true });

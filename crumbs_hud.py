@@ -124,7 +124,7 @@ from urllib.parse import urlparse, parse_qs
 import crumbs_core as core
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.21.4"
+APP_VERSION = "5.21.5"
 
 # ---- v5.18: in-app self-update -------------------------------------------------
 # Lloyd's rule: updates overwrite the old files in place — no more downloading a
@@ -189,6 +189,64 @@ def _update_can_rollback():
     # v5.21: an update is undoable while its .update-backup files survive.
     return any(os.path.exists(os.path.join(SCRIPT_DIR, n + ".update-backup"))
                for n in UPDATE_FILES)
+
+
+def _update_disk_version():
+    # v5.21.5: what version do the files ON DISK say? If the disk is newer
+    # than the running server, an update was installed but the server was
+    # never restarted — the check should say "restart", not offer install.
+    try:
+        with open(os.path.join(SCRIPT_DIR, "crumbs_hud.py"), "rb") as f:
+            # APP_VERSION lives near the top, but the header comment block
+            # has long lines — 16KB comfortably covers it.
+            m = re.search(br'^APP_VERSION\s*=\s*"([^"]+)"', f.read(16384), re.M)
+        return m.group(1).decode() if m else None
+    except OSError:
+        return None
+
+
+def _update_install(blobs):
+    # v5.21.5: shared installer — sanity-checks, version-guards, and
+    # atomically swaps a {name: bytes} bundle. Used by /api/update/apply
+    # (the server downloads) and /api/update/apply-blobs (the page
+    # downloads; the browser stays in the foreground, so iOS can't freeze
+    # it mid-file the way it freezes a-Shell).
+    # v5.21: sanity-check the downloads before swapping — a truncated
+    # file must never replace a good one.
+    bad = [n for n, b in blobs.items()
+           if not b
+           or (n == "crumbs_hud.py" and b"APP_VERSION" not in b)
+           or (n == "editor.html" and b"<html" not in b.lower())
+           or (n == "crumbs_core.py"
+               and b"def " not in b and b"class " not in b)]
+    if bad:
+        return {"ok": False, "leg": "github",
+                "error": f"downloaded {', '.join(bad)} looked wrong — old files untouched, try again"}
+    # v5.21.2: the download must actually be NEWER than this build.
+    # The check may have seen a fresh version while the file fetch
+    # hit a stale CDN edge — installing that would be a downgrade,
+    # so refuse it and leave the old files alone.
+    m = re.search(br'^APP_VERSION\s*=\s*"([^"]+)"', blobs["crumbs_hud.py"], re.M)
+    dl_version = m.group(1).decode() if m else None
+    if not dl_version or not _ver_tuple(dl_version) > _ver_tuple(APP_VERSION):
+        return {"ok": False, "leg": "github",
+                "error": f"GitHub served a stale copy (v{dl_version or 'unreadable'}) — old files untouched, try again in a bit"}
+    updated = []
+    try:
+        for n, blob in blobs.items():
+            p = os.path.join(SCRIPT_DIR, n)
+            if os.path.exists(p):
+                shutil.copy2(p, p + ".update-backup")
+            tmp = p + ".update-tmp"
+            with open(tmp, "wb") as f:
+                f.write(blob)
+            os.replace(tmp, p)  # atomic: the same name just gets the new bytes
+            updated.append(n)
+    except OSError as e:
+        return {"ok": False, "error": f"write failed ({e}) — backups kept"}
+    return {"ok": True, "updated": updated,
+            "can_rollback": True,
+            "note": "restart the server to run the new build"}
 
 
 def _ver_tuple(v):
@@ -2786,13 +2844,18 @@ class Handler(BaseHTTPRequestHandler):
             if not latest:
                 return self._send_json({"ok": False, "leg": "github",
                                         "error": "GitHub answered but the version was unreadable"})
+            disk = _update_disk_version()
             return self._send_json({"ok": True, "current": APP_VERSION,
                                     "latest": latest,
                                     # v5.21.1: numeric compare — a stale
                                     # GitHub cache must never offer a
                                     # *downgrade* as an update.
                                     "available": _ver_tuple(latest) > _ver_tuple(APP_VERSION),
-                                    "can_rollback": _update_can_rollback()})
+                                    "can_rollback": _update_can_rollback(),
+                                    # v5.21.5: installed-but-not-restarted —
+                                    # don't loop the install dialog; say restart.
+                                    "disk_version": disk,
+                                    "pending_restart": bool(disk and _ver_tuple(disk) > _ver_tuple(APP_VERSION))})
         elif path == "/api/update/changelog":
             # v5.21: what's new between this build and main, for the update
             # dialog — so the decision happens with the notes in front of you.
@@ -2954,44 +3017,34 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": False, "leg": "github",
                                         "error": f"download failed ({e.__class__.__name__}) — old files untouched",
                                         "hint": _update_hint(e)})
-            # v5.21: sanity-check the downloads before swapping — a truncated
-            # file must never replace a good one.
-            bad = [n for n, b in blobs.items()
-                   if not b
-                   or (n == "crumbs_hud.py" and b"APP_VERSION" not in b)
-                   or (n == "editor.html" and b"<html" not in b.lower())
-                   or (n == "crumbs_core.py"
-                       and b"def " not in b and b"class " not in b)]
-            if bad:
-                return self._send_json({"ok": False, "leg": "github",
-                                        "error": f"downloaded {', '.join(bad)} looked wrong — old files untouched, try again"})
-            # v5.21.2: the download must actually be NEWER than this build.
-            # The check may have seen a fresh version while the file fetch
-            # hit a stale CDN edge — installing that would be a downgrade,
-            # so refuse it and leave the old files alone.
-            m = re.search(br'^APP_VERSION\s*=\s*"([^"]+)"',
-                          blobs["crumbs_hud.py"], re.M)
-            dl_version = m.group(1).decode() if m else None
-            if not dl_version or not _ver_tuple(dl_version) > _ver_tuple(APP_VERSION):
-                return self._send_json({"ok": False, "leg": "github",
-                                        "error": f"GitHub served a stale copy (v{dl_version or 'unreadable'}) — old files untouched, try again in a bit"})
-            updated = []
-            try:
-                for n, blob in blobs.items():
-                    p = os.path.join(SCRIPT_DIR, n)
-                    if os.path.exists(p):
-                        shutil.copy2(p, p + ".update-backup")
-                    tmp = p + ".update-tmp"
-                    with open(tmp, "wb") as f:
-                        f.write(blob)
-                    os.replace(tmp, p)  # atomic: the same name just gets the new bytes
-                    updated.append(n)
-            except OSError as e:
-                return self._send_json({"ok": False, "error": f"write failed ({e}) — backups kept"})
-            return self._send_json({"ok": True, "updated": updated,
-                                    "map_saved": map_saved,
-                                    "can_rollback": True,
-                                    "note": "restart the server to run the new build"})
+            # v5.21.5: shared installer (sanity checks + version guard +
+            # atomic swap); page-fed installs use /api/update/apply-blobs.
+            res = _update_install(blobs)
+            if res.get("ok"):
+                res["map_saved"] = map_saved
+            return self._send_json(res)
+        if path == "/api/update/apply-blobs":
+            # v5.21.5: the PAGE downloaded the files and posts them here.
+            # The browser is foreground, so iOS can't freeze it mid-download
+            # the way it freezes this server — the server-side work is just
+            # the guarded swap, done in milliseconds. Same local-mode rule
+            # and same guards as /api/update/apply.
+            if PUBLIC_MODE:
+                return self._send_json({"ok": False, "error": "updates are local-mode only"}, 403)
+            files = body.get("files")
+            if not isinstance(files, dict):
+                return self._send_json({"ok": False, "error": "files must be a {name: text} object"}, 400)
+            blobs = {}
+            for n in UPDATE_FILES:
+                t = files.get(n)
+                if not isinstance(t, str) or not t:
+                    return self._send_json({"ok": False, "error": f"missing file in bundle: {n}"}, 400)
+                blobs[n] = t.encode("utf-8")
+            map_saved = bool(_save_state["dirty"] and _save_now())
+            res = _update_install(blobs)
+            if res.get("ok"):
+                res["map_saved"] = map_saved
+            return self._send_json(res)
         if path == "/api/update/rollback":
             # v5.21: put the .update-backup files back — the update, undone.
             # Local mode only, like apply.

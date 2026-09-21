@@ -3,6 +3,24 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.21.5 — 2026-09-21
+
+Freezer-proof updater. Verified on desktop/server; not yet run on Lloyd's
+iPhone.
+
+- **Updates now download in the page, not on the server.** iOS freezes
+  a-Shell in the background, so a server-side download from GitHub could
+  die mid-file and the update would loop forever. The browser is
+  foreground — it fetches the three files itself (raw.githubusercontent.com
+  allows it) and hands them to the server, whose only job is the guarded
+  atomic swap. Falls back to the old server-side download if the page
+  fetch fails.
+- **No more "same update" loop.** If the files were swapped but the server
+  was never restarted, Check for updates now says "vX is downloaded —
+  restart the server to finish" (with a Restart button) instead of
+  offering the install again. The check compares the on-disk version
+  against the running one.
+
 ## v5.21.4 — 2026-09-21
 
 Extension-noise filter + no-stale-page. Verified on desktop/server; not yet

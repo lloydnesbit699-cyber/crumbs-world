@@ -101,6 +101,7 @@ import io
 import glob
 import hmac
 import os
+import atexit
 import base64
 import copy
 import hmac
@@ -123,13 +124,26 @@ from urllib.parse import urlparse, parse_qs
 
 import crumbs_core as core
 try:
-    from crumbs_recovery import CheckpointStore, RecoverySupervisor
+    from crumbs_recovery import (
+        CheckpointStore, RecoverySupervisor,
+        classify_interruption, assess_risk, count_recent_outcomes,
+        run_verification_chain, decide_outcome,
+        HEARTBEAT_NAME, DIRTY_NAME, CLEAN_NAME,
+        HEARTBEAT_INTERVAL_S, HEARTBEAT_STALE_AFTER_S,
+        RECOVERY_UNSAFE,
+    )
 except ImportError:
     CheckpointStore = None
     RecoverySupervisor = None
+    classify_interruption = assess_risk = count_recent_outcomes = None
+    run_verification_chain = decide_outcome = None
+    HEARTBEAT_NAME = DIRTY_NAME = CLEAN_NAME = None
+    HEARTBEAT_INTERVAL_S = 5.0
+    HEARTBEAT_STALE_AFTER_S = 15.0
+    RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.22.0"
+APP_VERSION = "5.22.1"
 
 # ---- v5.18: in-app self-update -------------------------------------------------
 # Lloyd's rule: updates overwrite the old files in place — no more downloading a
@@ -308,6 +322,8 @@ DEFAULT_SAVE = "hud_map.json"
 # Phase 2A: persistent recovery lives beside the project, independent of the process.
 _recovery_store = CheckpointStore(SCRIPT_DIR) if CheckpointStore else None
 _recovery = RecoverySupervisor(_recovery_store) if _recovery_store else None
+# Phase 3B: set once the server has served its first HTTP request.
+_server_served_first_request = False
 LAYERS = ("tiles", "objects", "collision")
 PUBLIC_MODE = False
 PUBLIC_WRITE_KEY = ""
@@ -2508,9 +2524,19 @@ def _recovery_status():
     if not _recovery_store:
         return {"available": False}
     try:
+        hb_age = None
+        try:
+            with open(_recovery_evidence_paths()["heartbeat"]) as fh:
+                hb_age = max(0.0, time.time() - float(json.load(fh).get("ts", 0)))
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
         return {"available": True,
                 "slots": _recovery_store.slot_info(),
-                "journal": _recovery_store.journal_tail(50)}
+                "journal": _recovery_store.journal_tail(50),
+                "report": _recovery_store.read_report(),
+                "server_serving": _server_served_first_request,
+                "heartbeat_age": hb_age,
+                "last_save": _save_state["last"]}
     except Exception as exc:
         return {"available": True, "error": str(exc)[:200]}
 
@@ -2561,50 +2587,224 @@ def _primary_save_healthy(name):
     return True
 
 
-def _recover_startup():
-    """Verify and restore a checkpoint into memory only; disk stays untouched."""
-    if not _recovery:
-        return {"status": "RECOVERY_UNAVAILABLE"}
-    record, status = _recovery.startup()
-    if record is None:
-        print(f"[recovery] startup: {status}; normal startup")
-        return {"status": status}
-    state = record.get("state", {})
-    saved = state.get("map", {})
-    # v5.22: never let a stale checkpoint clobber a healthy primary save.
-    # The checkpoint shadows the file it was written alongside; if that
-    # file parses cleanly, it is the freshest authority — skip the restore.
-    primary_name = state.get("current_map") or DEFAULT_SAVE
-    if _primary_save_healthy(primary_name):
-        _recovery_store.record_event("CHECKPOINT_SKIPPED", reason="PRIMARY_HEALTHY",
-                                     checkpoint_id=record.get("id"))
-        print("[recovery] primary save healthy; checkpoint not needed")
-        return {"status": "PRIMARY_HEALTHY"}
-    if saved.get("width") != world.width or saved.get("height") != world.height:
-        _recovery_store.record_event("STATE_RESTORE_SKIPPED", reason="DIMENSION_MISMATCH", checkpoint_id=record.get("id"))
-        print("[recovery] checkpoint verified but dimensions differ; normal startup")
-        return {"status": "DIMENSION_MISMATCH"}
+def _recovery_evidence_paths():
+    """Heartbeat / dirty-flag / clean-marker paths inside .crumbs_recovery/."""
+    d = os.path.join(SCRIPT_DIR, ".crumbs_recovery")
+    return {"heartbeat": os.path.join(d, HEARTBEAT_NAME or "heartbeat.json"),
+            "dirty": os.path.join(d, DIRTY_NAME or "dirty.flag"),
+            "clean": os.path.join(d, CLEAN_NAME or "clean.shutdown")}
+
+
+def _heartbeat_loop(stop):
+    """Daemon: prove liveness every few seconds. Dies with suspension/crash,
+    which is exactly the signal the next startup classifies."""
+    paths = _recovery_evidence_paths()
+    while not stop.wait(HEARTBEAT_INTERVAL_S):
+        try:
+            tmp = paths["heartbeat"] + ".tmp"
+            with open(tmp, "w") as fh:
+                fh.write(json.dumps({"ts": time.time(), "pid": os.getpid()}))
+            os.replace(tmp, paths["heartbeat"])
+        except Exception:
+            pass
+
+
+def _install_lifecycle_markers():
+    """Dirty flag + heartbeat + orderly-shutdown marker. Best effort: a
+    failure here must never break startup. Called AFTER _recover_startup()
+    has read the previous run's evidence."""
+    if not _recovery_store:
+        return
     try:
-        tiles, objects, collision = saved["tiles"], saved["objects"], saved["collision"]
-        if not all(isinstance(x, list) for x in (tiles, objects, collision)):
-            raise ValueError("map layers are not lists")
-        world.data = copy.deepcopy(tiles)
-        world.object_layer = copy.deepcopy(objects)
-        world.collision_layer = copy.deepcopy(collision)
-        saved_rules = state.get("rules")
-        if isinstance(saved_rules, dict):
-            rules.clear(); rules.update(copy.deepcopy(saved_rules))
-        saved_name = state.get("current_map")
-        if isinstance(saved_name, str) and saved_name:
-            global _current_map
-            _current_map = saved_name
-        _recovery_store.record_event("STATE_RESTORED", checkpoint_id=record.get("id"), source=record.get("source"))
-        print(f"[recovery] restored verified checkpoint {record.get('id')}")
-        return {"status": "RESTORED", "checkpoint_id": record.get("id")}
+        paths = _recovery_evidence_paths()
+        with open(paths["dirty"], "w") as fh:
+            fh.write(str(os.getpid()))
+        try:
+            os.unlink(paths["clean"])
+        except OSError:
+            pass
+        stop = threading.Event()
+        threading.Thread(target=_heartbeat_loop, args=(stop,), daemon=True).start()
+
+        def _mark_clean():
+            try:
+                with open(paths["clean"], "w") as fh:
+                    fh.write(str(time.time()))
+                os.unlink(paths["dirty"])
+            except OSError:
+                pass
+
+        atexit.register(_mark_clean)
+        import signal as _signal
+
+        def _on_term(signum, frame):
+            _mark_clean()
+            _signal.signal(signum, _signal.SIG_DFL)
+            os.kill(os.getpid(), signum)
+
+        for sig in (_signal.SIGTERM, _signal.SIGINT):
+            try:
+                _signal.signal(sig, _on_term)
+            except (OSError, ValueError):
+                pass
     except Exception as exc:
-        _recovery_store.record_event("STATE_RESTORE_FAILED", checkpoint_id=record.get("id"), error=str(exc)[:300])
-        print(f"[recovery] restore failed: {exc}; normal startup")
-        return {"status": "RESTORE_FAILED"}
+        print(f"[recovery] lifecycle markers unavailable: {exc}")
+
+
+def _primary_state(name):
+    """healthy | corrupt | missing — for classification and risk assessment."""
+    name = _safe_name(name) or DEFAULT_SAVE
+    if not name.endswith(".json"):
+        name += ".json"
+    if not os.path.isfile(os.path.join(SCRIPT_DIR, name)):
+        return "missing"
+    return "healthy" if _primary_save_healthy(name) else "corrupt"
+
+
+def _checkpoint_slot(checkpoint_id):
+    """Which slot (0=newest) holds this checkpoint id, or None. Read-only."""
+    if not checkpoint_id or not _recovery_store:
+        return None
+    try:
+        for s in _recovery_store.slot_info():
+            rec = s.get("record") or {}
+            if rec.get("id") == checkpoint_id:
+                return s["slot"]
+    except Exception:
+        pass
+    return None
+
+
+def _recover_startup():
+    """Phase 3B startup: CLASSIFY the last interruption, ASSESS risk, ACT only
+    as permitted, VERIFY the result, RECORD a RECOVERY_REPORT. Disk is never
+    written except the journal and the last-report snapshot."""
+    if not _recovery or classify_interruption is None:
+        print("[recovery] startup: recovery core unavailable; normal startup")
+        return {"status": "RECOVERY_UNAVAILABLE", "risk": "CRITICAL"}
+
+    # 1. Newest verified checkpoint (existing behavior; journal events kept).
+    record, status = _recovery.startup()
+    state = record.get("state", {}) if record else {}
+    saved = state.get("map", {}) if record else {}
+
+    # 2. Evidence: primary-save state for the file this checkpoint shadows.
+    primary_name = (state.get("current_map") or DEFAULT_SAVE) if record else DEFAULT_SAVE
+    pstate = _primary_state(primary_name)
+
+    # 3. Classify the previous run's end from heartbeat/shutdown evidence.
+    interruption = classify_interruption(_recovery_store, dependencies_ok=True,
+                                         primary_state=pstate)
+
+    # 4. Checkpoint finding: which slot won, if any.
+    cid, slot, finding = None, None, "NONE"
+    if record is not None:
+        cid = record.get("id")
+        slot = _checkpoint_slot(cid)
+        finding = "FALLBACK" if (slot or 0) > 0 else "PASS"
+
+    # 5. Recent history: repeated failures may only RAISE risk, never lower it.
+    recent = count_recent_outcomes(_recovery_store)
+    failures = recent.get("RECOVERY_FAILED", 0) + recent.get(RECOVERY_UNSAFE, 0)
+    paths = _recovery_evidence_paths()
+    prior_known = (os.path.isfile(paths["dirty"]) or os.path.isfile(paths["clean"])
+                   or os.path.isfile(paths["heartbeat"]) or finding != "NONE")
+
+    # 6. Risk -> permitted actions. Risk decides what is ALLOWED, not just reported.
+    dim_mismatch = bool(record) and (saved.get("width") != world.width
+                                     or saved.get("height") != world.height)
+    risk = assess_risk(interruption=interruption["category"],
+                       checkpoint_finding=finding, primary_state=pstate,
+                       recent_failures=failures, prior_state_known=prior_known)
+    permitted = risk["permitted"]
+
+    # 7. Decide the action. Safety invariants hold regardless of risk level:
+    #    a healthy primary is never clobbered; a dimension-mismatched
+    #    checkpoint is never forced into the world.
+    action, detail, restore_error = "NONE", {}, None
+    if "WITHHOLD_ACTION" in permitted:
+        action = "WITHHELD"
+        detail = {"reason": risk["reason"]}
+        print(f"[recovery] action withheld at risk {risk['level']}: {risk['reason']}")
+    elif pstate == "healthy":
+        detail = {"reason": "PRIMARY_HEALTHY"}
+        print("[recovery] primary save healthy; checkpoint not needed")
+    elif finding == "NONE":
+        detail = {"reason": "NO_CHECKPOINT"}
+        print(f"[recovery] startup: {status}; normal startup")
+    elif dim_mismatch:
+        action = "WITHHELD"
+        detail = {"reason": "DIMENSION_MISMATCH"}
+        _recovery_store.record_event("STATE_RESTORE_SKIPPED", reason="DIMENSION_MISMATCH",
+                                     checkpoint_id=cid)
+        print("[recovery] checkpoint verified but dimensions differ; restore withheld")
+    elif "RESTORE_VERIFIED_CHECKPOINT" in permitted and record is not None:
+        try:
+            tiles, objects, collision = saved["tiles"], saved["objects"], saved["collision"]
+            if not all(isinstance(x, list) for x in (tiles, objects, collision)):
+                raise ValueError("map layers are not lists")
+            world.data = copy.deepcopy(tiles)
+            world.object_layer = copy.deepcopy(objects)
+            world.collision_layer = copy.deepcopy(collision)
+            saved_rules = state.get("rules")
+            if isinstance(saved_rules, dict):
+                rules.clear()
+                rules.update(copy.deepcopy(saved_rules))
+            saved_name = state.get("current_map")
+            if isinstance(saved_name, str) and saved_name:
+                global _current_map
+                _current_map = saved_name
+            action = "RESTORED"
+            detail = {"checkpoint_id": cid, "slot": slot}
+            _recovery_store.record_event("STATE_RESTORED", checkpoint_id=cid,
+                                         source=record.get("source"))
+            print(f"[recovery] restored verified checkpoint {cid}")
+        except Exception as exc:
+            restore_error = str(exc)[:300]
+            _recovery_store.record_event("STATE_RESTORE_FAILED", checkpoint_id=cid,
+                                         error=restore_error)
+            print(f"[recovery] restore failed: {exc}; normal startup")
+    else:
+        action = "WITHHELD"
+        detail = {"reason": "NOT_PERMITTED_AT_RISK_" + risk["level"]}
+        print(f"[recovery] restore not permitted at risk {risk['level']}; withheld")
+
+    # 8. Intervention notices get louder with risk; failures keep their evidence.
+    if risk["level"] in ("HIGH", "CRITICAL"):
+        _recovery_store.record_event("INTERVENTION_NOTICE", level=risk["level"],
+                                     reason=risk["reason"], checkpoint_id=cid)
+
+    # 9. Independent verification chain over the result.
+    chain = run_verification_chain(
+        checkpoint_ok=bool(record) and status == "PASS",
+        state=state if record else None,
+        expected_dims=(world.width, world.height))
+    outcome = decide_outcome(action=action, fallback=(slot or 0) > 0,
+                             checks_ok=chain["all_ok"],
+                             error=restore_error)
+
+    # 10. The evidence trail: one RECOVERY_REPORT answers what happened, what
+    #     was done, why it was permitted, what was preserved, and whether it
+    #     worked. Failure evidence is preserved, never deleted.
+    report = {
+        "report_version": 1,
+        "ts": time.time(),
+        "interruption": interruption,
+        "checkpoint": {"finding": finding, "slot": slot, "id": cid},
+        "primary": {"name": primary_name, "state": pstate},
+        "risk": risk,
+        "action": action,
+        "action_detail": detail,
+        "verification": {"steps": chain["steps"], "outcome": outcome},
+    }
+    try:
+        _recovery_store.record_event("RECOVERY_REPORT", report=report)
+        _recovery_store.write_report(report)
+    except Exception as exc:
+        print(f"[recovery] could not record report: {exc}")
+    print(f"[recovery] startup: action={action} risk={risk['level']} outcome={outcome}")
+    return {"status": action if action != "WITHHELD" else detail.get("reason", "WITHHELD"),
+            "report": report}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -2616,6 +2816,16 @@ class Handler(BaseHTTPRequestHandler):
     def handle_one_request(self):
         # v1.4: a phone browser often hangs up mid-write (iOS froze the server,
         # user reloaded, etc.). Swallow the dead-socket noise, keep serving.
+        # v5.22.1: Phase 3B — the first served request resolves the
+        # SERVER_RESPONDS verification step. Recorded once per process.
+        global _server_served_first_request
+        if not _server_served_first_request:
+            _server_served_first_request = True
+            try:
+                if _recovery_store is not None:
+                    _recovery_store.record_event("SERVER_RESPONDS")
+            except Exception:
+                pass
         try:
             super().handle_one_request()
         except (BrokenPipeError, ConnectionResetError):
@@ -4820,6 +5030,7 @@ def _lan_ip():
 if __name__ == "__main__":
     args = sys.argv[1:]
     _recover_startup()
+    _install_lifecycle_markers()  # Phase 3B: AFTER startup read the old evidence
     public = "--public" in args  # v1.9: serve the Wi-Fi network
     share_key = (os.environ.get("CRUMBS_SHARE_KEY") or "").strip()
     for a in args:

@@ -742,6 +742,9 @@
   <div class="grab"></div>
   <div class="tray-head">Recovery <button id="btn-recovery-refresh" class="ghost">Refresh</button></div>
   <div id="recovery-summary" class="tray-hint"></div>
+  <div id="recovery-state"></div>
+  <div id="recovery-intervention" style="display:none"></div>
+  <div id="recovery-report"></div>
   <div id="recovery-slots"></div>
   <div class="tray-head" style="margin-top:10px">Recent events</div>
   <div id="recovery-events"></div>
@@ -4315,6 +4318,54 @@ async function renderRecovery() {
     const newest = m.slots.length && m.slots[0].record;
     sum.textContent = ok + " of " + m.slots.length + " checkpoint slots verified" +
       (newest ? " \u00b7 newest " + fmtTs(newest.created_at) : "");
+    // Phase 3B: state block, report, intervention panel.
+    const rpt = m.report || null;
+    const rLevel = rpt && rpt.risk ? rpt.risk.level : "\u2014";
+    const rOutcome = rpt && rpt.verification ? rpt.verification.outcome : "\u2014";
+    const rAction = rpt ? rpt.action : "\u2014";
+    const ck = rpt && rpt.checkpoint;
+    const ckTxt = ck && ck.finding !== "NONE"
+      ? ck.finding + (ck.slot != null ? " \u00b7 slot " + ck.slot : "")
+      : "none";
+    const lvlBadge = rLevel === "LOW" ? "ok" : (rLevel === "MEDIUM" ? "empty" : "bad");
+    $("recovery-state").innerHTML =
+      `<div class="recrow"><span class="recname">SERVER</span><small>${m.server_serving ? "HEALTHY \u00b7 serving" : "HEALTHY \u00b7 starting"}</small></div>` +
+      `<div class="recrow"><span class="recname">CHECKPOINT</span><small>${escHtml(ckTxt)}</small></div>` +
+      `<div class="recrow"><span class="recname">LAST SAVE</span><small>${m.last_save ? escHtml(fmtTs(m.last_save)) : "never"}</small></div>` +
+      `<div class="recrow"><span class="recname">RECOVERY</span><small>${escHtml(rAction)}</small></div>` +
+      `<div class="recrow"><span class="recbadge ${lvlBadge}">${escHtml(rLevel)}</span><span class="recname">RISK</span></div>`;
+    const iv = $("recovery-intervention");
+    const needIv = rpt && (rLevel === "HIGH" || rLevel === "CRITICAL" ||
+      rOutcome === "RECOVERY_UNSAFE" || rOutcome === "RECOVERY_FAILED");
+    if (needIv) {
+      const reason = (rpt.risk && rpt.risk.reason) || rOutcome;
+      iv.style.display = "";
+      iv.innerHTML = `<div class="recrow"><span class="recbadge bad">\u26a0</span>` +
+        `<span class="recname">INTERVENTION REQUIRED</span></div>` +
+        `<small>Recovery action withheld. Known-good state preserved.<br>Reason: ${escHtml(reason)}</small>`;
+    } else { iv.style.display = "none"; iv.innerHTML = ""; }
+    const rp = $("recovery-report");
+    if (!rpt) {
+      rp.innerHTML = "<small>no recovery report yet (this startup predates Phase 3B)</small>";
+    } else {
+      const cause = rpt.interruption ? rpt.interruption.category : "\u2014";
+      const why = rpt.risk ? rpt.risk.reason : "";
+      const det = rpt.action_detail && rpt.action_detail.reason ? rpt.action_detail.reason : "";
+      const steps = (rpt.verification && rpt.verification.steps) || [];
+      const oBadge = rOutcome === "RECOVERY_SUCCESS" ? "ok" :
+        (rOutcome === "RECOVERY_PARTIAL" ? "empty" : "bad");
+      let html = `<div class="recrow"><span class="recname">CAUSE</span><small>${escHtml(cause)}</small></div>` +
+        `<div class="recrow"><span class="recname">ACTION</span><small>${escHtml(rAction)}${det ? " \u00b7 " + escHtml(det) : ""}</small></div>` +
+        `<div class="recrow"><span class="recname">PERMITTED BY</span><small>risk ${escHtml(rLevel)} \u00b7 ${escHtml(why)}</small></div>` +
+        `<div class="recrow"><span class="recbadge ${oBadge}">${escHtml(rOutcome)}</span><span class="recname">OUTCOME</span></div>`;
+      steps.forEach(s => {
+        const b = s.status === "pass" ? "ok" : (s.status === "pending" ? "empty" : "bad");
+        html += `<div class="recrow"><span class="recbadge ${b}">${escHtml(s.status.toUpperCase())}</span>` +
+          `<span class="recname">${escHtml(s.name)}</span>` +
+          (s.detail ? `<small>${escHtml(s.detail)}</small>` : "") + `</div>`;
+      });
+      rp.innerHTML = html;
+    }
     m.slots.forEach(s => {
       const d = document.createElement("div");
       d.className = "recrow";

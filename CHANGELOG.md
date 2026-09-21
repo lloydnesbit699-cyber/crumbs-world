@@ -3,6 +3,29 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.21.6 — 2026-09-21
+
+The `itemCells` ReferenceError is finally dead — root cause found and fixed.
+Verified on desktop/server; not yet run on Lloyd's iPhone.
+
+- **Root cause:** since v5.13, the entire gear section (items, NPCs, pack,
+  shop, mission HUD) was accidentally defined *inside* `init()`'s try block,
+  but `render()`/`renderBase()`, `refreshAll()`, `playTap()`, `natureTick()`,
+  `doStep()` and `playEvents()` are global and call into it. Every render
+  threw `ReferenceError: Can't find variable: itemCells`, and every D-pad
+  step / NPC shop event / mission-HUD sync threw its own sibling error
+  (`itemById`, `npcsReal`, `loadItems`, `loadNpcs`, `syncMissionHud`,
+  `syncInv`, `openShop`). The map still painted because the throw happened
+  after the tiles were drawn — so it looked like "just" log spam.
+- **Fix:** the whole gear + mission-HUD block (state and 19 functions) moved
+  to top level, above `init()`; `missionDanger` hoisted with it. No
+  behavior change besides the errors going away — gear items and NPC folks
+  now actually draw on the map, and file-switch reloads, D-pad mission
+  sync, and shop events call real functions instead of throwing.
+- Verified with an AST scope audit (no global function references an
+  init-scoped name anymore) plus the usual syntax, server, and endpoint
+  smoke tests.
+
 ## v5.21.5 — 2026-09-21
 
 Freezer-proof updater. Verified on desktop/server; not yet run on Lloyd's

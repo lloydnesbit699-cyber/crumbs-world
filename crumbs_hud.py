@@ -2824,6 +2824,13 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if _recovery_store is not None:
                     _recovery_store.record_event("SERVER_RESPONDS")
+                    # Phase 3B audit fix: converge the persisted report with the
+                    # journal truth. Reporting only; a failure here is logged
+                    # and never interrupts serving.
+                    try:
+                        _recovery_store.resolve_server_responds()
+                    except Exception as exc:
+                        print(f"[recovery] report persistence failed (non-fatal): {exc}")
             except Exception:
                 pass
         try:

@@ -304,6 +304,34 @@ class CheckpointStore:
         except (OSError, ValueError):
             return None
 
+    def resolve_server_responds(self) -> bool:
+        """Flip the persisted report's SERVER_RESPONDS step pending -> pass.
+
+        Reporting only: touches last_report.json and nothing else — no world
+        state, no checkpoint, no recovery action, no risk change. Idempotent:
+        only a step still marked pending transitions. Never raises: a
+        persistence failure must be logged by the caller, never fatal.
+        Returns True when a transition was persisted."""
+        try:
+            report = self.read_report()
+            if not isinstance(report, dict):
+                return False
+            steps = (report.get("verification") or {}).get("steps") or []
+            changed = False
+            for s in steps:
+                if (isinstance(s, dict) and s.get("name") == STEP_SERVER_RESPONDS
+                        and s.get("status") == "pending"):
+                    s["status"] = "pass"
+                    s["detail"] = "first request served"
+                    changed = True
+            if not changed:
+                return False
+            with self._locked():
+                self._atomic_write(self.report_path, _canonical_json(report) + b"\n")
+            return True
+        except Exception:
+            return False
+
     # ------------------------------------------------------------------
     # journal
     # ------------------------------------------------------------------

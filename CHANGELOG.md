@@ -3,6 +3,14 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.22.7 — 2026-09-21
+
+Client-side fallback for the version placeholder: a new editor.html
+served by a not-yet-restarted older server leaked the raw
+%%CRUMBS_VERSION%% onto the banner/splash (seen on Lloyd's phone). The
+quiet update check now patches it from the running server's version.
+Verified on desktop/server; not yet run on Lloyd's iPhone.
+
 ## v5.22.6 — 2026-09-21
 
 The banner/splash version was hardcoded as v5.21.11 in editor.html and

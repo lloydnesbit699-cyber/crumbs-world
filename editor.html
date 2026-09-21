@@ -4958,10 +4958,22 @@ $("pack-btn").onclick = () => { toggleOverlay("sheet-pack"); syncInv(); };
     // v5.21.8: also re-checks hourly while the page is open, so updates
     // "push" themselves to you instead of waiting for a manual check.
     let _lastNotifiedVer = null;
+    // v5.22.7: fallback — a new editor.html served by an older server
+    // (pulled but not restarted yet) leaks the raw %%CRUMBS_VERSION%%
+    // placeholder onto the banner/splash. Patch it client-side from the
+    // check's "current" — the running server's version, which is honest.
+    function patchVersionPlaceholder(ver) {
+      if (!ver) return;
+      document.querySelectorAll("#title small, .splash-sub").forEach(el => {
+        if (el.textContent.includes("%%CRUMBS_VERSION%%"))
+          el.textContent = el.textContent.replace(/%%CRUMBS_VERSION%%/g, ver);
+      });
+    }
     async function quietUpdateCheck() {
       try {
         const r = await api("/api/update/check");
         syncRollback(r);
+        if (r && r.ok) patchVersionPlaceholder(r.current);
         if (r && r.ok && r.available && r.latest !== _lastNotifiedVer) {
           _lastNotifiedVer = r.latest;
           const isRepair = r.repair && r.missing_files && r.missing_files.length;

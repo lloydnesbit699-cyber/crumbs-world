@@ -122,6 +122,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 import crumbs_core as core
+try:
+    from crumbs_recovery import CheckpointStore, RecoverySupervisor
+except ImportError:
+    CheckpointStore = None
+    RecoverySupervisor = None
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
 APP_VERSION = "5.21.15"
@@ -299,6 +304,10 @@ SCHEMA_VERSION = 1  # v5.16: stamped on every save; migrations run on load
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 HTML_PATH = os.path.join(SCRIPT_DIR, "editor.html")
 DEFAULT_SAVE = "hud_map.json"
+
+# Phase 2A: persistent recovery lives beside the project, independent of the process.
+_recovery_store = CheckpointStore(SCRIPT_DIR) if CheckpointStore else None
+_recovery = RecoverySupervisor(_recovery_store) if _recovery_store else None
 LAYERS = ("tiles", "objects", "collision")
 PUBLIC_MODE = False
 PUBLIC_WRITE_KEY = ""
@@ -2207,6 +2216,7 @@ def _save_now(name=DEFAULT_SAVE):
         _save_state["dirty"] = False
         _save_state["last"] = time.strftime("%H:%M:%S")
         _save_rules(name)  # v3.7: rules ride alongside the map
+        _checkpoint_save()  # v5.21.x: checkpoint rides alongside the save
         return True
     return False
 
@@ -2491,6 +2501,59 @@ def _map_state():
     return {"width": world.width, "height": world.height,
             "tiles": world.data, "objects": world.object_layer,
             "collision": world.collision_layer}
+
+
+def _recovery_snapshot():
+    return {"map": _map_state(), "rules": copy.deepcopy(rules), "current_map": _current_map}
+
+
+def _checkpoint_save():
+    """Write a verified checkpoint after a successful save. Never breaks the save."""
+    if not _recovery:
+        return
+    try:
+        rec = _recovery_store.checkpoint(_recovery_snapshot(), label="save", source="crumbs_hud")
+        _recovery.healthy(rec.get("id"))
+    except Exception as exc:
+        _recovery_store.record_event("CHECKPOINT_WRITE_FAILED", error=str(exc)[:300])
+        print(f"[recovery] checkpoint write failed: {exc}")
+
+
+def _recover_startup():
+    """Verify and restore a checkpoint into memory only; disk stays untouched."""
+    if not _recovery:
+        return {"status": "RECOVERY_UNAVAILABLE"}
+    record, status = _recovery.startup()
+    if record is None:
+        print(f"[recovery] startup: {status}; normal startup")
+        return {"status": status}
+    state = record.get("state", {})
+    saved = state.get("map", {})
+    if saved.get("width") != world.width or saved.get("height") != world.height:
+        _recovery_store.record_event("STATE_RESTORE_SKIPPED", reason="DIMENSION_MISMATCH", checkpoint_id=record.get("id"))
+        print("[recovery] checkpoint verified but dimensions differ; normal startup")
+        return {"status": "DIMENSION_MISMATCH"}
+    try:
+        tiles, objects, collision = saved["tiles"], saved["objects"], saved["collision"]
+        if not all(isinstance(x, list) for x in (tiles, objects, collision)):
+            raise ValueError("map layers are not lists")
+        world.data = copy.deepcopy(tiles)
+        world.object_layer = copy.deepcopy(objects)
+        world.collision_layer = copy.deepcopy(collision)
+        saved_rules = state.get("rules")
+        if isinstance(saved_rules, dict):
+            rules.clear(); rules.update(copy.deepcopy(saved_rules))
+        saved_name = state.get("current_map")
+        if isinstance(saved_name, str) and saved_name:
+            global _current_map
+            _current_map = saved_name
+        _recovery_store.record_event("STATE_RESTORED", checkpoint_id=record.get("id"), source=record.get("source"))
+        print(f"[recovery] restored verified checkpoint {record.get('id')}")
+        return {"status": "RESTORED", "checkpoint_id": record.get("id")}
+    except Exception as exc:
+        _recovery_store.record_event("STATE_RESTORE_FAILED", checkpoint_id=record.get("id"), error=str(exc)[:300])
+        print(f"[recovery] restore failed: {exc}; normal startup")
+        return {"status": "RESTORE_FAILED"}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -4148,6 +4211,7 @@ class Handler(BaseHTTPRequestHandler):
             if ok:
                 _save_rules(name)  # v3.7
                 _save_missions(name)  # v5.12: Melody's missions ride along
+                _checkpoint_save()  # v5.21.x: checkpoint rides alongside the save
                 _log_event(f"saved {name}")
             return self._send_json({"ok": ok, "file": name})
 
@@ -4701,6 +4765,7 @@ def _lan_ip():
 
 if __name__ == "__main__":
     args = sys.argv[1:]
+    _recover_startup()
     public = "--public" in args  # v1.9: serve the Wi-Fi network
     share_key = (os.environ.get("CRUMBS_SHARE_KEY") or "").strip()
     for a in args:

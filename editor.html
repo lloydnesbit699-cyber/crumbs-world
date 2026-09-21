@@ -3422,8 +3422,7 @@ function sheetCur() { return sheetFiles[sheetTab]; }
 function bestSheetCell(img) {
   const span = Math.min(img.naturalWidth || 0, img.naturalHeight || 0);
   if (span >= 16) return 16;
-  if (span >= 8) return 8;
-  return Math.max(1, span || 1);
+  return 8;
 }
 function resliceSheet(f) {
   f.grid = sliceSheetCells(f.img, f.cell);

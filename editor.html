@@ -33,7 +33,14 @@
             background: #1a1a1a; border-bottom: 1px solid #333;
             display: flex; align-items: center; gap: 8px; padding: 0 8px;
             padding-top: env(safe-area-inset-top); }
-  #menu-btn { font-size: 20px; padding: 4px 12px; min-height: 0; line-height: 1.4; }
+  /* v5.20: Windows-style menu bar — File Edit View Build Play Setup.
+     Scrolls sideways on narrow phones so the title and undo stay put. */
+  #menubar { display: flex; overflow-x: auto; flex: 0 1 auto; scrollbar-width: none; }
+  #menubar::-webkit-scrollbar { display: none; }
+  .mtop { background: none; border: none; color: #eee; font-size: 14px;
+          padding: 10px 11px; min-height: 0; line-height: 1.2; white-space: nowrap; }
+  .mtop:active, .mtop.open { background: #333; border-radius: 8px; }
+  #title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #title { font-size: 15px; font-weight: 600; }
   #title small { color: #888; font-weight: normal; font-size: 11px; }
   /* v5.0: undo/redo live on the top bar — thumb-sized, always in reach */
@@ -41,18 +48,18 @@
   #topbar-undo button { font-size: 22px; padding: 6px 14px; min-height: 40px;
                         min-width: 52px; line-height: 1; }
 
-  #menu-dropdown { position: fixed; top: 52px; right: 8px; z-index: 60; background: #222;
+  .menu-drop { position: fixed; top: 52px; left: 8px; z-index: 60; background: #222;
                    border: 1px solid #444; border-radius: 12px; padding: 6px;
                    display: none; min-width: 210px;
                    max-height: calc(100dvh - 64px); overflow-y: auto;
                    overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
                    box-shadow: 0 8px 24px rgba(0,0,0,.5); }
-  #menu-dropdown.open { display: block; }
-  #menu-dropdown button { display: block; width: 100%; text-align: left; border: none;
+  .menu-drop.open { display: block; }
+  .menu-drop button { display: block; width: 100%; text-align: left; border: none;
                          background: none; margin: 2px 0; min-height: 44px; }
-  #menu-dropdown button:active { background: #333; }
-  #menu-dropdown #btn-stop { color: #ff8a8a; }
-  #menu-dropdown hr { border: none; border-top: 1px solid #333; margin: 6px 0; }
+  .menu-drop button:active { background: #333; }
+  .menu-drop #btn-stop { color: #ff8a8a; }
+  .menu-drop hr { border: none; border-top: 1px solid #333; margin: 6px 0; }
 
   /* v2.2: the map is positioned with a transform, not scroll — panning works
      identically at every zoom level, no browser scroll quirks */
@@ -395,7 +402,7 @@
          white-space: pre-wrap; word-break: break-word; display: none; }
   @media (max-width: 520px) {
     button, select, input { font-size: 15px; padding: 8px 10px; min-height: 40px; }
-    #menu-dropdown button { min-height: 44px; }
+    .menu-drop button { min-height: 44px; }
   }
   /* v3.1: theme selector */
   #theme-row { margin: 4px 0 6px; }
@@ -416,44 +423,63 @@
 <body>
 
 <div id="topbar">
-  <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v5.19</small></span>
+  <div id="menubar">
+    <button class="mtop" data-menu="m-file">File</button>
+    <button class="mtop" data-menu="m-edit">Edit</button>
+    <button class="mtop" data-menu="m-view">View</button>
+    <button class="mtop" data-menu="m-build">Build</button>
+    <button class="mtop" data-menu="m-play">Play</button>
+    <button class="mtop" data-menu="m-setup">Setup</button>
+  </div>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v5.20</small></span>
   <span id="topbar-undo">
     <button id="btn-undo2" title="Undo">&#8617;</button>
     <button id="btn-redo2" title="Redo">&#8618;</button>
   </span>
 </div>
 
-<div id="menu-dropdown">
-  <button id="btn-play" title="Walk the map">&#9654; Play</button>
-  <button id="btn-record" title="Record the screen as a video">&#9679; Record</button>
+<div id="m-file" class="menu-drop">
+  <button id="menu-new" title="Archive this map and start a fresh blank one">New map&hellip;</button>
+  <button id="menu-save">Save</button>
+  <button id="menu-saveas">Save As&hellip;</button>
+  <button id="menu-load">Load&hellip;</button>
+  <button id="menu-slots" title="Save and load play sessions">Save slots&hellip;</button>
+  <button id="menu-export" title="Download this map as a PNG picture">Export PNG</button>
+  <hr>
+  <button id="menu-update" title="Pull the latest app files over this install">&#128260; Check for updates</button>
+  <button id="btn-restart" title="Restart the HUD server">Restart server</button>
+  <button id="btn-stop" class="danger" title="Stop the HUD server">Stop server</button>
+</div>
+<div id="m-edit" class="menu-drop">
+  <button id="btn-undo" title="Undo">Undo</button>
+  <button id="btn-redo" title="Redo">Redo</button>
+</div>
+<div id="m-view" class="menu-drop">
+  <button id="btn-light" title="Fog/lighting overlay in play mode">Lighting: on</button>
+  <button id="menu-dpad" title="Show or hide the on-screen controls">D-pad: on</button>
+  <button id="menu-clean" title="Hide every play button for a clean screen">Hide buttons</button>
+  <hr>
+  <button id="menu-collide" title="Show walls over the map while painting">Walls: off</button>
+  <button id="menu-height" title="Tint the map by elevation">&#9978; Height: off</button>
+  <button id="menu-sight" title="Dim what the hero can't see (play mode)">&#128065; Sight: off</button>
+</div>
+<div id="m-build" class="menu-drop">
   <button id="menu-rules" title="Game rules for this build">Rules&hellip;</button>
   <button id="menu-world" title="This world's nature: meters and traits">World&hellip;</button>
   <button id="menu-melody" title="Melody's workshop: missions, goals & playtests">&#128156; Melody&hellip;</button>
   <button id="menu-items" title="Weapons, tools and things to carry">&#127890; Items&hellip;</button>
   <button id="menu-npcs" title="Villagers and merchants">&#129489; Folks&hellip;</button>
-  <button id="btn-light" title="Fog/lighting overlay in play mode">Lighting: on</button>
-  <button id="menu-dpad" title="Show or hide the on-screen controls">D-pad: on</button>
-  <button id="menu-clean" title="Hide every play button for a clean screen">Hide buttons</button>
-  <button id="btn-undo" title="Undo">Undo</button>
-  <button id="btn-redo" title="Redo">Redo</button>
   <hr>
-  <button id="menu-setup">Setup&hellip;</button>
-  <button id="menu-save">Save</button>
-  <button id="menu-saveas">Save As&hellip;</button>
-  <button id="menu-load">Load&hellip;</button>
-  <button id="menu-export" title="Download this map as a PNG picture">Export PNG</button>
-  <button id="menu-key" title="Set the share key for a public HUD">Key&hellip;</button>
-  <button id="menu-slots" title="Save and load play sessions">Save slots&hellip;</button>
   <button id="menu-validate" title="Check the map: spawn, reachability, tile ids">Check map</button>
-  <button id="menu-collide" title="Show walls over the map while painting">Walls: off</button>
-  <button id="menu-height" title="Tint the map by elevation">&#9978; Height: off</button>
-  <button id="menu-sight" title="Dim what the hero can't see (play mode)">&#128065; Sight: off</button>
+</div>
+<div id="m-play" class="menu-drop">
+  <button id="btn-play" title="Walk the map">&#9654; Play</button>
+  <button id="btn-record" title="Record the screen as a video">&#9679; Record</button>
+</div>
+<div id="m-setup" class="menu-drop">
+  <button id="menu-setup">Setup&hellip;</button>
+  <button id="menu-key" title="Set the share key for a public HUD">Key&hellip;</button>
   <button id="menu-log" title="Server event log (debugging)">Server log</button>
-  <button id="menu-update" title="Pull the latest app files over this install">&#128260; Check for updates</button>
-  <hr>
-  <button id="btn-restart" title="Restart the HUD server">Restart server</button>
-  <button id="btn-stop" class="danger" title="Stop the HUD server">Stop server</button>
 </div>
 
 <div id="stage"><canvas id="grid"></canvas></div>
@@ -704,7 +730,7 @@
 
 <div id="splash">
   <div class="splash-title">Crumbs HUD</div>
-  <div class="splash-sub">tile painter &middot; v5.19</div>
+  <div class="splash-sub">tile painter &middot; v5.20</div>
   <div class="load-bar"><i id="splash-fill"></i></div>
   <div class="load-label" id="splash-label">Waking the server&hellip;</div>
 </div>
@@ -3752,7 +3778,7 @@ $("btn-link").onclick = () => {
 
 // ---- v2.0 trays & dropdown menu ------------------------------------------------
 function closeOverlays() {
-  document.querySelectorAll(".tray.open, .sheet.open, #menu-dropdown.open")
+  document.querySelectorAll(".tray.open, .sheet.open, .menu-drop.open, .mtop.open")
     .forEach(el => el.classList.remove("open"));
   $("scrim").classList.remove("on");
 }
@@ -3762,7 +3788,14 @@ function toggleOverlay(id) {
   closeOverlays();
   if (!wasOpen) { el.classList.add("open"); $("scrim").classList.add("on"); }
 }
-$("menu-btn").onclick = () => toggleOverlay("menu-dropdown");
+// v5.20: Windows-style menu bar — each top label toggles its own dropdown
+document.querySelectorAll(".mtop").forEach(b => {
+  b.onclick = () => {
+    const wasOpen = $(b.dataset.menu).classList.contains("open");
+    toggleOverlay(b.dataset.menu);
+    b.classList.toggle("open", !wasOpen);
+  };
+});
 $("tab-left").onclick = () => toggleOverlay("tray-left");
 $("tab-right").onclick = () => toggleOverlay("tray-right");
 $("scrim").onclick = closeOverlays;
@@ -3781,6 +3814,18 @@ sfxPaintUI();
 Sfx.syncAmb();   // restore wind if it was on
 $("menu-save").onclick = () => { closeOverlays(); doSave(); };
 $("menu-saveas").onclick = () => { closeOverlays(); doSaveAs(); };
+// v5.20: reset map — the server archives the current build to .backup first,
+// so Load can always bring it back
+$("menu-new").onclick = async () => {
+  if (!confirm("Start a new map? The current one is archived first — Load can bring it back.")) return;
+  closeOverlays();
+  const r = await api("/api/newmap", {});
+  if (r.ok) {
+    await refresh(); await loadTraits(); await loadWorld(); await loadNatural();
+    buildPalette();
+    toast("fresh blank map — old build archived");
+  } else { toast("reset failed"); Sfx.error(); }
+};
 $("menu-load").onclick = () => { toggleOverlay("sheet-load"); renderLoadList(); };
 // ---- v5.6: MVP finish — export, slots, validate, collision overlay, server log
 $("menu-export").onclick = () => {
@@ -4001,10 +4046,13 @@ $("btn-log-refresh").onclick = renderLog;
 // dismiss the menu after any of its action buttons fire — but never while a
 // sheet it just opened is still being read (v4.9: Rules/World were flashing
 // open then getting closed 60ms later by this very timer)
-$("menu-dropdown").addEventListener("click", e => {
+// v5.20: same dismiss behavior across all six menu-bar dropdowns
+document.querySelectorAll(".menu-drop").forEach(dd => {
+dd.addEventListener("click", e => {
   const b = e.target.closest("button");
   if (b && !["menu-setup", "menu-save", "menu-saveas", "menu-load",
              "menu-rules", "menu-world", "menu-slots", "menu-log"].includes(b.id)) setTimeout(closeOverlays, 60);
+});
 });
 
 // ---- v2.0: catch unsaved work before the tab closes ---------------------------

@@ -123,7 +123,7 @@ from urllib.parse import urlparse, parse_qs
 import crumbs_core as core
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.19"
+APP_VERSION = "5.20"
 
 # ---- v5.18: in-app self-update -------------------------------------------------
 # Lloyd's rule: updates overwrite the old files in place — no more downloading a
@@ -3847,6 +3847,33 @@ class Handler(BaseHTTPRequestHandler):
             _log_event(f"generated {biome} (seed {seed})")  # v5.6
             return self._send_json({"ok": True, "biome": biome, "seed": seed,
                                     "rules": rules})
+
+        if path == "/api/newmap":
+            # v5.20: Reset map — archive the current build first (world.save
+            # rotates it to .backup, restorable from Load), then a fresh
+            # blank map takes its place: default rules, nature and names.
+            # One undo step, same as generate.
+            w, h = world.width, world.height
+            def _do():
+                _save_now(_current_map)  # archive -> .backup before wiping
+                world.data = [[0 for _ in range(w)] for _ in range(h)]
+                world.object_layer = [[None for _ in range(w)]
+                                      for _ in range(h)]
+                world.collision_layer = [[False for _ in range(w)]
+                                         for _ in range(h)]
+                rules.clear()
+                rules.update(DEFAULT_RULES)  # v3.7: fresh build, fresh rules
+                world_profile["meters"] = dict(DEFAULT_WORLD["meters"])  # v4.0
+                world_profile["weather"] = DEFAULT_WORLD["weather"]  # v4.1
+                traits_grid[:] = _blank_traits()  # v4.0: fresh nature
+                object_names.clear()  # v5.1: fresh build, no names yet
+                _save_names(_current_map)
+                _save_rules(_current_map)
+                _save_traits(_current_map)
+                _mark_dirty()
+            _undoable("reset map", _do)  # v5.0: whole reset, one step
+            _log_event("map reset to blank")  # v5.6
+            return self._send_json({"ok": True})
 
         if path == "/api/clear_layer":
             layer = body.get("layer", "tiles")

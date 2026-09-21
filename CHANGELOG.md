@@ -3,6 +3,24 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.20 — 2026-09-21
+
+Windows-style menu bar + Reset map. Verified on desktop/server; not yet
+run on Lloyd's iPhone.
+
+- **Menu bar: File Edit View Build Play Setup.** Lloyd's call — the 26
+  items from the old hamburger pile are grouped the way he approved:
+  File holds saves, New map, updates and the server controls; Edit is
+  undo/redo; View holds the display toggles; Build holds rules, world,
+  Melody, items, folks and Check map; Play holds play + record; Setup
+  holds setup, key and the server log. The bar scrolls sideways on
+  narrow phones so the title and thumb undo/redo stay put.
+- **File → New map… (Reset map).** Answers his reset question: Restart
+  never clears the map (it saves dirty work first — that's the point).
+  New map archives the current build to its `.backup` first, then starts
+  a fresh blank map with default rules, nature and names. One undo
+  step, and Load can bring the old build back.
+
 ## v5.19 — 2026-09-21
 
 Restart server button. Verified on desktop/server; not yet run on

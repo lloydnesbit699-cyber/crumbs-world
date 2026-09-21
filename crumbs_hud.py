@@ -143,7 +143,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.22.4"
+APP_VERSION = "5.22.5"
 
 # ---- v5.18: in-app self-update -------------------------------------------------
 # Lloyd's rule: updates overwrite the old files in place — no more downloading a
@@ -5061,6 +5061,22 @@ def _lan_ip():
         return None
 
 
+def _probe_running_hud():
+    """v5.22.5: best-effort — is our own HUD already answering on PORT?
+    Returns a short description, or '' when nothing HUD-like answers.
+    Purely local probes; never touches GitHub."""
+    try:
+        import urllib.request
+        with urllib.request.urlopen(f"http://{HOST}:{PORT}/",
+                                    timeout=2) as r:
+            body = r.read(65536).decode("utf-8", "replace")
+        if "<title>Crumbs HUD" not in body:
+            return "something else (not the HUD)"
+        return "the Crumbs HUD"
+    except Exception:
+        return ""
+
+
 if __name__ == "__main__":
     args = sys.argv[1:]
     _recover_startup()
@@ -5075,7 +5091,25 @@ if __name__ == "__main__":
     PUBLIC_MODE = public
     PUBLIC_WRITE_KEY = share_key if public else ""
     host = "0.0.0.0" if public else HOST
-    srv = ThreadingHTTPServer((host, PORT), Handler)
+    try:
+        srv = ThreadingHTTPServer((host, PORT), Handler)
+    except OSError as e:
+        # v5.22.5: a second launch while the old server still holds the
+        # port used to die with a raw traceback. Say what's actually up.
+        if getattr(e, "errno", None) in (48, 98) or "already in use" in str(e).lower():
+            already = _probe_running_hud()
+            print("=" * 52)
+            print("  That port is already serving — no need to start another one.")
+            if already:
+                print(f"  Already running there: {already}.")
+                print(f"  Just reload this in the browser:  http://{HOST}:{PORT}")
+            else:
+                print("  Something is holding the port but isn't answering like the HUD.")
+            print("  To run this new version instead: stop the old server")
+            print("  (Ctrl-C in its a-Shell tab, or close that tab) and launch again here.")
+            print("=" * 52)
+            sys.exit(2)
+        raise
     threading.Thread(target=_autosave_loop, daemon=True).start()
     print("=" * 52)
     print(f"  Crumbs HUD v{APP_VERSION} — Menu > Check for updates keeps it fresh")

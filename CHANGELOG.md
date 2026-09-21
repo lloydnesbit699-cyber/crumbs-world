@@ -3,6 +3,15 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.22.5 — 2026-09-21
+
+Launching `python3 crumbs_hud.py` while the old server still holds port
+8778 used to die with a raw "Address already in use" traceback. Now it
+probes the port and says what's actually up: the HUD is already running,
+just reload the page — or stop the old server (Ctrl-C in its a-Shell tab)
+to run the new version. Verified on desktop/server; not yet run on
+Lloyd's iPhone.
+
 ## v5.22.4 — 2026-09-21
 
 The share-key prompt and Setup → Key… now trim the entered key. iPhone

@@ -3,6 +3,20 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.21.4 — 2026-09-21
+
+Extension-noise filter + no-stale-page. Verified on desktop/server; not yet
+run on Lloyd's iPhone.
+
+- **Theme-extension errors are silenced.** Dark-mode/theme browser
+  extensions inject scripts into the page and their internal errors
+  (`createThemeAndWatchForUpdates`, `hostsWithOddScrollbars`, `e.copyright`)
+  were flooding the on-page debug panel and the server log. The error
+  reporter now drops them silently — those strings never appear in our code.
+- **`Cache-Control: no-store` on the HUD page.** The server sent no cache
+  headers, so Safari could keep serving a stale editor.html after an
+  update. The page is 180KB over localhost — always fetch it fresh.
+
 ## v5.21.3 — 2026-09-21
 
 Full functionality audit + the sticky server banner. Verified on

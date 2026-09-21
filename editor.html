@@ -889,7 +889,18 @@ const WRITE_KEY = (new URLSearchParams(location.search).get("key") || "").trim()
     dbg.textContent = "JS: " + msg + "\n(tap to hide)";
   }
   dbg.onclick = () => { dbg.style.display = "none"; };
+  // v5.21.4: browser-extension noise filter — dark-mode/theme extensions
+  // inject their own scripts into the page, and their internal errors used
+  // to spam the debug panel and the server log. None of these strings ever
+  // appear in our code, so drop them silently.
+  const EXT_NOISE = ["createThemeAndWatchForUpdates", "hostsWithOddScrollbars",
+    "evaluating 'e.copyright'"];
+  function isExtNoise(msg, stack) {
+    const s = String(msg) + "\n" + String(stack || "");
+    return EXT_NOISE.some(n => s.indexOf(n) !== -1);
+  }
   function report(msg, src, line, col, stack) {
+    if (isExtNoise(msg, stack)) return;   // v5.21.4: extension noise, not ours
     show(String(msg).slice(0, 200) + " @ " + (src || "") + ":" + (line || "?"));
     try {
       const headers = { "Content-Type": "application/json" };

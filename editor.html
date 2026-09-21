@@ -210,6 +210,10 @@
      absolutely positioned inside it; only the visible window is mounted */
   #paint-strip .pack-window { position: relative; flex: 0 0 auto; align-self: stretch; }
   #paint-strip .pack-window .sw { position: absolute; top: 0; }
+  #palette-probe { margin: 4px 2px 0; font-size: 11px; line-height: 1.35;
+    color: #8fbaff; word-break: break-word; }
+  #palette-probe code { color: #ffd75f; background: #171a22; padding: 1px 4px;
+    border-radius: 4px; }
   /* v5.1: the selected one's card */
   #sel-card { display: flex; gap: 10px; align-items: center; background: #16181d;
     border: 1px solid #2c2f36; border-radius: 12px; padding: 10px; margin: 6px 0;
@@ -612,6 +616,7 @@
   <!-- v5.2: search the strip — 6,038 Utumno tiles live here now -->
   <div id="strip-search-row"><input id="strip-search" placeholder="search tiles…"></div>
   <div id="paint-strip"></div>
+  <div id="palette-probe" class="tray-hint"></div>
   <div id="collide-palette">
     <div class="grp-label">collision</div>
     <div class="swatches">
@@ -2900,6 +2905,23 @@ function defaultBrush(l) {
   const th = palette.find(t => biomeOf(t.name) === currentTheme);
   return th ? th.id : (palette.length ? palette[0].id : null);
 }
+function updatePaletteProbe() {
+  const box = $("palette-probe");
+  if (!box) return;
+  if (layer !== "tiles") { box.style.display = "none"; box.innerHTML = ""; return; }
+  const chip = document.querySelector('#paint-strip .sw.sel .chip');
+  const t = palette.find(x => x.id === selTile);
+  if (!chip || !t) { box.style.display = "none"; box.innerHTML = ""; return; }
+  const want = t.color || "(missing)";
+  const data = chip.dataset.color || "(none)";
+  const inline = chip.style.backgroundColor || "(none)";
+  const computed = getComputedStyle(chip).backgroundColor || "(none)";
+  box.style.display = "block";
+  box.innerHTML = 'probe ' + esc(shortName(t.name)) +
+    ': want <code>' + esc(want) + '</code> · data <code>' + esc(data) +
+    '</code> · inline <code>' + esc(inline) + '</code> · css <code>' +
+    esc(computed) + '</code>';
+}
 function buildPalette() {
   colorOf = {};
   palette.forEach(t => colorOf[t.id] = t.color);
@@ -2920,6 +2942,7 @@ function buildPalette() {
   if (layer === "collision") {
     box.style.display = "none";
     $("collide-palette").style.display = "block";
+    updatePaletteProbe();
     return;
   }
   box.style.display = "flex";
@@ -2958,6 +2981,7 @@ function buildPalette() {
     });
     buildCustomTiles();   // v5.1: customs join the same strip
   }
+  requestAnimationFrame(updatePaletteProbe);
 }
 
 // ---- v3.0: custom imported tiles + animator --------------------------------

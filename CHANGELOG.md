@@ -3,6 +3,19 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.21.13 — 2026-09-21
+
+Added a visible palette probe so the phone can report what Safari thinks
+the selected swatch color is. Verified on desktop/server; not yet run on
+Lloyd's iPhone.
+
+- Under the tile palette, the editor now shows the selected swatch's
+  expected hex color, `data-color`, inline `backgroundColor`, and computed
+  CSS color.
+- If the swatch still looks black on iPhone, this readout should tell us
+  whether the color is missing before paint, getting rewritten by CSS, or
+  surviving into computed style while the visual box still renders wrong.
+
 ## v5.21.12 — 2026-09-21
 
 Chased the "palette API is right but the swatch fill turns black" bug on

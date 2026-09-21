@@ -3,6 +3,21 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.21.8 — 2026-09-21
+
+Updates now come to you instead of waiting to be checked. Verified on
+desktop/server; not yet run on Lloyd's iPhone.
+
+- **Lloyd's call:** "instead of pulling we should have it push like most
+  apps get updates." True push (App Store style) needs Apple servers and
+  certs — not possible for a self-hosted app — but the page now
+  re-checks GitHub silently every hour while it's open. When a new build
+  appears you get the gold dot on File + one toast, same as the boot
+  check. No manual Menu → Check needed, no nagging (one notice per
+  version).
+- The quiet boot check was refactored into a reusable function; the
+  hourly timer shares it.
+
 ## v5.21.7 — 2026-09-21
 
 The Build / Play / Setup menus were invisible on Lloyd's phone — not

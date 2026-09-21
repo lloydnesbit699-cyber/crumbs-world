@@ -454,7 +454,7 @@
     <button class="mtop" data-menu="m-play">Play</button>
     <button class="mtop" data-menu="m-setup">Setup</button>
   </div>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v5.21.7</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v5.21.8</small></span>
   <span id="topbar-undo">
     <button id="btn-undo2" title="Undo">&#8617;</button>
     <button id="btn-redo2" title="Redo">&#8618;</button>
@@ -770,7 +770,7 @@
 
 <div id="splash">
   <div class="splash-title">Crumbs HUD</div>
-  <div class="splash-sub">tile painter &middot; v5.21.7</div>
+  <div class="splash-sub">tile painter &middot; v5.21.8</div>
   <div class="load-bar"><i id="splash-fill"></i></div>
   <div class="load-label" id="splash-label">Waking the server&hellip;</div>
 </div>
@@ -4758,11 +4758,15 @@ $("pack-btn").onclick = () => { toggleOverlay("sheet-pack"); syncInv(); };
     splashDone();
     // v5.21: one quiet update check per session — a gold dot on File, one
     // toast, no nagging. Failures (offline, asleep server) stay silent.
-    setTimeout(async () => {
+    // v5.21.8: also re-checks hourly while the page is open, so updates
+    // "push" themselves to you instead of waiting for a manual check.
+    let _lastNotifiedVer = null;
+    async function quietUpdateCheck() {
       try {
         const r = await api("/api/update/check");
         syncRollback(r);
-        if (r && r.ok && r.available) {
+        if (r && r.ok && r.available && r.latest !== _lastNotifiedVer) {
+          _lastNotifiedVer = r.latest;
           const fb = document.querySelector('.mtop[data-menu="m-file"]');
           if (fb && !fb.querySelector(".upd-dot")) {
             fb.insertAdjacentHTML("beforeend", ' <span class="upd-dot" title="v' + escHtml(r.latest) + ' is ready">&#9679;</span>');
@@ -4771,7 +4775,9 @@ $("pack-btn").onclick = () => { toggleOverlay("sheet-pack"); syncInv(); };
           toast("v" + r.latest + " is ready \u2014 File \u2192 Check for updates when you want it");
         }
       } catch (e) { /* stay silent */ }
-    }, 4000);
+    }
+    setTimeout(quietUpdateCheck, 4000);
+    setInterval(quietUpdateCheck, 60 * 60 * 1000);
     if (!localStorage.crumbs_tour) {
       localStorage.crumbs_tour = "1";
       const steps = [

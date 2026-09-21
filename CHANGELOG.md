@@ -3,6 +3,57 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.21.15 — 2026-09-21
+
+Made the sprite-sheet picker less fragile when the imported image is
+smaller than the default 16px cell size. Verified on desktop/server; not
+yet run on Lloyd's iPhone.
+
+- The picker now chooses a smaller starting cell size automatically when a
+  sheet is too short or too narrow for 16px cells, instead of silently
+  producing zero selectable cells.
+- If it has to fall back, the sheet hint says `auto-fit to image` so the
+  phone can tell us that sizing fallback is active.
+
+## v5.21.14 — 2026-09-21
+
+Stopped the sprite-sheet animator from going blank when the editor thinks
+every cell is empty. Verified on desktop/server; not yet run on Lloyd's
+iPhone.
+
+- The sheet picker now auto-shows all cells if non-empty-cell detection
+  finds zero solid cells, instead of leaving the grid empty while asking
+  you to select tiles.
+- The picker hint now says when it's in that fallback mode, so the next
+  debugging pass can tell whether the issue is bad empty-cell detection or
+  something deeper in the import pipeline.
+
+## v5.21.13 — 2026-09-21
+
+Added a visible palette probe so the phone can report what Safari thinks
+the selected swatch color is. Verified on desktop/server; not yet run on
+Lloyd's iPhone.
+
+- Under the tile palette, the editor now shows the selected swatch's
+  expected hex color, `data-color`, inline `backgroundColor`, and computed
+  CSS color.
+- If the swatch still looks black on iPhone, this readout should tell us
+  whether the color is missing before paint, getting rewritten by CSS, or
+  surviving into computed style while the visual box still renders wrong.
+
+## v5.21.12 — 2026-09-21
+
+Chased the "palette API is right but the swatch fill turns black" bug on
+the HTML side. Verified on desktop/server; not yet run on Lloyd's iPhone.
+
+- Tile palette swatches no longer depend on inline HTML strings for their
+  color fill. The editor now builds each swatch node directly and sets the
+  chip color through DOM style assignment (`backgroundColor`), which is the
+  path most likely to survive Safari's quirks here.
+- Added a `data-color` copy on each chip too, so if it still goes black on
+  iPhone the next chase can inspect the rendered HTML and see whether the
+  color made it into the DOM.
+
 ## v5.21.11 — 2026-09-21
 
 Brightened the grassland palette too — the dark blues/greens were reading

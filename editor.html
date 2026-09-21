@@ -210,6 +210,10 @@
      absolutely positioned inside it; only the visible window is mounted */
   #paint-strip .pack-window { position: relative; flex: 0 0 auto; align-self: stretch; }
   #paint-strip .pack-window .sw { position: absolute; top: 0; }
+  #palette-probe { margin: 4px 2px 0; font-size: 11px; line-height: 1.35;
+    color: #8fbaff; word-break: break-word; }
+  #palette-probe code { color: #ffd75f; background: #171a22; padding: 1px 4px;
+    border-radius: 4px; }
   /* v5.1: the selected one's card */
   #sel-card { display: flex; gap: 10px; align-items: center; background: #16181d;
     border: 1px solid #2c2f36; border-radius: 12px; padding: 10px; margin: 6px 0;
@@ -612,6 +616,7 @@
   <!-- v5.2: search the strip — 6,038 Utumno tiles live here now -->
   <div id="strip-search-row"><input id="strip-search" placeholder="search tiles…"></div>
   <div id="paint-strip"></div>
+  <div id="palette-probe" class="tray-hint"></div>
   <div id="collide-palette">
     <div class="grp-label">collision</div>
     <div class="swatches">
@@ -2900,6 +2905,23 @@ function defaultBrush(l) {
   const th = palette.find(t => biomeOf(t.name) === currentTheme);
   return th ? th.id : (palette.length ? palette[0].id : null);
 }
+function updatePaletteProbe() {
+  const box = $("palette-probe");
+  if (!box) return;
+  if (layer !== "tiles") { box.style.display = "none"; box.innerHTML = ""; return; }
+  const chip = document.querySelector('#paint-strip .sw.sel .chip');
+  const t = palette.find(x => x.id === selTile);
+  if (!chip || !t) { box.style.display = "none"; box.innerHTML = ""; return; }
+  const want = t.color || "(missing)";
+  const data = chip.dataset.color || "(none)";
+  const inline = chip.style.backgroundColor || "(none)";
+  const computed = getComputedStyle(chip).backgroundColor || "(none)";
+  box.style.display = "block";
+  box.innerHTML = 'probe ' + esc(shortName(t.name)) +
+    ': want <code>' + esc(want) + '</code> · data <code>' + esc(data) +
+    '</code> · inline <code>' + esc(inline) + '</code> · css <code>' +
+    esc(computed) + '</code>';
+}
 function buildPalette() {
   colorOf = {};
   palette.forEach(t => colorOf[t.id] = t.color);
@@ -2911,7 +2933,8 @@ function buildPalette() {
     const d = document.createElement("div");
     d.className = "sw" + (sel ? " sel" : "");
     d.title = title;
-    d.innerHTML = inner;
+    if (typeof inner === "string") d.innerHTML = inner;
+    else if (inner) d.appendChild(inner);
     d.onclick = onclick;
     box.appendChild(d);
     return d;
@@ -2919,6 +2942,7 @@ function buildPalette() {
   if (layer === "collision") {
     box.style.display = "none";
     $("collide-palette").style.display = "block";
+    updatePaletteProbe();
     return;
   }
   box.style.display = "flex";
@@ -2934,9 +2958,17 @@ function buildPalette() {
       seen.add(t.color);
       return true;
     }).forEach(t => {
+      const frag = document.createDocumentFragment();
+      const chip = document.createElement("div");
+      chip.className = "chip";
+      chip.dataset.color = t.color || "";
+      chip.style.backgroundColor = t.color || "#000";
+      const lbl = document.createElement("div");
+      lbl.className = "lbl";
+      lbl.textContent = shortName(t.name);
+      frag.append(chip, lbl);
       sw(t.id === selTile, t.name + " (#" + t.id + ")",
-         '<div class="chip" style="background:' + t.color + '"></div>' +
-         '<div class="lbl">' + shortName(t.name) + "</div>",
+         frag,
          () => selectTile(t.id));
     });
   } else {
@@ -2949,6 +2981,7 @@ function buildPalette() {
     });
     buildCustomTiles();   // v5.1: customs join the same strip
   }
+  requestAnimationFrame(updatePaletteProbe);
 }
 
 // ---- v3.0: custom imported tiles + animator --------------------------------
@@ -3386,8 +3419,22 @@ function sliceSheetCells(img, cell) {
   return { cols, rows, cells };
 }
 function sheetCur() { return sheetFiles[sheetTab]; }
+function bestSheetCell(img) {
+  const span = Math.min(img.naturalWidth || 0, img.naturalHeight || 0);
+  if (span >= 16) return 16;
+  return 8;
+}
 function resliceSheet(f) {
   f.grid = sliceSheetCells(f.img, f.cell);
+  f.autoFitCell = false;
+  if (!f.grid.cells.length) {
+    const fit = bestSheetCell(f.img);
+    if (fit !== f.cell) {
+      f.cell = fit;
+      f.grid = sliceSheetCells(f.img, f.cell);
+      f.autoFitCell = true;
+    }
+  }
   f.sel = new Set();
 }
 function renderSheetTabs() {
@@ -3411,12 +3458,16 @@ function syncSheetSizes() {
 function renderSheetGrid() {
   const f = sheetCur(); if (!f) return;
   const showEmpty = $("sheet-showempty").checked;
+  const usedCount = f.grid.cells.reduce((n, cell) => n + (cell.used ? 1 : 0), 0);
   $("sheet-hint").textContent =
     f.grid.cols + "×" + f.grid.rows + " = " + f.grid.cells.length + " cells" +
-    (f.pico ? " — PICO-8 sheet" : "") + " · " + f.cell + "px → 32px";
+    (f.pico ? " — PICO-8 sheet" : "") + " · " + f.cell + "px → 32px" +
+    (f.autoFitCell ? " · auto-fit to image" : "") +
+    (!showEmpty && !usedCount ? " · auto-showing all cells" : "");
   const g = $("sheet-grid"); g.innerHTML = "";
+  const revealAll = !showEmpty && !usedCount;
   f.grid.cells.forEach(cell => {
-    if (!cell.used && !showEmpty) return;
+    if (!cell.used && !showEmpty && !revealAll) return;
     const cv = cell.cv;
     cv.classList.toggle("sel", f.sel.has(cell.index));
     cv.title = "cell " + cell.index;
@@ -3432,9 +3483,14 @@ function renderSheetGrid() {
 function renderSheetSelInfo() {
   const f = sheetCur();
   const n = f ? f.sel.size : 0;
+  const usedCount = f ? f.grid.cells.reduce((m, cell) => m + (cell.used ? 1 : 0), 0) : 0;
   $("sheet-selinfo").textContent = n
     ? n + " selected — role: " + sheetRole
-    : "tap cells to select them";
+    : (!f || f.grid.cells.length)
+      ? (!usedCount && f && !$("sheet-showempty").checked)
+        ? "tap cells to select them — no solid cells were detected, so all cells are shown"
+        : "tap cells to select them"
+      : "no cells yet — try 8px, PICO-8, or a larger source image";
 }
 async function buildSheetRoles() {
   if (!presets.length) {
@@ -3478,7 +3534,8 @@ $("sheet-files").onchange = async e => {
     const norm = await normalizeSheet(await readFile(f));
     if (!norm) { toast("couldn't read " + f.name); continue; }
     const sf = { name: f.name.replace(/\.[^.]+$/, ""), dataUrl: norm.dataUrl,
-                 img: norm.img, cell: 16, pico: false, sel: new Set() };
+                 img: norm.img, cell: bestSheetCell(norm.img), pico: false,
+                 sel: new Set(), autoFitCell: false };
     // wait for the image to be fully decodable at natural size
     await new Promise(res => {
       if (norm.img.complete && norm.img.naturalWidth) res();

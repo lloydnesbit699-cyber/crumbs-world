@@ -3,6 +3,26 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.21.3 — 2026-09-21
+
+Full functionality audit + the sticky server banner. Verified on
+desktop/server; not yet run on Lloyd's iPhone.
+
+- **Audit: nothing was lost.** Checked every control against its handler
+  (31 buttons, 22 menu items, 6 menu drops) and every `api()` call against
+  its server endpoint (85/85) — all wired, all answered. The undo/redo
+  buttons, menus, and history stack survived every upgrade intact.
+- **Undo/redo diagnosis.** They are server-side (`/api/undo`), and the
+  request helper *threw* on a dead server — an unhandled rejection, so
+  the tap did literally nothing. With iOS freezing a-Shell's server on
+  every app switch, undo/redo looked broken when the real problem was
+  the frozen server. The wiring was never the bug.
+- **Sticky "Server isn't running" banner.** Any failed request now raises
+  a persistent banner under the menu bar ("Server isn't running — in
+  a-Shell: `python3 crumbs_hud.py`, then reload. Tap to retry."). It
+  stays until the server answers again — no more silent dead buttons,
+  and undo/redo fail loudly instead of mysteriously.
+
 ## v5.21.2 — 2026-09-21
 
 Stale-cache armor for the updater. Verified on desktop/server; not yet run

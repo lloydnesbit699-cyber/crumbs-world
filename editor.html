@@ -404,6 +404,16 @@
            background: #222; border: 1px solid #555; border-radius: 12px;
            padding: 10px 16px; font-size: 14px; display: none; z-index: 70;
            max-width: 90vw; text-align: center; }
+  /* v5.21.3: sticky server banner. iOS freezes a-Shell's server when you
+     switch apps, and every button used to die silently (undo/redo just did
+     nothing). This stays up until the server answers again — tap retries. */
+  #server-banner { position: fixed; top: calc(48px + env(safe-area-inset-top));
+           left: 0; right: 0; z-index: 65; display: none; cursor: pointer;
+           background: #4a1414; color: #ffd9d9; border-bottom: 2px solid #c0392b;
+           padding: 9px 12px; font-size: 13px; text-align: center; }
+  #server-banner b { color: #fff; }
+  #server-banner code { background: #2a0a0a; padding: 1px 6px; border-radius: 6px;
+           font-size: 12px; }
   #dbg { position: fixed; right: 8px; bottom: 8px; max-width: 92vw; z-index: 99;
          background: #3a1010; color: #ffb3b3; border: 1px solid #a03a3a;
          border-radius: 8px; padding: 8px 10px; font: 11px monospace;
@@ -439,11 +449,15 @@
     <button class="mtop" data-menu="m-play">Play</button>
     <button class="mtop" data-menu="m-setup">Setup</button>
   </div>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v5.21.2</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v5.21.3</small></span>
   <span id="topbar-undo">
     <button id="btn-undo2" title="Undo">&#8617;</button>
     <button id="btn-redo2" title="Redo">&#8618;</button>
   </span>
+</div>
+
+<div id="server-banner"><b>Server isn't running.</b>
+  <span>In a-Shell: <code>python3 crumbs_hud.py</code> — then reload this page. Tap to retry.</span>
 </div>
 
 <div id="m-file" class="menu-drop">
@@ -751,7 +765,7 @@
 
 <div id="splash">
   <div class="splash-title">Crumbs HUD</div>
-  <div class="splash-sub">tile painter &middot; v5.21.2</div>
+  <div class="splash-sub">tile painter &middot; v5.21.3</div>
   <div class="load-bar"><i id="splash-fill"></i></div>
   <div class="load-label" id="splash-label">Waking the server&hellip;</div>
 </div>
@@ -1019,14 +1033,30 @@ async function api(path, body) {
           continue;
         }
       }
+      setServerDown(false);
       return j;
     } catch (e) {
       lastErr = e;
       await new Promise(res => setTimeout(res, 400 * (attempt + 1)));
     }
   }
+  setServerDown(true);
   throw lastErr;
 }
+// v5.21.3: sticky server banner — one place owns the "server away" state.
+// api() clears it on any success and raises it when retries are exhausted,
+// so a frozen server (iOS backgrounded a-Shell) can never fail silently.
+// The 10s pollStatus clears it by itself once the server is back.
+let _serverDown = false;
+function setServerDown(on) {
+  if (_serverDown === on) return;
+  _serverDown = on;
+  const b = $("server-banner");
+  if (b) b.style.display = on ? "block" : "none";
+}
+$("server-banner").onclick = async () => {
+  try { await api("/api/status"); } catch (e) { /* stays up */ }
+};
 function toast(msg) {
   const t = $("toast");
   t.textContent = msg; t.style.display = "block";
@@ -3605,14 +3635,21 @@ $("btn-eraser").onclick = () => {
 // the top-bar buttons and the menu copies, and refreshAll() reloads every
 // aspect of the design they can change.
 async function doUndo() {
-  const r = await api("/api/undo", {});
-  if (!r.ok) toast("nothing to undo"); else Sfx.undo();
-  await refreshAll();
+  // v5.21.3: a dead server used to make this die silently (unhandled
+  // rejection). The sticky banner now owns that case — here we just make
+  // sure a throw never escapes as silence.
+  try {
+    const r = await api("/api/undo", {});
+    if (!r.ok) toast("nothing to undo"); else Sfx.undo();
+    await refreshAll();
+  } catch (e) { /* banner is up — nothing more to say */ }
 }
 async function doRedo() {
-  const r = await api("/api/redo", {});
-  if (!r.ok) toast("nothing to redo"); else Sfx.redo();
-  await refreshAll();
+  try {
+    const r = await api("/api/redo", {});
+    if (!r.ok) toast("nothing to redo"); else Sfx.redo();
+    await refreshAll();
+  } catch (e) { /* banner is up — nothing more to say */ }
 }
 $("btn-undo").onclick = doUndo;
 $("btn-redo").onclick = doRedo;

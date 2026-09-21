@@ -109,6 +109,7 @@ import re
 import secrets
 import socket
 import shutil
+import ssl
 import sys
 import threading
 import time
@@ -123,22 +124,109 @@ from urllib.parse import urlparse, parse_qs
 import crumbs_core as core
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.20"
+APP_VERSION = "5.21"
 
 # ---- v5.18: in-app self-update -------------------------------------------------
 # Lloyd's rule: updates overwrite the old files in place — no more downloading a
 # suffixed copy and renaming it by hand. Menu -> Check for updates pulls the
 # latest editor.html / crumbs_hud.py / crumbs_core.py from the repo's main
 # branch and swaps them in atomically, keeping one .update-backup of each.
+# v5.21: honest errors (which leg failed + fix hint), auto-certifi for a-Shell's
+# missing CA certs, changelog in the update dialog, save-before-update, and
+# File -> Roll back update to undo an install.
 UPDATE_REPO = "lloydnesbit699-cyber/crumbs-world"
 UPDATE_BRANCH = "main"
 UPDATE_FILES = ["editor.html", "crumbs_hud.py", "crumbs_core.py"]
 
-def _update_fetch(name):
+def _update_ssl_context():
+    # v5.21: a-Shell's Python ships without CA certificates, so HTTPS to
+    # GitHub fails verification out of the box. If certifi is installed
+    # (pip install certifi) its bundle is used automatically — no env vars.
+    cafile = os.environ.get("SSL_CERT_FILE")
+    if not cafile:
+        try:
+            import certifi
+            cafile = certifi.where()
+        except ImportError:
+            cafile = None
+    return ssl.create_default_context(cafile=cafile)
+
+
+def _update_fetch(name, tries=2):
     url = f"https://raw.githubusercontent.com/{UPDATE_REPO}/{UPDATE_BRANCH}/{name}"
     req = urllib.request.Request(url, headers={"User-Agent": "crumbs-hud-updater"})
-    with urllib.request.urlopen(req, timeout=15) as r:
-        return r.read()
+    ctx = _update_ssl_context()
+    last = None
+    for _ in range(max(1, tries)):
+        try:
+            with urllib.request.urlopen(req, timeout=15, context=ctx) as r:
+                return r.read()
+        except Exception as e:
+            last = e
+            time.sleep(1)
+    raise last
+
+
+def _update_hint(e):
+    # v5.21: the check/apply errors say which leg failed; the hint says the fix.
+    n = e.__class__.__name__
+    s = str(e).lower()
+    if "ssl" in n or "certificate" in s:
+        return "in a-Shell run: pip install certifi — then restart the server"
+    if "urlerror" in n or "nodename" in s or "name resolution" in s:
+        return "is the phone online? raw.githubusercontent.com must be reachable"
+    if "timeout" in n or "timed out" in s:
+        return "GitHub timed out — try again in a bit"
+    return ""
+
+
+def _update_can_rollback():
+    # v5.21: an update is undoable while its .update-backup files survive.
+    return any(os.path.exists(os.path.join(SCRIPT_DIR, n + ".update-backup"))
+               for n in UPDATE_FILES)
+
+
+def _ver_tuple(v):
+    # v5.21: "5.18.1" -> (5, 18, 1); garbage -> (0,) so it never looks newer.
+    try:
+        return tuple(int(x) for x in str(v).split("."))
+    except ValueError:
+        return (0,)
+
+
+def _update_changelog(current, limit=5):
+    # v5.21: newest-first CHANGELOG.md sections strictly newer than
+    # `current`, for the update dialog — Lloyd decides with the notes in
+    # front of him.
+    raw = _update_fetch("CHANGELOG.md").decode("utf-8", "replace")
+    entries, cur = [], None
+    cur_v = _ver_tuple(current)
+
+    def flush():
+        if cur and _ver_tuple(cur["version"]) > cur_v and len(entries) < limit:
+            entries.append(cur)
+
+    for line in raw.splitlines():
+        m = re.match(r"##\s+v([\d.]+)\s*(?:[—–-]\s*(.*))?$", line.strip())
+        if m:
+            flush()
+            if len(entries) >= limit:
+                break
+            # Newest-first: once we reach our own version (or anything
+            # older), nothing below it can be newer.
+            if _ver_tuple(m.group(1)) <= cur_v:
+                cur = None
+                break
+            cur = {"version": m.group(1), "date": (m.group(2) or "").strip(),
+                   "notes": []}
+        elif cur is not None:
+            cur["notes"].append(line)
+    flush()
+    for e in entries:
+        e["notes"] = "\n".join(e["notes"]).strip()
+        if len(e["notes"]) > 1200:
+            e["notes"] = e["notes"][:1200] + "…"
+    return entries
 
 def _update_remote_version():
     raw = _update_fetch("crumbs_hud.py").decode("utf-8", "replace")
@@ -2678,16 +2766,32 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"ok": True, "templates": out})
         elif path == "/api/update/check":
             # v5.18: is there a newer build on the repo's main branch?
+            # v5.21: the error names the failing leg (this server -> GitHub)
+            # with a fix hint, and reports whether a rollback target exists.
             try:
                 latest = _update_remote_version()
             except Exception as e:
-                return self._send_json({"ok": False,
-                                        "error": f"couldn't reach GitHub ({e.__class__.__name__})"})
+                return self._send_json({"ok": False, "leg": "github",
+                                        "error": f"this server couldn't reach GitHub ({e.__class__.__name__}: {str(e)[:100]})",
+                                        "hint": _update_hint(e)})
             if not latest:
-                return self._send_json({"ok": False, "error": "remote version unreadable"})
+                return self._send_json({"ok": False, "leg": "github",
+                                        "error": "GitHub answered but the version was unreadable"})
             return self._send_json({"ok": True, "current": APP_VERSION,
                                     "latest": latest,
-                                    "available": latest != APP_VERSION})
+                                    "available": latest != APP_VERSION,
+                                    "can_rollback": _update_can_rollback()})
+        elif path == "/api/update/changelog":
+            # v5.21: what's new between this build and main, for the update
+            # dialog — so the decision happens with the notes in front of you.
+            try:
+                entries = _update_changelog(APP_VERSION)
+            except Exception as e:
+                return self._send_json({"ok": False, "leg": "github",
+                                        "error": f"couldn't fetch the changelog ({e.__class__.__name__})",
+                                        "hint": _update_hint(e)})
+            return self._send_json({"ok": True, "current": APP_VERSION,
+                                    "entries": entries})
         elif path == "/api/export/tiled":
             # v5.16: Tiled (mapeditor.org) JSON + companion tileset.
             q = parse_qs(urlparse(self.path).query)
@@ -2829,10 +2933,26 @@ class Handler(BaseHTTPRequestHandler):
             # v5.18: local mode only — a public link must never rewrite the server.
             if PUBLIC_MODE:
                 return self._send_json({"ok": False, "error": "updates are local-mode only"}, 403)
+            # v5.21: save dirty map work before touching anything, so the
+            # update can never eat an unsaved build.
+            map_saved = bool(_save_state["dirty"] and _save_now())
             try:
                 blobs = {n: _update_fetch(n) for n in UPDATE_FILES}
             except Exception as e:
-                return self._send_json({"ok": False, "error": f"download failed ({e.__class__.__name__}) — old files untouched"})
+                return self._send_json({"ok": False, "leg": "github",
+                                        "error": f"download failed ({e.__class__.__name__}) — old files untouched",
+                                        "hint": _update_hint(e)})
+            # v5.21: sanity-check the downloads before swapping — a truncated
+            # file must never replace a good one.
+            bad = [n for n, b in blobs.items()
+                   if not b
+                   or (n == "crumbs_hud.py" and b"APP_VERSION" not in b)
+                   or (n == "editor.html" and b"<html" not in b.lower())
+                   or (n == "crumbs_core.py"
+                       and b"def " not in b and b"class " not in b)]
+            if bad:
+                return self._send_json({"ok": False, "leg": "github",
+                                        "error": f"downloaded {', '.join(bad)} looked wrong — old files untouched, try again"})
             updated = []
             try:
                 for n, blob in blobs.items():
@@ -2847,7 +2967,30 @@ class Handler(BaseHTTPRequestHandler):
             except OSError as e:
                 return self._send_json({"ok": False, "error": f"write failed ({e}) — backups kept"})
             return self._send_json({"ok": True, "updated": updated,
+                                    "map_saved": map_saved,
+                                    "can_rollback": True,
                                     "note": "restart the server to run the new build"})
+        if path == "/api/update/rollback":
+            # v5.21: put the .update-backup files back — the update, undone.
+            # Local mode only, like apply.
+            if PUBLIC_MODE:
+                return self._send_json({"ok": False, "error": "updates are local-mode only"}, 403)
+            if not _update_can_rollback():
+                return self._send_json({"ok": False,
+                                        "error": "no update backups found — nothing to roll back"})
+            restored = []
+            try:
+                for n in UPDATE_FILES:
+                    p = os.path.join(SCRIPT_DIR, n)
+                    bak = p + ".update-backup"
+                    if os.path.exists(bak):
+                        shutil.copy2(bak, p)
+                        restored.append(n)
+            except OSError as e:
+                return self._send_json({"ok": False,
+                                        "error": f"rollback failed ({e})"})
+            return self._send_json({"ok": True, "restored": restored,
+                                    "note": "restart the server to run the restored build"})
         if path == "/api/paint":
             x, y, layer = body.get("x"), body.get("y"), body.get("layer", "tiles")
             if layer not in LAYERS or not isinstance(x, int) or not isinstance(y, int):

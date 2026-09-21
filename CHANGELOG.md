@@ -3,6 +3,31 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.21 — 2026-09-21
+
+The updater says what it means. Verified on desktop/server; not yet run
+on Lloyd's iPhone.
+
+- **Honest errors.** The old "couldn't reach GitHub" toast lied: half the
+  time the page couldn't reach the *local* server (iOS froze a-Shell),
+  not GitHub. Now each failure names its leg — "HUD server isn't
+  answering" vs "this server couldn't reach GitHub" — with a fix hint
+  (e.g. `pip install certifi` for a-Shell's missing CA certificates).
+- **What's-new in the update prompt.** Check for updates now fetches the
+  changelog and shows every version between yours and latest, so the
+  install decision happens with the notes in front of you.
+- **Quiet update badge.** One silent check after boot: if a newer build
+  is out, the File menu gets a gold dot and one toast — no nagging,
+  and silence when offline.
+- **Save before updating.** Apply saves dirty map work first, then
+  sanity-checks each download (right file, not truncated) before the
+  atomic swap. A bad download can no longer replace a good file.
+- **File → Roll back update.** The `.update-backup` files from the last
+  install can be put back in one tap (restart the server after). The
+  button stays dimmed when there's nothing to roll back to.
+- **Auto-certifi.** If `certifi` is installed, the updater uses its CA
+  bundle automatically — no `SSL_CERT_FILE` env dance on a-Shell.
+
 ## v5.20 — 2026-09-21
 
 Windows-style menu bar + Reset map. Verified on desktop/server; not yet

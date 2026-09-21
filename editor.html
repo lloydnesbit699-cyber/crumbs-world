@@ -58,8 +58,16 @@
   .menu-drop button { display: block; width: 100%; text-align: left; border: none;
                          background: none; margin: 2px 0; min-height: 44px; }
   .menu-drop button:active { background: #333; }
+  .menu-drop button:disabled { opacity: .38; }
   .menu-drop #btn-stop { color: #ff8a8a; }
   .menu-drop hr { border: none; border-top: 1px solid #333; margin: 6px 0; }
+  /* v5.21: gold dot on the File menu when an update is waiting */
+  .upd-dot { color: #ffd75f; font-size: 9px; vertical-align: 2px; }
+  .update-notes { max-height: 38dvh; overflow-y: auto; margin: 4px 10px 8px;
+                  font-size: 12px; color: #cfd2dc; white-space: pre-wrap;
+                  -webkit-overflow-scrolling: touch; }
+  .upd-ver { color: #ffd75f; font-weight: 600; margin: 8px 0 2px; }
+  .upd-ver:first-child { margin-top: 0; }
 
   /* v2.2: the map is positioned with a transform, not scroll — panning works
      identically at every zoom level, no browser scroll quirks */
@@ -431,7 +439,7 @@
     <button class="mtop" data-menu="m-play">Play</button>
     <button class="mtop" data-menu="m-setup">Setup</button>
   </div>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v5.20</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v5.21</small></span>
   <span id="topbar-undo">
     <button id="btn-undo2" title="Undo">&#8617;</button>
     <button id="btn-redo2" title="Redo">&#8618;</button>
@@ -447,6 +455,7 @@
   <button id="menu-export" title="Download this map as a PNG picture">Export PNG</button>
   <hr>
   <button id="menu-update" title="Pull the latest app files over this install">&#128260; Check for updates</button>
+  <button id="menu-rollback" title="Restore the app files from before the last update">&#8617; Roll back update</button>
   <button id="btn-restart" title="Restart the HUD server">Restart server</button>
   <button id="btn-stop" class="danger" title="Stop the HUD server">Stop server</button>
 </div>
@@ -662,6 +671,18 @@
   <div id="backups-list"></div>
 </div>
 
+<!-- v5.21: update dialog — version, what's-new notes, your call -->
+<div id="sheet-update" class="sheet">
+  <div class="grab"></div>
+  <div class="tray-head" id="update-title">Update available</div>
+  <div id="update-notes" class="update-notes"></div>
+  <div class="row2">
+    <button id="btn-update-install">Install update</button>
+    <button id="btn-update-later" class="ghost">Not now</button>
+  </div>
+  <div class="tray-hint" style="margin: 6px 10px 2px;">Your map is saved first; the current app files are backed up, and File &rarr; Roll back update can undo the install.</div>
+</div>
+
 <div id="sheet-slots" class="sheet">
   <div class="grab"></div>
   <div class="tray-head">Save slots <span class="tray-hint">this map only</span></div>
@@ -730,7 +751,7 @@
 
 <div id="splash">
   <div class="splash-title">Crumbs HUD</div>
-  <div class="splash-sub">tile painter &middot; v5.20</div>
+  <div class="splash-sub">tile painter &middot; v5.21</div>
   <div class="load-bar"><i id="splash-fill"></i></div>
   <div class="load-label" id="splash-label">Waking the server&hellip;</div>
 </div>
@@ -3847,22 +3868,76 @@ $("menu-key").onclick = () => {
   } catch (e) {}
   toast(k ? "share key saved on this device" : "share key cleared");
 };
-// v5.18: self-update — new files overwrite the old ones in place, no renaming.
+// v5.21: honest update flow — names the failing leg, shows what's new,
+// lets the map save first, and offers rollback. One check, one decision.
+function escHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function syncRollback(r) {
+  const b = $("menu-rollback");
+  if (b) b.disabled = !(r && r.ok && r.can_rollback);
+}
+async function updateCheck() {
+  let r;
+  try { r = await api("/api/update/check"); }
+  catch (e) {
+    // v5.21: this leg is phone -> HUD server, NOT GitHub — say so.
+    toast("HUD server isn't answering — is it still running? Wake a-Shell, rerun python3 crumbs_hud.py, reload.");
+    Sfx.error(); return null;
+  }
+  syncRollback(r);
+  if (!r.ok) {
+    toast("update check failed: " + (r.error || "unknown") + (r.hint ? " — " + r.hint : ""));
+    Sfx.error(); return null;
+  }
+  return r;
+}
 $("menu-update").onclick = async () => {
   closeOverlays();
   toast("checking for updates\u2026");
-  let r;
-  try { r = await api("/api/update/check"); }
-  catch (e) { toast("couldn't reach GitHub \u2014 are you online?"); return; }
-  if (!r.ok) { toast("update check failed: " + (r.error || "unknown")); return; }
+  const r = await updateCheck();
+  if (!r) return;
   if (!r.available) { toast("already on v" + r.current + " \u2014 you're up to date"); return; }
-  if (!confirm("Crumbs HUD v" + r.latest + " is ready (you have v" + r.current + ").\nInstall now? Your current files are backed up first.")) return;
-  toast("installing v" + r.latest + "\u2026");
-  let a;
-  try { a = await api("/api/update/apply", {}); }
-  catch (e) { a = { ok: false, error: "network" }; }
-  if (a && a.ok) toast("updated \u2014 stop the server, run python3 crumbs_hud.py again, then reload");
-  else toast("update failed: " + ((a && a.error) || "unknown"));
+  let notes = [];
+  try {
+    const c = await api("/api/update/changelog");
+    if (c && c.ok) notes = c.entries || [];
+  } catch (e) { /* notes are nice-to-have; the update stands on its own */ }
+  $("update-title").textContent = "v" + r.latest + " is ready (you have v" + r.current + ")";
+  $("update-notes").innerHTML = notes.length
+    ? notes.map(e => "<div class='upd-ver'>v" + escHtml(e.version) + (e.date ? " \u2014 " + escHtml(e.date) : "") + "</div><div>" + escHtml(e.notes) + "</div>").join("")
+    : "<div class='tray-hint'>couldn't load the what's-new notes — the update itself is unaffected.</div>";
+  $("btn-update-install").onclick = async () => {
+    closeOverlays();
+    toast("installing v" + r.latest + "\u2026");
+    let a;
+    try { a = await api("/api/update/apply", {}); }
+    catch (e) { a = { ok: false, error: "HUD server stopped answering mid-update" }; }
+    if (a && a.ok) {
+      toast("updated to v" + r.latest + (a.map_saved ? " (map saved)" : "") + " \u2014 stop the server, run python3 crumbs_hud.py again, then reload");
+      syncRollback({ ok: true, can_rollback: true });
+      const fb = document.querySelector('.mtop[data-menu="m-file"] .upd-dot');
+      if (fb) fb.remove();
+    }
+    else {
+      toast("update failed: " + ((a && (a.error + (a.hint ? " \u2014 " + a.hint : ""))) || "unknown"));
+      Sfx.error();
+    }
+  };
+  $("btn-update-later").onclick = () => closeOverlays();
+  toggleOverlay("sheet-update");
+};
+$("menu-rollback").onclick = async () => {
+  closeOverlays();
+  if (!confirm("Roll back to the app files from before the last update? Restart the server after.")) return;
+  let r;
+  try { r = await api("/api/update/rollback", {}); }
+  catch (e) { toast("HUD server isn't answering — wake a-Shell and reload."); Sfx.error(); return; }
+  if (r.ok) {
+    toast("rolled back (" + r.restored.join(", ") + ") \u2014 stop the server, run python3 crumbs_hud.py again, then reload");
+    syncRollback({ ok: true, can_rollback: false });
+  }
+  else { toast("rollback failed: " + (r.error || "unknown")); Sfx.error(); }
 };
 $("btn-export-tiled").onclick = () => {
   // Tiled JSON for other engines; the tileset art strip rides the Share bundle
@@ -4180,6 +4255,22 @@ setTimeout(() => {
     splashStep(92, "Painting the map\u2026");
     // v5.17: splash out once boot really finished, then the first-run tour (once ever)
     splashDone();
+    // v5.21: one quiet update check per session — a gold dot on File, one
+    // toast, no nagging. Failures (offline, asleep server) stay silent.
+    setTimeout(async () => {
+      try {
+        const r = await api("/api/update/check");
+        syncRollback(r);
+        if (r && r.ok && r.available) {
+          const fb = document.querySelector('.mtop[data-menu="m-file"]');
+          if (fb && !fb.querySelector(".upd-dot")) {
+            fb.insertAdjacentHTML("beforeend", ' <span class="upd-dot" title="v' + escHtml(r.latest) + ' is ready">&#9679;</span>');
+            fb.title = "v" + r.latest + " is ready \u2014 File \u2192 Check for updates";
+          }
+          toast("v" + r.latest + " is ready \u2014 File \u2192 Check for updates when you want it");
+        }
+      } catch (e) { /* stay silent */ }
+    }, 4000);
     if (!localStorage.crumbs_tour) {
       localStorage.crumbs_tour = "1";
       const steps = [

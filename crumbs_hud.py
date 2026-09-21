@@ -129,7 +129,7 @@ except ImportError:
     RecoverySupervisor = None
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.21.15"
+APP_VERSION = "5.22.0"
 
 # ---- v5.18: in-app self-update -------------------------------------------------
 # Lloyd's rule: updates overwrite the old files in place — no more downloading a
@@ -2503,6 +2503,18 @@ def _map_state():
             "collision": world.collision_layer}
 
 
+def _recovery_status():
+    """HUD-facing recovery snapshot. Read-only; never raises."""
+    if not _recovery_store:
+        return {"available": False}
+    try:
+        return {"available": True,
+                "slots": _recovery_store.slot_info(),
+                "journal": _recovery_store.journal_tail(50)}
+    except Exception as exc:
+        return {"available": True, "error": str(exc)[:200]}
+
+
 def _recovery_snapshot():
     return {"map": _map_state(), "rules": copy.deepcopy(rules), "current_map": _current_map}
 
@@ -2519,6 +2531,36 @@ def _checkpoint_save():
         print(f"[recovery] checkpoint write failed: {exc}")
 
 
+def _primary_save_healthy(name):
+    """True when the on-disk save parses and has a sane map shape.
+
+    A checkpoint is a safety net, never the authority: if the primary save
+    is healthy it is fresher than any checkpoint by construction, so a
+    stale checkpoint must not clobber it in memory at startup.
+    """
+    name = _safe_name(name) or DEFAULT_SAVE
+    if not name.endswith(".json"):
+        name += ".json"
+    p = os.path.join(SCRIPT_DIR, name)
+    try:
+        with open(p, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    w, h = data.get("width"), data.get("height")
+    if not isinstance(w, int) or not isinstance(h, int) or w <= 0 or h <= 0:
+        return False
+    for key in ("tiles", "objects", "collision"):
+        grid = data.get(key)
+        if not isinstance(grid, list) or len(grid) != h:
+            return False
+        if not all(isinstance(r, list) and len(r) == w for r in grid):
+            return False
+    return True
+
+
 def _recover_startup():
     """Verify and restore a checkpoint into memory only; disk stays untouched."""
     if not _recovery:
@@ -2529,6 +2571,15 @@ def _recover_startup():
         return {"status": status}
     state = record.get("state", {})
     saved = state.get("map", {})
+    # v5.22: never let a stale checkpoint clobber a healthy primary save.
+    # The checkpoint shadows the file it was written alongside; if that
+    # file parses cleanly, it is the freshest authority — skip the restore.
+    primary_name = state.get("current_map") or DEFAULT_SAVE
+    if _primary_save_healthy(primary_name):
+        _recovery_store.record_event("CHECKPOINT_SKIPPED", reason="PRIMARY_HEALTHY",
+                                     checkpoint_id=record.get("id"))
+        print("[recovery] primary save healthy; checkpoint not needed")
+        return {"status": "PRIMARY_HEALTHY"}
     if saved.get("width") != world.width or saved.get("height") != world.height:
         _recovery_store.record_event("STATE_RESTORE_SKIPPED", reason="DIMENSION_MISMATCH", checkpoint_id=record.get("id"))
         print("[recovery] checkpoint verified but dimensions differ; normal startup")
@@ -2846,6 +2897,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"dirty": _save_state["dirty"],
                              "last_save": _save_state["last"],
                              "play": play["active"]})
+        elif path == "/api/recovery/status":
+            # v5.22: Phase 3 — recovery state for the HUD (read-only).
+            self._send_json(_recovery_status())
         elif path == "/api/log":
             # v5.6: server event log for debugging without watching the terminal
             q = parse_qs(urlparse(self.path).query)

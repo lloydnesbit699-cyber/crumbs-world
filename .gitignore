@@ -25,3 +25,6 @@ _trash/
 entitlements.json
 *.pre-restore-*
 *.update-backup
+
+# v5.21.x recovery: runtime checkpoint state never enters the repo
+.crumbs_recovery/

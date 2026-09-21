@@ -43,6 +43,19 @@
   #title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #title { font-size: 15px; font-weight: 600; }
   #title small { color: #888; font-weight: normal; font-size: 11px; }
+  /* v5.22.8: header status pills — update + recovery "signs of life". */
+  #pills { display: flex; gap: 6px; align-items: center; }
+  .pill { display: flex; align-items: center; gap: 5px; background: #1b1b21;
+          border: 1px solid #33333c; border-radius: 999px; padding: 3px 9px;
+          font-size: 11px; color: #cfcfd6; cursor: pointer; white-space: nowrap; }
+  .pill:active { transform: scale(.95); }
+  .pdot { width: 8px; height: 8px; border-radius: 50%; background: #555; flex: none; }
+  .pdot.g { background: #35c759; }
+  .pdot.gold { background: #e8b33c; }
+  .pdot.r { background: #e5484d; }
+  .pdot.grey { background: #555; }
+  .pdot.live { animation: pill-breathe 2.6s ease-in-out infinite; }
+  @keyframes pill-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
   /* v5.0: undo/redo live on the top bar — thumb-sized, always in reach */
   #topbar-undo { margin-left: auto; display: flex; gap: 8px; }
   #topbar-undo button { font-size: 22px; padding: 6px 14px; min-height: 40px;
@@ -477,6 +490,10 @@
     <button class="mtop" data-menu="m-setup">Setup</button>
   </div>
   <span id="title">Crumbs HUD <small>tile painter &middot; v%%CRUMBS_VERSION%%</small></span>
+  <span id="pills">
+    <button id="pill-update" class="pill" title="update status"><span class="pdot grey"></span><span class="ptxt">v&hellip;</span></button>
+    <button id="pill-recovery" class="pill" title="recovery status"><span class="pdot grey"></span><span class="ptxt">shield &hellip;</span></button>
+  </span>
   <span id="topbar-undo">
     <button id="btn-undo2" title="Undo">&#8617;</button>
     <button id="btn-redo2" title="Redo">&#8618;</button>
@@ -4433,14 +4450,37 @@ window.addEventListener("beforeunload", e => {
 
 // ---- save status -------------------------------------------------------------
 
+// v5.22.8: header status pills — update + recovery "signs of life".
+function setPill(which, dotCls, text, title) {
+  const p = $("pill-" + which);
+  if (!p) return;
+  p.querySelector(".pdot").className = "pdot " + dotCls;
+  p.querySelector(".ptxt").textContent = text;
+  p.title = title;
+}
 async function pollStatus() {
   try {
     const s = await api("/api/status");
     dirtyFlag = !!s.dirty;   // v2.0: server is the source of truth
     $("save-status").textContent = s.dirty ? "● unsaved changes"
       : (s.last_save ? "saved " + s.last_save : "no changes yet");
+    // v5.22.8: recovery pill — risk level at a glance, breathing while healthy.
+    const rb = s.recovery;
+    if (!rb || !rb.available) {
+      setPill("recovery", "grey", "shield \u2026", "recovery unavailable on this server \u2014 tap for details");
+    } else {
+      const lvl = rb.risk || "?";
+      const bad = lvl === "HIGH" || lvl === "CRITICAL" || (rb.outcome && /UNSAFE|FAILED/.test(rb.outcome));
+      const mid = !bad && lvl === "MEDIUM";
+      setPill("recovery", bad ? "r" : (mid ? "gold" : "g live"), "shield " + String(lvl).toLowerCase(),
+        "recovery risk " + lvl + " \u00b7 " + (rb.outcome || "?") + " \u2014 tap for details");
+    }
   } catch (e) { /* server away */ }
 }
+// v5.22.8: pills are shortcuts — update pill opens the updater,
+// recovery pill opens the Recovery sheet.
+$("pill-update").onclick = () => $("menu-update").click();
+$("pill-recovery").onclick = () => $("menu-recovery").click();
 
 // ---- init ----------------------------------------------------------------------
 // v5.17.1: melody state lives up here — the map tap handler can fire while
@@ -4973,7 +5013,15 @@ $("pack-btn").onclick = () => { toggleOverlay("sheet-pack"); syncInv(); };
       try {
         const r = await api("/api/update/check");
         syncRollback(r);
-        if (r && r.ok) patchVersionPlaceholder(r.current);
+        if (r && r.ok) {
+          patchVersionPlaceholder(r.current);
+          // v5.22.8: update pill — version always visible, dot says the state.
+          setPill("update", r.available ? "gold" : "g", "v" + r.current,
+            r.available ? "v" + r.latest + " is ready \u2014 tap for updates"
+                        : "v" + r.current + " \u2014 up to date \u2014 tap to check");
+        } else {
+          setPill("update", "r", "v?", "update check failed \u2014 tap to retry");
+        }
         if (r && r.ok && r.available && r.latest !== _lastNotifiedVer) {
           _lastNotifiedVer = r.latest;
           const isRepair = r.repair && r.missing_files && r.missing_files.length;

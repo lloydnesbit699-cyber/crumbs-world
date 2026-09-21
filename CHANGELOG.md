@@ -3,6 +3,15 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.22.8 — 2026-09-21
+
+Header status pills (Lloyd's "signs of life" ask): an update pill (live
+version + green/gold/red dot, tap opens the updater) fed by the quiet
+update check, and a recovery pill (shield + risk level, dot breathes
+while healthy, tap opens the Recovery sheet) fed by a new lightweight
+`recovery` brief on /api/status. Verified on desktop/server; not yet run
+on Lloyd's iPhone.
+
 ## v5.22.7 — 2026-09-21
 
 Client-side fallback for the version placeholder: a new editor.html

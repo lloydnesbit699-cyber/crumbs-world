@@ -143,7 +143,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.22.7"
+APP_VERSION = "5.22.8"
 
 # ---- v5.18: in-app self-update -------------------------------------------------
 # Lloyd's rule: updates overwrite the old files in place — no more downloading a
@@ -2560,6 +2560,22 @@ def _recovery_status():
         return {"available": True, "error": str(exc)[:200]}
 
 
+def _recovery_brief():
+    """v5.22.8: tiny recovery snapshot for the header pill. Never raises."""
+    if not _recovery_store:
+        return {"available": False}
+    try:
+        rpt = _recovery_store.read_report()
+        risk = (rpt.get("risk") or {}).get("level") if rpt else None
+        outcome = (rpt.get("verification") or {}).get("outcome") if rpt else None
+        return {"available": True,
+                "risk": risk or "?",
+                "outcome": outcome or "?",
+                "serving": _server_served_first_request}
+    except Exception:
+        return {"available": True, "risk": "?", "outcome": "?"}
+
+
 def _recovery_snapshot():
     return {"map": _map_state(), "rules": copy.deepcopy(rules), "current_map": _current_map}
 
@@ -3136,7 +3152,8 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/status":
             self._send_json({"dirty": _save_state["dirty"],
                              "last_save": _save_state["last"],
-                             "play": play["active"]})
+                             "play": play["active"],
+                             "recovery": _recovery_brief()})
         elif path == "/api/recovery/status":
             # v5.22: Phase 3 — recovery state for the HUD (read-only).
             self._send_json(_recovery_status())

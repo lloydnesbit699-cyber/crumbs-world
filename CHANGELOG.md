@@ -3,6 +3,17 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.21.1 — 2026-09-21
+
+Update-check honesty fix. Verified on desktop/server; not yet run on
+Lloyd's iPhone.
+
+- **No more phantom "updates".** The check compared versions with `!=`,
+  so a stale GitHub cache (or any mismatch) offered a *downgrade* as an
+  update — 5.21 was told 5.20 was "available". Now it's a numeric
+  comparison: an update is offered only when the remote build is strictly
+  newer than the running one.
+
 ## v5.21 — 2026-09-21
 
 The updater says what it means. Verified on desktop/server; not yet run

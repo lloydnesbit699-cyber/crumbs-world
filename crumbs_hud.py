@@ -124,7 +124,7 @@ from urllib.parse import urlparse, parse_qs
 import crumbs_core as core
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.21"
+APP_VERSION = "5.21.1"
 
 # ---- v5.18: in-app self-update -------------------------------------------------
 # Lloyd's rule: updates overwrite the old files in place — no more downloading a
@@ -2779,7 +2779,10 @@ class Handler(BaseHTTPRequestHandler):
                                         "error": "GitHub answered but the version was unreadable"})
             return self._send_json({"ok": True, "current": APP_VERSION,
                                     "latest": latest,
-                                    "available": latest != APP_VERSION,
+                                    # v5.21.1: numeric compare — a stale
+                                    # GitHub cache must never offer a
+                                    # *downgrade* as an update.
+                                    "available": _ver_tuple(latest) > _ver_tuple(APP_VERSION),
                                     "can_rollback": _update_can_rollback()})
         elif path == "/api/update/changelog":
             # v5.21: what's new between this build and main, for the update

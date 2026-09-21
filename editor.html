@@ -424,8 +424,14 @@
     /* v5.21.7: the title was eating the menu bar on narrow phones — Build,
        Play, Setup scrolled off-screen with no indicator. Hide it so all six
        menus fit without swiping. */
+    /* v5.21.9: still clipped ("Set" not "Setup") — go more compact: smaller
+       menu text, tighter undo/redo, so all six fit in ~390px. */
     #title { display: none; }
-    .mtop { padding: 10px 8px; font-size: 13px; }
+    .mtop { padding: 10px 6px; font-size: 12px; }
+    #topbar { gap: 4px; padding: 0 4px; }
+    #topbar-undo { gap: 4px; }
+    #topbar-undo button { font-size: 18px; padding: 6px 8px; min-height: 36px;
+                          min-width: 40px; }
   }
   /* v3.1: theme selector */
   #theme-row { margin: 4px 0 6px; }
@@ -454,7 +460,7 @@
     <button class="mtop" data-menu="m-play">Play</button>
     <button class="mtop" data-menu="m-setup">Setup</button>
   </div>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v5.21.8</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v5.21.9</small></span>
   <span id="topbar-undo">
     <button id="btn-undo2" title="Undo">&#8617;</button>
     <button id="btn-redo2" title="Redo">&#8618;</button>
@@ -770,7 +776,7 @@
 
 <div id="splash">
   <div class="splash-title">Crumbs HUD</div>
-  <div class="splash-sub">tile painter &middot; v5.21.8</div>
+  <div class="splash-sub">tile painter &middot; v5.21.9</div>
   <div class="load-bar"><i id="splash-fill"></i></div>
   <div class="load-label" id="splash-label">Waking the server&hellip;</div>
 </div>

@@ -3,6 +3,18 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.21.9 — 2026-09-21
+
+"Setup" was still clipped to "Set" on Lloyd's narrow portrait phone.
+Verified on desktop/server; not yet run on Lloyd's iPhone.
+
+- **Fix:** the v5.21.7 tightening wasn't enough — went more compact on
+  screens under 520px: 12px menu text, 6px button padding, tighter
+  topbar gaps, smaller undo/redo. All six menus (File–Setup) now fit in
+  ~390px without scrolling.
+- The gold dot on File in Lloyd's screenshot confirmed the v5.21.8
+  hourly check works — it was notifying him v5.21.8 was ready.
+
 ## v5.21.8 — 2026-09-21
 
 Updates now come to you instead of waiting to be checked. Verified on

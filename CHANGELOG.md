@@ -3,6 +3,19 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.21.14 — 2026-09-21
+
+Stopped the sprite-sheet animator from going blank when the editor thinks
+every cell is empty. Verified on desktop/server; not yet run on Lloyd's
+iPhone.
+
+- The sheet picker now auto-shows all cells if non-empty-cell detection
+  finds zero solid cells, instead of leaving the grid empty while asking
+  you to select tiles.
+- The picker hint now says when it's in that fallback mode, so the next
+  debugging pass can tell whether the issue is bad empty-cell detection or
+  something deeper in the import pipeline.
+
 ## v5.21.13 — 2026-09-21
 
 Added a visible palette probe so the phone can report what Safari thinks

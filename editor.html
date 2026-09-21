@@ -3444,12 +3444,15 @@ function syncSheetSizes() {
 function renderSheetGrid() {
   const f = sheetCur(); if (!f) return;
   const showEmpty = $("sheet-showempty").checked;
+  const usedCount = f.grid.cells.reduce((n, cell) => n + (cell.used ? 1 : 0), 0);
   $("sheet-hint").textContent =
     f.grid.cols + "×" + f.grid.rows + " = " + f.grid.cells.length + " cells" +
-    (f.pico ? " — PICO-8 sheet" : "") + " · " + f.cell + "px → 32px";
+    (f.pico ? " — PICO-8 sheet" : "") + " · " + f.cell + "px → 32px" +
+    (!showEmpty && !usedCount ? " · auto-showing all cells" : "");
   const g = $("sheet-grid"); g.innerHTML = "";
+  const revealAll = !showEmpty && !usedCount;
   f.grid.cells.forEach(cell => {
-    if (!cell.used && !showEmpty) return;
+    if (!cell.used && !showEmpty && !revealAll) return;
     const cv = cell.cv;
     cv.classList.toggle("sel", f.sel.has(cell.index));
     cv.title = "cell " + cell.index;
@@ -3465,9 +3468,12 @@ function renderSheetGrid() {
 function renderSheetSelInfo() {
   const f = sheetCur();
   const n = f ? f.sel.size : 0;
+  const usedCount = f ? f.grid.cells.reduce((m, cell) => m + (cell.used ? 1 : 0), 0) : 0;
   $("sheet-selinfo").textContent = n
     ? n + " selected — role: " + sheetRole
-    : "tap cells to select them";
+    : (!usedCount && f && !$("sheet-showempty").checked)
+      ? "tap cells to select them — no solid cells were detected, so all cells are shown"
+      : "tap cells to select them";
 }
 async function buildSheetRoles() {
   if (!presets.length) {

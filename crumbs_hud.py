@@ -124,7 +124,7 @@ from urllib.parse import urlparse, parse_qs
 import crumbs_core as core
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.21.1"
+APP_VERSION = "5.21.2"
 
 # ---- v5.18: in-app self-update -------------------------------------------------
 # Lloyd's rule: updates overwrite the old files in place — no more downloading a
@@ -153,7 +153,12 @@ def _update_ssl_context():
 
 
 def _update_fetch(name, tries=2):
-    url = f"https://raw.githubusercontent.com/{UPDATE_REPO}/{UPDATE_BRANCH}/{name}"
+    # v5.21.2: cache-buster — raw.githubusercontent.com is a CDN whose edge
+    # nodes can serve a stale copy for a while after a push (this exact
+    # thing bit a phone install of v5.21.1). A unique query string makes
+    # every fetch miss the cache and hit origin instead.
+    url = (f"https://raw.githubusercontent.com/{UPDATE_REPO}/{UPDATE_BRANCH}/{name}"
+           f"?t={int(time.time())}")
     req = urllib.request.Request(url, headers={"User-Agent": "crumbs-hud-updater"})
     ctx = _update_ssl_context()
     last = None
@@ -2956,6 +2961,16 @@ class Handler(BaseHTTPRequestHandler):
             if bad:
                 return self._send_json({"ok": False, "leg": "github",
                                         "error": f"downloaded {', '.join(bad)} looked wrong — old files untouched, try again"})
+            # v5.21.2: the download must actually be NEWER than this build.
+            # The check may have seen a fresh version while the file fetch
+            # hit a stale CDN edge — installing that would be a downgrade,
+            # so refuse it and leave the old files alone.
+            m = re.search(br'^APP_VERSION\s*=\s*"([^"]+)"',
+                          blobs["crumbs_hud.py"], re.M)
+            dl_version = m.group(1).decode() if m else None
+            if not dl_version or not _ver_tuple(dl_version) > _ver_tuple(APP_VERSION):
+                return self._send_json({"ok": False, "leg": "github",
+                                        "error": f"GitHub served a stale copy (v{dl_version or 'unreadable'}) — old files untouched, try again in a bit"})
             updated = []
             try:
                 for n, blob in blobs.items():

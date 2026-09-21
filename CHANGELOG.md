@@ -3,6 +3,23 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.21.2 — 2026-09-21
+
+Stale-cache armor for the updater. Verified on desktop/server; not yet run
+on Lloyd's iPhone.
+
+- **Cache-buster on every GitHub fetch.** raw.githubusercontent.com is a
+  CDN whose edge nodes can serve an older copy for a while after a push —
+  a phone install pulled v5.18 files minutes after v5.21.1 was released.
+  Every updater fetch (version check, changelog, file downloads) now
+  carries a unique `?t=` query string, so each request misses the cache
+  and hits origin.
+- **Install-time version guard.** Before swapping files, the updater now
+  reads `APP_VERSION` out of the downloaded `crumbs_hud.py` and requires
+  it to be numerically newer than the running build. If a stale copy
+  slips through anyway, the install aborts cleanly — old files untouched,
+  with a "try again in a bit" message instead of a silent downgrade.
+
 ## v5.21.1 — 2026-09-21
 
 Update-check honesty fix. Verified on desktop/server; not yet run on

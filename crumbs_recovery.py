@@ -287,6 +287,52 @@ class CheckpointStore:
         return out
 
     # ------------------------------------------------------------------
+    # phase 3B: last recovery report (HUD reads; server writes at startup)
+    # ------------------------------------------------------------------
+    @property
+    def report_path(self) -> Path:
+        return self.directory / "last_report.json"
+
+    def write_report(self, report: Dict[str, Any]) -> None:
+        """Atomically persist the latest RECOVERY_REPORT for the HUD."""
+        with self._locked():
+            self._atomic_write(self.report_path, _canonical_json(report) + b"\n")
+
+    def read_report(self) -> Optional[Dict[str, Any]]:
+        try:
+            return json.loads(self.report_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+
+    def resolve_server_responds(self) -> bool:
+        """Flip the persisted report's SERVER_RESPONDS step pending -> pass.
+
+        Reporting only: touches last_report.json and nothing else — no world
+        state, no checkpoint, no recovery action, no risk change. Idempotent:
+        only a step still marked pending transitions. Never raises: a
+        persistence failure must be logged by the caller, never fatal.
+        Returns True when a transition was persisted."""
+        try:
+            report = self.read_report()
+            if not isinstance(report, dict):
+                return False
+            steps = (report.get("verification") or {}).get("steps") or []
+            changed = False
+            for s in steps:
+                if (isinstance(s, dict) and s.get("name") == STEP_SERVER_RESPONDS
+                        and s.get("status") == "pending"):
+                    s["status"] = "pass"
+                    s["detail"] = "first request served"
+                    changed = True
+            if not changed:
+                return False
+            with self._locked():
+                self._atomic_write(self.report_path, _canonical_json(report) + b"\n")
+            return True
+        except Exception:
+            return False
+
+    # ------------------------------------------------------------------
     # journal
     # ------------------------------------------------------------------
     def _maybe_rotate_journal(self) -> None:
@@ -367,3 +413,233 @@ class RecoverySupervisor:
             "SERVER_HEALTHY",
             checkpoint_id=checkpoint_id,
         )
+
+
+# ======================================================================
+# Phase 3B — Recovery Intelligence & Guardrails
+#
+# Observe / classify / assess / verify / record. Nothing in this section
+# deletes, overwrites, or grants itself more authority. The only actions
+# the system may take are the ones the risk model explicitly permits,
+# and a repeated failure can only NARROW what is permitted, never widen.
+# ======================================================================
+
+# ---- failure/success library: outcome taxonomy (definitions first) ----
+RECOVERY_SUCCESS = "RECOVERY_SUCCESS"  # valid state produced AND independently verified
+RECOVERY_PARTIAL = "RECOVERY_PARTIAL"  # some state restored, completeness unverifiable
+RECOVERY_FAILED = "RECOVERY_FAILED"    # no verified valid state produced
+RECOVERY_UNSAFE = "RECOVERY_UNSAFE"    # action withheld: could harm known-good state
+RECOVERY_UNKNOWN = "RECOVERY_UNKNOWN"  # validity of the result cannot be established
+
+RECOVERY_OUTCOME_DEFS = {
+    RECOVERY_SUCCESS: "a recovery or repair operation that produces a valid state "
+                      "and passes independent verification",
+    RECOVERY_PARTIAL: "some state is restored, but the complete expected state "
+                      "cannot be independently verified",
+    RECOVERY_FAILED: "a recovery or repair operation that does not produce a "
+                     "verified valid state",
+    RECOVERY_UNSAFE: "a proposed action could destroy or compromise a known-good "
+                     "state, so the action must be withheld",
+    RECOVERY_UNKNOWN: "the system cannot establish whether the resulting state "
+                      "is valid",
+}
+
+# ---- interruption taxonomy ----
+# IOS_SUSPENSION and PROCESS_EXIT are defined but intentionally UNUSED in v1:
+# with only a heartbeat and shutdown markers, a suspension-then-kill is
+# indistinguishable from a crash. Unknown remains unknown — see
+# classify_interruption(). They are reserved for a future explicit channel.
+CLEAN_SHUTDOWN = "CLEAN_SHUTDOWN"
+IOS_SUSPENSION = "IOS_SUSPENSION"
+PROCESS_EXIT = "PROCESS_EXIT"
+CRASH = "CRASH"  # sudden death: kill -9 and segfault are indistinguishable here
+DEPENDENCY_FAILURE = "DEPENDENCY_FAILURE"
+CORRUPTED_STATE = "CORRUPTED_STATE"
+UNKNOWN_INTERRUPTION = "UNKNOWN_INTERRUPTION"
+
+# ---- interruption evidence files (live beside checkpoints; gitignored) ----
+HEARTBEAT_NAME = "heartbeat.json"
+DIRTY_NAME = "dirty.flag"
+CLEAN_NAME = "clean.shutdown"
+HEARTBEAT_INTERVAL_S = 5.0
+HEARTBEAT_STALE_AFTER_S = 15.0  # 3x the interval: was alive moments ago, then gone
+
+# ---- risk model ----
+RISK_LOW = "LOW"
+RISK_MEDIUM = "MEDIUM"
+RISK_HIGH = "HIGH"
+RISK_CRITICAL = "CRITICAL"
+RISK_LEVELS = (RISK_LOW, RISK_MEDIUM, RISK_HIGH, RISK_CRITICAL)
+
+# Permitted actions per level. Authority never grows with risk: the
+# destructive-capable subset ({RESTORE_VERIFIED_CHECKPOINT}) is
+# {} -> {RESTORE} -> {RESTORE} -> {} across LOW/MEDIUM/HIGH/CRITICAL.
+# Notices get louder with risk, but no new power is granted.
+PERMITTED_ACTIONS = {
+    RISK_LOW: ("NORMAL_STARTUP",),
+    RISK_MEDIUM: ("NORMAL_STARTUP", "RESTORE_VERIFIED_CHECKPOINT", "LOG_NOTICE"),
+    RISK_HIGH: ("NORMAL_STARTUP", "RESTORE_VERIFIED_CHECKPOINT",
+                "PRESERVE_EVIDENCE", "INTERVENTION_NOTICE"),
+    RISK_CRITICAL: ("WITHHOLD_ACTION", "PRESERVE_EVIDENCE", "INTERVENTION_REQUIRED"),
+}
+_DESTRUCTIVE_ACTIONS = frozenset({"RESTORE_VERIFIED_CHECKPOINT"})
+
+
+def read_heartbeat(store: "CheckpointStore") -> Optional[Dict[str, Any]]:
+    """Return the last heartbeat with its age in seconds, or None. Never raises."""
+    try:
+        raw = json.loads((store.directory / HEARTBEAT_NAME).read_text(encoding="utf-8"))
+        ts = float(raw.get("ts", 0))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+    if ts <= 0:
+        return None
+    return {"ts": ts, "pid": raw.get("pid"), "age": max(0.0, time.time() - ts)}
+
+
+def classify_interruption(store: "CheckpointStore", *,
+                          dependencies_ok: bool = True,
+                          primary_state: str = "unknown") -> Dict[str, Any]:
+    """Classify the previous run's end from evidence. Never guesses beyond it.
+
+    Decision tree (first match wins):
+      not dependencies_ok                    -> DEPENDENCY_FAILURE
+      clean marker, no dirty flag            -> CLEAN_SHUTDOWN
+      dirty, and the primary save is corrupt  -> CORRUPTED_STATE
+      dirty, heartbeat was recent             -> CRASH (sudden death)
+      otherwise                               -> UNKNOWN_INTERRUPTION
+    """
+    d = store.directory
+    clean = (d / CLEAN_NAME).is_file()
+    dirty = (d / DIRTY_NAME).is_file()
+    hb = read_heartbeat(store)
+    evidence: Dict[str, Any] = {
+        "clean_marker": clean,
+        "dirty_flag": dirty,
+        "heartbeat": hb,
+        "primary_state": primary_state,
+        "dependencies_ok": bool(dependencies_ok),
+    }
+    if not dependencies_ok:
+        category = DEPENDENCY_FAILURE
+    elif clean and not dirty:
+        category = CLEAN_SHUTDOWN
+    elif dirty and primary_state == "corrupt":
+        category = CORRUPTED_STATE
+    elif dirty and hb is not None and hb["age"] <= HEARTBEAT_STALE_AFTER_S:
+        category = CRASH
+    else:
+        category = UNKNOWN_INTERRUPTION
+    return {"category": category, "evidence": evidence}
+
+
+def count_recent_outcomes(store: "CheckpointStore", n: int = 200) -> Dict[str, int]:
+    """Count RECOVERY_REPORT outcomes in the journal tail. Never raises."""
+    counts: Dict[str, int] = {}
+    try:
+        for entry in store.journal_tail(n):
+            if entry.get("event") != "RECOVERY_REPORT":
+                continue
+            outcome = (entry.get("report") or {}).get("verification", {}).get("outcome")
+            if isinstance(outcome, str):
+                counts[outcome] = counts.get(outcome, 0) + 1
+    except Exception:
+        pass
+    return counts
+
+
+def assess_risk(*, interruption: str, checkpoint_finding: str,
+                primary_state: str, recent_failures: int = 0,
+                prior_state_known: bool = True) -> Dict[str, Any]:
+    """Map concrete signals to a risk level and its permitted actions.
+
+    checkpoint_finding: "PASS" | "FALLBACK" | "NONE"
+    primary_state:      "healthy" | "corrupt" | "missing" | "unknown"
+    recent_failures is only ever allowed to RAISE the level, never lower it.
+    """
+    def _risk(level: str, reason: str) -> Dict[str, Any]:
+        return {"level": level, "permitted": list(PERMITTED_ACTIONS[level]),
+                "reason": reason}
+
+    if not prior_state_known and checkpoint_finding == "NONE" and primary_state == "missing":
+        return _risk(RISK_LOW, "FIRST_RUN_NO_PRIOR_STATE")
+    if interruption == DEPENDENCY_FAILURE:
+        return _risk(RISK_CRITICAL, "RECOVERY_CORE_UNAVAILABLE")
+    if checkpoint_finding == "NONE" and primary_state != "healthy":
+        return _risk(RISK_CRITICAL, "NO_VERIFIED_CHECKPOINT_AND_PRIMARY_UNUSABLE")
+    if checkpoint_finding == "FALLBACK" or recent_failures >= 2:
+        return _risk(RISK_HIGH, "FALLBACK_SLOT_USED" if checkpoint_finding == "FALLBACK"
+                     else "REPEATED_RECOVERY_FAILURES")
+    if interruption in (CRASH, UNKNOWN_INTERRUPTION, CORRUPTED_STATE,
+                        IOS_SUSPENSION, PROCESS_EXIT):
+        return _risk(RISK_MEDIUM, "DIRTY_INTERRUPTION:" + interruption)
+    return _risk(RISK_LOW, "CLEAN_SHUTDOWN")
+
+
+# ---- verification chain (formalizes the checks the code already performs) ----
+STEP_CHECKPOINT_VALID = "CHECKPOINT_VALID"
+STEP_STATE_STRUCTURE_VALID = "STATE_STRUCTURE_VALID"
+STEP_WORLD_DIMENSIONS_VALID = "WORLD_DIMENSIONS_VALID"
+STEP_LAYERS_VALID = "LAYERS_VALID"
+STEP_RULES_VALID = "RULES_VALID"
+STEP_SERVER_RESPONDS = "SERVER_RESPONDS"
+VERIFICATION_STEPS = (STEP_CHECKPOINT_VALID, STEP_STATE_STRUCTURE_VALID,
+                      STEP_WORLD_DIMENSIONS_VALID, STEP_LAYERS_VALID,
+                      STEP_RULES_VALID, STEP_SERVER_RESPONDS)
+
+
+def run_verification_chain(*, checkpoint_ok: bool,
+                           state: Optional[Dict[str, Any]],
+                           expected_dims: Optional[tuple] = None) -> Dict[str, Any]:
+    """Evaluate the named verification steps. SERVER_RESPONDS stays pending:
+    it resolves on the first served request, after startup returns."""
+    steps = []
+
+    def _step(name: str, ok: bool, detail: str = "") -> None:
+        steps.append({"name": name, "status": "pass" if ok else "fail",
+                      "detail": detail})
+
+    _step(STEP_CHECKPOINT_VALID, bool(checkpoint_ok),
+          "" if checkpoint_ok else "no verified checkpoint")
+    struct_ok = isinstance(state, dict) and isinstance(state.get("map"), dict)
+    _step(STEP_STATE_STRUCTURE_VALID, struct_ok,
+          "" if struct_ok else "state/map missing or malformed")
+    dims_ok = False
+    if struct_ok and expected_dims is not None:
+        m = state["map"]
+        dims_ok = (m.get("width"), m.get("height")) == tuple(expected_dims)
+    _step(STEP_WORLD_DIMENSIONS_VALID, dims_ok,
+          "" if dims_ok else "dimension mismatch or unknown expectation")
+    layers_ok = False
+    if struct_ok:
+        layers_ok = all(isinstance(state["map"].get(k), list)
+                        for k in ("tiles", "objects", "collision"))
+    _step(STEP_LAYERS_VALID, layers_ok,
+          "" if layers_ok else "a map layer is not a list")
+    rules = state.get("rules") if isinstance(state, dict) else None
+    rules_ok = rules is None or isinstance(rules, dict)
+    _step(STEP_RULES_VALID, rules_ok,
+          "" if rules_ok else "rules present but malformed")
+    steps.append({"name": STEP_SERVER_RESPONDS, "status": "pending",
+                  "detail": "resolves on first served request"})
+    checkable = [s for s in steps if s["status"] != "pending"]
+    return {"steps": steps, "all_ok": all(s["status"] == "pass" for s in checkable)}
+
+
+def decide_outcome(*, action: str, fallback: bool = False,
+                   checks_ok: bool = True, error: Optional[str] = None) -> str:
+    """Map (action taken, verification result) to the outcome taxonomy.
+
+    action: "RESTORED" | "NONE" | "WITHHELD"
+    """
+    if action == "WITHHELD":
+        return RECOVERY_UNSAFE
+    if error:
+        return RECOVERY_FAILED
+    if action == "RESTORED":
+        if not checks_ok:
+            return RECOVERY_FAILED
+        return RECOVERY_PARTIAL if fallback else RECOVERY_SUCCESS
+    if action == "NONE":
+        return RECOVERY_SUCCESS
+    return RECOVERY_UNKNOWN

@@ -241,6 +241,52 @@ class CheckpointStore:
         return record, "PASS"
 
     # ------------------------------------------------------------------
+    # phase 3: read-only status for the HUD (no journal side effects)
+    # ------------------------------------------------------------------
+    def slot_info(self) -> list:
+        """Per-slot inventory for the HUD. Verifies in place; writes nothing."""
+        out = []
+        for slot in range(KEEP_CHECKPOINTS):
+            path = self._slot_path(slot)
+            info: Dict[str, Any] = {
+                "slot": slot,
+                "name": path.name,
+                "present": path.is_file(),
+                "status": "EMPTY",
+                "record": None,
+            }
+            if path.is_file():
+                record, status = self._verify_path(path)
+                info["status"] = "PASS" if record is not None else status
+                if record is not None:
+                    info["record"] = {
+                        "id": record.get("id"),
+                        "created_at": record.get("created_at"),
+                        "label": record.get("label"),
+                        "source": record.get("source"),
+                    }
+            out.append(info)
+        return out
+
+    def journal_tail(self, n: int = 50) -> list:
+        """Last n journal entries, newest last. Never raises."""
+        try:
+            n = max(1, min(200, int(n)))
+        except (TypeError, ValueError):
+            n = 50
+        try:
+            lines = self.journal_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return []
+        out = []
+        for line in lines[-n:]:
+            try:
+                out.append(json.loads(line))
+            except ValueError:
+                continue
+        return out
+
+    # ------------------------------------------------------------------
     # journal
     # ------------------------------------------------------------------
     def _maybe_rotate_journal(self) -> None:

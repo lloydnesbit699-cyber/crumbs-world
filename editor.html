@@ -130,6 +130,16 @@
   #log-list { font-size: 12px; font-family: monospace; }
   #log-list .logrow { padding: 4px 0; border-bottom: 1px solid #222; color: #ccc; }
   #log-list .logrow .lt { color: #666; margin-right: 8px; }
+  /* v5.22: Phase 3 — recovery sheet */
+  #recovery-events .logrow { padding: 4px 0; border-bottom: 1px solid #222; color: #ccc; }
+  #recovery-events .logrow .lt { color: #666; margin-right: 8px; }
+  .recrow { display: flex; gap: 8px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid #222; }
+  .recbadge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 8px; white-space: nowrap; }
+  .recbadge.ok { background: #1d3a24; color: #7ddf8e; }
+  .recbadge.bad { background: #3a1d1d; color: #ff9a9a; }
+  .recbadge.empty { background: #2a2a2a; color: #888; }
+  .recrow .recname { color: #ddd; }
+  .recrow small { color: #888; margin-left: auto; text-align: right; }
   #check-list .checkrow.bad { border-color: #a33; color: #f88; font-size: 13px; }
   #check-list .checkrow.good { border-color: #3a3; color: #8f8; font-size: 13px; }
   /* v5.6: splash screen */
@@ -520,6 +530,7 @@
   <button id="menu-setup">Setup&hellip;</button>
   <button id="menu-key" title="Set the share key for a public HUD">Key&hellip;</button>
   <button id="menu-log" title="Server event log (debugging)">Server log</button>
+  <button id="menu-recovery" title="Checkpoint slots and recent recovery events">Recovery&hellip;</button>
 </div>
 
 <div id="stage"><canvas id="grid"></canvas></div>
@@ -725,6 +736,15 @@
   <div class="grab"></div>
   <div class="tray-head">Server log <button id="btn-log-refresh" class="ghost">Refresh</button></div>
   <div id="log-list" class="loglist"></div>
+</div>
+
+<div id="sheet-recovery" class="sheet">
+  <div class="grab"></div>
+  <div class="tray-head">Recovery <button id="btn-recovery-refresh" class="ghost">Refresh</button></div>
+  <div id="recovery-summary" class="tray-hint"></div>
+  <div id="recovery-slots"></div>
+  <div class="tray-head" style="margin-top:10px">Recent events</div>
+  <div id="recovery-events"></div>
 </div>
 
 <div id="sheet-check" class="sheet">
@@ -4279,6 +4299,43 @@ async function renderLog() {
 }
 $("menu-log").onclick = () => { toggleOverlay("sheet-log"); renderLog(); };
 $("btn-log-refresh").onclick = renderLog;
+// v5.22: Phase 3 — recovery state in the HUD (read-only).
+function fmtTs(ts) {
+  if (!ts) return "\u2014";
+  try { return new Date(ts * 1000).toLocaleString(); } catch (e) { return "\u2014"; }
+}
+async function renderRecovery() {
+  const sum = $("recovery-summary"), slots = $("recovery-slots"), evts = $("recovery-events");
+  sum.textContent = "loading\u2026"; slots.innerHTML = ""; evts.innerHTML = "";
+  try {
+    const m = await fetch("/api/recovery/status").then(r => r.json());
+    if (!m.available) { sum.textContent = "recovery unavailable on this server"; return; }
+    if (m.error) { sum.textContent = "status error: " + m.error; return; }
+    const ok = m.slots.filter(s => s.status === "PASS").length;
+    const newest = m.slots.length && m.slots[0].record;
+    sum.textContent = ok + " of " + m.slots.length + " checkpoint slots verified" +
+      (newest ? " \u00b7 newest " + fmtTs(newest.created_at) : "");
+    m.slots.forEach(s => {
+      const d = document.createElement("div");
+      d.className = "recrow";
+      const badge = s.status === "PASS" ? "ok" : (s.status === "EMPTY" ? "empty" : "bad");
+      d.innerHTML = `<span class="recbadge ${badge}">${escHtml(s.status)}</span>` +
+        `<span class="recname">${escHtml(s.name)}</span>` +
+        (s.record ? `<small>${escHtml(s.record.id.slice(0, 24))}\u2026 \u00b7 ${escHtml(fmtTs(s.record.created_at))}</small>` : "");
+      slots.appendChild(d);
+    });
+    const ev = (m.journal || []).slice().reverse().slice(0, 15);
+    if (!ev.length) evts.innerHTML = "<small>no recovery events yet</small>";
+    ev.forEach(e => {
+      const d = document.createElement("div");
+      d.className = "logrow";
+      d.innerHTML = `<span class="lt">${escHtml(fmtTs(e.timestamp))}</span>${escHtml(e.event)}`;
+      evts.appendChild(d);
+    });
+  } catch (e) { sum.textContent = "couldn't reach server"; }
+}
+$("menu-recovery").onclick = () => { toggleOverlay("sheet-recovery"); renderRecovery(); };
+$("btn-recovery-refresh").onclick = renderRecovery;
 // dismiss the menu after any of its action buttons fire — but never while a
 // sheet it just opened is still being read (v4.9: Rules/World were flashing
 // open then getting closed 60ms later by this very timer)
@@ -4287,7 +4344,7 @@ document.querySelectorAll(".menu-drop").forEach(dd => {
 dd.addEventListener("click", e => {
   const b = e.target.closest("button");
   if (b && !["menu-setup", "menu-save", "menu-saveas", "menu-load",
-             "menu-rules", "menu-world", "menu-slots", "menu-log"].includes(b.id)) setTimeout(closeOverlays, 60);
+             "menu-rules", "menu-world", "menu-slots", "menu-log", "menu-recovery"].includes(b.id)) setTimeout(closeOverlays, 60);
 });
 });
 

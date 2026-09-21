@@ -129,7 +129,7 @@ except ImportError:
     RecoverySupervisor = None
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.21.15"
+APP_VERSION = "5.22.0"
 
 # ---- v5.18: in-app self-update -------------------------------------------------
 # Lloyd's rule: updates overwrite the old files in place — no more downloading a
@@ -2503,6 +2503,18 @@ def _map_state():
             "collision": world.collision_layer}
 
 
+def _recovery_status():
+    """HUD-facing recovery snapshot. Read-only; never raises."""
+    if not _recovery_store:
+        return {"available": False}
+    try:
+        return {"available": True,
+                "slots": _recovery_store.slot_info(),
+                "journal": _recovery_store.journal_tail(50)}
+    except Exception as exc:
+        return {"available": True, "error": str(exc)[:200]}
+
+
 def _recovery_snapshot():
     return {"map": _map_state(), "rules": copy.deepcopy(rules), "current_map": _current_map}
 
@@ -2885,6 +2897,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"dirty": _save_state["dirty"],
                              "last_save": _save_state["last"],
                              "play": play["active"]})
+        elif path == "/api/recovery/status":
+            # v5.22: Phase 3 — recovery state for the HUD (read-only).
+            self._send_json(_recovery_status())
         elif path == "/api/log":
             # v5.6: server event log for debugging without watching the terminal
             q = parse_qs(urlparse(self.path).query)

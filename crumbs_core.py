@@ -101,8 +101,8 @@ BIOMES = {
     "dungeon": {
         "name": "Dungeon",
         "colors": {
-            "floor": "#2a2a2a", "floor_dark": "#1a1a1a", "wall": "#3a3a3a",
-            "wall_dark": "#252525", "door": "#6b4423", "chest": "#8b6914"
+            "floor": "#757575", "floor_dark": "#555555", "wall": "#9a9a9a",
+            "wall_dark": "#6a6a6a", "door": "#8b5a2b", "chest": "#c9a227"
         },
         "noise_settings": {"water_level": 0.0, "sand_level": 0.0, "grass_level": 0.0, "stone_level": 0.0}
     }

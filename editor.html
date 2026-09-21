@@ -174,7 +174,8 @@
               border: 2px solid #555; }
   .sw .chip img { width: 100%; height: 100%; border-radius: 8px; image-rendering: pixelated;
                   display: block; object-fit: contain; background: #0a0a0a; }
-  .sw.sel .chip { border-color: #ffd75f; box-shadow: 0 0 8px #ffd75f; }
+  .sw.sel .chip { border-color: #ffd75f; border-width: 3px; box-shadow: 0 0 12px #ffd75f; }
+  .sw.sel { background: rgba(255,215,95,0.15); border-radius: 12px; }
   .sw .lbl { font-size: 10px; color: #bbb; margin-top: 2px; word-break: break-word; }
 
   /* v3.0: custom imported tiles + import form */
@@ -189,7 +190,8 @@
     border: 2px solid #555; margin: 0 auto; overflow: hidden; background: #1c1c1c; }
   #paint-strip .sw .chip img { width: 100%; height: 100%; object-fit: contain;
     image-rendering: pixelated; }
-  #paint-strip .sw.sel canvas, #paint-strip .sw.sel .chip { border-color: #ffd75f; box-shadow: 0 0 8px #ffd75f; }
+  #paint-strip .sw.sel canvas, #paint-strip .sw.sel .chip { border-color: #ffd75f; border-width: 3px; box-shadow: 0 0 12px #ffd75f; }
+  .sw.sel { background: rgba(255,215,95,0.15); border-radius: 12px; }
   #paint-strip .preset-tag { font-size: 9px; color: #4da3ff; text-align: center; }
   #paint-strip .lbl { text-align: center; }
   #paint-strip.editing .sw { outline: 2px dashed #8a6dd7; outline-offset: -2px; }
@@ -460,7 +462,7 @@
     <button class="mtop" data-menu="m-play">Play</button>
     <button class="mtop" data-menu="m-setup">Setup</button>
   </div>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v5.21.9</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v5.21.10</small></span>
   <span id="topbar-undo">
     <button id="btn-undo2" title="Undo">&#8617;</button>
     <button id="btn-redo2" title="Redo">&#8618;</button>
@@ -776,7 +778,7 @@
 
 <div id="splash">
   <div class="splash-title">Crumbs HUD</div>
-  <div class="splash-sub">tile painter &middot; v5.21.9</div>
+  <div class="splash-sub">tile painter &middot; v5.21.10</div>
   <div class="load-bar"><i id="splash-fill"></i></div>
   <div class="load-label" id="splash-label">Waking the server&hellip;</div>
 </div>

@@ -3,6 +3,18 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.21.10 — 2026-09-21
+
+The dungeon palette was unusable — four near-black grays you couldn't
+tell apart. Verified on desktop/server; not yet run on Lloyd's iPhone.
+
+- **Lloyd's call:** "the thumbs are way too dark you can't tell any
+  difference." Brightened the dungeon colorset: floor #757575, floor_dark
+  #555555, wall #9a9a9a, wall_dark #6a6a6a, door #8b5a2b, chest #c9a227.
+  Still reads as dungeon, now actually distinguishable.
+- **Selection highlight** made impossible to miss: thicker gold border,
+  stronger glow, plus a gold tint behind the whole selected swatch.
+
 ## v5.21.9 — 2026-09-21
 
 "Setup" was still clipped to "Set" on Lloyd's narrow portrait phone.

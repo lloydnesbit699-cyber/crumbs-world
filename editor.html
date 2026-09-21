@@ -1076,7 +1076,10 @@ async function api(path, body) {
       // v5.16: public share key — ask once, remember on this device, retry.
       if (r.status === 403 && j && j.error && /write key required|share key required/.test(j.error)) {
         if (!opt._keyTried) {
-          const k = prompt("This shared HUD needs a key to save changes.\nEnter the share key (stored on this device only):");
+          // v5.22.4: trim — iPhone keyboards love to capitalize the first
+          // letter or trail a space, both of which silently break the key.
+          let k = prompt("This shared HUD needs a key to save changes.\nEnter the share key (stored on this device only):");
+          k = (k || "").trim();
           if (k) {
             crumbsKey = k;
             try { localStorage.setItem("crumbsKey", k); } catch (e) {}
@@ -4009,8 +4012,9 @@ $("menu-export").onclick = () => {
 $("menu-key").onclick = () => {
   closeOverlays();
   const cur = crumbsKey ? "(one is saved — blank clears it)" : "(none saved)";
-  const k = prompt("Share key for this HUD " + cur + "\nBlank clears the saved key:", "");
+  let k = prompt("Share key for this HUD " + cur + "\nBlank clears the saved key:", "");
   if (k === null) return;
+  k = k.trim();  // v5.22.4: see the api() prompt — same keyboard trap
   crumbsKey = k;
   try {
     if (k) localStorage.setItem("crumbsKey", k);

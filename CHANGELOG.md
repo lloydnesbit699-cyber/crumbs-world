@@ -3,6 +3,13 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.22.4 — 2026-09-21
+
+The share-key prompt and Setup → Key… now trim the entered key. iPhone
+keyboards auto-capitalize the first letter and trail spaces, both of
+which silently failed the key check and left the HUD read-only. Verified
+on desktop/server; not yet run on Lloyd's iPhone.
+
 ## v5.22.3 — 2026-09-21
 
 A wrong share key on a public HUD used to nag the key prompt on *every*

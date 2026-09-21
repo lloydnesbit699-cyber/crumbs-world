@@ -2519,6 +2519,36 @@ def _checkpoint_save():
         print(f"[recovery] checkpoint write failed: {exc}")
 
 
+def _primary_save_healthy(name):
+    """True when the on-disk save parses and has a sane map shape.
+
+    A checkpoint is a safety net, never the authority: if the primary save
+    is healthy it is fresher than any checkpoint by construction, so a
+    stale checkpoint must not clobber it in memory at startup.
+    """
+    name = _safe_name(name) or DEFAULT_SAVE
+    if not name.endswith(".json"):
+        name += ".json"
+    p = os.path.join(SCRIPT_DIR, name)
+    try:
+        with open(p, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    w, h = data.get("width"), data.get("height")
+    if not isinstance(w, int) or not isinstance(h, int) or w <= 0 or h <= 0:
+        return False
+    for key in ("tiles", "objects", "collision"):
+        grid = data.get(key)
+        if not isinstance(grid, list) or len(grid) != h:
+            return False
+        if not all(isinstance(r, list) and len(r) == w for r in grid):
+            return False
+    return True
+
+
 def _recover_startup():
     """Verify and restore a checkpoint into memory only; disk stays untouched."""
     if not _recovery:
@@ -2529,6 +2559,15 @@ def _recover_startup():
         return {"status": status}
     state = record.get("state", {})
     saved = state.get("map", {})
+    # v5.22: never let a stale checkpoint clobber a healthy primary save.
+    # The checkpoint shadows the file it was written alongside; if that
+    # file parses cleanly, it is the freshest authority — skip the restore.
+    primary_name = state.get("current_map") or DEFAULT_SAVE
+    if _primary_save_healthy(primary_name):
+        _recovery_store.record_event("CHECKPOINT_SKIPPED", reason="PRIMARY_HEALTHY",
+                                     checkpoint_id=record.get("id"))
+        print("[recovery] primary save healthy; checkpoint not needed")
+        return {"status": "PRIMARY_HEALTHY"}
     if saved.get("width") != world.width or saved.get("height") != world.height:
         _recovery_store.record_event("STATE_RESTORE_SKIPPED", reason="DIMENSION_MISMATCH", checkpoint_id=record.get("id"))
         print("[recovery] checkpoint verified but dimensions differ; normal startup")

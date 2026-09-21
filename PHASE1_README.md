@@ -10,6 +10,7 @@ Prove the core property:
 
 - `crumbs_recovery.py` — atomic checkpoint store + integrity verification + recovery journal.
 - `recovery_smoke_test.py` — self-contained proof-of-concept.
+- `PHASE1_REVIEW_WREN.md` — Wren's hardening review (implemented in v1.1).
 
 ## Test
 
@@ -20,9 +21,23 @@ python3 recovery_smoke_test.py
 Expected:
 
 ```text
-PHASE 1 PASS
-checkpoint -> interruption -> restart -> verified recovery -> corruption detection
+PHASE 1 PASS (v1.1)
+checkpoint -> interruption -> restart -> verified recovery
+rotation -> fallback -> corruption detection
 ```
+
+## v1.1 hardening (Wren)
+
+- **Checkpoint rotation**: keeps `latest.json` + `prev-1.json` + `prev-2.json`.
+  Recovery tries newest first and falls back. A corrupt new checkpoint can
+  never destroy all older good copies.
+- **File locking**: `fcntl.flock` guards checkpoint + journal writes, so a
+  double-launched server can't interleave or clobber state.
+- **Anchored paths**: default checkpoint root is the script's own directory
+  (`__file__`), never the process working directory (unreliable on a-Shell).
+- **Journal rotation**: capped at 1 MiB / 1000 lines, keeps the last 500.
+- **UUID checkpoint IDs**: `CP-<utc-stamp>-<8 hex>` instead of
+  timestamp + nanosecond-modulo.
 
 ## Safety
 

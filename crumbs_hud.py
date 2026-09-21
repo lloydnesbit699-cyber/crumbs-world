@@ -143,7 +143,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.22.5"
+APP_VERSION = "5.22.6"
 
 # ---- v5.18: in-app self-update -------------------------------------------------
 # Lloyd's rule: updates overwrite the old files in place — no more downloading a
@@ -2946,6 +2946,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(b"editor.html not found next to crumbs_hud.py")
                 return
+            # v5.22.6: the banner/splash version used to be hardcoded in the
+            # HTML and went stale on every bump. Stamp the real version here.
+            body = body.replace(b"%%CRUMBS_VERSION%%",
+                                APP_VERSION.encode("utf-8"))
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))

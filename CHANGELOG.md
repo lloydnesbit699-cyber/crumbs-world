@@ -3,6 +3,14 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.22.6 — 2026-09-21
+
+The banner/splash version was hardcoded as v5.21.11 in editor.html and
+went stale on every bump (Lloyd's running 5.22.5 showed 5.21.11). Now
+the HTML carries a %%CRUMBS_VERSION%% placeholder and the server stamps
+the real APP_VERSION when serving `/`. Verified on desktop/server; not
+yet run on Lloyd's iPhone.
+
 ## v5.22.5 — 2026-09-21
 
 Launching `python3 crumbs_hud.py` while the old server still holds port

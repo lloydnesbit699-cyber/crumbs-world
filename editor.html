@@ -417,7 +417,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v5.18.1</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v5.19</small></span>
   <span id="topbar-undo">
     <button id="btn-undo2" title="Undo">&#8617;</button>
     <button id="btn-redo2" title="Redo">&#8618;</button>
@@ -452,6 +452,7 @@
   <button id="menu-log" title="Server event log (debugging)">Server log</button>
   <button id="menu-update" title="Pull the latest app files over this install">&#128260; Check for updates</button>
   <hr>
+  <button id="btn-restart" title="Restart the HUD server">Restart server</button>
   <button id="btn-stop" class="danger" title="Stop the HUD server">Stop server</button>
 </div>
 
@@ -703,7 +704,7 @@
 
 <div id="splash">
   <div class="splash-title">Crumbs HUD</div>
-  <div class="splash-sub">tile painter &middot; v5.18.1</div>
+  <div class="splash-sub">tile painter &middot; v5.19</div>
   <div class="load-bar"><i id="splash-fill"></i></div>
   <div class="load-label" id="splash-label">Waking the server&hellip;</div>
 </div>
@@ -3720,6 +3721,19 @@ $("btn-stop").onclick = async () => {
   if (!confirm("Stop the HUD server? The page goes dead until you restart it.")) return;
   try { await api("/api/shutdown", {}); } catch (e) { /* server is going away */ }
   toast("server stopping — restart it in a-Shell when ready");
+};
+// v5.19: restart the server from the page — it re-execs itself, then the
+// page polls /api/status and reloads when the new process answers.
+$("btn-restart").onclick = async () => {
+  if (!confirm("Restart the HUD server? Dirty work is saved first.")) return;
+  try { await api("/api/restart", {}); } catch (e) { /* server is going away */ }
+  toast("restarting — waiting for the server to come back…");
+  for (let i = 0; i < 60; i++) {
+    await new Promise(r => setTimeout(r, 1000));
+    try { const s = await api("/api/status"); if (s) { location.reload(); return; } }
+    catch (e) { /* not up yet */ }
+  }
+  toast("server didn't come back — restart it in a-Shell");
 };
 document.querySelectorAll("#collide-palette .sw").forEach(d => {
   d.onclick = () => {

@@ -3,6 +3,18 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.19 — 2026-09-21
+
+Restart server button. Verified on desktop/server; not yet run on
+Lloyd's iPhone.
+
+- **Menu → Restart server.** Lloyd wanted start/stop/reset controls next
+  to Stop server. A page can't start a dead server, so restart does both
+  halves in one move: the server saves dirty work, re-execs itself in
+  place, and the page polls `/api/status` and reloads when the new
+  process answers (60s timeout, then it tells you to use a-Shell).
+  Stop server stays for a full shutdown to the a-Shell prompt.
+
 ## v5.18.1 — 2026-09-21
 
 Tap-during-boot race, part two. Verified on desktop/server; not yet run on

@@ -123,7 +123,7 @@ from urllib.parse import urlparse, parse_qs
 import crumbs_core as core
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.18.1"
+APP_VERSION = "5.19"
 
 # ---- v5.18: in-app self-update -------------------------------------------------
 # Lloyd's rule: updates overwrite the old files in place — no more downloading a
@@ -4422,6 +4422,19 @@ class Handler(BaseHTTPRequestHandler):
                 print("\n[hud] stopped from the page — prompt is yours again")
                 srv.shutdown()
             threading.Thread(target=_stop, daemon=True).start()
+            return self._send_json({"ok": True})
+        if path == "/api/restart":
+            # v5.19: restart the server from the page. Same safe path as
+            # shutdown (answer first, save dirty work), then re-exec the
+            # process in place — the page polls /api/status and reloads
+            # when the new process is up.
+            def _restart():
+                time.sleep(0.3)  # let the "ok" reach the page first
+                if _save_state["dirty"]:
+                    _save_now()
+                print("\n[hud] restarting from the page — back in a moment")
+                os.execv(sys.executable, [sys.executable] + sys.argv)
+            threading.Thread(target=_restart, daemon=True).start()
             return self._send_json({"ok": True})
 
         return self._send_json({"ok": False, "error": "not found"}, 404)

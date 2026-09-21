@@ -421,6 +421,11 @@
   @media (max-width: 520px) {
     button, select, input { font-size: 15px; padding: 8px 10px; min-height: 40px; }
     .menu-drop button { min-height: 44px; }
+    /* v5.21.7: the title was eating the menu bar on narrow phones — Build,
+       Play, Setup scrolled off-screen with no indicator. Hide it so all six
+       menus fit without swiping. */
+    #title { display: none; }
+    .mtop { padding: 10px 8px; font-size: 13px; }
   }
   /* v3.1: theme selector */
   #theme-row { margin: 4px 0 6px; }
@@ -449,7 +454,7 @@
     <button class="mtop" data-menu="m-play">Play</button>
     <button class="mtop" data-menu="m-setup">Setup</button>
   </div>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v5.21.3</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v5.21.7</small></span>
   <span id="topbar-undo">
     <button id="btn-undo2" title="Undo">&#8617;</button>
     <button id="btn-redo2" title="Redo">&#8618;</button>
@@ -765,7 +770,7 @@
 
 <div id="splash">
   <div class="splash-title">Crumbs HUD</div>
-  <div class="splash-sub">tile painter &middot; v5.21.3</div>
+  <div class="splash-sub">tile painter &middot; v5.21.7</div>
   <div class="load-bar"><i id="splash-fill"></i></div>
   <div class="load-label" id="splash-label">Waking the server&hellip;</div>
 </div>

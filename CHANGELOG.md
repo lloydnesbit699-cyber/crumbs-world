@@ -3,6 +3,22 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.21.7 — 2026-09-21
+
+The Build / Play / Setup menus were invisible on Lloyd's phone — not
+missing, just scrolled off-screen. Verified on desktop/server; not yet run
+on Lloyd's iPhone.
+
+- **Root cause:** on narrow phones the top-bar title ("Crumbs HUD · tile
+  painter") ate the menu bar's width. The menubar scrolls sideways by
+  design, but with the scrollbar hidden there was no hint — File/Edit/View
+  showed, Build/Play/Setup hid off-screen. That's why Play, map generation
+  (Setup sheet), and the rest were "no shows".
+- **Fix:** the title hides on screens under 520px wide and the menu buttons
+  get tighter padding, so all six menus fit without swiping.
+- Also bumped the hardcoded title/splash version stamp (was stale at
+  v5.21.3).
+
 ## v5.21.6 — 2026-09-21
 
 The `itemCells` ReferenceError is finally dead — root cause found and fixed.

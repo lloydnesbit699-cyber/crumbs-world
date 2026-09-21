@@ -417,7 +417,7 @@
 
 <div id="topbar">
   <button id="menu-btn" title="Menu">&#9776;</button>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v5.18</small></span>
+  <span id="title">Crumbs HUD <small>tile painter &middot; v5.18.1</small></span>
   <span id="topbar-undo">
     <button id="btn-undo2" title="Undo">&#8617;</button>
     <button id="btn-redo2" title="Redo">&#8618;</button>
@@ -703,7 +703,7 @@
 
 <div id="splash">
   <div class="splash-title">Crumbs HUD</div>
-  <div class="splash-sub">tile painter &middot; v5.18</div>
+  <div class="splash-sub">tile painter &middot; v5.18.1</div>
   <div class="load-bar"><i id="splash-fill"></i></div>
   <div class="load-label" id="splash-label">Waking the server&hellip;</div>
 </div>
@@ -4018,6 +4018,9 @@ async function pollStatus() {
 let melodyPresets = [], melodyDiffs = [];
 let melodyForm = null;    // {preset, name, difficulty, reward, target, targets, what, count, ticks}
 let melodyPick = null;    // "target" | "waypoint" — next map tap marks it
+// v5.18.1: same tap-during-boot race — itemPlace/npcPlace are read by the map
+// tap handler, so they live up here too instead of down in the v5.13 section.
+let itemPlace = null, npcPlace = false;
 
 // v5.17: honest boot progress on the splash — each milestone moves the bar, so a
 // stuck load says where it's stuck instead of looking dead.
@@ -4316,7 +4319,7 @@ async function syncMissionHud() {
 
 // ---- v5.13: gear — items on the ground, packs on backs, folks in town --------
 let itemsLib = [], itemCells = [], npcsReal = [];
-let itemPlace = null, npcPlace = false;
+// (v5.18.1: itemPlace/npcPlace hoisted above init — see the v5.17.1 note)
 let packState = null, shopNpcId = null;
 const KIND_EMOJI = { weapon: "🗡️", tool: "🛠️", food: "🍖", trinket: "🔮" };
 

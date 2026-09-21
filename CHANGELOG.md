@@ -3,6 +3,20 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.18.1 — 2026-09-21
+
+Tap-during-boot race, part two. Verified on desktop/server; not yet run on
+Lloyd's iPhone.
+
+- **Fixed `itemPlace`/`npcPlace` boot race.** Same bug as the v5.17.1
+  `melodyPick` fix: the map tap handler reads the item/npc placement
+  flags, but they were declared down in the v5.13 gear section, which
+  runs after init's awaits. A tap during boot threw `Can't find
+  variable: itemPlace` — Lloyd caught it on his phone at 4:18am. The
+  flags are now hoisted next to the melody state above init.
+  (The `hostsWithOddScrollbars` error in the same screenshot is his
+  browser's dark-mode extension, not Crumbs.)
+
 ## v5.18 — 2026-09-20
 
 In-app self-update. Verified on desktop/server; not yet run on

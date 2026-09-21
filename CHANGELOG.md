@@ -3,6 +3,22 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.22.2 — 2026-09-21
+
+The in-app updater's file list missed `crumbs_recovery.py`, so phones that
+updated to v5.22.x started with "recovery core unavailable" and the whole
+Phase 3B recovery layer stayed dark. The updater now ships all four app
+files, and Check for updates offers a *repair* install when a file never
+arrived — even when the version is already current. Verified on
+desktop/server; not yet run on Lloyd's iPhone.
+
+- Server `UPDATE_FILES` and the page-side download list both include
+  `crumbs_recovery.py`, with the same truncated-download sanity checks.
+- Same-version installs are allowed as repairs when an update file is
+  missing from disk; true downgrades are still refused.
+- The update dialog and the quiet hourly nudge both explain the repair
+  case instead of pretending a new version is out.
+
 ## v5.21.15 — 2026-09-21
 
 Made the sprite-sheet picker less fragile when the imported image is

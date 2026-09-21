@@ -143,19 +143,24 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.22.1"
+APP_VERSION = "5.22.2"
 
 # ---- v5.18: in-app self-update -------------------------------------------------
 # Lloyd's rule: updates overwrite the old files in place — no more downloading a
 # suffixed copy and renaming it by hand. Menu -> Check for updates pulls the
-# latest editor.html / crumbs_hud.py / crumbs_core.py from the repo's main
-# branch and swaps them in atomically, keeping one .update-backup of each.
+# latest editor.html / crumbs_hud.py / crumbs_core.py / crumbs_recovery.py
+# from the repo's main branch and swaps them in atomically, keeping one
+# .update-backup of each.
 # v5.21: honest errors (which leg failed + fix hint), auto-certifi for a-Shell's
 # missing CA certs, changelog in the update dialog, save-before-update, and
 # File -> Roll back update to undo an install.
+# v5.22.2: the file list grew (crumbs_recovery.py) after phones were already
+# on v5.22.x — Check for updates now also offers a *repair* install when an
+# update file is missing from disk, even at the current version.
 UPDATE_REPO = "lloydnesbit699-cyber/crumbs-world"
 UPDATE_BRANCH = "main"
-UPDATE_FILES = ["editor.html", "crumbs_hud.py", "crumbs_core.py"]
+UPDATE_FILES = ["editor.html", "crumbs_hud.py", "crumbs_core.py",
+                "crumbs_recovery.py"]
 
 def _update_ssl_context():
     # v5.21: a-Shell's Python ships without CA certificates, so HTTPS to
@@ -210,6 +215,13 @@ def _update_can_rollback():
                for n in UPDATE_FILES)
 
 
+def _update_missing_files():
+    # v5.22.2: update files absent from disk — the repair case. (Phones
+    # that updated while the updater's file list was shorter.)
+    return [n for n in UPDATE_FILES
+            if not os.path.exists(os.path.join(SCRIPT_DIR, n))]
+
+
 def _update_disk_version():
     # v5.21.5: what version do the files ON DISK say? If the disk is newer
     # than the running server, an update was installed but the server was
@@ -237,6 +249,8 @@ def _update_install(blobs):
            or (n == "crumbs_hud.py" and b"APP_VERSION" not in b)
            or (n == "editor.html" and b"<html" not in b.lower())
            or (n == "crumbs_core.py"
+               and b"def " not in b and b"class " not in b)
+           or (n == "crumbs_recovery.py"
                and b"def " not in b and b"class " not in b)]
     if bad:
         return {"ok": False, "leg": "github",
@@ -247,7 +261,12 @@ def _update_install(blobs):
     # so refuse it and leave the old files alone.
     m = re.search(br'^APP_VERSION\s*=\s*"([^"]+)"', blobs["crumbs_hud.py"], re.M)
     dl_version = m.group(1).decode() if m else None
-    if not dl_version or not _ver_tuple(dl_version) > _ver_tuple(APP_VERSION):
+    # v5.22.2: a same-version install is a *repair*, not a downgrade, when
+    # update files are missing from disk (crumbs_recovery.py postdates the
+    # updater's old file list). A true downgrade is still refused.
+    missing = _update_missing_files()
+    if not dl_version or (not _ver_tuple(dl_version) > _ver_tuple(APP_VERSION)
+                          and not missing):
         return {"ok": False, "leg": "github",
                 "error": f"GitHub served a stale copy (v{dl_version or 'unreadable'}) — old files untouched, try again in a bit"}
     updated = []
@@ -3179,12 +3198,20 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": False, "leg": "github",
                                         "error": "GitHub answered but the version was unreadable"})
             disk = _update_disk_version()
+            # v5.22.2: repair — the updater's file list grew after some
+            # phones already updated (crumbs_recovery.py). If any update
+            # file is missing from disk, offer a repair install even when
+            # the version is current.
+            missing = _update_missing_files()
+            is_newer = _ver_tuple(latest) > _ver_tuple(APP_VERSION)
             return self._send_json({"ok": True, "current": APP_VERSION,
                                     "latest": latest,
                                     # v5.21.1: numeric compare — a stale
                                     # GitHub cache must never offer a
                                     # *downgrade* as an update.
-                                    "available": _ver_tuple(latest) > _ver_tuple(APP_VERSION),
+                                    "available": is_newer or bool(missing),
+                                    "repair": (not is_newer) and bool(missing),
+                                    "missing_files": missing,
                                     "can_rollback": _update_can_rollback(),
                                     # v5.21.5: installed-but-not-restarted —
                                     # don't loop the install dialog; say restart.

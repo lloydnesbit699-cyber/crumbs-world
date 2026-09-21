@@ -4067,11 +4067,20 @@ $("menu-update").onclick = async () => {
     toggleOverlay("sheet-update");
     return;
   }
+  if (r.repair && r.missing_files && r.missing_files.length) {
+    // v5.22.2: repair — same version, but update files never made it to
+    // this phone (e.g. crumbs_recovery.py). Fetch just the missing ones.
+    $("update-title").textContent = "Repair: " + r.missing_files.join(", ") + " missing on this phone";
+    $("update-notes").innerHTML = "<div class='tray-hint'>You're already on v" + escHtml(r.current) + " — but " + escHtml(r.missing_files.join(", ")) + " never arrived here, so that part stays offline. This fetches the missing file(s); restart the server after.</div>";
+    $("btn-update-install").textContent = "Fetch missing files";
+  }
+  else {
   $("update-title").textContent = "v" + r.latest + " is ready (you have v" + r.current + ")";
   $("update-notes").innerHTML = notes.length
     ? notes.map(e => "<div class='upd-ver'>v" + escHtml(e.version) + (e.date ? " \u2014 " + escHtml(e.date) : "") + "</div><div>" + escHtml(e.notes) + "</div>").join("")
     : "<div class='tray-hint'>couldn't load the what's-new notes — the update itself is unaffected.</div>";
   $("btn-update-install").textContent = "Install update";
+  }
   $("btn-update-install").onclick = async () => {
     closeOverlays();
     toast("installing v" + r.latest + "\u2026");
@@ -4082,7 +4091,9 @@ $("menu-update").onclick = async () => {
     try {
       const t = Date.now();
       const gh = "https://raw.githubusercontent.com/lloydnesbit699-cyber/crumbs-world/main/";
-      const names = ["editor.html", "crumbs_hud.py", "crumbs_core.py"];
+      // v5.22.2: keep in step with the server's UPDATE_FILES — a file the
+      // page doesn't fetch can never arrive via a page-side install.
+      const names = ["editor.html", "crumbs_hud.py", "crumbs_core.py", "crumbs_recovery.py"];
       const files = {};
       const parts = await Promise.all(names.map(async n => {
         const resp = await fetch(gh + n + "?t=" + t);
@@ -4940,12 +4951,18 @@ $("pack-btn").onclick = () => { toggleOverlay("sheet-pack"); syncInv(); };
         syncRollback(r);
         if (r && r.ok && r.available && r.latest !== _lastNotifiedVer) {
           _lastNotifiedVer = r.latest;
+          const isRepair = r.repair && r.missing_files && r.missing_files.length;
+          const dotTip = isRepair ? "missing files — repair available"
+                                  : "v" + escHtml(r.latest) + " is ready";
+          const toastMsg = isRepair ? "missing app files — File \u2192 Check for updates to repair"
+                                    : "v" + r.latest + " is ready \u2014 File \u2192 Check for updates when you want it";
           const fb = document.querySelector('.mtop[data-menu="m-file"]');
           if (fb && !fb.querySelector(".upd-dot")) {
-            fb.insertAdjacentHTML("beforeend", ' <span class="upd-dot" title="v' + escHtml(r.latest) + ' is ready">&#9679;</span>');
-            fb.title = "v" + r.latest + " is ready \u2014 File \u2192 Check for updates";
+            fb.insertAdjacentHTML("beforeend", ' <span class="upd-dot" title="' + dotTip + '">&#9679;</span>');
+            fb.title = isRepair ? "missing files \u2014 File \u2192 Check for updates to repair"
+                                : "v" + r.latest + " is ready \u2014 File \u2192 Check for updates";
           }
-          toast("v" + r.latest + " is ready \u2014 File \u2192 Check for updates when you want it");
+          toast(toastMsg);
         }
       } catch (e) { /* stay silent */ }
     }

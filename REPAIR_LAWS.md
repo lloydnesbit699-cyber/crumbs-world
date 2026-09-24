@@ -1,0 +1,72 @@
+# The Crumbs Repair Laws
+
+*Learned the hard way, 2026-09-23/24. These govern every fix, every update,
+every recovery in the Crumbs HUD. Break one and you get a midnight debugging
+session. Follow them and the system heals itself.*
+
+---
+
+### 1. The Banner Tells The Truth
+The version in the banner is the version of the code running RIGHT NOW.
+Not the version on disk. Not the version git knows about. The running code.
+If the banner lies, nothing else can be trusted.
+
+### 2. A Restart Must Actually Restart
+When anything triggers a restart (button, updater, API), the new process
+must load the new files. If the restart mechanism can't guarantee this, it
+must say so and tell the user to kill the process manually.
+A restart that silently keeps old code is worse than no restart at all.
+
+### 3. Pull Is Not Proof
+`git pull` saying "up to date" doesn't mean you have the latest code.
+If the local branch diverged — Replit's "Published your App" commits,
+local edits, anything — the pull can't merge and won't tell you why.
+Check `git log --oneline -3`. If the top commit isn't what you expect,
+`git reset --hard origin/main` puts you back on truth.
+
+### 4. Reset Means Clean Slate
+A reset button must produce a clean next boot. Archive the old (never
+delete), clear ALL evidence — journal, reports, heartbeat, dirty/clean
+flags — so the next assessment starts from zero.
+If the next boot still shows the old state, the reset was a lie.
+
+### 5. One Port, One Server
+Never run two servers on the same port. If the port is taken, say what's
+running there and refuse to start a ghost that masks the real one.
+
+### 6. Never Downgrade Silently
+The updater must refuse to install anything older than what's running.
+A stale CDN edge or a cached download is not an excuse.
+
+### 7. Pushed ≠ Verified
+Code pushed to GitHub is not code running on the device. Never claim a fix
+works until it's confirmed on the actual hardware. The only verification
+that counts is the user's eyes on their screen.
+
+### 8. Cache Is Guilty Until Proven Innocent
+After any update, assume the browser cached the old page. Hard-refresh.
+The updater should force this, not hope for it.
+
+### 9. Archive, Don't Delete
+User data, journals, backups — archive with a timestamp, never delete.
+A fix that destroys history is not a fix.
+
+### 10. Evidence Over Assumptions
+When something's wrong, check the actual state: `git log`, the banner
+version, the running process, the files on disk. Don't assume the last
+command worked. Trust the evidence, not the expectation.
+
+### 11. The Button Must Work
+If a button is in the UI, it must do what it says. Dead buttons —
+"empty hooks" that can't function no matter how much you wish —
+get removed. No placeholders, no wishes.
+
+### 12. Failures Expire, But State Doesn't Lie
+Old failures shouldn't hold the shield red forever (24-hour decay).
+But the current state assessment must always reflect reality:
+no verified checkpoint + no usable save IS critical,
+no matter how old the failures are.
+
+---
+
+*When a new midnight lesson arrives, it becomes Law 13.*

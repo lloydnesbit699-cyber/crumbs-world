@@ -3,6 +3,17 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.23.2 — 2026-09-24
+
+Palette strip becomes a scrollable grid (Lloyd's call): the sideways strip
+left dead space at the bottom of the left tray. Swatches now flow in a
+76px-column grid that scrolls with the tray; pack headers span full width.
+The 6k-tile virtualized pack window was reworked from horizontal to vertical
+windowing (pages by row off the tray's scrollTop, re-measures columns on
+rotation). Search, selection, lazy thumbnails, and collapse behavior
+unchanged. (Server-verified only: syntax-checked, no logic touched beyond
+the windowing math.)
+
 ## v5.23.1 — 2026-09-24
 
 Narrow-phone topbar fix: the v5.22.8 status pills re-broke the 390px fit and

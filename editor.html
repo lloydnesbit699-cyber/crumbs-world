@@ -202,10 +202,11 @@
   .sw .lbl { font-size: 10px; color: #bbb; margin-top: 2px; word-break: break-word; }
 
   /* v3.0: custom imported tiles + import form */
-  /* v5.1: the elongated palette — one horizontal strip, everything paintable */
-  #paint-strip { display: flex; overflow-x: auto; gap: 10px; padding: 6px 2px;
-    -webkit-overflow-scrolling: touch; }
-  #paint-strip .sw { flex: 0 0 auto; min-width: 64px; padding: 6px 4px; }
+  /* v5.23.2: the palette is a scrollable grid now, not a sideways strip —
+     it fills the tray's dead space and scrolls with the tray. */
+  #paint-strip { display: grid; grid-template-columns: repeat(auto-fill, 76px);
+    gap: 8px; padding: 6px 2px; align-content: start; justify-content: start; }
+  #paint-strip .sw { min-width: 0; padding: 6px 4px; }
   #paint-strip .sw canvas { width: 48px; height: 48px; border-radius: 10px;
       border: 2px solid #555; image-rendering: pixelated; background: #1c1c1c;
       display: block; margin: 0 auto; }
@@ -218,7 +219,7 @@
   #paint-strip .preset-tag { font-size: 9px; color: #4da3ff; text-align: center; }
   #paint-strip .lbl { text-align: center; }
   #paint-strip.editing .sw { outline: 2px dashed #8a6dd7; outline-offset: -2px; }
-  #paint-strip .strip-label { flex: 0 0 auto; align-self: center; font-size: 10px;
+  #paint-strip .strip-label { grid-column: 1 / -1; font-size: 10px;
     color: #888; letter-spacing: 1px; }
   /* v5.2: strip search + collapsible pack headers (the 6k-tile Utumno pack) */
   #strip-search-row { padding: 2px 2px 8px; }
@@ -229,10 +230,12 @@
   #paint-strip .pack-head { cursor: pointer; border: 1px solid #444;
     border-radius: 8px; padding: 8px 12px; background: #1b1b26; color: #ffd75f;
     font-size: 11px; letter-spacing: 1px; white-space: nowrap; }
-  /* v5.3: the virtualized pack window — one wide relative box, swatches
-     absolutely positioned inside it; only the visible window is mounted */
-  #paint-strip .pack-window { position: relative; flex: 0 0 auto; align-self: stretch; }
-  #paint-strip .pack-window .sw { position: absolute; top: 0; }
+  /* v5.23.2: the virtualized pack window is vertical now — one relatively-
+     positioned box with an explicit height; swatches absolutely positioned
+     by row/column inside it, only the visible rows mounted */
+  #paint-strip .pack-window { grid-column: 1 / -1; position: relative; }
+  #paint-strip .pack-window .sw { position: absolute; width: 76px;
+    box-sizing: border-box; }
   #palette-probe { margin: 4px 2px 0; font-size: 11px; line-height: 1.35;
     color: #8fbaff; word-break: break-word; }
   #palette-probe code { color: #ffd75f; background: #171a22; padding: 1px 4px;
@@ -3006,7 +3009,7 @@ function buildPalette() {
     updatePaletteProbe();
     return;
   }
-  box.style.display = "flex";
+  box.style.display = "grid";
   box.classList.toggle("editing", customEditMode);
   $("collide-palette").style.display = "none";
   if (layer === "tiles") {
@@ -3127,33 +3130,48 @@ function buildCustomTiles() {
 // v5.2: strip search state + pack collapse state
 let stripQuery = "";
 const packCollapsed = {};
-// v5.3: windowed pack rendering — an expanded 6k-tile pack only mounts the
-// swatches near the visible scroll window (+overscan), so the strip never
-// holds 6k DOM nodes at once.
-const PACK_SW_PITCH = 84;   // approx swatch pitch in the strip (px)
-const PACK_OVERSCAN = 12;   // swatches rendered past each visible edge
+// v5.23.2: windowed pack rendering, vertical edition — an expanded 6k-tile
+// pack only mounts the swatches near the visible scroll rows (+overscan),
+// so the grid never holds 6k DOM nodes at once.
+const PACK_COL_W = 84;      // 76px column + 8px gap
+const PACK_ROW_H = 96;      // swatch height + gap (48px art + labels + padding)
+const PACK_OVERSCAN_ROWS = 4;
 let packWin = null;         // {pk, members, el} | null
+function packCols() {
+  return Math.max(1, Math.floor(($("paint-strip").clientWidth + 8) / PACK_COL_W));
+}
 function mountPackWindow(box, pk, members) {
   const el = document.createElement("div");
   el.className = "pack-window";
-  el.style.width = (members.length * PACK_SW_PITCH) + "px";
+  const cols = packCols();
+  el._cols = cols;
+  el.style.height = (Math.ceil(members.length / cols) * PACK_ROW_H) + "px";
   box.appendChild(el);
   packWin = { pk, members, el };
   paintPackWindow();
 }
 function paintPackWindow() {
   if (!packWin) return;
-  const strip = $("paint-strip");
+  const tray = $("tray-left");
   const { members, el } = packWin;
-  const lo = Math.max(0, Math.floor(strip.scrollLeft / PACK_SW_PITCH) - PACK_OVERSCAN);
-  const hi = Math.min(members.length,
-    Math.ceil((strip.scrollLeft + strip.clientWidth) / PACK_SW_PITCH) + PACK_OVERSCAN);
+  let cols = el._cols || packCols();
+  const nowCols = packCols();
+  if (nowCols !== cols) {   // tray resized (rotation) — re-measure the grid
+    cols = el._cols = nowCols;
+    el.style.height = (Math.ceil(members.length / cols) * PACK_ROW_H) + "px";
+    el._lo = -1;            // force a repaint below
+  }
+  const viewTop = tray.scrollTop - el.offsetTop;
+  const viewBot = viewTop + tray.clientHeight;
+  const lo = Math.max(0, (Math.max(0, Math.floor(viewTop / PACK_ROW_H) - PACK_OVERSCAN_ROWS)) * cols);
+  const hi = Math.min(members.length, (Math.ceil(viewBot / PACK_ROW_H) + PACK_OVERSCAN_ROWS) * cols);
   if (el._lo === lo && el._hi === hi) return;   // window didn't move — nothing to do
   el._lo = lo; el._hi = hi;
   el.innerHTML = "";
   for (let i = lo; i < hi; i++) {
     const sw = customSwatch(members[i]);
-    sw.style.left = (i * PACK_SW_PITCH) + "px";
+    sw.style.left = ((i % cols) * PACK_COL_W) + "px";
+    sw.style.top = (Math.floor(i / cols) * PACK_ROW_H) + "px";
     el.appendChild(sw);
   }
 }
@@ -5009,12 +5027,13 @@ $("pack-btn").onclick = () => { toggleOverlay("sheet-pack"); syncInv(); };
     await loadCustomTiles();      // v3.0: imported tiles before first render
     // v5.2: strip search — filters the palette as he types
     $("strip-search").addEventListener("input", e => { stripQuery = e.target.value; buildCustomTiles(); });
-    // v5.3: the virtualized pack window follows the strip's scroll
-    let stripScrollQ = false;
-    $("paint-strip").addEventListener("scroll", () => {
-      if (stripScrollQ || !packWin) return;
-      stripScrollQ = true;
-      requestAnimationFrame(() => { stripScrollQ = false; paintPackWindow(); });
+    // v5.23.2: the virtualized pack window follows the tray's vertical
+    // scroll now (the palette is a grid, not a sideways strip)
+    let packScrollQ = false;
+    $("tray-left").addEventListener("scroll", () => {
+      if (packScrollQ || !packWin) return;
+      packScrollQ = true;
+      requestAnimationFrame(() => { packScrollQ = false; paintPackWindow(); });
     }, { passive: true });
     await loadPatrols();          // v3.4: patrol routes back
     await loadTraits();           // v4.0: nature traits before first render

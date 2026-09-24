@@ -3,6 +3,26 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.23 — 2026-09-24 — "Wren's hardening patch"
+
+Animator and GUI/rendering hardening, merged from Lloyd's phone (v5.23.3)
+onto the v5.22.11 base — the phone had diverged at v5.22.9, so the merge
+kept the Recovery Reset button/endpoint, hosted write-key mode, and boot
+census from v5.22.11 while bringing in the hardening changes.
+- Hero selection is explicit-only: `RULES.hero_tile` or nothing. The old
+  `/hero/i` name-guess fallback is gone — maps that relied on it need the
+  hero set explicitly.
+- No implicit object/hero brush: the objects layer no longer auto-selects
+  a brush. Painting with nothing selected stamps nothing.
+- Existing objects are directly tappable in Objects mode — tap inspects
+  instead of painting over. Erase first (or tap an empty cell) to replace.
+- Sheet/animator imports auto-select the first tile and switch to the
+  right layer, ready to place immediately.
+- New "Apply biome" overlay: `/api/generate-overlay` adds a biome to the
+  current map (empty tiles only, or replace ground) without rebuilding —
+  objects, collision, rules, nature and names are preserved. Undoable.
+(Server-verified only: overlay painted 375 tiles, reset archived cleanly.)
+
 ## v5.22.11 — 2026-09-23
 
 v5.22.10's Reset only stopped counting old failures — the next boot still

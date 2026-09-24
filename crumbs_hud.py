@@ -143,7 +143,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.22.11"
+APP_VERSION = "5.23"
 
 # ---- v5.18: in-app self-update -------------------------------------------------
 # Lloyd's rule: updates overwrite the old files in place — no more downloading a
@@ -4426,6 +4426,43 @@ class Handler(BaseHTTPRequestHandler):
             if ok:
                 _mark_dirty()
             return self._send_json({"ok": ok})
+
+        if path == "/api/generate-overlay":
+            # v5.23: apply a generated biome to the current ground only.
+            # Objects, collision, rules, nature and names are preserved.
+            preset_id = str(body.get("preset", "") or "")
+            noise_over = None
+            biome = str(body.get("biome", "dungeon"))
+            if preset_id:
+                preset = core.GENERATION_PRESETS.get(preset_id)
+                if not preset:
+                    return self._send_json({"ok": False, "error": "unknown preset"}, 400)
+                biome = preset["biome"]; noise_over = preset["noise"] or None
+            if biome not in core.BIOMES:
+                return self._send_json({"ok": False, "error": "unknown biome"}, 400)
+            mode = str(body.get("mode", "empty"))
+            if mode not in ("empty", "replace"):
+                return self._send_json({"ok": False, "error": "mode must be empty or replace"}, 400)
+            seed = body.get("seed")
+            seed = int(seed) if isinstance(seed,int) or (isinstance(seed,str) and seed.strip().lstrip("-").isdigit()) else None
+            if seed is None: seed = random.randrange(1_000_000_000)
+            overlay = core.WorldMap(world.width, world.height, assets)
+            overlay.generate_biome(biome, seed, noise_over)
+            changes=[]
+            for yy in range(world.height):
+                for xx in range(world.width):
+                    old=world.data[yy][xx]; new=overlay.data[yy][xx]
+                    if (mode == "replace" or old == 0) and old != new:
+                        changes.append((xx,yy,new))
+            def _do():
+                for xx,yy,new in changes: world.data[yy][xx]=new
+                map_meta["biome"]=biome; map_meta["seed"]=seed
+                if preset_id: map_meta["preset"]=preset_id
+                else: map_meta.pop("preset",None)
+                _mark_dirty()
+            _undoable("overlay " + biome, _do)
+            _log_event(f"overlay {biome} (seed {seed}, {mode}, {len(changes)} tiles)")
+            return self._send_json({"ok": True, "biome": biome, "seed": seed, "mode": mode, "painted": len(changes)})
 
         if path == "/api/generate":
             # v5.16: a named preset is a deterministic recipe — same seed,

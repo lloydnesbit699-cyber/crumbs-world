@@ -688,6 +688,7 @@
       <select id="biome"></select>
       <input id="seed" type="number" placeholder="seed" title="Seed (blank = random)">
       <button id="btn-gen">Generate</button>
+      <button id="btn-biome-overlay" title="Apply a biome without rebuilding the map">Apply biome…</button>
     </div>
   </div>
   <div class="row">
@@ -1747,6 +1748,12 @@ canvas.addEventListener("pointerdown", async e => {
   }
   const cell = evCell(e); if (!cell) return;
   if (playMode) { playTap(cell); return; }
+  // v5.23.3: direct object inspect.
+  if (!selectTool && layer === "objects" && !erasing &&
+      objects[cell.y] && objects[cell.y][cell.x] != null) {
+    inspectTap(cell);
+    return;
+  }
   if (selectTool) {   // v4.3: the inspector, not paint
     if (moveArmed) moveTap(cell); else inspectTap(cell);   // v4.8: carrying something
     return;
@@ -2046,11 +2053,10 @@ async function refreshRules() {
   updateDpad();
   resolveHero();   // v4.8: the saved PC pick applies
 }
-// v4.8: the inspector's PC pick wins; otherwise the old name-guess
+// v5.23: hero selection is explicit only.
 function resolveHero() {
-  if (RULES.hero_tile != null) { heroTileId = RULES.hero_tile; return; }
-  const ht = spriteTiles.find(t => /hero/i.test(t.name));
-  heroTileId = ht ? ht.id : null;
+  // v5.23.3: hero selection is explicit only; never infer from tile names.
+  heroTileId = RULES.hero_tile != null ? RULES.hero_tile : null;
 }
 function syncRulesSheet() {
   document.querySelectorAll("#rules-walk button").forEach(b =>
@@ -2948,12 +2954,8 @@ function selectTile(id) {
   buildPalette();
 }
 function defaultBrush(l) {
-  if (l === "objects") {
-    const sp = spriteTiles.find(t => t.type !== "custom");
-    if (sp) return sp.id;
-    if (customTiles.length) return customTiles[0].id;
-    return null;
-  }
+  // v5.23.3: never silently select an object/hero brush.
+  if (l === "objects") return null;
   const th = palette.find(t => biomeOf(t.name) === currentTheme);
   return th ? th.id : (palette.length ? palette[0].id : null);
 }
@@ -3654,8 +3656,23 @@ $("sheet-import").onclick = async () => {
   $("sheet-form").hidden = true; sheetFiles = []; sheetPicks = [];
   await loadCustomTiles();
   buildPalette();
-  toast("🧩 imported " + r.count + (r.count === 1 ? " tile" : " tiles") +
-        " — tap the palette to paint " + (r.count === 1 ? "it" : "them"));
+  const first = (r.tiles || [])[0];
+  if (first && first.id != null) {
+    selTile = first.id;
+    const objectRole = ["character", "creature", "object", "inventory"].includes(first.preset);
+    layer = objectRole ? "objects" : "tiles";
+    selByLayer[layer] = selTile;
+    erasing = false;
+    $("btn-eraser").classList.remove("on");
+    document.querySelectorAll("#layer-seg button").forEach(b =>
+      b.classList.toggle("on", b.dataset.layer === layer));
+    buildPalette();
+    render();
+    toast("🧩 imported " + r.count + (r.count === 1 ? " tile" : " tiles") +
+          " — selected and ready to place");
+  } else {
+    toast("🧩 import returned no usable tile");
+  }
 };
 
 // ---- v3.3: custom tile manager (rename / change type / delete) ---------------
@@ -3832,6 +3849,24 @@ $("btn-gen").onclick = async () => {
     genBtn.disabled = false;
   }
 };
+// v5.23.3: non-destructive biome overlay. Objects/collision stay intact.
+$("btn-biome-overlay").onclick = async () => {
+  const preset = $("gen-preset").value || undefined;
+  const biome = $("biome").value;
+  const seedRaw = $("seed").value.trim();
+  const mode = prompt("Apply biome to current map:\n\nempty = paint only blank tiles\nreplace = replace ground/tile layer\n\nEnter empty or replace:", "empty");
+  if (mode !== "empty" && mode !== "replace") { toast("overlay cancelled"); return; }
+  const btn = $("btn-biome-overlay"); btn.disabled = true; btn.textContent = "Applying…";
+  try {
+    const r = await api("/api/generate-overlay", {biome, preset, seed: seedRaw === "" ? null : parseInt(seedRaw,10), mode});
+    if (!r.ok) { toast("overlay failed: " + (r.error || "unknown")); Sfx.error(); return; }
+    await refresh(); await loadNatural();
+    currentTheme = r.biome || currentTheme; $("theme-sel").value = currentTheme;
+    buildPalette(); render(); toast("applied " + r.biome + " (" + r.painted + " tiles)");
+  } catch (e) { toast("overlay failed"); Sfx.error(); }
+  finally { btn.disabled = false; btn.textContent = "Apply biome…"; }
+};
+
 // ---- v2.3: explicit Save / Save As / Load ------------------------------------
 let currentFile = "hud_map.json";
 function setFile(name) {
@@ -4428,8 +4463,6 @@ async function renderRecovery() {
 }
 $("menu-recovery").onclick = () => { toggleOverlay("sheet-recovery"); renderRecovery(); };
 $("btn-recovery-refresh").onclick = renderRecovery;
-// v5.22.10: one tap clears stale failure history — stops an old bad day
-// holding the shield red. Checkpoints and saves are untouched.
 $("btn-recovery-reset").onclick = async () => {
   if (!confirm("Reset recovery state? Clears old failure history. Your map and checkpoints are untouched.")) return;
   try {

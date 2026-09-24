@@ -3,6 +3,16 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.22.11 — 2026-09-23
+
+v5.22.10's Reset only stopped counting old failures — the next boot still
+hit NO_VERIFIED_CHECKPOINT_AND_PRIMARY_UNUSABLE → CRITICAL, because the
+old journal and heartbeat/dirty/clean evidence kept prior_state_known true.
+Reset is now a true fresh start: the journal is archived (never deleted),
+last_report.json and the evidence files are cleared, and the next boot
+assesses FIRST_RUN_NO_PRIOR_STATE (LOW) — shield goes green. Checkpoints
+and saves are untouched. (Server-verified only.)
+
 ## v5.22.10 — 2026-09-23
 
 The shield stayed red forever after one bad day: recovery failures never

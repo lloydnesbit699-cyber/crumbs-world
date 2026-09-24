@@ -143,7 +143,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.22.10"
+APP_VERSION = "5.22.11"
 
 # ---- v5.18: in-app self-update -------------------------------------------------
 # Lloyd's rule: updates overwrite the old files in place — no more downloading a
@@ -3397,13 +3397,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"ok": False, "error": "bad JSON"}, 400)
 
         if path == "/api/recovery/reset":
-            # v5.22.10: clear stale failure history — one tap stops an old bad
-            # day holding the shield red. Checkpoints and saves are untouched.
+            # v5.22.11: true fresh start — archive old journal, clear stale
+            # report. Checkpoints and saves are untouched.
             # (do_POST already gated the write key above for non-local mode.)
+            res = {"ok": True, "archived": None}
             if _recovery_store:
-                _recovery_store.record_event("RECOVERY_RESET",
-                    reason=str((body or {}).get("reason") or "manual reset from Recovery sheet"))
-            return self._send_json({"ok": True})
+                res.update(_recovery_store.reset(
+                    reason=str((body or {}).get("reason") or "manual reset from Recovery sheet")))
+            return self._send_json(res)
         if path == "/api/update/apply":
             # v5.18: a public link must never rewrite the server.
             # v5.22.9: hosted mode — the owner's write key unlocks updates, so a

@@ -304,6 +304,35 @@ class CheckpointStore:
         except (OSError, ValueError):
             return None
 
+    def reset(self, reason: str = "") -> Dict[str, Any]:
+        """v5.22.11: fresh start — archive the old journal (never delete),
+        clear the stale last-report and the dirty/clean/heartbeat evidence,
+        then open a new journal with a RECOVERY_RESET marker. The next boot
+        sees no prior state and assesses FIRST_RUN (LOW), not CRITICAL.
+        Checkpoints and saves are untouched.
+        Returns {"archived": <name or None>}."""
+        archived = None
+        with self._locked():
+            try:
+                if self.journal_path.exists():
+                    ts = time.strftime("%Y%m%d-%H%M%S")
+                    dest = self.directory / f"recovery-journal-archived-{ts}.jsonl"
+                    self.journal_path.rename(dest)
+                    archived = dest.name
+            except OSError:
+                pass
+            for name in ("last_report.json", "heartbeat.json",
+                         "dirty.flag", "clean.shutdown"):
+                try:
+                    p = self.directory / name
+                    if p.exists():
+                        p.unlink()
+                except OSError:
+                    pass
+        self.record_event("RECOVERY_RESET", reason=reason,
+                          archived=archived or "no journal to archive")
+        return {"archived": archived}
+
     def resolve_server_responds(self) -> bool:
         """Flip the persisted report's SERVER_RESPONDS step pending -> pass.
 

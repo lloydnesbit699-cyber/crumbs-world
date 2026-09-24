@@ -3,6 +3,14 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.23.1 — 2026-09-24
+
+Narrow-phone topbar fix: the v5.22.8 status pills re-broke the 390px fit and
+Setup/undo were clipping again on tall phones. Pills are dot-only under
+520px (color still shows status, tap still opens them); menu buttons and
+undo tightened so the whole bar fits without swiping.
+(Server-verified only: CSS change, no logic touched.)
+
 ## v5.23 — 2026-09-24 — "Wren's hardening patch"
 
 Animator and GUI/rendering hardening, merged from Lloyd's phone (v5.23.3)

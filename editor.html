@@ -455,12 +455,19 @@
        menus fit without swiping. */
     /* v5.21.9: still clipped ("Set" not "Setup") — go more compact: smaller
        menu text, tighter undo/redo, so all six fit in ~390px. */
+    /* v5.23.1: the v5.22.8 status pills re-broke the 390px fit — Setup and
+       undo clipped again on tall phones. Pills go dot-only here (the color
+       still shows status; tap still opens them), menus and undo tighten up
+       so the whole bar fits without swiping. */
     #title { display: none; }
-    .mtop { padding: 10px 6px; font-size: 12px; }
+    .mtop { padding: 10px 4px; font-size: 12px; }
     #topbar { gap: 4px; padding: 0 4px; }
+    #pills { gap: 4px; }
+    #pills .ptxt { display: none; }
+    .pill { padding: 3px 7px; }
     #topbar-undo { gap: 4px; }
-    #topbar-undo button { font-size: 18px; padding: 6px 8px; min-height: 36px;
-                          min-width: 40px; }
+    #topbar-undo button { font-size: 18px; padding: 6px 6px; min-height: 36px;
+                          min-width: 36px; }
   }
   /* v3.1: theme selector */
   #theme-row { margin: 4px 0 6px; }

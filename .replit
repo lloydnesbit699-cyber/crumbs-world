@@ -8,7 +8,7 @@ modules = ["python-3.12", "web", "bash"]
 
 [nix]
 channel = "stable-25_05"
-packages = ["freetype", "lcms2", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "openjpeg", "tcl", "tk", "zlib"]
+packages = ["freetype", "lcms2", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "openjpeg", "tcl", "tk", "zlib", "got"]
 
 [workflows]
 runButton = "Project"
@@ -50,6 +50,15 @@ args = "git pull --rebase origin main"
 [workflows.workflow.metadata]
 outputType = "console"
 
+[[workflows.workflow]]
+name = "update"
+mode = "sequential"
+author = 65697835
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "./ops.sh update"
+
 [[ports]]
 localPort = 5000
 externalPort = 5000
@@ -57,3 +66,10 @@ externalPort = 5000
 [[ports]]
 localPort = 8778
 externalPort = 3000
+
+[deployment]
+deploymentTarget = "cloudrun"
+run = "PORT=5000 python3 crumbs_hud.py --public"
+
+[objectStorage]
+defaultBucketID = "replit-objstore-3954851f-4cf0-4549-a1fd-6b0156020c98"

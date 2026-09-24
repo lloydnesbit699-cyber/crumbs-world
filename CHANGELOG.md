@@ -3,6 +3,15 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.22.10 — 2026-09-23
+
+The shield stayed red forever after one bad day: recovery failures never
+decayed, so stale 9/21 RECOVERY_FAILED events kept risk CRITICAL with no
+verified checkpoint and no save file. Failures now decay after 24h, and
+the Recovery sheet has a Reset button (write-key gated) that records a
+RECOVERY_RESET marker — counting stops there, so one tap clears the stale
+history. Checkpoints and saves are untouched. (Server-verified only.)
+
 ## v5.22.9 — 2026-09-21
 
 The default tile library never reached Lloyd's phone: the updater and the

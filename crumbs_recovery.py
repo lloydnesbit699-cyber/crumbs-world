@@ -534,11 +534,20 @@ def classify_interruption(store: "CheckpointStore", *,
 
 
 def count_recent_outcomes(store: "CheckpointStore", n: int = 200) -> Dict[str, int]:
-    """Count RECOVERY_REPORT outcomes in the journal tail. Never raises."""
+    """Count RECOVERY_REPORT outcomes in the journal tail. Never raises.
+    v5.22.10: failures decay — only the last 24h count, and counting stops
+    at the most recent RECOVERY_RESET marker, so one bad day (or one tap
+    on Reset) stops holding the risk level up forever."""
     counts: Dict[str, int] = {}
+    cutoff = time.time() - 24 * 3600
     try:
         for entry in store.journal_tail(n):
+            if entry.get("event") == "RECOVERY_RESET":
+                break
             if entry.get("event") != "RECOVERY_REPORT":
+                continue
+            if not isinstance(entry.get("timestamp"), (int, float)) \
+                    or entry["timestamp"] < cutoff:
                 continue
             outcome = (entry.get("report") or {}).get("verification", {}).get("outcome")
             if isinstance(outcome, str):

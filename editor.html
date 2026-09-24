@@ -757,7 +757,7 @@
 
 <div id="sheet-recovery" class="sheet">
   <div class="grab"></div>
-  <div class="tray-head">Recovery <button id="btn-recovery-refresh" class="ghost">Refresh</button></div>
+  <div class="tray-head">Recovery <button id="btn-recovery-refresh" class="ghost">Refresh</button> <button id="btn-recovery-reset" class="ghost" title="Clear stale failure history — stops an old bad day holding the shield red">Reset</button></div>
   <div id="recovery-summary" class="tray-hint"></div>
   <div id="recovery-state"></div>
   <div id="recovery-intervention" style="display:none"></div>
@@ -4428,6 +4428,16 @@ async function renderRecovery() {
 }
 $("menu-recovery").onclick = () => { toggleOverlay("sheet-recovery"); renderRecovery(); };
 $("btn-recovery-refresh").onclick = renderRecovery;
+// v5.22.10: one tap clears stale failure history — stops an old bad day
+// holding the shield red. Checkpoints and saves are untouched.
+$("btn-recovery-reset").onclick = async () => {
+  if (!confirm("Reset recovery state? Clears old failure history. Your map and checkpoints are untouched.")) return;
+  try {
+    const r = await api("/api/recovery/reset", {});
+    if (r.ok) { renderRecovery(); pollStatus(); }
+    else alert("reset failed: " + (r.error || "?"));
+  } catch (e) { alert("reset failed: " + e.message); }
+};
 // dismiss the menu after any of its action buttons fire — but never while a
 // sheet it just opened is still being read (v4.9: Rules/World were flashing
 // open then getting closed 60ms later by this very timer)

@@ -3,6 +3,13 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.25.1 — 2026-09-25
+
+Hotfix: v5.25 shipped a typo (`customes` for `customs`) that crashed the
+palette the moment the Objects or Characters tab opened — Lloyd caught it
+on his phone within the hour. One-line fix, tabs render again.
+(Server-verified only: syntax check; no phone run yet.)
+
 ## v5.25 — 2026-09-25
 
 The missing thumbnails, fixed at the root (Lloyd's call — stop patching

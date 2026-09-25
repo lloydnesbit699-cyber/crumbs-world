@@ -3123,7 +3123,7 @@ function buildPalette() {
     const sprites = spriteTiles.filter(t => t.type !== "custom")
       .filter(t => charTab === isCharSub(subOf(t)));
     const customs = customTiles.filter(t => charTab === isCharSub(subOf(t)));
-    renderSubChips(tabKey, sprites.concat(customes));
+    renderSubChips(tabKey, sprites.concat(customs));
     customTabKey = tabKey;   // v5.25: buildCustomTiles filters on this too
     sprites.filter(t => subMatch(tabKey, subOf(t))).forEach(t => {
       sw(t.id === selTile, t.name + " (#" + t.id + " · " + t.type + ")",

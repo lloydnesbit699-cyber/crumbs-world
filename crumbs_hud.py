@@ -144,7 +144,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.25.1"
+APP_VERSION = "5.26"
 # v5.24: unique per process boot. After an update the server re-execs into
 # the new files; the page waits for a DIFFERENT instance id (plus the new
 # version) instead of mistaking the old process — still answering during
@@ -557,6 +557,13 @@ def _custom_public(entry):
             "subcategory": (entry.get("subcategory")
                             or core.guess_subcategory(entry["name"],
                                                       entry.get("preset"))),
+            # v5.26: hardened taxonomy — one home tab per subcategory
+            # (floors live in Tiles, not Objects) + the automatic display
+            # name ("dungeon_wall_dark" -> "Dark Wall").
+            "tab": core.tab_for_subcategory(entry.get("subcategory")
+                            or core.guess_subcategory(entry["name"],
+                                                      entry.get("preset"))),
+            "display": core.display_name(entry["name"]),
             "art": bool(assets.tiles.get(tid)),
             "frames": len(entry["files"]), "frame_ms": entry["frame_ms"]}
 
@@ -1632,6 +1639,9 @@ def _load_patrols():
 assets = core.AssetManager()
 world = core.WorldMap(25, 15, assets)
 history = core.HistoryManager()
+# v5.26: thumbnail byte cache (see /api/thumb) — key (tile id, frame).
+_thumb_cache = {}
+_THUMB_CACHE_MAX = 2000
 
 # ---- v3.7: per-map game rules ---------------------------------------------------
 # Rules differ per build (saved with the map) and per user preference (the
@@ -3214,7 +3224,9 @@ class Handler(BaseHTTPRequestHandler):
                 if t["type"] == "color" and t.get("category") == "tiles":
                     sw.append({"id": tid, "name": t["name"], "color": t.get("color"),
                                # v5.25: subcategory for the grouped palette
-                               "subcategory": t.get("subcategory", "other")})
+                               "subcategory": t.get("subcategory", "other"),
+                               # v5.26: automatic display name
+                               "display": core.display_name(t["name"])})
             self._send_json({"tiles": sw})
         elif path == "/api/sprites":
             sp = []
@@ -3226,6 +3238,10 @@ class Handler(BaseHTTPRequestHandler):
                                # v5.25: subcategory + preset drive the
                                # Characters tab and the object groupings
                                "subcategory": t.get("subcategory", "other"),
+                               # v5.26: one home tab + automatic display name
+                               "tab": core.tab_for_subcategory(
+                                   t.get("subcategory", "other")),
+                               "display": core.display_name(t["name"]),
                                "preset": t.get("preset")})
             self._send_json({"tiles": sp})
         elif path == "/api/presets":
@@ -3300,12 +3316,24 @@ class Handler(BaseHTTPRequestHandler):
                 thumb = assets.get_thumbnail(tid, size=64)
             if thumb is None:
                 return self._send_json({"ok": False, "error": "no thumbnail"}, 404)
-            buf = io.BytesIO()
-            thumb.save(buf, "PNG")
-            data = buf.getvalue()
+            # v5.26: thumbnail cache — cropping + PNG-encoding every request
+            # took ~3s on slow hosts, so a full tab of thumbnails "hung".
+            # Cache the bytes in memory and tell the browser to cache too.
+            # Only 200s are cached (never 404s), and backfill only ADDS art,
+            # so a cached thumbnail can never go stale.
+            key = (tid, q.get("frame", ["-"])[0] if "frame" in q else "-")
+            data = _thumb_cache.get(key)
+            if data is None:
+                buf = io.BytesIO()
+                thumb.save(buf, "PNG")
+                data = buf.getvalue()
+                if len(_thumb_cache) >= _THUMB_CACHE_MAX:
+                    _thumb_cache.pop(next(iter(_thumb_cache)))
+                _thumb_cache[key] = data
             self.send_response(200)
             self.send_header("Content-Type", "image/png")
             self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "public, max-age=86400")
             self.end_headers()
             self.wfile.write(data)
         elif path == "/api/maps":

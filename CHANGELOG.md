@@ -3,6 +3,35 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.26 — 2026-09-25
+
+Lloyd's direction: harden the categorization, and give straight colors
+their own tab.
+
+- **Thumbnails stop hanging.** Every `/api/thumb` request re-cropped and
+  re-encoded the PNG — ~3s each on a slow host, so a full tab never
+  finished loading. Thumbnails are now cached in server memory and the
+  browser is told to cache them for a day (only successes are cached, and
+  backfill only adds art, so the cache can't go stale). First paint is
+  progressive, every revisit is instant. Repair Law 16: Cache What You Crop.
+- **One tile, one home.** A new `SUBCATEGORY_TABS` routing table (shared by
+  server and client): walls/floors/doors/roofs/materials/natural → Tiles,
+  furniture/containers/props/lighting/other → Objects,
+  characters/creatures → Characters. "Starter Dark floor" now lives in the
+  Tiles tab under the Floors chip instead of leaking into Objects — a floor
+  is a floor. Imports land on their home tab automatically. Repair Law 15:
+  One Tile, One Home.
+- **Colors tab.** Straight flat colors get their own tab (no chips, just
+  swatches) — the Tiles tab stays pure art tiles. Colors paints onto the
+  tiles layer, and the app boots on Colors so open-and-paint works exactly
+  like the old Tiles tab did.
+- **Automatic display names.** `display_name()` derives one clean label
+  from the raw name: `dungeon_wall_dark` → "Dark Wall", "Starter Dark
+  floor" → "Starter Dark Floor". Palette labels, swatch titles, and search
+  all use it (raw names kept for identity).
+- Laws 15 and 16 added to REPAIR_LAWS.md.
+- Server-verified only (API fields, cache timing, syntax); no phone run yet.
+
 ## v5.25.1 — 2026-09-25
 
 Hotfix: v5.25 shipped a typo (`customes` for `customs`) that crashed the

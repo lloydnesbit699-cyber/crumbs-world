@@ -654,7 +654,10 @@
     </div>
   </div>
   <div class="seg" id="layer-seg">
-    <button data-layer="tiles" class="on">Tiles</button>
+    <button data-layer="tiles">Tiles</button>
+    <!-- v5.26: straight colors get their own tab — flat swatches only,
+         so the Tiles tab stays pure art tiles. Paints to the tiles layer. -->
+    <button data-layer="colors" class="on">Colors</button>
     <button data-layer="objects">Objects</button>
     <!-- v5.25: characters & creatures get their own menu — the brush still
          paints onto the objects layer, where characters live. -->
@@ -1039,20 +1042,24 @@ let editingTile = null, editPreset = null;
 let animOnMap = new Set();          // custom animated tile ids currently placed
 let heroTileId = null;              // sprite tile used as the play-mode hero
 let colorOf = {};                   // tile id -> css color
-let layer = "tiles";
+let layer = "colors";   // v5.26: boot on Colors — the flat-color paint flow,
+// so open-and-paint works exactly like the old Tiles tab did.
 // v5.25: the Characters tab is a palette mode, not a map layer — its brush
 // paints onto the objects layer, where characters live. Every dispatch
-// point that branches on the layer goes through paintLayer().
-const paintLayer = () => layer === "characters" ? "objects" : layer;
+// v5.25: the Characters tab paints onto the objects layer.
+// v5.26: the Colors tab paints onto the tiles layer — every branch point
+// that branches on the layer goes through paintLayer().
+const paintLayer = () => layer === "characters" ? "objects" : layer === "colors" ? "tiles" : layer;
 let erasing = false;
 let selTile = null;                 // selected tile id (tiles/objects layers)
 let selCollide = 1;                 // collision brush: 0 = clear, 1 = solid, 2 = locked
 let currentTheme = "dungeon";       // v3.1: palette shows the map's theme colors
-let selByLayer = { tiles: null, objects: null, characters: null };  // v3.1: remembered brush per layer
+let selByLayer = { tiles: null, colors: null, objects: null, characters: null };  // v3.1: remembered brush per layer
 let linkCollision = false;          // v3.1: painting tiles also stamps collision
 let lightingOn = true;              // v3.1: fog/lighting overlay in play mode
 let lightCv = null;                 // v4.9: the darkness lives on its own layer
-const LAYER_HINTS = { tiles: "paint the ground", objects: "things that sit on tiles",
+const LAYER_HINTS = { tiles: "paint the ground", colors: "flat colors for the ground",
+  objects: "things that sit on tiles",
                       characters: "walkers & beasties — painted onto the objects layer",
                       collision: "red = solid · amber = locked" };
 let tilePx = 32;
@@ -2988,14 +2995,18 @@ function selectTile(id) {
 function defaultBrush(l) {
   // v5.23.3: never silently select an object/hero brush.
   // v5.25: the Characters tab is object-like — same rule.
-  if (l === "objects" || l === "characters") return null;
+  // v5.26: the Tiles tab is art tiles now — same rule. Only the Colors
+  // tab gets an automatic brush (the theme's ground color).
+  if (l === "objects" || l === "characters" || l === "tiles") return null;
   const th = palette.find(t => biomeOf(t.name) === currentTheme);
   return th ? th.id : (palette.length ? palette[0].id : null);
 }
 function updatePaletteProbe() {
   const box = $("palette-probe");
   if (!box) return;
-  if (layer !== "tiles") { box.style.display = "none"; box.innerHTML = ""; return; }
+  // v5.26: the probe watches the flat-color swatches — they live on the
+  // Colors tab now.
+  if (layer !== "colors") { box.style.display = "none"; box.innerHTML = ""; return; }
   const chip = document.querySelector('#paint-strip .sw.sel .chip');
   const t = palette.find(x => x.id === selTile);
   if (!chip || !t) { box.style.display = "none"; box.innerHTML = ""; return; }
@@ -3019,6 +3030,15 @@ const SUBCAT_ORDER = {
   objects: ["furniture", "containers", "props", "lighting"],
   characters: ["characters", "creatures"],
 };
+// v5.26: hardened taxonomy — every subcategory has exactly ONE home tab,
+// mirroring the server's SUBCATEGORY_TABS. The server sends t.tab; this is
+// the fallback for payloads that predate it.
+const SUBCAT_TABS = { walls: "tiles", floors: "tiles", doors: "tiles",
+  roofs: "tiles", materials: "tiles", natural: "tiles",
+  furniture: "objects", containers: "objects", props: "objects",
+  lighting: "objects", other: "objects",
+  characters: "characters", creatures: "characters" };
+function tabOf(t) { return t.tab || SUBCAT_TABS[subOf(t)] || "objects"; }
 const SUBCAT_LABEL = { walls: "Walls", floors: "Floors", doors: "Doors",
   roofs: "Roofs", materials: "Materials", natural: "Natural",
   furniture: "Furniture", containers: "Containers", props: "Props",
@@ -3090,14 +3110,22 @@ function buildPalette() {
   box.classList.toggle("editing", customEditMode);
   $("collide-palette").style.display = "none";
   if (layer === "tiles") {
+    // v5.26: the Tiles tab is ART tiles now — customs whose subcategory is
+    // tile-like (walls/floors/doors/…). A floor is a floor: it lives here
+    // under the Floors chip, not in Objects. The strip reuses the pack
+    // groups + windowing, so the 6k Utumno pack stays usable here too.
+    // Flat colors moved to the Colors tab.
+    customTabKey = "tiles";
+    renderSubChips("tiles", customTiles.filter(t => tabOf(t) === "tiles"));
+    buildCustomTiles();
+  } else if (layer === "colors") {
+    // v5.26: straight colors — the old Tiles-tab content, no chips.
     // v3.1: theme-aware colors — a dungeon map shows dungeon colors only.
     // Same-color tiles collapse into one swatch.
-    // v5.25: subcategory chips filter the swatches (walls/floors/…).
-    renderSubChips("tiles", palette.filter(t => biomeOf(t.name) === currentTheme));
+    $("subcat-row").style.display = "none";   // v5.26: no chips on this tab
     const seen = new Set();
     palette.filter(t => {
       if (biomeOf(t.name) !== currentTheme) return false;
-      if (!subMatch("tiles", subOf(t))) return false;
       if (seen.has(t.color)) return false;
       seen.add(t.color);
       return true;
@@ -3109,26 +3137,28 @@ function buildPalette() {
       chip.style.backgroundColor = t.color || "#000";
       const lbl = document.createElement("div");
       lbl.className = "lbl";
-      lbl.textContent = shortName(t.name);
+      lbl.textContent = t.display || shortName(t.name);
       frag.append(chip, lbl);
-      sw(t.id === selTile, t.name + " (#" + t.id + ")",
+      sw(t.id === selTile, (t.display || t.name) + " (#" + t.id + ")",
          frag,
          () => selectTile(t.id));
     });
   } else {
     // v5.25: the Objects tab, or the Characters tab — characters &
     // creatures get their own menu. Both paint onto the objects layer.
+    // v5.26: customs are routed by their ONE home tab — tile-like customs
+    // (walls/floors/…) no longer leak into Objects; they live in Tiles.
     const charTab = layer === "characters";
     const tabKey = charTab ? "characters" : "objects";
     const sprites = spriteTiles.filter(t => t.type !== "custom")
       .filter(t => charTab === isCharSub(subOf(t)));
-    const customs = customTiles.filter(t => charTab === isCharSub(subOf(t)));
+    const customs = customTiles.filter(t => tabOf(t) === tabKey);
     renderSubChips(tabKey, sprites.concat(customs));
     customTabKey = tabKey;   // v5.25: buildCustomTiles filters on this too
     sprites.filter(t => subMatch(tabKey, subOf(t))).forEach(t => {
-      sw(t.id === selTile, t.name + " (#" + t.id + " · " + t.type + ")",
+      sw(t.id === selTile, (t.display || t.name) + " (#" + t.id + " · " + t.type + ")",
          '<div class="chip"><img src="/api/thumb/' + t.id + '" alt="" onerror="thumbImgFail(this)"></div>' +
-         '<div class="lbl">' + t.name + "</div>",
+         '<div class="lbl">' + esc(t.display || t.name) + "</div>",
          () => selectTile(t.id));
     });
     buildCustomTiles();   // v5.1: customs join the same strip
@@ -3201,9 +3231,12 @@ function buildCustomTiles() {
   // v5.25: the strip follows the active tab — the Characters tab shows only
   // characters & creatures, the Objects tab shows everything else, and the
   // subcategory chips filter both.
+  // v5.26: hardened — a custom appears on exactly ONE tab, its home tab
+  // (floors in Tiles, not Objects). tabOf() falls back to the local table
+  // for payloads that predate t.tab.
   const charOnly = customTabKey === "characters";
   const vis = t => match(t) && subMatch(customTabKey, subOf(t)) &&
-                   (charOnly === isCharSub(subOf(t)));
+                   tabOf(t) === customTabKey;
   const groups = [["shared", "SHARED"], ["local", "DEVICE"]];
   const nonEmpty = groups.filter(([s]) => customTiles.some(t => (t.scope || "local") === s && vis(t)));
   const showLabels = nonEmpty.length > 1;
@@ -3298,12 +3331,13 @@ function paintPackWindow() {
 }
 function customSwatch(t) {
   ensureFrames(t);   // v5.2: lazy — only rendered swatches fetch thumbnails
+  const label = t.display || t.name;   // v5.26: automatic display name
   const d = document.createElement("div");
   d.className = "sw" + (t.id === selTile ? " sel" : "");
-  d.title = t.name + " (" + t.preset + (t.frames > 1 ? ", " + t.frames + " frames" : "") + ")";
+  d.title = label + " (" + t.preset + (t.frames > 1 ? ", " + t.frames + " frames" : "") + ")";
   d.innerHTML = '<canvas width="48" height="48" data-tid="' + t.id + '"></canvas>' +
-                '<div class="lbl">' + t.name + '</div>' +
-                '<div class="preset-tag">' + t.preset + '</div>';
+                '<div class="lbl">' + esc(label) + '</div>' +
+                '<div class="preset-tag">' + esc(t.preset) + '</div>';
   paintSwatch(d.querySelector("canvas"), t.id);   // v4.7: still chip, painted now if loaded
   d.onclick = () => {
     if (customEditMode) openTileEditor(t.id);   // v3.3: tile manager
@@ -3810,7 +3844,9 @@ $("sheet-import").onclick = async () => {
   if (first && first.id != null) {
     selTile = first.id;
     const objectRole = ["character", "creature", "object", "inventory"].includes(first.preset);
-    layer = objectRole ? "objects" : "tiles";
+    // v5.26: the import lands on its ONE home tab (a floor goes to Tiles,
+    // not Objects) — the server's tab field is authoritative.
+    layer = first.tab || (objectRole ? "objects" : "tiles");
     selByLayer[layer] = selTile;
     erasing = false;
     $("btn-eraser").classList.remove("on");
@@ -3988,7 +4024,7 @@ $("btn-gen").onclick = async () => {
     splashStep(80, "Loading map data\u2026");
     // v3.1: the palette follows the generated biome
     currentTheme = r.biome || "dungeon"; $("theme-sel").value = currentTheme;
-    if (layer === "tiles") { selTile = defaultBrush("tiles"); selByLayer.tiles = selTile; }
+    if (layer === "tiles" || layer === "colors") { selTile = defaultBrush(layer); selByLayer[layer] = selTile; }
     buildPalette();
     // v3.7: fresh build — apply the user's saved rule defaults, if any
     const def = myDefaults();
@@ -5277,10 +5313,10 @@ $("pack-btn").onclick = () => { toggleOverlay("sheet-pack"); syncInv(); };
     $("theme-sel").value = currentTheme;
     $("theme-sel").onchange = e => {
       currentTheme = e.target.value;
-      if (layer === "tiles") { selTile = defaultBrush("tiles"); selByLayer.tiles = selTile; }
+      if (layer === "tiles" || layer === "colors") { selTile = defaultBrush(layer); selByLayer[layer] = selTile; }
       buildPalette();
     };
-    selTile = defaultBrush("tiles");   // v3.1: first dungeon color, not tile #0
+    selTile = defaultBrush(layer); selByLayer[layer] = selTile;   // v3.1: first dungeon color, not tile #0
     buildPalette();
     setFile(currentFile);
     await refresh();

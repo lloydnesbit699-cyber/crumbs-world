@@ -87,6 +87,25 @@ repair it on demand.
 (Lloyd's call, 2026-09-25: fix the missing thumbnails at the root, don't
 patch the symptoms.)
 
+### 15. One Tile, One Home
+Every tile has exactly one home tab, decided by what it IS — not by how
+it arrived. A floor is a floor: it lives in Tiles under the Floors chip,
+even though it's a "made thing" like an object. When "everything else"
+becomes a junk drawer, harden the taxonomy: a single routing table both
+sides share, automatic names derived from the data, no tile in two places
+and none in none. Categories are promises — keep them so a user can trust
+them.
+(Lloyd's direction, 2026-09-25: hardened naming, distinctions,
+categorization — floors belong in the tiles menu where the floor menu is.)
+
+### 16. Cache What You Crop
+If the server builds it from scratch on every request, the client will
+feel it hang. A thumbnail cropped and PNG-encoded per request took ~3s on
+a slow host — a full tab of them never finished. Cache the bytes in memory
+and tell the browser to cache them too; only ever cache successes, and
+only when the underlying data can't go stale beneath the cache.
+(Lloyd's report, 2026-09-25: thumbnails still hanging.)
+
 ---
 
-*When a new midnight lesson arrives, it becomes Law 15.*
+*When a new midnight lesson arrives, it becomes Law 17.*

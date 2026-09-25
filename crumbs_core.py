@@ -445,6 +445,49 @@ def guess_subcategory(name, preset=None, category="tiles"):
     return "other"
 
 
+# v5.26: hardened taxonomy — every subcategory has exactly ONE home tab.
+# A floor is a floor: it lives in Tiles under the Floors chip, even though
+# it's a "made thing" like an object. Imports keep the subcategory guessed
+# at import time, so the routing is stable and automatic.
+SUBCATEGORY_TABS = {
+    "walls": "tiles", "floors": "tiles", "doors": "tiles",
+    "roofs": "tiles", "materials": "tiles", "natural": "tiles",
+    "furniture": "objects", "containers": "objects", "props": "objects",
+    "lighting": "objects", "other": "objects",
+    "characters": "characters", "creatures": "characters",
+}
+def tab_for_subcategory(sub):
+    """v5.26: which palette tab a subcategory belongs to. Never raises,
+    never returns empty — unknown subcategories are objects."""
+    try:
+        return SUBCATEGORY_TABS.get((sub or "other").lower(), "objects")
+    except Exception:
+        return "objects"
+
+
+_BIOME_PREFIXES = ("dungeon", "grassland", "desert", "arctic", "forest",
+                   "ocean", "core")
+def display_name(name):
+    """v5.26: the automatic name system — one clean human-readable label
+    derived from the raw tile name. 'dungeon_wall_dark' -> 'Dark Wall',
+    'Starter Dark floor' -> 'Starter Dark Floor', 'cell_4521' -> 'Cell 4521'.
+    Never raises, never returns empty."""
+    try:
+        s = (name or "").replace("_", " ").strip()
+        low = s.lower()
+        for b in _BIOME_PREFIXES:
+            if low.startswith(b + " ") and len(s) > len(b) + 1:
+                s = s[len(b) + 1:].strip()
+                break
+        words = s.split()
+        if words and words[-1].lower() in ("dark", "light"):
+            words.insert(0, words.pop())
+        labeled = " ".join(w[:1].upper() + w[1:] for w in words)
+        return labeled or "Tile"
+    except Exception:
+        return "Tile"
+
+
 # ==========================================
 # ASSET MANAGER (headless — no Tkinter)
 # ==========================================

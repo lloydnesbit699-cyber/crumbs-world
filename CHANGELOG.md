@@ -3,6 +3,18 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.27.2 — 2026-09-25
+
+Root-caused from Lloyd's live `sync.sh` conflict: the first-boot owner
+migration MOVED shipped starter maps (tracked in git) into the owner vault,
+leaving the repo tree dirty and breaking every later `git pull --rebase`.
+
+- **Migration copies git-tracked files instead of moving them.** The
+  owner's vault still gets the starter maps; the repo copies stay put, so
+  git stays clean forever. Untracked/personal files still move as before;
+  non-git installs (phone) are unaffected. `/api/maps` only lists the
+  vault dir, so the leftover root copies are never double-listed.
+
 ## v5.27.1 — 2026-09-25
 
 Lloyd's call, from John's first login: the throttle just said "slow down"

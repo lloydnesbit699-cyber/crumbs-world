@@ -117,6 +117,7 @@ import uuid
 import threading
 import time
 import math
+import subprocess
 import heapq
 import zipfile
 import urllib.request
@@ -146,7 +147,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.27.1"
+APP_VERSION = "5.27.2"
 # v5.24: unique per process boot. After an update the server re-execs into
 # the new files; the page waits for a DIFFERENT instance id (plus the new
 # version) instead of mistaking the old process — still answering during
@@ -839,6 +840,22 @@ _SIDECAR_SUFFIXES = (".rules.json", ".traits.json", ".names.json",
                      ".gear.json", ".slots.json")
 
 
+def _git_tracked(fname):
+    """v5.27.2: True if fname is tracked in the git repo around SCRIPT_DIR.
+
+    Used by the first-boot migration: shipped starter maps are tracked, so
+    they get COPIED into the owner's vault instead of moved — the repo tree
+    stays clean and `git pull` never breaks. No git / not a repo -> False
+    (original move behavior, e.g. phone installs)."""
+    try:
+        r = subprocess.run(
+            ["git", "ls-files", "--error-unmatch", "--", fname],
+            cwd=SCRIPT_DIR, capture_output=True, timeout=15)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
 def _migrate_owner_data(owner):
     dest = _user_vault_dir(owner)
     os.makedirs(dest, exist_ok=True)
@@ -846,15 +863,29 @@ def _migrate_owner_data(owner):
 
     def _move_with_sidecars(fname):
         src = os.path.join(SCRIPT_DIR, fname)
-        shutil.move(src, os.path.join(dest, fname))
-        moved.append(fname)
+        dst = os.path.join(dest, fname)
+        # v5.27.2: git-tracked files are COPIED, not moved — moving shipped
+        # starter maps dirtied the repo and broke `git pull --rebase`.
+        # /api/maps only lists the vault dir, so the root copies left behind
+        # are never double-listed.
+        if _git_tracked(fname):
+            shutil.copy2(src, dst)
+            moved.append(fname + " (copied, git-tracked)")
+        else:
+            shutil.move(src, dst)
+            moved.append(fname)
         if fname.endswith(".json"):  # a map's sidecars ride along
             base = fname[:-len(".json")]
             for sfx in _SIDECAR_SUFFIXES:
                 sf = os.path.join(SCRIPT_DIR, base + sfx)
                 if os.path.isfile(sf):
-                    shutil.move(sf, os.path.join(dest, base + sfx))
-                    moved.append(base + sfx)
+                    sdst = os.path.join(dest, base + sfx)
+                    if _git_tracked(base + sfx):
+                        shutil.copy2(sf, sdst)
+                        moved.append(base + sfx + " (copied, git-tracked)")
+                    else:
+                        shutil.move(sf, sdst)
+                        moved.append(base + sfx)
 
     for f in sorted(os.listdir(SCRIPT_DIR)):
         src = os.path.join(SCRIPT_DIR, f)

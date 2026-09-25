@@ -14,6 +14,7 @@ import os
 import json
 import random
 import math
+import re
 import shutil
 from collections import deque
 
@@ -378,6 +379,73 @@ class NoiseGenerator:
 
 
 # ==========================================
+# SUBCATEGORY TAXONOMY (v5.25)
+# Minecraft-style separation for the palette: tiles split into
+# walls/floors/doors/roofs/materials/natural, objects into
+# furniture/containers/props/lighting, and characters & creatures get
+# their own group. Tiles carry a 'subcategory' field, guessed from the
+# name when nothing explicit was assigned (this is the "automatic
+# categorization" the asset docs called out as still needing work).
+# (subcategory, [name-token keywords]); first match wins, so the
+# specific comes before the general.
+SUBCATEGORY_HINTS = [
+    ("lighting",   ["torch", "lamp", "lantern", "candle", "brazier",
+                    "chandelier", "glow"]),
+    ("furniture",  ["chair", "table", "bed", "sofa", "stool", "desk",
+                    "shelf", "throne", "bench", "cabinet", "dresser"]),
+    ("containers", ["chest", "barrel", "crate", "box", "sack", "pot", "urn",
+                    "coffer", "basket"]),
+    ("walls",      ["wall"]),
+    ("floors",     ["floor"]),
+    ("doors",      ["door", "gate", "portal"]),
+    ("roofs",      ["roof"]),
+    ("materials",  ["brick", "stone", "wood", "plank", "metal", "marble"]),
+    ("natural",    ["grass", "sand", "water", "dirt", "mud", "snow", "lava",
+                    "swamp", "tree", "bush", "flower", "rock", "cactus",
+                    "beach", "ocean", "ice"]),
+    ("props",      ["statue", "pillar", "column", "rubble", "bones", "altar",
+                    "fountain", "well", "sign", "banner", "rug", "carpet",
+                    "stairs", "trap", "grid", "noise", "fade", "band",
+                    "gradient"]),
+]
+# creature name-tokens — a character-preset tile matching one of these
+# lands in "creatures", otherwise in "characters".
+CREATURE_HINTS = ["goblin", "orc", "rat", "bat", "spider", "wolf", "snake",
+                  "imp", "skeleton", "zombie", "dragon", "slime", "hound",
+                  "scorpion", "troll", "ghost", "demon", "beast", "critter",
+                  "serpent"]
+# palette display order per tab ("other" is appended only when non-empty —
+# Law 11: no dead buttons, so empty groups never render a chip).
+SUBCATEGORY_ORDER = {
+    "tiles": ["walls", "floors", "doors", "roofs", "materials", "natural"],
+    "objects": ["furniture", "containers", "props", "lighting"],
+    "characters": ["characters", "creatures"],
+}
+
+
+def guess_subcategory(name, preset=None, category="tiles"):
+    """v5.25: filename/name-hint auto-categorization. Returns a subcategory
+    string; never raises, never returns empty."""
+    try:
+        tokens = set(re.split(r"[^a-z0-9]+", (name or "").lower()))
+        tokens.discard("")
+        # characters & creatures are their own group — by preset, or by the
+        # hero token for built-ins that predate presets (e.g. "Hood Hero").
+        if preset == "character" or "hero" in tokens:
+            for kw in CREATURE_HINTS:
+                if kw in tokens:
+                    return "creatures"
+            return "characters"
+        for sub, kws in SUBCATEGORY_HINTS:
+            for kw in kws:
+                if kw in tokens:
+                    return sub
+    except Exception:
+        pass
+    return "other"
+
+
+# ==========================================
 # ASSET MANAGER (headless — no Tkinter)
 # ==========================================
 class AssetManager:
@@ -461,6 +529,12 @@ class AssetManager:
             'properties': {'passable': True, 'solid': False, 'interactive': False},
             **data
         }
+        # v5.25: every tile knows its subcategory — explicit assignment
+        # wins, otherwise the name-hint guesser categorizes it.
+        if not self.tiles[tid].get('subcategory'):
+            self.tiles[tid]['subcategory'] = guess_subcategory(
+                self.tiles[tid]['name'], data.get('preset'),
+                self.tiles[tid]['category'])
         cat = self.tiles[tid]['category']
         if cat not in self.categories:
             self.categories[cat] = []
@@ -659,16 +733,25 @@ class AssetManager:
         return self.categories.get(category, [])
 
     def get_thumbnail(self, tid, size=40):
-        """Headless version: returns a PIL Image (or None), never a Tk PhotoImage."""
-        if not PIL_AVAILABLE:
+        """Headless version: returns a PIL Image (or None), never a Tk PhotoImage.
+        v5.25: never throws — a tile with missing art yields None (the
+        /api/thumb caller turns that into a 404, and the page paints a
+        "?" placeholder), never a dead connection."""
+        try:
+            if not PIL_AVAILABLE:
+                return None
+            tile = self.tiles.get(tid)
+            if not tile:
+                return None
+            if tile['type'] == 'color':
+                return Image.new("RGBA", (size, size), tile['color'])
+            frames = tile.get('frames') or []
+            if not frames:
+                return None
+            frame = frames[tile.get('current_frame', 0) % len(frames)]
+            return frame.resize((size, size), Image.Resampling.NEAREST)
+        except Exception:
             return None
-        tile = self.tiles.get(tid)
-        if not tile:
-            return None
-        if tile['type'] == 'color':
-            return Image.new("RGBA", (size, size), tile['color'])
-        frame = tile['frames'][tile.get('current_frame', 0)]
-        return frame.resize((size, size), Image.Resampling.NEAREST)
 
 
 # ==========================================

@@ -3,6 +3,27 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.25 — 2026-09-25
+
+The missing thumbnails, fixed at the root (Lloyd's call — stop patching
+symptoms): the updater shipped code only, so phones carried registry
+entries for art that never arrived — every one of those tiles painted a
+permanently blank swatch. The update now ships the art too
+(`shared_library.json`, the starter-pack strip, the built-in sprite art),
+validates downloads by magic bytes, and a boot-time backfill fetches any
+art an older install missed, then re-registers the shared shelf; the page
+reloads the strip when the backfill lands. Thumbnails that still can't
+load now paint an honest "?" placeholder (with a missing-art count in the
+palette) instead of blank. And the palette grows the Minecraft-style
+separation Lloyd sketched: every tile auto-categorizes from name hints
+(the docs' "automatic categorization" TODO, done — imports included),
+tiles filter by walls/floors/doors/roofs/materials/natural, objects by
+furniture/containers/props/lighting, and characters & creatures get their
+own menu tab (its brush paints onto the objects layer, where characters
+live). The v5.23.2 grid and virtualized pack scrolling are untouched.
+(Server-verified only: syntax-checked all files, live API checks, no
+phone run yet.)
+
 ## v5.24 — 2026-09-25
 
 The update finishes the job (Lloyd's diagnosis): the old flow swapped the

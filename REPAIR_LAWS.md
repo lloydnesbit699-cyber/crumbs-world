@@ -75,6 +75,18 @@ never let a button declare success off the old process still answering.
 (Lloyd's diagnosis, 2026-09-25: the updater swapped files then waited on a
 manual restart — the "stuck between commits" state.)
 
+### 14. Ship The Art With The App
+A feature isn't shipped when its code lands — it's shipped when everything
+the code *points at* lands too. The updater shipped code only, so phones
+carried registry entries for art that never arrived, and a hundred tiles
+painted permanently blank swatches: the "missing thumbnails" were never a
+rendering bug, they were an incomplete shipment. Data, art, and registries
+travel with the installer; a registry entry whose file is absent is a
+broken promise — detect it, say so honestly (a "?" beats a blank), and
+repair it on demand.
+(Lloyd's call, 2026-09-25: fix the missing thumbnails at the root, don't
+patch the symptoms.)
+
 ---
 
-*When a new midnight lesson arrives, it becomes Law 14.*
+*When a new midnight lesson arrives, it becomes Law 15.*

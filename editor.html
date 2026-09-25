@@ -227,6 +227,16 @@
     color: #eee; border: 1px solid #333; border-radius: 8px; padding: 8px 10px;
     font-size: 14px; }
   #strip-search::placeholder { color: #666; }
+  /* v5.25: subcategory chips — the palette's Minecraft-style tabs */
+  #subcat-row { display: none; gap: 6px; padding: 2px 2px 8px; overflow-x: auto;
+    flex: none; align-items: center; }
+  .subcat-chip { flex: none; padding: 5px 11px; border-radius: 12px;
+    border: 1px solid #555; background: #1c1c26; color: #ccc; font-size: 12px; }
+  .subcat-chip.on { background: #3a5a8a; border-color: #7ab; color: #fff; }
+  .art-warn { flex: none; font-size: 11px; color: #e8a33d; white-space: nowrap; }
+  #paint-strip .sw .chip .thumb-q { width: 100%; height: 100%; display: flex;
+    align-items: center; justify-content: center; font-size: 24px;
+    color: #c98; background: #3a2b2b; border-radius: 10px; }
   #paint-strip .pack-head { cursor: pointer; border: 1px solid #444;
     border-radius: 8px; padding: 8px 12px; background: #1b1b26; color: #ffd75f;
     font-size: 11px; letter-spacing: 1px; white-space: nowrap; }
@@ -646,6 +656,9 @@
   <div class="seg" id="layer-seg">
     <button data-layer="tiles" class="on">Tiles</button>
     <button data-layer="objects">Objects</button>
+    <!-- v5.25: characters & creatures get their own menu — the brush still
+         paints onto the objects layer, where characters live. -->
+    <button data-layer="characters">Characters</button>
     <button data-layer="collision">Collision</button>
   </div>
   <div id="theme-row" class="tray-hint">colors: <select id="theme-sel"></select></div>
@@ -653,6 +666,10 @@
   <div class="grp-label">palette<button id="btn-custom-edit" class="ghost">Edit</button></div>
   <!-- v5.2: search the strip — 6,038 Utumno tiles live here now -->
   <div id="strip-search-row"><input id="strip-search" placeholder="search tiles…"></div>
+  <!-- v5.25: subcategory chips — Minecraft-style separation (walls/floors/…
+       furniture/… characters/creatures). Built from the data, so an empty
+       group never renders a chip (Law 11: no dead buttons). -->
+  <div id="subcat-row"></div>
   <div id="paint-strip"></div>
   <div id="palette-probe" class="tray-hint"></div>
   <div id="collide-palette">
@@ -1023,15 +1040,20 @@ let animOnMap = new Set();          // custom animated tile ids currently placed
 let heroTileId = null;              // sprite tile used as the play-mode hero
 let colorOf = {};                   // tile id -> css color
 let layer = "tiles";
+// v5.25: the Characters tab is a palette mode, not a map layer — its brush
+// paints onto the objects layer, where characters live. Every dispatch
+// point that branches on the layer goes through paintLayer().
+const paintLayer = () => layer === "characters" ? "objects" : layer;
 let erasing = false;
 let selTile = null;                 // selected tile id (tiles/objects layers)
 let selCollide = 1;                 // collision brush: 0 = clear, 1 = solid, 2 = locked
 let currentTheme = "dungeon";       // v3.1: palette shows the map's theme colors
-let selByLayer = { tiles: null, objects: null };  // v3.1: remembered brush per layer
+let selByLayer = { tiles: null, objects: null, characters: null };  // v3.1: remembered brush per layer
 let linkCollision = false;          // v3.1: painting tiles also stamps collision
 let lightingOn = true;              // v3.1: fog/lighting overlay in play mode
 let lightCv = null;                 // v4.9: the darkness lives on its own layer
 const LAYER_HINTS = { tiles: "paint the ground", objects: "things that sit on tiles",
+                      characters: "walkers & beasties — painted onto the objects layer",
                       collision: "red = solid · amber = locked" };
 let tilePx = 32;
 let manualZoom = false;   // v1.5: until the user zooms, tiles auto-fit the screen
@@ -1709,13 +1731,13 @@ function evCell(e) {
   return { x, y };
 }
 function brushValue() {
-  if (layer === "collision") return erasing ? false : selCollide;
-  if (layer === "objects")   return erasing ? null  : selTile;
+  if (paintLayer() === "collision") return erasing ? false : selCollide;
+  if (paintLayer() === "objects")   return erasing ? null  : selTile;
   // v5.0: the eraser sends "natural" — the server restores the seed's own
   // ground for each cell instead of a fixed tile 0.
   return erasing ? "natural" : selTile;
 }
-function localGrid() { return layer === "objects" ? objects : layer === "collision" ? coll : tiles; }
+function localGrid() { const pl = paintLayer(); return pl === "objects" ? objects : pl === "collision" ? coll : tiles; }
 
 function strokeAdd(cell) {
   const key = cell.x + "," + cell.y;
@@ -1759,7 +1781,7 @@ canvas.addEventListener("pointerdown", async e => {
   const cell = evCell(e); if (!cell) return;
   if (playMode) { playTap(cell); return; }
   // v5.23.3: direct object inspect.
-  if (!selectTool && layer === "objects" && !erasing &&
+  if (!selectTool && paintLayer() === "objects" && !erasing &&
       objects[cell.y] && objects[cell.y][cell.x] != null) {
     inspectTap(cell);
     return;
@@ -2965,7 +2987,8 @@ function selectTile(id) {
 }
 function defaultBrush(l) {
   // v5.23.3: never silently select an object/hero brush.
-  if (l === "objects") return null;
+  // v5.25: the Characters tab is object-like — same rule.
+  if (l === "objects" || l === "characters") return null;
   const th = palette.find(t => biomeOf(t.name) === currentTheme);
   return th ? th.id : (palette.length ? palette[0].id : null);
 }
@@ -2986,6 +3009,59 @@ function updatePaletteProbe() {
     '</code> · inline <code>' + esc(inline) + '</code> · css <code>' +
     esc(computed) + '</code>';
 }
+// ---- v5.25: subcategory filters -------------------------------------------
+// Minecraft-style separation: tiles → walls/floors/doors/roofs/materials/
+// natural, objects → furniture/containers/props/lighting, and characters &
+// creatures get their own menu. Chips are built from the data on hand — an
+// empty group never renders a chip (Law 11: no dead buttons).
+const SUBCAT_ORDER = {
+  tiles: ["walls", "floors", "doors", "roofs", "materials", "natural"],
+  objects: ["furniture", "containers", "props", "lighting"],
+  characters: ["characters", "creatures"],
+};
+const SUBCAT_LABEL = { walls: "Walls", floors: "Floors", doors: "Doors",
+  roofs: "Roofs", materials: "Materials", natural: "Natural",
+  furniture: "Furniture", containers: "Containers", props: "Props",
+  lighting: "Lighting", characters: "Characters", creatures: "Creatures",
+  other: "Other" };
+const isCharSub = s => s === "characters" || s === "creatures";
+const subFilter = { tiles: "all", objects: "all", characters: "all" };  // per-tab memory
+let customTabKey = "objects";   // v5.25: which tab buildCustomTiles filters for
+const subOf = t => t.subcategory || "other";
+function subMatch(tabKey, sub) {
+  const f = subFilter[tabKey];
+  if (f === "all") return true;
+  if (f === "other") return !SUBCAT_ORDER[tabKey].includes(sub);
+  return sub === f;
+}
+let missingArtCount = 0;   // v5.25: customs whose PNGs never reached this phone
+function renderSubChips(tabKey, items) {
+  const row = $("subcat-row"); row.innerHTML = "";
+  const counts = {};
+  items.forEach(t => { const s = subOf(t); counts[s] = (counts[s] || 0) + 1; });
+  const groups = SUBCAT_ORDER[tabKey].filter(s => counts[s]);
+  if (Object.keys(counts).some(s => !SUBCAT_ORDER[tabKey].includes(s))) groups.push("other");
+  if (!groups.length) { row.style.display = "none"; return; }
+  row.style.display = "flex";
+  const mk = (val, label) => {
+    const b = document.createElement("button");
+    b.className = "subcat-chip" + (subFilter[tabKey] === val ? " on" : "");
+    b.textContent = label;
+    b.onclick = () => { subFilter[tabKey] = val; buildPalette(); };
+    row.appendChild(b);
+  };
+  mk("all", "All");
+  groups.forEach(s => mk(s, (SUBCAT_LABEL[s] || s) + " (" + counts[s] + ")"));
+  // v5.25: the honest count — tiles whose art never reached this phone.
+  // Menu → Check for updates → repair fetches them (see the tooltip).
+  if (missingArtCount > 0 && tabKey !== "tiles") {
+    const w = document.createElement("span");
+    w.className = "art-warn";
+    w.textContent = "⚠ " + missingArtCount + " missing art";
+    w.title = "those tiles' image files never arrived on this phone — Menu → Check for updates → repair fetches them";
+    row.appendChild(w);
+  }
+}
 function buildPalette() {
   colorOf = {};
   palette.forEach(t => colorOf[t.id] = t.color);
@@ -3005,6 +3081,7 @@ function buildPalette() {
   };
   if (layer === "collision") {
     box.style.display = "none";
+    $("subcat-row").style.display = "none";   // v5.25: no chips on this tab
     $("collide-palette").style.display = "block";
     updatePaletteProbe();
     return;
@@ -3015,9 +3092,12 @@ function buildPalette() {
   if (layer === "tiles") {
     // v3.1: theme-aware colors — a dungeon map shows dungeon colors only.
     // Same-color tiles collapse into one swatch.
+    // v5.25: subcategory chips filter the swatches (walls/floors/…).
+    renderSubChips("tiles", palette.filter(t => biomeOf(t.name) === currentTheme));
     const seen = new Set();
     palette.filter(t => {
       if (biomeOf(t.name) !== currentTheme) return false;
+      if (!subMatch("tiles", subOf(t))) return false;
       if (seen.has(t.color)) return false;
       seen.add(t.color);
       return true;
@@ -3036,10 +3116,18 @@ function buildPalette() {
          () => selectTile(t.id));
     });
   } else {
-    // v3.1: objects get art (sprites + customs), not flat colors.
-    spriteTiles.filter(t => t.type !== "custom").forEach(t => {
+    // v5.25: the Objects tab, or the Characters tab — characters &
+    // creatures get their own menu. Both paint onto the objects layer.
+    const charTab = layer === "characters";
+    const tabKey = charTab ? "characters" : "objects";
+    const sprites = spriteTiles.filter(t => t.type !== "custom")
+      .filter(t => charTab === isCharSub(subOf(t)));
+    const customs = customTiles.filter(t => charTab === isCharSub(subOf(t)));
+    renderSubChips(tabKey, sprites.concat(customes));
+    customTabKey = tabKey;   // v5.25: buildCustomTiles filters on this too
+    sprites.filter(t => subMatch(tabKey, subOf(t))).forEach(t => {
       sw(t.id === selTile, t.name + " (#" + t.id + " · " + t.type + ")",
-         '<div class="chip"><img src="/api/thumb/' + t.id + '" alt=""></div>' +
+         '<div class="chip"><img src="/api/thumb/' + t.id + '" alt="" onerror="thumbImgFail(this)"></div>' +
          '<div class="lbl">' + t.name + "</div>",
          () => selectTile(t.id));
     });
@@ -3052,14 +3140,39 @@ function buildPalette() {
 // v5.2: frames load lazily — only tiles that actually get rendered (a strip
 // swatch, a map cell, the selected card) ever fetch their /api/thumb images.
 // A 6k-tile pack would otherwise fire 6k requests on every page load.
+// v5.25: thumbnail failure tracking — a tile whose art never arrived used
+// to paint a permanently blank swatch with no way to tell it was broken.
+const thumbFailed = {};   // tile id -> true once its thumbnail 404'd
+function paintThumbPlaceholder(c) {
+  // the honest placeholder: missing art shows as "?", never blank.
+  c.clearRect(0, 0, 48, 48);
+  c.fillStyle = "#3a2b2b"; c.fillRect(0, 0, 48, 48);
+  c.strokeStyle = "#8a5a5a"; c.lineWidth = 2; c.strokeRect(2, 2, 44, 44);
+  c.fillStyle = "#c98"; c.font = "bold 28px sans-serif";
+  c.textAlign = "center"; c.textBaseline = "middle";
+  c.fillText("?", 24, 26);
+}
+function thumbImgFail(img) {
+  // v5.25: <img> chips (objects tab) get the same honest placeholder.
+  img.style.display = "none";
+  const chip = img.parentElement;
+  if (chip && !chip.querySelector(".thumb-q")) {
+    const q = document.createElement("div");
+    q.className = "thumb-q"; q.textContent = "?";
+    q.title = "thumbnail missing — Menu → Check for updates → repair fetches the art";
+    chip.appendChild(q);
+  }
+}
 function ensureFrames(t) {
   let fr = customFrames[t.id];
   if (!fr) {
     fr = [];
-    for (let i = 0; i < t.frames; i++) {
+    for (let i = 0; i < (t.frames || 0); i++) {
       const im = new Image();
       // v4.7: the tray chip is a still — frame 0 paints it once it arrives
       im.onload = () => { baseSig = null; render(); renderSelCard();   // v5.3: a newly-arrived tile image invalidates the cached base layer
+        paintSwatch(document.querySelector('#paint-strip canvas[data-tid="' + t.id + '"]'), t.id); };
+      im.onerror = () => { thumbFailed[t.id] = true;
         paintSwatch(document.querySelector('#paint-strip canvas[data-tid="' + t.id + '"]'), t.id); };
       im.src = "/api/thumb/" + t.id + "?frame=" + i;
       fr.push(im);
@@ -3073,6 +3186,8 @@ async function loadCustomTiles() {
   customTiles = r.tiles || [];
   customById = {}; customFrames = {};
   for (const t of customTiles) customById[t.id] = t;
+  // v5.25: the honest count — registry entries whose PNGs never arrived.
+  missingArtCount = customTiles.filter(t => !t.art).length;
   buildCustomTiles();
 }
 function buildCustomTiles() {
@@ -3083,8 +3198,14 @@ function buildCustomTiles() {
   packWin = null;   // v5.3: any rebuild drops the virtualized pack window
   const q = stripQuery.trim().toLowerCase();
   const match = t => !q || t.name.toLowerCase().includes(q);
+  // v5.25: the strip follows the active tab — the Characters tab shows only
+  // characters & creatures, the Objects tab shows everything else, and the
+  // subcategory chips filter both.
+  const charOnly = customTabKey === "characters";
+  const vis = t => match(t) && subMatch(customTabKey, subOf(t)) &&
+                   (charOnly === isCharSub(subOf(t)));
   const groups = [["shared", "SHARED"], ["local", "DEVICE"]];
-  const nonEmpty = groups.filter(([s]) => customTiles.some(t => (t.scope || "local") === s && match(t)));
+  const nonEmpty = groups.filter(([s]) => customTiles.some(t => (t.scope || "local") === s && vis(t)));
   const showLabels = nonEmpty.length > 1;
   for (const [scope, label] of nonEmpty) {
     if (showLabels) {
@@ -3092,7 +3213,7 @@ function buildCustomTiles() {
       h.className = "strip-label"; h.textContent = label;
       box.appendChild(h);
     }
-    const tiles = customTiles.filter(t => (t.scope || "local") === scope && match(t));
+    const tiles = customTiles.filter(t => (t.scope || "local") === scope && vis(t));
     let i = 0;
     while (i < tiles.length) {
       const t = tiles[i];
@@ -3299,11 +3420,15 @@ function renameInstance() {
 function paintSwatch(cv, tid) {
   if (!cv) return;
   const fr = customFrames[tid], im = fr && fr[0];
+  const c = cv.getContext("2d");
   if (im && im.complete && im.naturalWidth) {
-    const c = cv.getContext("2d");
     c.imageSmoothingEnabled = false;
     c.clearRect(0, 0, 48, 48);
     c.drawImage(im, 0, 0, 48, 48);
+  } else if (!im || thumbFailed[tid]) {
+    // v5.25: no image (zero frames / 404'd art) paints "?", never blank.
+    // A still-loading image keeps its placeholder until onload repaints.
+    paintThumbPlaceholder(c);
   }
 }
 // animator tick: map redraws when an on-map frame actually changed — never
@@ -4199,8 +4324,12 @@ $("menu-update").onclick = async () => {
   if (r.repair && r.missing_files && r.missing_files.length) {
     // v5.22.2: repair — same version, but update files never made it to
     // this phone (e.g. crumbs_recovery.py). Fetch just the missing ones.
-    $("update-title").textContent = "Repair: " + r.missing_files.join(", ") + " missing on this phone";
-    $("update-notes").innerHTML = "<div class='tray-hint'>You're already on v" + escHtml(r.current) + " — but " + escHtml(r.missing_files.join(", ")) + " never arrived here, so that part stays offline. This fetches the missing file(s); restart the server after.</div>";
+    // v5.25: the missing list can be long now that art files are checked
+    // too — cap the title at three names.
+    const mf = r.missing_files;
+    const mfShort = mf.length > 3 ? mf.slice(0, 3).join(", ") + ", and " + (mf.length - 3) + " more" : mf.join(", ");
+    $("update-title").textContent = "Repair: " + mfShort + " missing on this phone";
+    $("update-notes").innerHTML = "<div class='tray-hint'>You're already on v" + escHtml(r.current) + " — but " + escHtml(mfShort) + " never arrived here, so that part stays offline. This fetches the missing file(s); restart the server after.</div>";
     $("btn-update-install").textContent = "Fetch missing files";
   }
   else {
@@ -4223,13 +4352,34 @@ $("menu-update").onclick = async () => {
       // v5.22.2: keep in step with the server's UPDATE_FILES — a file the
       // page doesn't fetch can never arrive via a page-side install.
       const names = ["editor.html", "crumbs_hud.py", "crumbs_core.py", "crumbs_recovery.py"];
+      // v5.25: keep in step with the server's UPDATE_ART_FILES — the art
+      // rides the same install as base64 data URLs (binary can't survive
+      // the JSON text encoding).
+      const artNames = ["shared_library.json", "shared_library/starter_pack.png",
+        "sprite_library.json", "asset_library/hero_hood.png",
+        "asset_library/logo_rata.png", "asset_library/portrait_apple.jpg",
+        "asset_library/palette.json", "asset_library/palette_strip.png",
+        "asset_library/tile_band_horizontal.png", "asset_library/tile_band_vertical.png",
+        "asset_library/tile_fade_horizontal.png", "asset_library/tile_fade_vertical.png"];
+      const binToB64 = buf => {
+        const bytes = new Uint8Array(buf); let s = "";
+        for (let i = 0; i < bytes.length; i += 0x8000)
+          s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+        return btoa(s);
+      };
       const files = {};
       const parts = await Promise.all(names.map(async n => {
         const resp = await fetch(gh + n + "?t=" + t);
         if (!resp.ok) throw new Error("http " + resp.status + " for " + n);
         return [n, await resp.text()];
       }));
+      const artParts = await Promise.all(artNames.map(async n => {
+        const resp = await fetch(gh + n + "?t=" + t);
+        if (!resp.ok) throw new Error("http " + resp.status + " for " + n);
+        return [n, "data:application/octet-stream;base64," + binToB64(await resp.arrayBuffer())];
+      }));
       for (const [n, text] of parts) files[n] = text;
+      for (const [n, durl] of artParts) files[n] = durl;
       a = await api("/api/update/apply-blobs", { files });
     } catch (e) { pageDlFailed = true; }
     if (pageDlFailed) {
@@ -4600,6 +4750,14 @@ async function pollStatus() {
   try {
     const s = await api("/api/status");
     dirtyFlag = !!s.dirty;   // v2.0: server is the source of truth
+    // v5.25: a boot-time art backfill can land after the strip first
+    // painted — when it flips to done, reload the customs so the "?"
+    // tiles become real art without a manual refresh.
+    if (s.art_backfill === "done" && !window._artBackfilled) {
+      window._artBackfilled = true;
+      await loadCustomTiles();
+      buildPalette();
+    }
     $("save-status").textContent = s.dirty ? "● unsaved changes"
       : (s.last_save ? "saved " + s.last_save : "no changes yet");
     // v5.22.8: recovery pill — risk level at a glance, breathing while healthy.
@@ -5088,6 +5246,7 @@ $("pack-btn").onclick = () => { toggleOverlay("sheet-pack"); syncInv(); };
     spriteTiles.forEach(t => {
       const im = new Image();
       im.onload = () => { baseSig = null; render(); renderSelCard(); };   // v5.1: card thumb too; v5.3: invalidate cached base
+      im.onerror = () => { thumbFailed[t.id] = true; };   // v5.25: honest placeholder instead of blank
       im.src = "/api/thumb/" + t.id;
       thumbImg[t.id] = im;
     });

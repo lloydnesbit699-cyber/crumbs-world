@@ -144,7 +144,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.24"
+APP_VERSION = "5.25"
 # v5.24: unique per process boot. After an update the server re-execs into
 # the new files; the page waits for a DIFFERENT instance id (plus the new
 # version) instead of mistaking the old process — still answering during
@@ -167,6 +167,27 @@ UPDATE_REPO = "lloydnesbit699-cyber/crumbs-world"
 UPDATE_BRANCH = "main"
 UPDATE_FILES = ["editor.html", "crumbs_hud.py", "crumbs_core.py",
                 "crumbs_recovery.py"]
+# v5.25: the art the thumbnails are painted from. The updater used to ship
+# code only, so phones ended up with registry entries (shared_library.json)
+# pointing at PNGs that never arrived — every one of those tiles painted a
+# permanently blank swatch ("the missing thumbnails"). The update now ships
+# the art too, and Check for updates offers a repair install when art
+# files are absent from disk.
+UPDATE_ART_FILES = [
+    "shared_library.json",
+    "shared_library/starter_pack.png",
+    "sprite_library.json",
+    "asset_library/hero_hood.png",
+    "asset_library/logo_rata.png",
+    "asset_library/portrait_apple.jpg",
+    "asset_library/palette.json",
+    "asset_library/palette_strip.png",
+    "asset_library/tile_band_horizontal.png",
+    "asset_library/tile_band_vertical.png",
+    "asset_library/tile_fade_horizontal.png",
+    "asset_library/tile_fade_vertical.png",
+]
+UPDATE_ALL_FILES = UPDATE_FILES + UPDATE_ART_FILES
 
 def _update_ssl_context():
     # v5.21: a-Shell's Python ships without CA certificates, so HTTPS to
@@ -217,15 +238,35 @@ def _update_hint(e):
 
 def _update_can_rollback():
     # v5.21: an update is undoable while its .update-backup files survive.
+    # v5.25: art files are backed up too, so a rollback restores them.
     return any(os.path.exists(os.path.join(SCRIPT_DIR, n + ".update-backup"))
-               for n in UPDATE_FILES)
+               for n in UPDATE_ALL_FILES)
+
+
+def _art_present(name):
+    """v5.25: content-aware presence check for update art. A registry file
+    that exists but holds zero tiles is as good as missing — the old boot
+    bug wrote {"tiles": []} and then everything (backfill, repair check)
+    believed the art had arrived."""
+    p = os.path.join(SCRIPT_DIR, name)
+    if not os.path.exists(p):
+        return False
+    if name == "shared_library.json":
+        try:
+            return len(json.load(open(p)).get("tiles", [])) > 0
+        except Exception:
+            return False
+    return True
 
 
 def _update_missing_files():
     # v5.22.2: update files absent from disk — the repair case. (Phones
     # that updated while the updater's file list was shorter.)
-    return [n for n in UPDATE_FILES
-            if not os.path.exists(os.path.join(SCRIPT_DIR, n))]
+    # v5.25: art files join the check — a phone missing starter_pack.png
+    # is a phone with a hundred blank thumbnails, and deserves the same
+    # repair offer as a phone missing crumbs_recovery.py.
+    return [n for n in UPDATE_ALL_FILES
+            if not _art_present(n)]
 
 
 def _update_disk_version():
@@ -240,6 +281,22 @@ def _update_disk_version():
         return m.group(1).decode() if m else None
     except OSError:
         return None
+
+
+def _validate_art_blob(n, b):
+    # v5.25: shared art-blob sanity — JSON must parse, images must carry
+    # their magic bytes. Used by the installer and the boot backfill.
+    if n.endswith(".json"):
+        try:
+            json.loads(b.decode("utf-8"))
+            return True
+        except (ValueError, UnicodeDecodeError):
+            return False
+    if n.endswith(".png"):
+        return b.startswith(b"\x89PNG\r\n\x1a\n")
+    if n.endswith((".jpg", ".jpeg")):
+        return b.startswith(b"\xff\xd8")
+    return bool(b)
 
 
 def _update_install(blobs):
@@ -258,6 +315,13 @@ def _update_install(blobs):
                and b"def " not in b and b"class " not in b)
            or (n == "crumbs_recovery.py"
                and b"def " not in b and b"class " not in b)]
+    # v5.25: art sanity — JSON must parse, images must carry their magic
+    # bytes. A truncated PNG must never replace a good one.
+    for n, b in blobs.items():
+        if n in bad or n not in UPDATE_ART_FILES:
+            continue
+        if not _validate_art_blob(n, b):
+            bad.append(n)
     if bad:
         return {"ok": False, "leg": "github",
                 "error": f"downloaded {', '.join(bad)} looked wrong — old files untouched, try again"}
@@ -291,6 +355,11 @@ def _update_install(blobs):
     try:
         for n, blob in blobs.items():
             p = os.path.join(SCRIPT_DIR, n)
+            # v5.25: art files live in subdirectories — make sure the
+            # shelf exists before the atomic swap.
+            parent = os.path.dirname(p)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
             if os.path.exists(p):
                 shutil.copy2(p, p + ".update-backup")
             tmp = p + ".update-tmp"
@@ -473,12 +542,22 @@ ENABLE_FULL_UTUMNO = False
 
 
 def _custom_public(entry):
-    return {"id": entry["id"], "name": entry["name"], "preset": entry["preset"],
+    tid = entry["id"]
+    return {"id": tid, "name": entry["name"], "preset": entry["preset"],
             "solid": entry["solid"], "height": _norm_height(entry),
             "swim": bool(entry.get("swim", False)),
             "deep": bool(entry.get("deep", False)),
             "scope": entry.get("scope", "local"),
             "pack": entry.get("pack"),
+            # v5.25: subcategory (guessed from the name for entries stored
+            # before subcategories existed) + art flag — True when the
+            # tile's image files actually loaded. A registry entry WITHOUT
+            # art is the "missing thumbnails" case: the page paints a "?"
+            # and counts it instead of showing a blank swatch.
+            "subcategory": (entry.get("subcategory")
+                            or core.guess_subcategory(entry["name"],
+                                                      entry.get("preset"))),
+            "art": bool(assets.tiles.get(tid)),
             "frames": len(entry["files"]), "frame_ms": entry["frame_ms"]}
 
 
@@ -502,6 +581,11 @@ def _save_custom_registry(scope="local"):
         # v5.9: keep dormant full-library entries in the JSON so they are not
         # wiped by a rewrite — they just stay unregistered until opted in.
         tiles = list(tiles) + list(_shared_skipped)
+    # v5.25: never conjure an empty registry from nothing — a boot with no
+    # registry file used to write {"tiles": []}, which then looked like a
+    # real (empty) library and blocked the art backfill from fetching it.
+    if not tiles and not os.path.exists(path):
+        return
     try:
         # v5.2: preserve top-level metadata (e.g. "packs") across rewrites
         try:
@@ -640,6 +724,82 @@ def _load_custom_tiles():
     _save_custom_registry("shared")
 
 
+# ---- v5.25: boot-time art backfill -------------------------------------------
+# The updater shipped code-only for years, so phones carry registry entries
+# (shared_library.json) for art that never arrived (starter_pack.png) —
+# every one of those tiles painted a permanently blank swatch. On boot, a
+# daemon thread fetches whatever art is missing and re-registers the
+# shared shelf, so an old page-side install still heals itself. The page
+# watches /api/status art_backfill and reloads the strip when it flips.
+_ART_BACKFILL = {"state": "idle"}  # idle | pending | done | failed
+
+
+def _reload_shared_shelf():
+    """Re-run the shared shelf registration (idempotent) — picks up
+    entries whose art arrived after the first load."""
+    if not os.path.exists(SHARED_REG) or not core.PIL_AVAILABLE:
+        return 0
+    try:
+        reg = json.load(open(SHARED_REG))
+    except Exception:
+        return 0
+    have = {e.get("id") for e in _shared_tiles}
+    added = 0
+    for entry in reg.get("tiles", []):
+        try:
+            if entry.get("id") in have:
+                continue
+            entry["scope"] = "shared"
+            if not ENABLE_FULL_UTUMNO and entry.get("pack") == "utumno":
+                continue
+            if _register_custom_tile(entry, SHARED_DIR):
+                _shared_tiles.append(entry)
+                added += 1
+        except Exception:
+            pass
+    if added:
+        _save_custom_registry("shared")
+        print(f"[hud] art backfill: {added} shared tiles now have art")
+    return added
+
+
+def _art_backfill_async():
+    missing = [n for n in UPDATE_ART_FILES if not _art_present(n)]
+    if not missing:
+        return
+    _ART_BACKFILL["state"] = "pending"
+    print(f"[hud] art backfill: {len(missing)} art files missing — fetching: "
+          + ", ".join(missing))
+
+    def work():
+        try:
+            blobs = {}
+            for n in missing:
+                blobs[n] = _update_fetch(n, tries=1)
+            bad = [n for n, b in blobs.items()
+                   if not _validate_art_blob(n, b)]
+            if bad:
+                raise RuntimeError(f"bad downloads: {', '.join(bad)}")
+            for n, blob in blobs.items():
+                p = os.path.join(SCRIPT_DIR, n)
+                parent = os.path.dirname(p)
+                if parent:
+                    os.makedirs(parent, exist_ok=True)
+                tmp = p + ".update-tmp"
+                with open(tmp, "wb") as f:
+                    f.write(blob)
+                os.replace(tmp, p)
+            _reload_shared_shelf()
+            _ART_BACKFILL["state"] = "done"
+            print("[hud] art backfill: complete")
+        except Exception as e:
+            _ART_BACKFILL["state"] = "failed"
+            print(f"[hud] art backfill failed ({e}) — Check for updates > "
+                  "repair fetches it on demand")
+
+    threading.Thread(target=work, daemon=True).start()
+
+
 # ---- v3.3: one-button animation ("Make it move") ------------------------------
 def _divisor_frames(img):
     """Last-resort split for edge-to-edge sheets with no detectable gaps.
@@ -761,6 +921,9 @@ def _store_custom_tile(name, preset, frame_ms, pil_images, scope="local"):
     entry = {"id": tid, "name": name, "preset": preset,
              "solid": TILE_PRESETS[preset]["solid"],
              "height": TILE_PRESETS[preset]["height"],
+             # v5.25: filename-hint auto-categorization at import time —
+             # the docs' "automatic categorization" TODO, done.
+             "subcategory": core.guess_subcategory(name, preset),
              "swim": bool(TILE_PRESETS[preset].get("swim", False)),
              "deep": bool(TILE_PRESETS[preset].get("deep", False)),
              "frame_ms": frame_ms, "files": files, "scope": scope}
@@ -2058,6 +2221,7 @@ else:
     print(f"[hud] fresh map {world.width}x{world.height}")
 
 _load_custom_tiles()  # v3.0: imported tiles back into the asset manager
+_art_backfill_async()   # v5.25: fetch art the old code-only updater never shipped
 _load_patrols()       # v3.4: patrol routes back (needs tiles loaded first)
 _mission_reconcile_patrols()  # v5.13: only this map's hazards stay
 _load_rules(DEFAULT_SAVE)  # v3.7: this build's rules (or defaults)
@@ -3048,7 +3212,9 @@ class Handler(BaseHTTPRequestHandler):
             for tid in sorted(assets.tiles):
                 t = assets.tiles[tid]
                 if t["type"] == "color" and t.get("category") == "tiles":
-                    sw.append({"id": tid, "name": t["name"], "color": t.get("color")})
+                    sw.append({"id": tid, "name": t["name"], "color": t.get("color"),
+                               # v5.25: subcategory for the grouped palette
+                               "subcategory": t.get("subcategory", "other")})
             self._send_json({"tiles": sw})
         elif path == "/api/sprites":
             sp = []
@@ -3056,7 +3222,11 @@ class Handler(BaseHTTPRequestHandler):
                 t = assets.tiles[tid]
                 if t["type"] != "color":
                     sp.append({"id": tid, "name": t["name"], "type": t["type"],
-                               "category": t.get("category", "objects")})
+                               "category": t.get("category", "objects"),
+                               # v5.25: subcategory + preset drive the
+                               # Characters tab and the object groupings
+                               "subcategory": t.get("subcategory", "other"),
+                               "preset": t.get("preset")})
             self._send_json({"tiles": sp})
         elif path == "/api/presets":
             # v3.0: tile function presets for the import picker
@@ -3208,6 +3378,9 @@ class Handler(BaseHTTPRequestHandler):
                              "play": play["active"],
                              "instance": INSTANCE_ID,
                              "version": APP_VERSION,
+                             # v5.25: the page reloads the tile strip when a
+                             # boot-time art backfill lands.
+                             "art_backfill": _ART_BACKFILL["state"],
                              "recovery": _recovery_brief()})
         elif path == "/api/recovery/status":
             # v5.22: Phase 3 — recovery state for the HUD (read-only).
@@ -3460,7 +3633,9 @@ class Handler(BaseHTTPRequestHandler):
             # update can never eat an unsaved build.
             map_saved = bool(_save_state["dirty"] and _save_now())
             try:
-                blobs = {n: _update_fetch(n) for n in UPDATE_FILES}
+                # v5.25: the art ships with the code — one install, no
+                # blank-thumbnail aftermath.
+                blobs = {n: _update_fetch(n) for n in UPDATE_ALL_FILES}
             except Exception as e:
                 return self._send_json({"ok": False, "leg": "github",
                                         "error": f"download failed ({e.__class__.__name__}) — old files untouched",
@@ -3494,6 +3669,16 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(t, str) or not t:
                     return self._send_json({"ok": False, "error": f"missing file in bundle: {n}"}, 400)
                 blobs[n] = t.encode("utf-8")
+            # v5.25: art files ride along as data-URL base64 (binary can't
+            # survive the JSON text encoding). Same missing-file strictness.
+            for n in UPDATE_ART_FILES:
+                t = files.get(n)
+                if not isinstance(t, str) or not t.startswith("data:") or "," not in t:
+                    return self._send_json({"ok": False, "error": f"missing file in bundle: {n}"}, 400)
+                try:
+                    blobs[n] = base64.b64decode(t.split(",", 1)[1], validate=True)
+                except Exception:
+                    return self._send_json({"ok": False, "error": f"bad encoding for {n} — re-download"}, 400)
             map_saved = bool(_save_state["dirty"] and _save_now())
             res = _update_install(blobs)
             if res.get("ok"):
@@ -3513,7 +3698,9 @@ class Handler(BaseHTTPRequestHandler):
                                         "error": "no update backups found — nothing to roll back"})
             restored = []
             try:
-                for n in UPDATE_FILES:
+                # v5.25: art files roll back too — a rollback must not leave
+                # new art pointed at by old code, or vice versa.
+                for n in UPDATE_ALL_FILES:
                     p = os.path.join(SCRIPT_DIR, n)
                     bak = p + ".update-backup"
                     if os.path.exists(bak):

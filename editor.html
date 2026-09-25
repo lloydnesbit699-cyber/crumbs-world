@@ -1319,14 +1319,43 @@ async function authGate() {
   showLogin();
   return await new Promise(resolve => { window._loginResolve = resolve; });
 }
+let _loginCooldownTimer = null;  // v5.27.1: visible cooldown, no blind tapping
+function startLoginCooldown(secs) {
+  const btn = $("login-go"), err = $("login-err");
+  if (_loginCooldownTimer) clearTimeout(_loginCooldownTimer);
+  btn.disabled = true;
+  let left = Math.max(1, Math.ceil(secs));
+  const tick = () => {
+    if (left <= 0) {
+      btn.disabled = false;
+      btn.textContent = "Log in";
+      err.textContent = "";
+      _loginCooldownTimer = null;
+      return;
+    }
+    btn.textContent = "Wait " + left + "s";
+    err.textContent = "slow down \u2014 try again in " + left + "s";
+    left--;
+    _loginCooldownTimer = setTimeout(tick, 1000);
+  };
+  tick();
+}
 async function doLogin() {
+  if (_loginCooldownTimer) return;  // cooling down — the timer owns the button
   const u = $("login-user").value.trim().toLowerCase();
   const p = $("login-pass").value;
   if (!u || !p) { $("login-err").textContent = "enter a username and password"; return; }
   $("login-err").textContent = "";
   try {
     const r = await api("/api/auth/login", { username: u, password: p });
-    if (!r.ok) { $("login-err").textContent = r.error || "login failed"; return; }
+    if (!r.ok) {
+      if (r.retry_after) { startLoginCooldown(r.retry_after); return; }
+      const left = (typeof r.tries_left === "number")
+        ? " \u2014 " + r.tries_left + (r.tries_left === 1 ? " try" : " tries") + " left"
+        : "";
+      $("login-err").textContent = (r.error || "login failed") + left;
+      return;
+    }
     ME = { username: r.username, is_owner: r.is_owner, world: r.world || "private" };
     hideLogin();
     updateUserMenu();

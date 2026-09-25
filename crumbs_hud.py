@@ -116,6 +116,7 @@ import sys
 import uuid
 import threading
 import time
+import math
 import heapq
 import zipfile
 import urllib.request
@@ -145,7 +146,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.27"
+APP_VERSION = "5.27.1"
 # v5.24: unique per process boot. After an update the server re-execs into
 # the new files; the page waits for a DIFFERENT instance id (plus the new
 # version) instead of mistaking the old process — still answering during
@@ -961,6 +962,25 @@ def _rate_ok(kind, ip):
         arr.append(now)
         _rl_buckets[(kind, ip)] = arr
         return True
+
+
+def _login_rate(ip):
+    """v5.27.1: consume one login attempt; report tries-left + cooldown.
+
+    Returns (allowed, tries_left, retry_after_secs). tries_left counts down
+    from 5 per 60s window; retry_after is seconds until the oldest attempt
+    ages out. Never reveals whether the username exists."""
+    limit, window = _RL_LOGIN
+    now = time.monotonic()
+    with _rl_lock:
+        arr = [t for t in _rl_buckets.get(("LOGIN", ip), []) if now - t < window]
+        if len(arr) >= limit:
+            _rl_buckets[("LOGIN", ip)] = arr
+            retry = max(1, int(math.ceil(window - (now - arr[0])))) if arr else window
+            return False, 0, retry
+        arr.append(now)
+        _rl_buckets[("LOGIN", ip)] = arr
+        return True, limit - len(arr), 0
 
 # ---- v3.0: custom imported tiles -------------------------------------------
 # v5.27: the "local" shelf is per-vault (each vault — private or Commons —
@@ -4281,10 +4301,14 @@ class Handler(BaseHTTPRequestHandler):
 
         # ---- v5.27: accounts ------------------------------------------------
         if path == "/api/auth/login":
-            # brute-force armor: 5 tries/min/IP, then 429. Generic failure —
-            # never reveal whether the username exists vs the password missed.
-            if not _rate_ok("LOGIN", self._client_ip()):
-                return self._send_json({"ok": False, "error": "slow down"}, 429)
+            # brute-force armor: 5 tries/min/IP, then 429 with a cooldown.
+            # Generic failure — never reveal whether the username exists vs
+            # the password missed. v5.27.1 reports tries-left + retry_after
+            # so the login page can show a counter and a cooldown timer.
+            allowed, tries_left, retry_after = _login_rate(self._client_ip())
+            if not allowed:
+                return self._send_json({"ok": False, "error": "slow down",
+                                        "retry_after": retry_after}, 429)
             username = str(body.get("username") or "").strip().lower()
             password = str(body.get("password") or "")
             users = _load_users()
@@ -4295,7 +4319,8 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 ok = _verify_password(password, rec)
             if not ok:
-                return self._send_json({"ok": False, "error": "bad login"}, 401)
+                return self._send_json({"ok": False, "error": "bad login",
+                                        "tries_left": tries_left}, 401)
             os.makedirs(_user_vault_dir(username), exist_ok=True)
             self._issue_session(username)
             _log_event(f"{username} logged in")

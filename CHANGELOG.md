@@ -3,6 +3,17 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.27.1 — 2026-09-25
+
+Lloyd's call, from John's first login: the throttle just said "slow down"
+with no timer, so he kept tapping and extending his own lockout.
+
+- **Login try counter + cooldown timer.** Failed logins now report tries
+  left ("bad login — 3 tries left"); hitting the 5/min limit returns
+  `retry_after` seconds and the login page shows a live countdown,
+  disables the button until it clears, and ignores taps/Enter during the
+  cooldown. Server-verified; not phone-verified.
+
 ## v5.27 — 2026-09-25
 
 Lloyd's direction: multiple accounts, each with a private vault, plus one

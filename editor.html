@@ -4001,16 +4001,19 @@ $("btn-stop").onclick = async () => {
 };
 // v5.19: restart the server from the page — it re-execs itself, then the
 // page polls /api/status and reloads when the new process answers.
+// v5.24: wait for a NEW instance id, not any 200 — the old process answers
+// during the restart gap, and that answer is not "back".
 $("btn-restart").onclick = async () => {
   if (!confirm("Restart the HUD server? Dirty work is saved first.")) return;
-  try { await api("/api/restart", {}); } catch (e) { /* server is going away */ }
-  toast("restarting — waiting for the server to come back…");
-  for (let i = 0; i < 60; i++) {
-    await new Promise(r => setTimeout(r, 1000));
-    try { const s = await api("/api/status"); if (s) { location.reload(); return; } }
-    catch (e) { /* not up yet */ }
-  }
-  toast("server didn't come back — restart it in a-Shell");
+  let rr = null;
+  try { rr = await api("/api/restart", {}); } catch (e) { /* server is going away */ }
+  toast("restarting — waiting for the NEW server instance\u2026");
+  const w = await waitForNewInstance(rr && rr.old_instance, rr && rr.expect_version, 45000);
+  if (w.ok) { location.reload(); return; }
+  toast(w.wrongVersion
+    ? "server came back as v" + w.wrongVersion + " — not what was expected"
+    : "server didn't come back — restart it in a-Shell");
+  Sfx.error();
 };
 document.querySelectorAll("#collide-palette .sw").forEach(d => {
   d.onclick = () => {
@@ -4123,8 +4126,37 @@ async function updateCheck() {
   }
   return r;
 }
+// v5.24: wait for a NEW server instance after an update/restart/rollback.
+// The server re-execs into the new files ~0.4s after answering; during that
+// gap the OLD process is still answering /api/status. A bare "server
+// answered" is not proof we're back — only a different instance id (plus
+// the expected version) is. Returns {ok} on the new instance,
+// {wrongVersion} if something else booted, {timeout} if nothing new shows.
+// oldInstance may be null when talking to a pre-5.24 server — then any
+// status carrying an instance id proves the new build booted.
+async function waitForNewInstance(oldInstance, expectVersion, timeoutMs) {
+  const t0 = Date.now();
+  for (;;) {
+    await new Promise(res => setTimeout(res, 1000));
+    let s = null;
+    try { s = await api("/api/status"); } catch (e) { /* still down */ }
+    if (s && s.instance && (!oldInstance || s.instance !== oldInstance)) {
+      if (expectVersion && s.version !== expectVersion)
+        return { wrongVersion: s.version };
+      return { ok: true, status: s };
+    }
+    if (Date.now() - t0 > timeoutMs) return { timeout: true };
+  }
+}
+function restartFailedHtml(detail) {
+  return "<div class='tray-hint'>The server didn't come back as the new build. "
+    + detail + "<br><br>Wake a-Shell and run <b>python3 crumbs_hud.py</b> \u2014 "
+    + "if it crashes on launch, read the error, then File &rarr; Roll back update "
+    + "once it's up (or restore the <b>.update-backup</b> files by hand).</div>";
+}
 $("menu-update").onclick = async () => {
   closeOverlays();
+  $("btn-update-install").style.display = "";  // v5.24: reset after a failed-restart state hid it
   toast("checking for updates\u2026");
   const r = await updateCheck();
   if (!r) return;
@@ -4144,14 +4176,21 @@ $("menu-update").onclick = async () => {
     $("btn-update-install").onclick = async () => {
       closeOverlays();
       if (!confirm("Restart the HUD server? Dirty work is saved first.")) return;
-      try { await api("/api/restart", {}); } catch (e) { /* server is going away */ }
-      toast("restarting — waiting for the server to come back…");
-      for (let i = 0; i < 60; i++) {
-        await new Promise(res => setTimeout(res, 1000));
-        try { const s = await api("/api/status"); if (s) { location.reload(); return; } }
-        catch (e) { /* not up yet */ }
-      }
-      toast("server didn't come back — wake a-Shell, run python3 crumbs_hud.py, then reload.");
+      let rr = null;
+      try { rr = await api("/api/restart", {}); } catch (e) { /* server is going away */ }
+      toast("restarting — waiting for the NEW server instance\u2026");
+      // v5.24: don't accept any 200 as "back" — the old process answers
+      // during the restart gap. Wait for a new instance id (or, talking to
+      // a pre-5.24 server, for any instance id at the new version).
+      const w = await waitForNewInstance(rr && rr.old_instance, r.disk_version, 45000);
+      if (w.ok) { location.reload(); return; }
+      $("update-title").textContent = "The server didn't come back";
+      $("update-notes").innerHTML = restartFailedHtml(w.wrongVersion
+        ? "It came back as v" + escHtml(w.wrongVersion) + " instead of v" + escHtml(r.disk_version) + "."
+        : "45 seconds, no new server instance.");
+      $("btn-update-install").style.display = "none";
+      toggleOverlay("sheet-update");
+      Sfx.error();
     };
     $("btn-update-later").onclick = () => closeOverlays();
     toggleOverlay("sheet-update");
@@ -4199,10 +4238,30 @@ $("menu-update").onclick = async () => {
       catch (e2) { a = { ok: false, error: "HUD server stopped answering mid-update" }; }
     }
     if (a && a.ok) {
-      toast("updated to v" + r.latest + (a.map_saved ? " (map saved)" : "") + " \u2014 stop the server, run python3 crumbs_hud.py again, then reload");
       syncRollback({ ok: true, can_rollback: true });
       const fb = document.querySelector('.mtop[data-menu="m-file"] .upd-dot');
       if (fb) fb.remove();
+      if (a.restarting) {
+        // v5.24: the server is re-execing into the new files itself — no
+        // more "stop the server and rerun it by hand". Wait for the NEW
+        // instance, then reload into it. Never declare success off the old
+        // process answering.
+        const ver = a.version || r.latest;
+        toast("installed v" + ver + (a.map_saved ? " (map saved)" : "") + " \u2014 restarting into it\u2026");
+        const w = await waitForNewInstance(a.old_instance, ver, 45000);
+        if (w.ok) { location.reload(); return; }
+        $("update-title").textContent = "The server didn't come back";
+        $("update-notes").innerHTML = restartFailedHtml(w.wrongVersion
+          ? "It came back as v" + escHtml(w.wrongVersion) + " instead of v" + escHtml(ver) + "."
+          : "45 seconds, no new server instance. The new files ARE in place, though.");
+        $("btn-update-install").style.display = "none";
+        toggleOverlay("sheet-update");
+        Sfx.error();
+      }
+      else {
+        // legacy server without auto-restart — manual path.
+        toast("updated to v" + r.latest + (a.map_saved ? " (map saved)" : "") + " \u2014 stop the server, run python3 crumbs_hud.py again, then reload");
+      }
     }
     else {
       toast("update failed: " + ((a && (a.error + (a.hint ? " \u2014 " + a.hint : ""))) || "unknown"));
@@ -4219,8 +4278,19 @@ $("menu-rollback").onclick = async () => {
   try { r = await api("/api/update/rollback", {}); }
   catch (e) { toast("HUD server isn't answering — wake a-Shell and reload."); Sfx.error(); return; }
   if (r.ok) {
-    toast("rolled back (" + r.restored.join(", ") + ") \u2014 stop the server, run python3 crumbs_hud.py again, then reload");
     syncRollback({ ok: true, can_rollback: false });
+    if (r.restarting) {
+      // v5.24: the server restarts itself into the restored files — wait
+      // for the new instance before believing it.
+      toast("rolled back (" + r.restored.join(", ") + ") \u2014 restarting into the restored files\u2026");
+      const w = await waitForNewInstance(r.old_instance, r.expect_version, 45000);
+      if (w.ok) { location.reload(); return; }
+      toast("rollback installed, but the server didn't come back — wake a-Shell, run python3 crumbs_hud.py, then reload.");
+      Sfx.error();
+    }
+    else {
+      toast("rolled back (" + r.restored.join(", ") + ") \u2014 stop the server, run python3 crumbs_hud.py again, then reload");
+    }
   }
   else { toast("rollback failed: " + (r.error || "unknown")); Sfx.error(); }
 };

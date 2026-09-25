@@ -112,6 +112,7 @@ import socket
 import shutil
 import ssl
 import sys
+import uuid
 import threading
 import time
 import heapq
@@ -143,7 +144,12 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.23.2"
+APP_VERSION = "5.24"
+# v5.24: unique per process boot. After an update the server re-execs into
+# the new files; the page waits for a DIFFERENT instance id (plus the new
+# version) instead of mistaking the old process — still answering during
+# the restart gap — for "back". This kills the stuck-between-commits state.
+INSTANCE_ID = uuid.uuid4().hex
 
 # ---- v5.18: in-app self-update -------------------------------------------------
 # Lloyd's rule: updates overwrite the old files in place — no more downloading a
@@ -269,6 +275,18 @@ def _update_install(blobs):
                           and not missing):
         return {"ok": False, "leg": "github",
                 "error": f"GitHub served a stale copy (v{dl_version or 'unreadable'}) — old files untouched, try again in a bit"}
+    # v5.24: pre-flight — compile the new Python before it touches the
+    # disk. A syntax error in a swapped-in crumbs_hud.py would brick the
+    # server on the next boot with no page left to roll it back, so refuse
+    # the install here instead. This is the "recover cleanly" half of the
+    # auto-restart: bad code never becomes the running code.
+    for n, b in blobs.items():
+        if n.endswith(".py"):
+            try:
+                compile(b.decode("utf-8"), n, "exec")
+            except (SyntaxError, ValueError, UnicodeDecodeError) as e:
+                return {"ok": False, "leg": "github",
+                        "error": f"downloaded {n} doesn't compile ({e}) — old files untouched, try again"}
     updated = []
     try:
         for n, blob in blobs.items():
@@ -284,7 +302,29 @@ def _update_install(blobs):
         return {"ok": False, "error": f"write failed ({e}) — backups kept"}
     return {"ok": True, "updated": updated,
             "can_rollback": True,
-            "note": "restart the server to run the new build"}
+            "version": dl_version,
+            "note": "restarting into the new build"}
+
+
+def _schedule_self_restart(reason):
+    # v5.24: the update finishes the job — answer first, then re-exec this
+    # process into the just-installed files. Same safe path as /api/restart
+    # (save dirty work first), plus a __pycache__ purge: without it Python
+    # can serve the OLD bytecode under the NEW version number, which is
+    # exactly the "stuck between commits" ghost this release kills.
+    def _restart():
+        time.sleep(0.4)  # let the "ok" reach the page first
+        if _save_state["dirty"]:
+            _save_now()
+        for root, dirs, _files in os.walk(SCRIPT_DIR):
+            if "__pycache__" in dirs:
+                try:
+                    shutil.rmtree(os.path.join(root, "__pycache__"))
+                except OSError:
+                    pass
+        print(f"\n[hud] {reason} — re-execing into the new files")
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+    threading.Thread(target=_restart, daemon=True).start()
 
 
 def _ver_tuple(v):
@@ -3160,9 +3200,14 @@ class Handler(BaseHTTPRequestHandler):
             # v4.0: this build's world profile (meter selectors, v4.1: sky)
             self._send_json({"ok": True, "world": world_profile})
         elif path == "/api/status":
+            # v5.24: instance + version — the page uses these to tell a
+            # freshly restarted server from the old process still
+            # answering during the restart gap.
             self._send_json({"dirty": _save_state["dirty"],
                              "last_save": _save_state["last"],
                              "play": play["active"],
+                             "instance": INSTANCE_ID,
+                             "version": APP_VERSION,
                              "recovery": _recovery_brief()})
         elif path == "/api/recovery/status":
             # v5.22: Phase 3 — recovery state for the HUD (read-only).
@@ -3424,7 +3469,13 @@ class Handler(BaseHTTPRequestHandler):
             # atomic swap); page-fed installs use /api/update/apply-blobs.
             res = _update_install(blobs)
             if res.get("ok"):
+                # v5.24: the update finishes the job — the server restarts
+                # itself into the new files. The page waits for a new
+                # instance id before it believes we're back.
                 res["map_saved"] = map_saved
+                res["restarting"] = True
+                res["old_instance"] = INSTANCE_ID
+                _schedule_self_restart(f"update to v{res.get('version')}")
             return self._send_json(res)
         if path == "/api/update/apply-blobs":
             # v5.21.5: the PAGE downloaded the files and posts them here.
@@ -3446,7 +3497,11 @@ class Handler(BaseHTTPRequestHandler):
             map_saved = bool(_save_state["dirty"] and _save_now())
             res = _update_install(blobs)
             if res.get("ok"):
+                # v5.24: same auto-restart as /api/update/apply.
                 res["map_saved"] = map_saved
+                res["restarting"] = True
+                res["old_instance"] = INSTANCE_ID
+                _schedule_self_restart(f"update to v{res.get('version')}")
             return self._send_json(res)
         if path == "/api/update/rollback":
             # v5.21: put the .update-backup files back — the update, undone.
@@ -3467,8 +3522,13 @@ class Handler(BaseHTTPRequestHandler):
             except OSError as e:
                 return self._send_json({"ok": False,
                                         "error": f"rollback failed ({e})"})
+            # v5.24: the rollback finishes the job too — restart into the
+            # restored files and let the page verify the new instance.
+            _schedule_self_restart("rollback to the pre-update files")
             return self._send_json({"ok": True, "restored": restored,
-                                    "note": "restart the server to run the restored build"})
+                                    "restarting": True,
+                                    "old_instance": INSTANCE_ID,
+                                    "expect_version": _update_disk_version()})
         if path == "/api/paint":
             x, y, layer = body.get("x"), body.get("y"), body.get("layer", "tiles")
             if layer not in LAYERS or not isinstance(x, int) or not isinstance(y, int):
@@ -5117,16 +5177,14 @@ class Handler(BaseHTTPRequestHandler):
             # v5.22.9: hosted mode — require the write key, so a stranger
             # with the URL can't bounce Lloyd's server (the page sends it
             # automatically via X-Crumbs-Key).
+            # v5.24: returns the old instance id so the page can wait for a
+            # genuinely NEW server instead of accepting any 200 as "back".
             if PUBLIC_MODE and not self._write_key_ok():
                 return self._send_json({"ok": False, "error": "restart needs the write key"}, 403)
-            def _restart():
-                time.sleep(0.3)  # let the "ok" reach the page first
-                if _save_state["dirty"]:
-                    _save_now()
-                print("\n[hud] restarting from the page — back in a moment")
-                os.execv(sys.executable, [sys.executable] + sys.argv)
-            threading.Thread(target=_restart, daemon=True).start()
-            return self._send_json({"ok": True})
+            _schedule_self_restart("manual restart from the page")
+            return self._send_json({"ok": True, "restarting": True,
+                                    "old_instance": INSTANCE_ID,
+                                    "expect_version": APP_VERSION})
 
         return self._send_json({"ok": False, "error": "not found"}, 404)
 

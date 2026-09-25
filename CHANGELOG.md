@@ -3,6 +3,23 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.24 — 2026-09-25
+
+The update finishes the job (Lloyd's diagnosis): the old flow swapped the
+files and left the app waiting on a manual restart — the "stuck between
+commits" state. Now installing an update (or a repair, or a rollback)
+makes the server re-exec itself into the new files automatically, after
+saving dirty map work and purging `__pycache__` (stale bytecode under a new
+version number was the same ghost wearing a different coat). The page no
+longer accepts any 200 as "back": every server boot mints an instance id,
+and the page waits for a *different* instance id at the expected version
+before reloading — the Restart button uses the same handshake, so it can
+never falsely declare success. New Python files are compile-checked before
+they touch the disk, so a bad download can't brick the server with no page
+left to roll it back. If the new instance never appears, the page says so
+honestly with recovery steps instead of pretending. (Server-verified only:
+syntax-checked both files, logic walkthrough, no phone run yet.)
+
 ## v5.23.2 — 2026-09-24
 
 Palette strip becomes a scrollable grid (Lloyd's call): the sideways strip

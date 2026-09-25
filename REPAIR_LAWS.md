@@ -67,6 +67,14 @@ But the current state assessment must always reflect reality:
 no verified checkpoint + no usable save IS critical,
 no matter how old the failures are.
 
+### 13. The Update Finishes The Job
+An update isn't done when the files land — it's done when the new code is
+*running and verified*. Swap, restart into the new files, and prove the new
+instance is the one answering; never leave the user between versions, and
+never let a button declare success off the old process still answering.
+(Lloyd's diagnosis, 2026-09-25: the updater swapped files then waited on a
+manual restart — the "stuck between commits" state.)
+
 ---
 
-*When a new midnight lesson arrives, it becomes Law 13.*
+*When a new midnight lesson arrives, it becomes Law 14.*

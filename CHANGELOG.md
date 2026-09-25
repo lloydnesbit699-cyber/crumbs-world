@@ -3,6 +3,22 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.27.3 — 2026-09-25
+
+Root-caused from Lloyd's screenshot: palette thumbnails were blank — not
+failed (no "?"), just never arriving. v5.27's vault lock serialized ALL
+`/api/*` requests, so ~80 thumbnail images loaded single-file; on a slow
+host the palette stayed blank for a long while.
+
+- **`/api/thumb/*` skips the vault lock in public mode.** Thumbnails render
+  from the global art registry and never touch vault globals, so they
+  didn't need the lock at all. Auth is still checked (401 without a
+  session); no vault is activated and no session cookie is reissued for
+  them. Worst case under a concurrent vault switch is a transient "?" for
+  a per-vault custom tile — 404s are never cached, so it heals on reload.
+  Verified: 12 concurrent thumbs finish in ~0.1s wall time (previously
+  strictly serialized).
+
 ## v5.27.2 — 2026-09-25
 
 Root-caused from Lloyd's live `sync.sh` conflict: the first-boot owner

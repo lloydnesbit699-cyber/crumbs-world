@@ -147,7 +147,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.27.2"
+APP_VERSION = "5.27.3"
 # v5.24: unique per process boot. After an update the server re-execs into
 # the new files; the page waits for a DIFFERENT instance id (plus the new
 # version) instead of mistaking the old process — still answering during
@@ -3808,6 +3808,17 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"ok": False, "error": "slow down"}, 429)
         path = urlparse(self.path).path
         self._outgoing_cookie = None
+        # v5.27.3: thumbnails are vault-independent (they render from the
+        # global art registry, never vault globals), so they skip the vault
+        # lock entirely — otherwise an 80-thumbnail palette loads single-file
+        # and stays blank for a long while on slow hosts. Auth is still
+        # checked; no vault is activated and no session cookie reissued.
+        # Worst case under a concurrent vault switch is a transient "?" for
+        # a per-vault custom tile (the client never caches 404s).
+        if PUBLIC_MODE and path.startswith("/api/thumb/"):
+            if not self._session_user() and not self._write_key_ok():
+                return self._send_json({"ok": False, "error": "login required"}, 401)
+            return self._do_GET_impl(path)
         # v5.27: public mode serializes /api/* on the vault lock — one
         # request's globals can never bleed into another's.
         if PUBLIC_MODE and path.startswith("/api/"):

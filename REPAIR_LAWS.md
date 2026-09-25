@@ -109,3 +109,13 @@ only when the underlying data can't go stale beneath the cache.
 ---
 
 *When a new midnight lesson arrives, it becomes Law 17.*
+
+### 17. Don't Serialize What Doesn't Share State
+A lock must guard only what it protects. v5.27 put every `/api/*` request
+— including 80 thumbnail images that touch no vault state at all — into a
+single-file line behind the vault lock, and the palette sat blank on slow
+hosts. The fix wasn't a faster lock; it was no lock: prove each endpoint's
+independence (thumbnails render from the global art registry) and exempt
+it. When you add a global lock, audit every path it now covers — the
+innocent ones will be the ones your users feel.
+(Lloyd's report, 2026-09-25: palette thumbnails blank, never arriving.)

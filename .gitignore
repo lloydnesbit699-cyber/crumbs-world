@@ -29,3 +29,8 @@ entitlements.json
 # v5.21.x recovery: runtime checkpoint state never enters the repo
 .crumbs_recovery/
 *.phase2-backup
+
+# v5.27: accounts + vaults — never in the repo
+users.json
+vaults/
+.crumbs_secret

@@ -99,6 +99,7 @@ Open:  http://127.0.0.1:8778   (same phone's browser)
 import json
 import io
 import glob
+import hashlib
 import hmac
 import os
 import atexit
@@ -144,7 +145,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.26"
+APP_VERSION = "5.27"
 # v5.24: unique per process boot. After an update the server re-execs into
 # the new files; the page waits for a DIFFERENT instance id (plus the new
 # version) instead of mistaking the old process — still answering during
@@ -458,7 +459,479 @@ PUBLIC_WRITE_KEY = ""
 WRITE_KEY_HEADER = "X-Crumbs-Key"
 WRITE_KEY_QUERY = "key"
 
-# ---- v5.16: abuse guards (rate limits, size caps) ---------------------------
+# ---- v5.27: accounts, sessions, private vaults, the Commons -----------------
+# Multi-user: every account gets a private vault (vaults/<username>/); every
+# authenticated user also shares the Commons world (vaults/__commons__/),
+# shared-turns style (A saves, B refreshes and sees it — no live sync).
+# Access gate, not encryption: passwords are PBKDF2 hashes so a reset is
+# always possible. Local mode (no --public) skips all of this — single-user
+# behavior there is byte-for-byte what it was.
+#
+# Custom-tile shelf rule: EACH vault has its own custom_tiles/ shelf.
+# Private custom tiles never appear in the Commons (and vice versa), so one
+# player's imports can't paint "?" missing-art on another player's screen.
+# The shipped shared_library/ shelf stays global for everyone.
+#
+# Owner break-glass: set CRUMBS_OWNER_PASSWORD and restart — the owner's
+# password is reset to it even when users.json already exists.
+_VAULTS_DIRNAME = "vaults"
+_COMMONS_VAULT = "__commons__"
+_USERS_FILE = os.path.join(SCRIPT_DIR, "users.json")
+_SECRET_FILE = os.path.join(SCRIPT_DIR, ".crumbs_secret")
+_SESSION_COOKIE = "crumbs_sid"
+_SESSION_DAYS = 30
+_PBKDF2_ROUNDS = 200000
+_USERNAME_RE = re.compile(r"^[a-z0-9_-]{3,24}$")
+_MIN_PASSWORD_LEN = 4
+# v5.27: login brute-force armor — 5 attempts per minute per IP, then 429.
+_RL_LOGIN = (5, 60)
+
+_vault_lock = threading.RLock()   # held for whole /api/* requests in public mode
+_vault_states = {}                # vault_id -> {global_name: object}
+_active_vault = None              # vault_id whose objects the globals point at
+_active_custom_tids = set()       # custom tile ids currently registered in assets
+_histories = {}                   # username -> HistoryManager (per-user undo)
+
+
+def _vaults_dir():
+    d = os.path.join(SCRIPT_DIR, _VAULTS_DIRNAME)
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _user_vault_dir(username):
+    return os.path.join(_vaults_dir(), username)
+
+
+def _commons_dir():
+    return os.path.join(_vaults_dir(), _COMMONS_VAULT)
+
+
+def _vault_dir_for(vault_id):
+    if vault_id == _COMMONS_VAULT:
+        return _commons_dir()
+    return _user_vault_dir(vault_id)
+
+
+def _vault_base():
+    """Directory user data reads/writes for. Local mode: SCRIPT_DIR (unchanged)."""
+    if not PUBLIC_MODE or not _active_vault:
+        return SCRIPT_DIR
+    return _vault_dir_for(_active_vault)
+
+
+def _vpath(*parts):
+    return os.path.join(_vault_base(), *parts)
+
+
+def _valid_username(name):
+    return bool(_USERNAME_RE.match(name or "")) and name != _COMMONS_VAULT
+
+
+# -- password hashing (stdlib only) -------------------------------------------
+def _new_salt():
+    return secrets.token_hex(16)
+
+
+def _hash_password(password, salt_hex):
+    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"),
+                               bytes.fromhex(salt_hex), _PBKDF2_ROUNDS).hex()
+
+
+def _verify_password(password, rec):
+    try:
+        want = _hash_password(password, rec["salt"])
+    except (KeyError, ValueError):
+        return False
+    return hmac.compare_digest(want, rec.get("hash", ""))
+
+
+def _load_users():
+    try:
+        with open(_USERS_FILE) as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_users(users):
+    tmp = _USERS_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(users, f, indent=1)
+    os.replace(tmp, _USERS_FILE)
+
+
+def _owner_username():
+    for name, rec in _load_users().items():
+        if isinstance(rec, dict) and rec.get("is_owner"):
+            return name
+    return None
+
+
+# -- server secret + sessions ---------------------------------------------------
+def _get_secret():
+    try:
+        with open(_SECRET_FILE, "rb") as f:
+            s = f.read().strip()
+        if len(s) >= 32:
+            return s
+    except OSError:
+        pass
+    s = secrets.token_bytes(32)
+    try:
+        fd = os.open(_SECRET_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(s)
+    except OSError as e:
+        print(f"[auth] could not persist server secret: {e}")
+    return s
+
+
+def _make_session_token(username, token_version):
+    user_b64 = base64.urlsafe_b64encode(username.encode()).decode()
+    exp = int(time.time()) + _SESSION_DAYS * 86400
+    payload = f"{user_b64}.{exp}.{int(token_version)}"
+    sig = hmac.new(_get_secret(), payload.encode(),
+                   hashlib.sha256).hexdigest()
+    return f"{payload}.{sig}"
+
+
+def _verify_session_token(token):
+    """-> username, or None. Checks signature, expiry, and token version
+    (bumped on every password change, killing stolen cookies)."""
+    try:
+        user_b64, exp, ver, sig = token.split(".")
+        payload = f"{user_b64}.{exp}.{ver}"
+        want = hmac.new(_get_secret(), payload.encode(),
+                        hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(want, sig):
+            return None
+        if int(exp) < time.time():
+            return None
+        username = base64.urlsafe_b64decode(user_b64.encode()).decode()
+    except (ValueError, TypeError):
+        return None
+    rec = _load_users().get(username)
+    if not isinstance(rec, dict):
+        return None
+    if int(rec.get("token_version", 0)) != int(ver):
+        return None  # password changed since this cookie was minted
+    return username
+
+
+def _session_cookie_value(username, token_version):
+    return (f"{_SESSION_COOKIE}={_make_session_token(username, token_version)}"
+            f"; HttpOnly; Path=/; SameSite=Lax; Max-Age={_SESSION_DAYS * 86400}")
+
+
+_CLEAR_COOKIE = (f"{_SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Lax; "
+                 "Max-Age=0")
+
+
+# -- vault state switching ------------------------------------------------------
+# The server keeps its world in module globals. In public mode each request
+# activates its vault first: the current vault's objects are stashed (by
+# reference — no copying), the target vault's are restored, or fresh-loaded
+# from disk on first touch. The lock is held for the whole request, so two
+# threads can never interleave globals mid-handler.
+_VAULT_SCOPED = (
+    "world",
+    "_custom_tiles",
+    "_patrols", "_patrol_seq",
+    "_missions", "_mission_seq", "mission_run",
+    "_items", "_item_seq", "_item_cells",
+    "_npcs", "_npc_seq",
+    "_hero_inv", "_gold", "_equipped", "_npc_near",
+    "rules", "game_rules", "_game_seq",
+    "traits_grid",
+    "world_profile", "_meters", "_inv", "_nature_mods", "_tick_n",
+    "object_names",
+    "_events",
+    "hero_override",
+    "map_meta",
+    "play",
+    "_rule_mods", "_rule_shown", "_rule_keys", "_rule_over",
+    "_save_state",
+    "_current_map",
+    "_recovery_store", "_recovery",
+    "_thumb_cache",
+)
+# NOTE: `history` is deliberately NOT vault-scoped — undo stacks are per
+# (username, world), so one player's undo in the Commons can never revert
+# another player's paints, and a private snapshot can never leak across a
+# world switch. `assets` stays global (built-in + shared shelf); each
+# vault's custom tiles are swapped in/out of it on activation.
+
+
+def _vault_stash_current():
+    slot = {k: globals()[k] for k in _VAULT_SCOPED}
+    slot["__custom_tids"] = set(_active_custom_tids)
+    slot["__next_tile_id"] = assets.next_tile_id
+    _vault_states[_active_vault] = slot
+
+
+def _vault_restore(slot):
+    g = globals()
+    for k in _VAULT_SCOPED:
+        g[k] = slot[k]
+    _vault_swap_custom_tiles(slot["__custom_tids"])
+    assets.next_tile_id = slot["__next_tile_id"]
+
+
+def _vault_swap_custom_tiles(want_tids):
+    """Unregister the old vault's customs from the shared AssetManager and
+    register this vault's. Built-in + shared shelf tiles are never touched."""
+    global _active_custom_tids
+    old = set(_active_custom_tids) if _active_custom_tids else set()
+    for tid in old:
+        assets.tiles.pop(tid, None)
+    if "custom" in assets.categories:
+        assets.categories["custom"] = [t for t in assets.categories["custom"]
+                                       if t not in old]
+    # v5.27 fix: re-register the incoming vault's own tiles from its live
+    # registry — without this the palette lost every custom tile after a
+    # vault switch. Missing art files register as absent (honest "?" tiles).
+    cdir = _custom_dir()
+    for entry in _custom_tiles:
+        try:
+            tid = int(entry["id"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        if tid not in assets.tiles:
+            try:
+                _register_custom_tile(entry, cdir)
+            except Exception:
+                pass
+    _active_custom_tids = set(want_tids)
+
+
+def _vault_fresh_state(vault_id):
+    """First touch this process: blank objects, then load from the vault dir."""
+    global _active_vault, _active_custom_tids, _events
+    _active_vault = vault_id  # path helpers route here from this point on
+    # v5.27: the import-time legacy load registered the top-level shelf in
+    # the shared AssetManager; those files were migrated into a vault (or
+    # belong to no vault). Drop them here so they can never leak into
+    # another vault's palette — this vault's own tiles register below.
+    legacy = set(_active_custom_tids) if _active_custom_tids else set()
+    for tid in legacy:
+        assets.tiles.pop(tid, None)
+    if "custom" in assets.categories:
+        assets.categories["custom"] = [t for t in assets.categories["custom"]
+                                       if t not in legacy]
+    _active_custom_tids = set()
+    vdir = _vault_dir_for(vault_id)
+    os.makedirs(vdir, exist_ok=True)
+    g = globals()
+    g["world"] = core.WorldMap(25, 15, assets)
+    g["_custom_tiles"] = []
+    g["_patrols"] = []
+    g["_patrol_seq"] = {"next": 1}
+    g["_missions"] = []
+    g["_mission_seq"] = {"next": 1}
+    g["mission_run"] = None
+    g["_items"] = []
+    g["_item_seq"] = {"next": 1}
+    g["_item_cells"] = {}
+    g["_npcs"] = []
+    g["_npc_seq"] = {"next": 1}
+    g["_hero_inv"] = []
+    g["_gold"] = 25
+    g["_equipped"] = {"weapon": None, "tool": None}
+    g["_npc_near"] = set()
+    g["rules"] = dict(DEFAULT_RULES)
+    g["game_rules"] = []
+    g["_game_seq"] = {"next": 1}
+    g["world_profile"] = {"meters": dict(DEFAULT_WORLD["meters"]),
+                          "weather": DEFAULT_WORLD.get("weather", "clear")}
+    g["_meters"] = {"health": 10, "warmth": 10, "belly": 10}
+    g["_inv"] = {"wood": 0, "food": 0}
+    g["_nature_mods"] = []
+    g["_tick_n"] = 0
+    g["object_names"] = {}
+    g["_events"] = deque(maxlen=200)
+    g["hero_override"] = None
+    g["map_meta"] = {"biome": None, "seed": None}
+    g["play"] = {"active": False, "tx": 0, "ty": 0}
+    g["_rule_mods"] = []
+    g["_rule_shown"] = set()
+    g["_rule_keys"] = set()
+    g["_rule_over"] = None
+    g["_save_state"] = {"dirty": False, "last": None}
+    g["_current_map"] = DEFAULT_SAVE
+    g["_thumb_cache"] = {}
+    _active_custom_tids = set()
+    # a fresh world invalidates every undo stack that pointed at the old one
+    for k in [k for k in _histories
+              if isinstance(k, tuple) and k[1] == vault_id]:
+        del _histories[k]
+    # per-vault recovery, beside the vault's own data
+    g["_recovery_store"] = CheckpointStore(vdir) if CheckpointStore else None
+    g["_recovery"] = RecoverySupervisor(g["_recovery_store"]) \
+        if g["_recovery_store"] else None
+    # map: this vault's save, else a fresh blank (never another vault's map)
+    p = os.path.join(vdir, DEFAULT_SAVE)
+    if os.path.exists(p) and world.load(p):
+        print(f"[vault] {vault_id}: resumed {DEFAULT_SAVE}")
+    else:
+        print(f"[vault] {vault_id}: fresh map {world.width}x{world.height}")
+    _load_custom_tiles()  # shared part is one-shot; local part reads this vault
+    _active_custom_tids = {int(e["id"]) for e in _custom_tiles
+                           if str(e.get("id", "")).isdigit()}
+    _load_patrols()
+    _load_rules(DEFAULT_SAVE)
+    _load_traits(DEFAULT_SAVE)
+    _load_names(DEFAULT_SAVE)
+    _load_missions(DEFAULT_SAVE)
+    _load_items(DEFAULT_SAVE)
+    _load_npcs(DEFAULT_SAVE)
+    _load_gear(DEFAULT_SAVE)
+    _vault_stash_current()
+
+
+def _vault_activate(vault_id):
+    """Make vault_id's objects live. Call with _vault_lock held."""
+    global _active_vault
+    if vault_id == _active_vault:
+        return
+    if _active_vault is not None:
+        # autosave-on-switch: a dirty vault is saved before it goes quiet,
+        # so the background autosaver only ever has the active vault to watch.
+        try:
+            if _save_state.get("dirty"):
+                _save_now()
+        except Exception as e:
+            print(f"[vault] autosave-on-switch failed: {e}")
+    _vault_stash_current()
+    slot = _vault_states.get(vault_id)
+    if slot is None:
+        _vault_fresh_state(vault_id)
+    else:
+        _active_vault = vault_id  # paths route here before the restore
+        _vault_restore(slot)
+    _active_vault = vault_id
+
+
+def _user_history(username, vault_id):
+    """Per-(user, world) undo/redo stacks. Keyed by username (not merely
+    vault) so one player's undo in the Commons can never revert another
+    player's paints — and keyed by world too, so a private-vault snapshot
+    can never be pasted onto the Commons world by an undo after switching.
+    Call with _vault_lock held."""
+    key = (username, vault_id)
+    h = _histories.get(key)
+    if h is None:
+        h = core.HistoryManager()
+        _histories[key] = h
+    return h
+
+
+# -- first-boot owner + migration -------------------------------------------------
+# v5.27: these top-level files are per-vault user data and move into the
+# owner's vault on first boot. Code, shipped art, and templates stay global.
+_MIGRATE_DIRS = ("custom_tiles", "_trash", ".crumbs_recovery")
+_MIGRATE_FILES = ("hud_map.json", "custom_tiles.json", "hud_patrols.json",
+                  "entitlements.json")
+_SIDECAR_SUFFIXES = (".rules.json", ".traits.json", ".names.json",
+                     ".missions.json", ".items.json", ".npcs.json",
+                     ".gear.json", ".slots.json")
+
+
+def _migrate_owner_data(owner):
+    dest = _user_vault_dir(owner)
+    os.makedirs(dest, exist_ok=True)
+    moved = []
+
+    def _move_with_sidecars(fname):
+        src = os.path.join(SCRIPT_DIR, fname)
+        shutil.move(src, os.path.join(dest, fname))
+        moved.append(fname)
+        if fname.endswith(".json"):  # a map's sidecars ride along
+            base = fname[:-len(".json")]
+            for sfx in _SIDECAR_SUFFIXES:
+                sf = os.path.join(SCRIPT_DIR, base + sfx)
+                if os.path.isfile(sf):
+                    shutil.move(sf, os.path.join(dest, base + sfx))
+                    moved.append(base + sfx)
+
+    for f in sorted(os.listdir(SCRIPT_DIR)):
+        src = os.path.join(SCRIPT_DIR, f)
+        if os.path.isfile(src) and (
+                f in _MIGRATE_FILES or f.endswith(".backup")
+                or (f.endswith(".json") and f not in _NON_MAPS
+                    and not f.startswith("template-")
+                    and not any(f.endswith(s) for s in _SIDECAR_SUFFIXES)
+                    and f != "users.json")):
+            _move_with_sidecars(f)
+        elif os.path.isdir(src) and f in _MIGRATE_DIRS and not os.path.islink(src):
+            shutil.move(src, os.path.join(dest, f))
+            moved.append(f + "/")
+    if moved:
+        print(f"[auth] migrated {len(moved)} item(s) into {owner}'s vault")
+    return moved
+
+
+def _ensure_owner():
+    """First boot (or break-glass): make sure an owner account exists."""
+    users = _load_users()
+    want_name = (os.environ.get("CRUMBS_OWNER") or "owner").strip().lower()
+    if not _valid_username(want_name):
+        print(f"[auth] CRUMBS_OWNER={want_name!r} invalid — using 'owner'")
+        want_name = "owner"
+    env_pw = (os.environ.get("CRUMBS_OWNER_PASSWORD") or "").strip()
+    owner = None
+    for name, rec in users.items():
+        if isinstance(rec, dict) and rec.get("is_owner"):
+            owner = name
+            break
+    if owner is None:
+        # fresh install — create the owner, migrate their world, print the
+        # generated password ONCE (Lloyd: this is the access gate, and the
+        # password can always be reset later).
+        password = env_pw or secrets.token_urlsafe(12)
+        salt = _new_salt()
+        users[want_name] = {"salt": salt,
+                            "hash": _hash_password(password, salt),
+                            "created": datetime.now(timezone.utc).isoformat(),
+                            "is_owner": True,
+                            "token_version": 0,
+                            "world": "private"}
+        _save_users(users)
+        _migrate_owner_data(want_name)
+        os.makedirs(_commons_dir(), exist_ok=True)
+        print("=" * 52)
+        print(f"  Owner account created: {want_name}")
+        if not env_pw:
+            print(f"  Password (shown once): {password}")
+            print("  Change it via Setup menu > Change password.")
+        print("=" * 52)
+        return want_name
+    # break-glass: CRUMBS_OWNER_PASSWORD set + restart resets the owner pw.
+    # v5.27: only when it differs from the current one — otherwise every
+    # restart would nuke all sessions while the env var is still set.
+    if env_pw and not _verify_password(env_pw, users[owner]):
+        salt = _new_salt()
+        users[owner]["salt"] = salt
+        users[owner]["hash"] = _hash_password(env_pw, salt)
+        users[owner]["token_version"] = int(users[owner].get("token_version", 0)) + 1
+        _save_users(users)
+        print(f"[auth] owner password reset from CRUMBS_OWNER_PASSWORD "
+              f"(all {owner} sessions invalidated; unset the variable)")
+    os.makedirs(_user_vault_dir(owner), exist_ok=True)
+    os.makedirs(_commons_dir(), exist_ok=True)
+    return owner
+
+
+def _vault_id_for(username):
+    """Which vault this request works in: the user's world selection."""
+    if not PUBLIC_MODE or not username:
+        return None
+    rec = _load_users().get(username) or {}
+    if rec.get("world") == "commons":
+        return _COMMONS_VAULT
+    return username
+
 # PUBLIC_MODE / PUBLIC_WRITE_KEY are set in __main__ (--public / --share-key= / $CRUMBS_SHARE_KEY).
 MAX_JSON_BYTES = 64 * 1024 * 1024   # JSON bodies; base64 inflates bundles
                                   # ~4/3, and the decoded zip is still capped
@@ -475,7 +948,10 @@ _rl_lock = threading.Lock()
 
 def _rate_ok(kind, ip):
     """Tiny in-memory token bucket. Generous for a human, stops floods."""
-    limit, window = _RL_POST if kind == "POST" else _RL_GET
+    if kind == "LOGIN":
+        limit, window = _RL_LOGIN  # v5.27: brute-force armor on the login
+    else:
+        limit, window = _RL_POST if kind == "POST" else _RL_GET
     now = time.monotonic()
     with _rl_lock:
         arr = [t for t in _rl_buckets.get((kind, ip), []) if now - t < window]
@@ -487,8 +963,20 @@ def _rate_ok(kind, ip):
         return True
 
 # ---- v3.0: custom imported tiles -------------------------------------------
-CUSTOM_DIR = os.path.join(SCRIPT_DIR, "custom_tiles")
-CUSTOM_REG = os.path.join(SCRIPT_DIR, "custom_tiles.json")
+# v5.27: the "local" shelf is per-vault (each vault — private or Commons —
+# has its own custom_tiles/ so one player's imports never leak onto another
+# player's screen). Local mode keeps the classic top-level paths.
+def _custom_dir():
+    return _vpath("custom_tiles")
+
+def _custom_reg():
+    return _vpath("custom_tiles.json")
+
+def _patrol_save():
+    return _vpath("hud_patrols.json")
+
+def _trash_dir():
+    return _vpath("_trash")
 # v3.8: the shared shelf — imported tiles published for everyone.
 # TRACKED in git (unlike custom_tiles/): a pull delivers them everywhere.
 SHARED_DIR = os.path.join(SCRIPT_DIR, "shared_library")
@@ -580,7 +1068,7 @@ def _find_custom(tid):
 
 
 def _save_custom_registry(scope="local"):
-    path = SHARED_REG if scope == "shared" else CUSTOM_REG
+    path = SHARED_REG if scope == "shared" else _custom_reg()
     tiles = _shared_tiles if scope == "shared" else _custom_tiles
     # v5.14: drop-in art packs live in their *.pack.json — never merge them here.
     tiles = [t for t in tiles if not t.get("_from_pack")]
@@ -657,16 +1145,22 @@ def _register_custom_tile(entry, tile_dir):
     return True
 
 
+_shared_shelf_done = False  # v5.27: the shipped shelf registers once per process
+
+
 def _load_custom_tiles():
     """Re-register imported tiles at startup — this device's shelf plus the
-    shared shelf. Entries without a scope predate v3.8 and are local."""
-    for d in (CUSTOM_DIR, SHARED_DIR):
+    shared shelf. Entries without a scope predate v3.8 and are local.
+    v5.27: the local shelf is per-vault; the shared shelf registers once."""
+    global _shared_shelf_done
+    for d in (_custom_dir(), SHARED_DIR):
         os.makedirs(d, exist_ok=True)
     if not core.PIL_AVAILABLE:
         return
-    for reg_path, tile_dir, store, scope in (
-            (CUSTOM_REG, CUSTOM_DIR, _custom_tiles, "local"),
-            (SHARED_REG, SHARED_DIR, _shared_tiles, "shared")):
+    shelves = [(_custom_reg(), _custom_dir(), _custom_tiles, "local")]
+    if not _shared_shelf_done:
+        shelves.append((SHARED_REG, SHARED_DIR, _shared_tiles, "shared"))
+    for reg_path, tile_dir, store, scope in shelves:
         if not os.path.exists(reg_path):
             # v5.22.9: say so out loud — a missing registry used to mean a
             # silently empty palette and nobody knew why.
@@ -703,7 +1197,7 @@ def _load_custom_tiles():
     n_pack = 0
     # v5.16: paid packs load only when entitlements.json grants them.
     granted = _load_entitlements()
-    for pack_path in sorted(glob.glob(os.path.join(CUSTOM_DIR, "*.pack.json"))):
+    for pack_path in sorted(glob.glob(os.path.join(_custom_dir(), "*.pack.json"))):
         try:
             doc = json.load(open(pack_path))
         except Exception as e:
@@ -720,7 +1214,7 @@ def _load_custom_tiles():
             try:
                 entry["scope"] = "local"
                 entry["_from_pack"] = True
-                if _register_custom_tile(entry, CUSTOM_DIR):
+                if _register_custom_tile(entry, _custom_dir()):
                     _custom_tiles.append(entry)
                     n_pack += 1
             except Exception as e:
@@ -729,6 +1223,8 @@ def _load_custom_tiles():
         print(f"[hud] loaded {len(_custom_tiles)} local + {len(_shared_tiles)} shared tile(s) ({n_pack} from art packs)")
     _save_custom_registry("local")   # v3.2: persist water→swim migrations, if any
     _save_custom_registry("shared")
+    _shared_shelf_done = True  # v5.27: one-shot per process; later vault
+                               # activations only reload their local shelf
 
 
 # ---- v5.25: boot-time art backfill -------------------------------------------
@@ -796,7 +1292,14 @@ def _art_backfill_async():
                 with open(tmp, "wb") as f:
                     f.write(blob)
                 os.replace(tmp, p)
-            _reload_shared_shelf()
+            # v5.27: shared-shelf registration mutates the global assets —
+            # take the vault lock in public mode so a request can't swap
+            # custom tiles mid-registration.
+            if PUBLIC_MODE:
+                with _vault_lock:
+                    _reload_shared_shelf()
+            else:
+                _reload_shared_shelf()
             _ART_BACKFILL["state"] = "done"
             print("[hud] art backfill: complete")
         except Exception as e:
@@ -906,7 +1409,7 @@ def _store_custom_tile(name, preset, frame_ms, pil_images, scope="local"):
     """Write PIL frames to the right shelf (this device / shared), register the
     tile, save that shelf's registry. Returns the entry. Rolls back partial
     writes on failure."""
-    tile_dir = SHARED_DIR if scope == "shared" else CUSTOM_DIR
+    tile_dir = SHARED_DIR if scope == "shared" else _custom_dir()
     store = _shared_tiles if scope == "shared" else _custom_tiles
     tid = assets._next_id()
     files = []
@@ -940,14 +1443,13 @@ def _store_custom_tile(name, preset, frame_ms, pil_images, scope="local"):
     return entry
 
 # ---- v3.4: patrol routes ----------------------------------------------------
-PATROL_SAVE = os.path.join(SCRIPT_DIR, "hud_patrols.json")
 _patrols = []          # [{id, tile_id, points: [[x, y], ...]}]
 _patrol_seq = {"next": 1}
 
 
 def _save_patrols():
     try:
-        with open(PATROL_SAVE, "w") as f:
+        with open(_patrol_save(), "w") as f:
             json.dump(_stamp({"patrols": _patrols, "next": _patrol_seq["next"]}), f)
     except Exception as e:
         print(f"[hud] could not save patrols: {e}")
@@ -1038,7 +1540,7 @@ def _load_entitlements():
     """Pack names this device is granted (entitlements.json is user data,
     gitignored — the storefront that sells grants is a Later item)."""
     try:
-        d = json.load(open(os.path.join(SCRIPT_DIR, "entitlements.json")))
+        d = json.load(open(_vpath("entitlements.json")))
         packs = d.get("packs", [])
         return set(packs) if isinstance(packs, list) else set()
     except (OSError, ValueError):
@@ -1047,7 +1549,7 @@ def _load_entitlements():
 
 def _pack_catalog():
     catalog, granted = [], _load_entitlements()
-    for pack_path in sorted(glob.glob(os.path.join(CUSTOM_DIR, "*.pack.json"))):
+    for pack_path in sorted(glob.glob(os.path.join(_custom_dir(), "*.pack.json"))):
         try:
             doc = json.load(open(pack_path))
         except Exception:
@@ -1062,7 +1564,7 @@ def _pack_catalog():
 
 def _missions_path(name):
     base = name[:-5] if name.endswith(".json") else name
-    return os.path.join(SCRIPT_DIR, base + ".missions.json")
+    return _vpath(base + ".missions.json")
 
 
 def _load_missions(name):
@@ -1371,19 +1873,19 @@ _npc_near = set()    # npc ids the hero is already beside (no repeat hellos)
 
 def _items_path(name):
     base = name[:-5] if name.endswith(".json") else name
-    return os.path.join(SCRIPT_DIR, base + ".items.json")
+    return _vpath(base + ".items.json")
 
 
 def _npcs_path(name):
     base = name[:-5] if name.endswith(".json") else name
-    return os.path.join(SCRIPT_DIR, base + ".npcs.json")
+    return _vpath(base + ".npcs.json")
 
 
 def _gear_path(name):
     # v5.13: the hero's own pack — coin, carried gear, and hands — rides
     # with the map so it survives stop/start. User data, never committed.
     base = name[:-5] if name.endswith(".json") else name
-    return os.path.join(SCRIPT_DIR, base + ".gear.json")
+    return _vpath(base + ".gear.json")
 
 
 def _load_gear(name):
@@ -1606,7 +2108,7 @@ def _mission_reconcile_patrols():
 def _load_patrols():
     global _patrols
     _patrols = []
-    reg, err = _load_json_file(PATROL_SAVE, "patrols", {"patrols": []})
+    reg, err = _load_json_file(_patrol_save(), "patrols", {"patrols": []})
     if err:
         _log_event(f"patrols: {err['detail']}")
         return
@@ -1726,7 +2228,7 @@ def _load_game_rules(saved_list):
 
 def _rules_path(name):
     base = name[:-5] if name.endswith(".json") else name
-    return os.path.join(SCRIPT_DIR, base + ".rules.json")
+    return _vpath(base + ".rules.json")
 
 
 # ---- v4.0: the nature of the world -----------------------------------------
@@ -1766,7 +2268,7 @@ _tick_n = 0
 
 def _traits_path(name):
     base = name[:-5] if name.endswith(".json") else name
-    return os.path.join(SCRIPT_DIR, base + ".traits.json")
+    return _vpath(base + ".traits.json")
 
 def _blank_traits():
     return [[None] * world.width for _ in range(world.height)]
@@ -1807,7 +2309,7 @@ object_names = {}  # "x,y" -> name
 
 def _names_path(name):
     base = name[:-5] if name.endswith(".json") else name
-    return os.path.join(SCRIPT_DIR, base + ".names.json")
+    return _vpath(base + ".names.json")
 
 def _name_key(x, y):
     return "%d,%d" % (x, y)
@@ -1923,13 +2425,12 @@ def _validate_map():
                        "msg": f"{bad} cell(s) reference missing tile ids."})
     return issues
 
-_TRASH_DIR = os.path.join(SCRIPT_DIR, "_trash")
 _NON_MAPS = {"custom_tiles.json", "sprite_library.json", "shared_library.json",
              "hud_patrols.json"}
 
 def _map_sidecars(name):
     base = name[:-5] if name.endswith(".json") else name
-    return [os.path.join(SCRIPT_DIR, base + ext)
+    return [_vpath(base + ext)
             for ext in (".json", ".rules.json", ".traits.json", ".names.json",
                         ".missions.json", ".items.json",
                         ".npcs.json")]  # v5.12, v5.13
@@ -1937,7 +2438,7 @@ def _map_sidecars(name):
 def _slots_path():
     base = _current_map or DEFAULT_SAVE
     base = base[:-5] if base.endswith(".json") else base
-    return os.path.join(SCRIPT_DIR, base + ".slots.json")
+    return _vpath(base + ".slots.json")
 
 def _load_slots():
     slots, err = _load_json_file(_slots_path(), "slots", {"slots": []})
@@ -2470,7 +2971,7 @@ def _mark_dirty():
 
 
 def _save_now(name=DEFAULT_SAVE):
-    p = os.path.join(SCRIPT_DIR, name)
+    p = _vpath(name)
     if world.save(p, schema=SCHEMA_VERSION):  # v5.16: stamp the data schema
         _save_state["dirty"] = False
         _save_state["last"] = time.strftime("%H:%M:%S")
@@ -2488,7 +2989,7 @@ def _save_now(name=DEFAULT_SAVE):
 def _export_map_doc(name):
     """Load a saved map file for export. Dict or None."""
     try:
-        m = json.load(open(os.path.join(SCRIPT_DIR, name)))
+        m = json.load(open(_vpath(name)))
         return {"name": name, "w": int(m["width"]), "h": int(m["height"]),
                 "tiles": m["tiles"], "objects": m.get("objects"),
                 "collision": m.get("collision")}
@@ -2589,7 +3090,7 @@ def _build_bundle(name):
              "objects": doc["objects"], "collision": doc["collision"]}))
         for ext in _BUNDLE_EXTS:
             fn = base + ext
-            p = os.path.join(SCRIPT_DIR, fn)
+            p = _vpath(fn)
             if not os.path.isfile(p):
                 continue
             try:
@@ -2633,7 +3134,7 @@ def _import_bundle(raw, want_name):
     base = want[:-5] if want.endswith(".json") else want
     base = re.sub(r"[^A-Za-z0-9_-]+", "-", base).strip("-") or "imported"
     candidate, i = base + ".json", 2
-    while os.path.exists(os.path.join(SCRIPT_DIR, candidate)):
+    while os.path.exists(_vpath(candidate)):
         candidate, i = f"{base}-{i}.json", i + 1
     dst_base = candidate[:-5]
     allowed = {src_base + ".json"} | {src_base + e for e in _BUNDLE_EXTS}
@@ -2651,7 +3152,7 @@ def _import_bundle(raw, want_name):
                 continue
             out = (dst_base + arc[len(src_base):]
                    if arc != src_base + ".json" else candidate)
-            with open(os.path.join(SCRIPT_DIR, out), "w") as f:
+            with open(_vpath(out), "w") as f:
                 json.dump(data, f)
             wrote.append(out)
     except Exception as e:
@@ -2668,7 +3169,7 @@ def _import_bundle(raw, want_name):
 def _restore_backup(name):
     """Copy <name>.backup over <name>; refresh live state when the file
     belongs to the current map. Returns (ok, message)."""
-    p = os.path.join(SCRIPT_DIR, name)
+    p = _vpath(name)
     src = p + ".backup"
     if not os.path.isfile(src):
         return False, "no backup for that file"
@@ -2715,7 +3216,14 @@ def _restore_backup(name):
 def _autosave_loop():
     while True:
         time.sleep(30)
-        if _save_state["dirty"] and _save_now():
+        # v5.27: in public mode the vault lock keeps the autosaver from
+        # racing a request's globals. Only the active vault is watched —
+        # switching vaults already saved the dirty ones on the way out.
+        if PUBLIC_MODE:
+            with _vault_lock:
+                if _save_state["dirty"] and _save_now():
+                    print(f"[hud] autosaved {_current_map} at {_save_state['last']}")
+        elif _save_state["dirty"] and _save_now():
             print(f"[hud] autosaved {DEFAULT_SAVE} at {_save_state['last']}")
 
 
@@ -2826,7 +3334,7 @@ def _primary_save_healthy(name):
     name = _safe_name(name) or DEFAULT_SAVE
     if not name.endswith(".json"):
         name += ".json"
-    p = os.path.join(SCRIPT_DIR, name)
+    p = _vpath(name)
     try:
         with open(p, encoding="utf-8") as fh:
             data = json.load(fh)
@@ -2848,7 +3356,7 @@ def _primary_save_healthy(name):
 
 def _recovery_evidence_paths():
     """Heartbeat / dirty-flag / clean-marker paths inside .crumbs_recovery/."""
-    d = os.path.join(SCRIPT_DIR, ".crumbs_recovery")
+    d = _vpath(".crumbs_recovery")
     return {"heartbeat": os.path.join(d, HEARTBEAT_NAME or "heartbeat.json"),
             "dirty": os.path.join(d, DIRTY_NAME or "dirty.flag"),
             "clean": os.path.join(d, CLEAN_NAME or "clean.shutdown")}
@@ -2915,7 +3423,7 @@ def _primary_state(name):
     name = _safe_name(name) or DEFAULT_SAVE
     if not name.endswith(".json"):
         name += ".json"
-    if not os.path.isfile(os.path.join(SCRIPT_DIR, name)):
+    if not os.path.isfile(_vpath(name)):
         return "missing"
     return "healthy" if _primary_save_healthy(name) else "corrupt"
 
@@ -3068,9 +3576,77 @@ def _recover_startup():
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "CrumbsHUD/1.9"
+    _outgoing_cookie = None  # v5.27: Set-Cookie queued by _issue_session etc.
 
     def log_message(self, *a):  # keep the console quiet
         pass
+
+    # -- v5.27: sessions ---------------------------------------------------
+    def _get_cookie(self, name):
+        raw = self.headers.get("Cookie") or ""
+        for part in raw.split(";"):
+            k, _, v = part.partition("=")
+            if k.strip() == name:
+                return v.strip()
+        return ""
+
+    def _session_user(self):
+        tok = self._get_cookie(_SESSION_COOKIE)
+        if not tok:
+            return None
+        return _verify_session_token(tok)
+
+    def _issue_session(self, username):
+        users = _load_users()
+        rec = users.get(username) or {}
+        self._outgoing_cookie = _session_cookie_value(
+            username, int(rec.get("token_version", 0)))
+
+    def _clear_session(self):
+        # v5.27: logout kills the token server-side too — bump token_version
+        # so a copied cookie can't survive the logout. (This ends every
+        # session for the user, which is the safe meaning of "log out".)
+        me = self._session_user()
+        if me:
+            users = _load_users()
+            rec = users.get(me)
+            if rec is not None:
+                rec["token_version"] = int(rec.get("token_version", 0)) + 1
+                _save_users(users)
+        self._outgoing_cookie = _CLEAR_COOKIE
+
+    def _is_owner_session(self):
+        u = self._session_user()
+        if not u:
+            return False
+        rec = _load_users().get(u) or {}
+        return bool(rec.get("is_owner"))
+
+    def _auth_activate(self, path):
+        """v5.27 public-mode gate + vault activation. Sends the error and
+        returns False when the request may not proceed. Must be called with
+        _vault_lock held; on True the vault's objects are live in the
+        globals and `history` is the caller's own undo stack."""
+        global history
+        user = self._session_user()
+        key_ok = self._write_key_ok()
+        # /api/auth/* manage their own gates (login must work keyless);
+        # login, me, health never 401.
+        if path.startswith("/api/auth/") or path in ("/api/health",):
+            return True
+        if not user and not key_ok:
+            self._send_json({"ok": False, "error": "login required"}, 401)
+            return False
+        # the write key is the owner's master bypass — key-only requests
+        # work in the owner's vault.
+        eff_user = user or _owner_username()
+        vault_id = _vault_id_for(eff_user)
+        if vault_id:
+            _vault_activate(vault_id)
+            history = _user_history(eff_user, _active_vault)
+            if user:
+                self._issue_session(user)  # sliding 30-day refresh
+        return True
 
     def handle_one_request(self):
         # v1.4: a phone browser often hangs up mid-write (iOS froze the server,
@@ -3103,6 +3679,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        if self._outgoing_cookie:  # v5.27: login / sliding refresh / logout
+            self.send_header("Set-Cookie", self._outgoing_cookie)
+            self._outgoing_cookie = None
         self.end_headers()
         self.wfile.write(body)
 
@@ -3177,6 +3756,20 @@ class Handler(BaseHTTPRequestHandler):
         if not _rate_ok("GET", self._client_ip()):
             return self._send_json({"ok": False, "error": "slow down"}, 429)
         path = urlparse(self.path).path
+        self._outgoing_cookie = None
+        # v5.27: public mode serializes /api/* on the vault lock — one
+        # request's globals can never bleed into another's.
+        if PUBLIC_MODE and path.startswith("/api/"):
+            _vault_lock.acquire()
+            try:
+                if not self._auth_activate(path):
+                    return
+                return self._do_GET_impl(path)
+            finally:
+                _vault_lock.release()
+        return self._do_GET_impl(path)
+
+    def _do_GET_impl(self, path):
         if path == "/":
             try:
                 with open(HTML_PATH, "rb") as f:
@@ -3199,6 +3792,32 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(body)
+        elif path == "/api/health":
+            # v5.27: no auth — the page checks this before deciding whether
+            # to show the login overlay.
+            self._send_json({"ok": True, "version": APP_VERSION,
+                             "public_mode": PUBLIC_MODE,
+                             "instance": INSTANCE_ID})
+        elif path == "/api/auth/me":
+            # v5.27: no auth — reports the login state, never 401s.
+            u = self._session_user()
+            if not u:
+                self._send_json({"ok": True, "logged_in": False,
+                                 "public_mode": PUBLIC_MODE})
+            else:
+                rec = _load_users().get(u) or {}
+                self._send_json({"ok": True, "logged_in": True, "username": u,
+                                 "is_owner": bool(rec.get("is_owner")),
+                                 "world": rec.get("world", "private")})
+        elif path == "/api/auth/users":
+            # v5.27: owner-only account list.
+            if not self._is_owner_session() and not self._write_key_ok():
+                return self._send_json({"ok": False, "error": "owner only"}, 403)
+            users = _load_users()
+            self._send_json({"ok": True, "users": [
+                {"username": n, "created": (r or {}).get("created"),
+                 "is_owner": bool((r or {}).get("is_owner"))}
+                for n, r in sorted(users.items())]})
         elif path == "/api/map":
             self._send_json(_map_state())
         elif path == "/api/height-grid":
@@ -3339,15 +3958,16 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/maps":
             # v5.6: rich entries — dims, modified time, description — for the picker
             out = []
-            for f in sorted(os.listdir(SCRIPT_DIR)):
-                if f in _NON_MAPS or not os.path.isfile(os.path.join(SCRIPT_DIR, f)):
+            vdir = _vault_base()  # v5.27: each vault lists only its own maps
+            for f in sorted(os.listdir(vdir)):
+                if f in _NON_MAPS or not os.path.isfile(os.path.join(vdir, f)):
                     continue
                 if not (f.endswith(".json") or f.endswith(".txt")):
                     continue
                 if f.endswith((".rules.json", ".traits.json", ".names.json",
                                ".slots.json")):
                     continue
-                p = os.path.join(SCRIPT_DIR, f)
+                p = os.path.join(vdir, f)
                 w = h = None
                 if f.endswith(".json"):
                     try:
@@ -3424,11 +4044,12 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/backups":
             # v5.16: every save rotates a .backup — list them for restore.
             out = []
-            for f in sorted(os.listdir(SCRIPT_DIR)):
+            vdir = _vault_base()  # v5.27: backups are per-vault
+            for f in sorted(os.listdir(vdir)):
                 if not f.endswith(".backup"):
                     continue
                 try:
-                    st = os.stat(os.path.join(SCRIPT_DIR, f))
+                    st = os.stat(os.path.join(vdir, f))
                 except OSError:
                     continue
                 out.append({"file": f[:-len(".backup")], "bytes": st.st_size,
@@ -3584,7 +4205,7 @@ class Handler(BaseHTTPRequestHandler):
             name = _safe_name((q.get("file") or [""])[0])
             if not name:
                 return self._send_json({"ok": False, "error": "file required"}, 400)
-            p = os.path.join(SCRIPT_DIR, name)
+            p = _vpath(name)
             try:
                 m = json.load(open(p))
                 img = _map_png(1, m["tiles"], m.get("objects"),
@@ -3622,25 +4243,219 @@ class Handler(BaseHTTPRequestHandler):
 
     # -- POST --------------------------------------------------------------
     def do_POST(self):
-        global traits_grid, hero_override  # v5.6: slots/load rebinds these
-        global _current_map, mission_run  # v5.12: rename + mission runs
-        global _gold, _item_cells  # v5.13: coin + ground items
         # v5.16: abuse guards run before any mutation.
         if not _rate_ok("POST", self._client_ip()):
             return self._send_json({"ok": False, "error": "slow down"}, 429)
         path = urlparse(self.path).path
+        self._outgoing_cookie = None
+        # v5.27: public mode serializes /api/* on the vault lock — one
+        # request's globals can never bleed into another's.
+        if PUBLIC_MODE and path.startswith("/api/"):
+            _vault_lock.acquire()
+            try:
+                if not self._auth_activate(path):
+                    return
+                return self._do_POST_impl(path)
+            finally:
+                _vault_lock.release()
+        return self._do_POST_impl(path)
+
+    def _do_POST_impl(self, path):
+        global traits_grid, hero_override  # v5.6: slots/load rebinds these
+        global _current_map, mission_run  # v5.12: rename + mission runs
+        global _gold, _item_cells  # v5.13: coin + ground items
         if not self._is_json_request():
             return self._send_json({"ok": False, "error": "Content-Type must be application/json"}, 415)
         if not self._same_origin_ok():
             return self._send_json({"ok": False, "error": "origin/host check failed"}, 403)
-        if path != "/api/jslog" and not self._write_key_ok():
-            return self._send_json({"ok": False, "error": "read-only in public mode (write key required)"}, 403)
+        # v5.27: the old blanket write-key gate is gone — _auth_activate
+        # (public mode) already enforced session-or-write-key, and local
+        # mode skips auth entirely. Update/restart keep their own
+        # write-key checks below.
         body = self._read_json()
         if body is None or not isinstance(body, dict):
             # QA 2026-09-19: a JSON list/string/number parsed fine but has no
             # .get — reject it here instead of dying mid-handler with a bare
             # dropped connection and a terminal traceback.
             return self._send_json({"ok": False, "error": "bad JSON"}, 400)
+
+        # ---- v5.27: accounts ------------------------------------------------
+        if path == "/api/auth/login":
+            # brute-force armor: 5 tries/min/IP, then 429. Generic failure —
+            # never reveal whether the username exists vs the password missed.
+            if not _rate_ok("LOGIN", self._client_ip()):
+                return self._send_json({"ok": False, "error": "slow down"}, 429)
+            username = str(body.get("username") or "").strip().lower()
+            password = str(body.get("password") or "")
+            users = _load_users()
+            rec = users.get(username)
+            if not isinstance(rec, dict):
+                _hash_password(password, _new_salt())  # dummy work: same cost
+                ok = False
+            else:
+                ok = _verify_password(password, rec)
+            if not ok:
+                return self._send_json({"ok": False, "error": "bad login"}, 401)
+            os.makedirs(_user_vault_dir(username), exist_ok=True)
+            self._issue_session(username)
+            _log_event(f"{username} logged in")
+            return self._send_json({"ok": True, "username": username,
+                                    "is_owner": bool(rec.get("is_owner")),
+                                    "world": rec.get("world", "private")})
+
+        if path == "/api/auth/logout":
+            self._clear_session()
+            return self._send_json({"ok": True})
+
+        if path == "/api/auth/register":
+            users = _load_users()
+            me = self._session_user()
+            me_is_owner = me and bool((users.get(me) or {}).get("is_owner"))
+            open_reg = os.environ.get("ALLOW_OPEN_REGISTER") == "1"
+            if not open_reg and not me_is_owner and not self._write_key_ok():
+                return self._send_json({"ok": False, "error": "owner only"}, 403)
+            username = str(body.get("username") or "").strip().lower()
+            password = str(body.get("password") or "")
+            # v5.27: usernames become directory names — strict charset so no
+            # slashes, dots, or traversal can ever sneak in.
+            if not _valid_username(username):
+                return self._send_json({"ok": False, "error": "username must be 3-24 chars: a-z 0-9 _ -"}, 400)
+            if username in users:
+                return self._send_json({"ok": False, "error": "name taken"}, 409)
+            if len(password) < _MIN_PASSWORD_LEN:
+                return self._send_json({"ok": False, "error": "password too short"}, 400)
+            salt = _new_salt()
+            users[username] = {"salt": salt,
+                               "hash": _hash_password(password, salt),
+                               "created": datetime.now(timezone.utc).isoformat(),
+                               "is_owner": False, "token_version": 0,
+                               "world": "private"}
+            _save_users(users)
+            os.makedirs(_user_vault_dir(username), exist_ok=True)
+            _log_event(f"account created: {username}")
+            return self._send_json({"ok": True, "username": username})
+
+        if path == "/api/auth/change-password":
+            me = self._session_user()
+            users = _load_users()
+            rec = users.get(me) if me else None
+            if not isinstance(rec, dict):
+                return self._send_json({"ok": False, "error": "login required"}, 401)
+            if not _verify_password(str(body.get("old") or ""), rec):
+                return self._send_json({"ok": False, "error": "bad login"}, 401)
+            new = str(body.get("new") or "")
+            if len(new) < _MIN_PASSWORD_LEN:
+                return self._send_json({"ok": False, "error": "password too short"}, 400)
+            salt = _new_salt()
+            rec["salt"] = salt
+            rec["hash"] = _hash_password(new, salt)
+            # v5.27: a password change kills every existing session —
+            # a stolen cookie dies with the old password.
+            rec["token_version"] = int(rec.get("token_version", 0)) + 1
+            _save_users(users)
+            self._issue_session(me)  # this request's session stays alive
+            return self._send_json({"ok": True})
+
+        if path == "/api/auth/reset-password":
+            users = _load_users()
+            me = self._session_user()
+            if not (me and bool((users.get(me) or {}).get("is_owner"))) \
+                    and not self._write_key_ok():
+                return self._send_json({"ok": False, "error": "owner only"}, 403)
+            username = str(body.get("username") or "").strip().lower()
+            new = str(body.get("new") or "")
+            rec = users.get(username)
+            if not isinstance(rec, dict):
+                return self._send_json({"ok": False, "error": "unknown user"}, 404)
+            if len(new) < _MIN_PASSWORD_LEN:
+                return self._send_json({"ok": False, "error": "password too short"}, 400)
+            salt = _new_salt()
+            rec["salt"] = salt
+            rec["hash"] = _hash_password(new, salt)
+            rec["token_version"] = int(rec.get("token_version", 0)) + 1
+            _save_users(users)
+            _log_event(f"password reset for {username}")
+            return self._send_json({"ok": True, "username": username})
+
+        if path == "/api/auth/delete":
+            # v5.27: owner-only account deletion. The account dies
+            # immediately (sessions stop validating on next lookup); the
+            # vault is archived under vaults/.deleted/ so nothing is lost
+            # if the owner deletes by mistake. Re-registering the same
+            # username later starts a fresh empty vault.
+            users = _load_users()
+            me = self._session_user()
+            me_rec = users.get(me) if me else None
+            key_ok = self._write_key_ok()
+            if not (me_rec and me_rec.get("is_owner")) and not key_ok:
+                return self._send_json({"ok": False, "error": "owner only"}, 403)
+            username = str(body.get("username") or "").strip().lower()
+            rec = users.get(username)
+            if not isinstance(rec, dict):
+                return self._send_json({"ok": False, "error": "unknown user"}, 404)
+            if rec.get("is_owner"):
+                return self._send_json({"ok": False, "error": "cannot delete the owner"}, 403)
+            if username == me and not key_ok:
+                return self._send_json({"ok": False, "error": "cannot delete yourself"}, 403)
+            del users[username]
+            _save_users(users)
+            archived = False
+            vdir = _user_vault_dir(username)
+            if os.path.isdir(vdir) and not os.path.islink(vdir):
+                ddir = os.path.join(_vaults_dir(), ".deleted")
+                os.makedirs(ddir, exist_ok=True)
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+                try:
+                    shutil.move(vdir, os.path.join(ddir, f"{username}-{stamp}"))
+                    archived = True
+                except OSError:
+                    pass
+            _vault_states.pop(username, None)
+            for k in [k for k in _histories
+                      if isinstance(k, tuple) and k[0] == username]:
+                del _histories[k]
+            _log_event(f"account deleted: {username}")
+            return self._send_json({"ok": True, "username": username,
+                                    "archived": archived})
+
+        if path == "/api/auth/world":
+            me = self._session_user()
+            users = _load_users()
+            rec = users.get(me) if me else None
+            if not isinstance(rec, dict):
+                return self._send_json({"ok": False, "error": "login required"}, 401)
+            w = body.get("world")
+            if w not in ("private", "commons"):
+                return self._send_json({"ok": False, "error": 'world must be "private" or "commons"'}, 400)
+            rec["world"] = w
+            _save_users(users)
+            return self._send_json({"ok": True, "world": w})
+
+        if path == "/api/commons/reset":
+            # v5.27: owner-only — clears the Commons world. Private vaults
+            # are never touched.
+            users = _load_users()
+            me = self._session_user()
+            if not (me and bool((users.get(me) or {}).get("is_owner"))) \
+                    and not self._write_key_ok():
+                return self._send_json({"ok": False, "error": "owner only"}, 403)
+            cdir = _commons_dir()
+            n = 0
+            for f in os.listdir(cdir):
+                p = os.path.join(cdir, f)
+                try:
+                    if os.path.isdir(p) and not os.path.islink(p):
+                        shutil.rmtree(p)
+                    else:
+                        os.remove(p)
+                    n += 1
+                except OSError:
+                    pass
+            _vault_states.pop(_COMMONS_VAULT, None)
+            if _active_vault == _COMMONS_VAULT:
+                _vault_fresh_state(_COMMONS_VAULT)
+            _log_event("commons reset by owner")
+            return self._send_json({"ok": True, "cleared": n})
 
         if path == "/api/recovery/reset":
             # v5.22.11: true fresh start — archive old journal, clear stale
@@ -4631,8 +5446,8 @@ class Handler(BaseHTTPRequestHandler):
                 # v5.9: starter tiles share one packed strip — built in, can't move
                 return self._send_json({"ok": False, "error": "starter tiles are built in"}, 403)
             if cur != scope:
-                src_dir = SHARED_DIR if cur == "shared" else CUSTOM_DIR
-                dst_dir = SHARED_DIR if scope == "shared" else CUSTOM_DIR
+                src_dir = SHARED_DIR if cur == "shared" else _custom_dir()
+                dst_dir = SHARED_DIR if scope == "shared" else _custom_dir()
                 try:
                     for fn in entry.get("files", []):
                         os.rename(os.path.join(src_dir, fn), os.path.join(dst_dir, fn))
@@ -4665,7 +5480,7 @@ class Handler(BaseHTTPRequestHandler):
                 # v5.14: art-pack tiles share packed strips — delete the pack's
                 # files to uninstall it, not tile by tile
                 return self._send_json({"ok": False, "error": "pack tiles uninstall with their pack"}, 403)
-            tile_dir = SHARED_DIR if scope == "shared" else CUSTOM_DIR
+            tile_dir = SHARED_DIR if scope == "shared" else _custom_dir()
             if scope == "shared":
                 _shared_tiles[:] = [e for e in _shared_tiles if int(e["id"]) != tid]
             else:
@@ -4858,7 +5673,7 @@ class Handler(BaseHTTPRequestHandler):
             now = int(time.time())
             map_meta.setdefault("created", now)  # v5.6: map metadata
             map_meta["modified"] = now
-            ok = world.save(os.path.join(SCRIPT_DIR, name),
+            ok = world.save(_vpath(name),
                             schema=SCHEMA_VERSION)  # v5.16: stamp the schema
             if ok:
                 _save_rules(name)  # v3.7
@@ -4871,9 +5686,14 @@ class Handler(BaseHTTPRequestHandler):
             name = _safe_name(body.get("filename"))
             if not name:
                 return self._send_json({"ok": False, "error": "filename required"}, 400)
-            p = os.path.join(SCRIPT_DIR, name)
+            p = _vpath(name)
             if not os.path.isfile(p):
-                return self._send_json({"ok": False, "error": "file not found"}, 404)
+                # v5.27: shipped starter templates stay global — a vault
+                # may load them read-only, then save into its own vault.
+                if name.startswith("template-"):
+                    p = os.path.join(SCRIPT_DIR, name)
+                if not os.path.isfile(p):
+                    return self._send_json({"ok": False, "error": "file not found"}, 404)
             ok = world.load(p) or world.load_csv(p)
             if ok:
                 history.undo_stack.clear()
@@ -4901,15 +5721,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": False, "error": "from/to required"}, 400)
             if not dst.endswith(".json"):
                 dst += ".json"
-            if os.path.exists(os.path.join(SCRIPT_DIR, dst)):
+            if os.path.exists(_vpath(dst)):
                 return self._send_json({"ok": False, "error": "name taken"}, 409)
             moved = 0
             for p in _map_sidecars(src):
                 if os.path.isfile(p):
                     base = dst[:-5] if dst.endswith(".json") else dst
-                    ext = p[len(os.path.join(SCRIPT_DIR,
-                                             src[:-5] if src.endswith(".json") else src)):]
-                    os.rename(p, os.path.join(SCRIPT_DIR, base + ext))
+                    ext = p[len(_vpath(src[:-5] if src.endswith(".json") else src)):]
+                    os.rename(p, _vpath(base + ext))
                     moved += 1
             if _current_map == src:
                 _current_map = dst
@@ -4927,15 +5746,15 @@ class Handler(BaseHTTPRequestHandler):
                 dst = base + " copy.json"
             if not dst.endswith(".json"):
                 dst += ".json"
-            if os.path.exists(os.path.join(SCRIPT_DIR, dst)):
+            if os.path.exists(_vpath(dst)):
                 return self._send_json({"ok": False, "error": "name taken"}, 409)
             copied = 0
             src_base = src[:-5] if src.endswith(".json") else src
             dst_base = dst[:-5] if dst.endswith(".json") else dst
             for p in _map_sidecars(src):
                 if os.path.isfile(p):
-                    ext = p[len(os.path.join(SCRIPT_DIR, src_base)):]
-                    shutil.copy2(p, os.path.join(SCRIPT_DIR, dst_base + ext))
+                    ext = p[len(_vpath(src_base)):]
+                    shutil.copy2(p, _vpath(dst_base + ext))
                     copied += 1
             _log_event(f"duplicated {src} -> {dst}")
             return self._send_json({"ok": copied > 0, "file": dst})
@@ -4947,16 +5766,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": False, "error": "file required"}, 400)
             if name == DEFAULT_SAVE:
                 return self._send_json({"ok": False, "error": "cannot delete the default map"}, 400)
-            os.makedirs(_TRASH_DIR, exist_ok=True)
+            os.makedirs(_trash_dir(), exist_ok=True)
             moved = 0
             src_base = name[:-5] if name.endswith(".json") else name
             for p in _map_sidecars(name):
                 if os.path.isfile(p):
-                    ext = p[len(os.path.join(SCRIPT_DIR, src_base)):]
-                    dest = os.path.join(_TRASH_DIR, src_base + ext)
+                    ext = p[len(_vpath(src_base)):]
+                    dest = os.path.join(_trash_dir(), src_base + ext)
                     n = 1
                     while os.path.exists(dest):
-                        dest = os.path.join(_TRASH_DIR, f"{src_base}.{n}{ext}")
+                        dest = os.path.join(_trash_dir(), f"{src_base}.{n}{ext}")
                         n += 1
                     os.rename(p, dest)
                     moved += 1
@@ -4987,7 +5806,7 @@ class Handler(BaseHTTPRequestHandler):
                 json.dump({"version": data.get("version", 3.0), "width": w, "height": h,
                            "tiles": data["tiles"], "objects": data["objects"],
                            "collision": data["collision"]},
-                          open(os.path.join(SCRIPT_DIR, name), "w"))
+                          open(_vpath(name), "w"))
             except OSError:
                 return self._send_json({"ok": False, "error": "cannot write"}, 500)
             _log_event(f"imported {name}")
@@ -5447,6 +6266,12 @@ if __name__ == "__main__":
         share_key = secrets.token_urlsafe(12)
     PUBLIC_MODE = public
     PUBLIC_WRITE_KEY = share_key if public else ""
+    # v5.27: public mode boots the account system first — owner account,
+    # first-run migration of existing user data into the owner's vault.
+    # Local mode skips this entirely (single-user behavior unchanged).
+    if public:
+        _get_secret()  # persisted session secret, created once (0600)
+        _ensure_owner()
     host = "0.0.0.0" if public else HOST
     try:
         srv = ThreadingHTTPServer((host, PORT), Handler)

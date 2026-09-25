@@ -74,6 +74,11 @@
   .menu-drop button:disabled { opacity: .38; }
   .menu-drop #btn-stop { color: #ff8a8a; }
   .menu-drop hr { border: none; border-top: 1px solid #333; margin: 6px 0; }
+  /* v5.27: non-action version header (narrow phones hide #title, so the
+     version lives one tap away at the top of Setup instead) */
+  .menu-drop .menu-ver { display: block; padding: 8px 12px 6px; color: #888;
+                         font-size: 12px; font-weight: 600; cursor: default;
+                         border-bottom: 1px solid #333; margin-bottom: 4px; }
   /* v5.21: gold dot on the File menu when an update is waiting */
   .upd-dot { color: #ffd75f; font-size: 9px; vertical-align: 2px; }
   .update-notes { max-height: 38dvh; overflow-y: auto; margin: 4px 10px 8px;
@@ -172,6 +177,56 @@
   #splash .load-label { font-size: 12px; color: #cfd2dc; min-height: 16px; }
   #splash .splash-title { font-size: 28px; color: #ffd75f; font-weight: bold; }
   #splash .splash-sub { font-size: 14px; color: #888; }
+  /* v5.27: login overlay + user menu */
+  #login-overlay { position: fixed; inset: 0; z-index: 300; display: none;
+    align-items: center; justify-content: center; background: rgba(5,5,12,.92); }
+  #login-overlay.show { display: flex; }
+  #login-box { background: #14141c; border: 1px solid #2a2a38; border-radius: 12px;
+    padding: 24px; width: min(86vw, 320px); text-align: center; }
+  #login-box h2 { color: #ffd75f; margin: 0 0 4px; font-size: 20px; }
+  #login-box .login-sub { color: #888; font-size: 12px; margin-bottom: 14px; }
+  #login-box input { display: block; width: 100%; box-sizing: border-box;
+    margin: 8px 0; padding: 10px; border-radius: 8px; border: 1px solid #333;
+    background: #0d0d12; color: #eee; font-size: 16px; }
+  #login-go { width: 100%; margin-top: 10px; padding: 11px; border: 0;
+    border-radius: 8px; background: linear-gradient(90deg,#ff5a5a,#ffd75f);
+    color: #14141c; font-weight: bold; font-size: 16px; }
+  #login-err { color: #ff7a7a; font-size: 13px; min-height: 18px; margin-top: 8px; }
+  #login-box .login-hint { color: #777; font-size: 11px; margin-top: 10px; }
+  /* v5.27: owner Users panel */
+  #users-overlay { position: fixed; inset: 0; z-index: 300; display: none;
+    align-items: center; justify-content: center; background: rgba(5,5,12,.92); }
+  #users-overlay.show { display: flex; }
+  #users-box { background: #14141c; border: 1px solid #2a2a38; border-radius: 12px;
+    padding: 18px; width: min(92vw, 380px); max-height: 84vh; overflow-y: auto; }
+  #users-box h2 { color: #ffd75f; margin: 0; font-size: 18px; }
+  .users-head { display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 8px; }
+  #users-close { background: none; border: 1px solid #333; color: #aaa;
+    border-radius: 8px; font-size: 14px; padding: 4px 10px; }
+  .users-create { border-bottom: 1px solid #26262e; padding-bottom: 10px; margin-bottom: 4px; }
+  .users-create input { display: block; width: 100%; box-sizing: border-box;
+    margin: 6px 0; padding: 9px; border-radius: 8px; border: 1px solid #333;
+    background: #0d0d12; color: #eee; font-size: 15px; }
+  #nu-go { width: 100%; padding: 10px; border: 0; border-radius: 8px;
+    background: linear-gradient(90deg,#ff5a5a,#ffd75f); color: #14141c;
+    font-weight: bold; font-size: 15px; margin-top: 4px; }
+  #nu-err { color: #ff7a7a; font-size: 13px; min-height: 18px; margin-top: 6px; }
+  .u-row { display: flex; align-items: center; gap: 8px; padding: 9px 2px;
+    border-top: 1px solid #26262e; }
+  .u-name { color: #eee; font-size: 14px; }
+  .u-owner { color: #ffd75f; font-size: 11px; }
+  .u-date { color: #777; font-size: 11px; }
+  .u-sp { flex: 1; }
+  .u-btn { background: #23232e; border: 1px solid #3a3a48; color: #ddd;
+    border-radius: 8px; font-size: 12px; padding: 6px 9px; }
+  .u-danger { color: #ff8a8a; border-color: #5a2a2a; }
+  .users-loading { color: #888; font-size: 13px; padding: 12px 2px; }
+  #user-section { border-top: 1px solid #26262e; margin-top: 6px; padding-top: 8px; }
+  #user-section .user-line { display: flex; align-items: center; gap: 8px;
+    padding: 4px 12px 8px; }
+  #user-name { color: #ffd75f; font-weight: bold; font-size: 15px; }
+  #world-label { color: #8fd0ff; font-size: 12px; }
   .lbl { color: #888; font-size: 12px; margin-right: 6px; }
   #map-name { color: #eee; font-size: 14px; word-break: break-all; }
 
@@ -564,10 +619,18 @@
   <button id="btn-record" title="Record the screen as a video">&#9679; Record</button>
 </div>
 <div id="m-setup" class="menu-drop">
+  <div class="menu-ver">Crumbs HUD <span class="ver-num">v%%CRUMBS_VERSION%%</span></div>
   <button id="menu-setup">Setup&hellip;</button>
   <button id="menu-key" title="Set the share key for a public HUD">Key&hellip;</button>
   <button id="menu-log" title="Server event log (debugging)">Server log</button>
   <button id="menu-recovery" title="Checkpoint slots and recent recovery events">Recovery&hellip;</button>
+  <div id="user-section" hidden>
+    <div class="user-line"><span id="user-name"></span><span id="world-label"></span></div>
+    <button id="btn-world-switch" title="Switch between My vault and the shared Commons">&#x1F310; Switch world</button>
+    <button id="btn-change-pass" title="Change your password">&#x1F511; Change password</button>
+    <button id="btn-logout" title="Log out">&#x23FB; Log out</button>
+  </div>
+  <button id="menu-users" hidden title="Create accounts, reset passwords">&#x1F465; Users&hellip;</button>
 </div>
 
 <div id="stage"><canvas id="grid"></canvas></div>
@@ -852,6 +915,33 @@
 
 <div id="mission-hud" hidden></div>
 
+<!-- v5.27: login overlay (public mode only) -->
+<div id="login-overlay">
+  <div id="login-box">
+    <h2>&#x1F9F1; Crumbs HUD</h2>
+    <div class="login-sub">Log in to your vault</div>
+    <input id="login-user" type="text" placeholder="username" autocomplete="username" autocapitalize="none" autocorrect="off">
+    <input id="login-pass" type="password" placeholder="password" autocomplete="current-password">
+    <button id="login-go">Log in</button>
+    <div id="login-err"></div>
+    <div class="login-hint">No account yet? Ask the HUD owner to register one for you.</div>
+  </div>
+</div>
+
+<!-- v5.27: owner-only Users panel -->
+<div id="users-overlay">
+  <div id="users-box">
+    <div class="users-head"><h2>&#x1F465; Users</h2><button id="users-close">&#x2715;</button></div>
+    <div class="users-create">
+      <input id="nu-user" type="text" placeholder="new username" autocomplete="off" autocapitalize="none" autocorrect="off">
+      <input id="nu-pass" type="password" placeholder="password (min 4 chars)" autocomplete="new-password">
+      <button id="nu-go">Create user</button>
+      <div id="nu-err"></div>
+    </div>
+    <div id="users-list"></div>
+  </div>
+</div>
+
 <div id="splash">
   <div class="splash-title">Crumbs HUD</div>
   <div class="splash-sub">tile painter &middot; v%%CRUMBS_VERSION%%</div>
@@ -1130,33 +1220,27 @@ async function api(path, body) {
     try {
       const r = await fetch(path, opt);
       const j = await r.json();
-      // v5.16: public share key — ask once, remember on this device, retry.
-      if (r.status === 403 && j && j.error && /write key required|share key required/.test(j.error)) {
-        if (!opt._keyTried) {
-          // v5.22.4: trim — iPhone keyboards love to capitalize the first
-          // letter or trail a space, both of which silently break the key.
-          let k = prompt("This shared HUD needs a key to save changes.\nEnter the share key (stored on this device only):");
-          k = (k || "").trim();
-          if (k) {
-            crumbsKey = k;
-            try { localStorage.setItem("crumbsKey", k); } catch (e) {}
-            opt.headers["X-Crumbs-Key"] = k;
-            opt._keyTried = true;
-            attempt--;
-            continue;
-          }
-        } else {
-          // v5.22.3: the key just entered was rejected too — a wrong key
-          // must not be kept and re-asked on every action. Clear it, say so.
-          crumbsKey = "";
-          try { localStorage.removeItem("crumbsKey"); } catch (e) {}
-          toast("that share key was rejected \u2014 Setup \u2192 Key\u2026 to enter the right one");
-          Sfx.error();
-        }
-      }
+      // v5.27: Lloyd's firm direction — players NEVER deal with the share
+      // key. The old auto-prompt dialog is gone for good: in public mode
+      // an unauthenticated visitor gets the login overlay (see authGate /
+      // the 401 handler below), a logged-in player never needs a key at
+      // all, and the key survives only as a silent programmatic bypass
+      // (X-Crumbs-Key header, ?key= URL, or the owner's Setup → Key…
+      // entry). A 403 here just flows through — each caller toasts r.error
+      // honestly.
       setServerDown(false);
+      // v5.27: the session died (or was never established) — show the
+      // login overlay instead of failing silently. Don't do this for the
+      // auth endpoints themselves (the login form lives behind them).
+      if (r.status === 401 && !/\/api\/auth\//.test(path) && !/\/api\/health/.test(path)) {
+        showLogin("your session expired — log in again");
+        const err = new Error("login required");
+        err.auth = true;
+        throw err;
+      }
       return j;
     } catch (e) {
+      if (e && e.auth) throw e;  // v5.27: a dead session isn't a retryable blip
       lastErr = e;
       await new Promise(res => setTimeout(res, 400 * (attempt + 1)));
     }
@@ -1183,6 +1267,197 @@ function toast(msg) {
   t.textContent = msg; t.style.display = "block";
   clearTimeout(t._h); t._h = setTimeout(() => t.style.display = "none", 2200);
 }
+
+// ---- v5.27: accounts ----------------------------------------------------
+// Public mode gates the HUD behind a login: the page asks /api/auth/me
+// first; local mode reports public_mode:false and boots straight in.
+let ME = null;          // {username, is_owner, world} while logged in
+let PUBLIC_MODE = false;
+
+function showLogin(msg) {
+  if (msg) $("login-err").textContent = msg;
+  $("login-overlay").classList.add("show");
+  setTimeout(() => $("login-user").focus(), 50);
+}
+function hideLogin() {
+  $("login-overlay").classList.remove("show");
+  $("login-err").textContent = "";
+  $("login-pass").value = "";
+}
+function updateUserMenu() {
+  const sec = $("user-section");
+  // v5.27: the share key is a hidden owner-only path now — players never
+  // see it. In local mode (no accounts) the button stays as it always was.
+  const keyBtn = $("menu-key");
+  if (keyBtn) keyBtn.style.display = (PUBLIC_MODE && ME && !ME.is_owner) ? "none" : "";
+  // v5.27: Setup → Users… is owner-only. The button is hidden for everyone
+  // else; the server re-checks owner on the panel's API calls too.
+  const usersBtn = $("menu-users");
+  if (usersBtn) usersBtn.hidden = !(ME && ME.is_owner);
+  if (!ME) { sec.hidden = true; return; }
+  sec.hidden = false;
+  $("user-name").textContent = (ME.is_owner ? "\u2B50 " : "") + ME.username;
+  $("world-label").textContent = ME.world === "commons"
+    ? "\u{1F310} Commons (shared)" : "\u{1F512} My vault";
+}
+// true when the HUD may boot; in public mode without a session this parks
+// on the login overlay until the user logs in.
+async function authGate() {
+  let me;
+  try {
+    const r = await fetch("/api/auth/me");
+    me = await r.json();
+  } catch (e) { return true; }  // server unreachable — init's catch reports it
+  PUBLIC_MODE = !!me.public_mode;
+  if (!PUBLIC_MODE || (me.logged_in && me.username)) {
+    ME = me.logged_in
+      ? { username: me.username, is_owner: me.is_owner, world: me.world || "private" }
+      : null;
+    updateUserMenu();
+    return true;
+  }
+  showLogin();
+  return await new Promise(resolve => { window._loginResolve = resolve; });
+}
+async function doLogin() {
+  const u = $("login-user").value.trim().toLowerCase();
+  const p = $("login-pass").value;
+  if (!u || !p) { $("login-err").textContent = "enter a username and password"; return; }
+  $("login-err").textContent = "";
+  try {
+    const r = await api("/api/auth/login", { username: u, password: p });
+    if (!r.ok) { $("login-err").textContent = r.error || "login failed"; return; }
+    ME = { username: r.username, is_owner: r.is_owner, world: r.world || "private" };
+    hideLogin();
+    updateUserMenu();
+    if (window._loginResolve) {
+      const res = window._loginResolve; window._loginResolve = null; res(true);
+    } else {
+      location.reload();  // session expired mid-use — reboot into a clean state
+    }
+  } catch (e) {
+    if (!e.auth) $("login-err").textContent = "can't reach the server";
+  }
+}
+$("login-go").onclick = doLogin;
+$("login-user").addEventListener("keydown", e => { if (e.key === "Enter") $("login-pass").focus(); });
+$("login-pass").addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
+$("btn-logout").onclick = async () => {
+  try { await api("/api/auth/logout"); } catch (e) {}
+  location.reload();  // the gate shows the login overlay on the way back in
+};
+$("btn-world-switch").onclick = async () => {
+  if (!ME) return;
+  const next = ME.world === "commons" ? "private" : "commons";
+  try {
+    const r = await api("/api/auth/world", { world: next });
+    if (!r.ok) { toast(r.error || "switch failed"); return; }
+  } catch (e) { if (e.auth) return; toast("switch failed"); return; }
+  location.reload();  // boot fresh into the other world
+};
+$("btn-change-pass").onclick = async () => {
+  const oldp = prompt("Current password:");
+  if (oldp === null) return;
+  const np = prompt("New password (min 8 chars):");
+  if (np === null) return;
+  try {
+    const r = await api("/api/auth/change-password", { old: oldp, new: np });
+    toast(r.ok ? "password changed" : (r.error || "change failed"));
+  } catch (e) { if (!e.auth) toast("change failed"); }
+};
+
+// ---- v5.27: owner Users panel -------------------------------------------
+// Setup → Users… is visible only to the owner (see updateUserMenu); the
+// server re-checks owner on every call, so non-owners can never reach it.
+const _USERNAME_RE = /^[a-z0-9_-]{3,24}$/;  // matches the server's _USERNAME_RE
+function openUsers() {
+  $("nu-err").textContent = "";
+  $("users-overlay").classList.add("show");
+  refreshUsers();
+}
+function closeUsers() { $("users-overlay").classList.remove("show"); }
+async function refreshUsers() {
+  const list = $("users-list");
+  list.innerHTML = '<div class="users-loading">loading…</div>';
+  let r;
+  try { r = await api("/api/auth/users"); }
+  catch (e) {
+    list.innerHTML = '<div class="users-loading">' +
+      (e && e.auth ? "session expired — log in again" : "couldn't reach the server") + "</div>";
+    return;
+  }
+  if (!r.ok) {
+    list.innerHTML = '<div class="users-loading">' + esc(r.error || "couldn't load users") + "</div>";
+    return;
+  }
+  list.innerHTML = "";
+  (r.users || []).forEach(u => {
+    const row = document.createElement("div");
+    row.className = "u-row";
+    const badge = u.is_owner ? ' <span class="u-owner">⭐ owner</span>' : "";
+    const created = u.created ? String(u.created).slice(0, 10) : "—";
+    row.innerHTML = '<span class="u-name">' + esc(u.username) + badge + "</span>" +
+      '<span class="u-date">' + esc(created) + '</span><span class="u-sp"></span>';
+    if (!u.is_owner) {
+      const rp = document.createElement("button");
+      rp.className = "u-btn"; rp.textContent = "Reset pw";
+      rp.onclick = () => resetUserPw(u.username);
+      const del = document.createElement("button");
+      del.className = "u-btn u-danger"; del.textContent = "Delete";
+      del.onclick = () => deleteUser(u.username);
+      row.appendChild(rp);
+      row.appendChild(del);
+    }
+    list.appendChild(row);
+  });
+  if (!list.children.length)
+    list.innerHTML = '<div class="users-loading">no users yet</div>';
+}
+async function createUser() {
+  // same rules as the server: trim + lowercase, then the strict charset.
+  // A created account works immediately — no approval, no pending state.
+  const uname = $("nu-user").value.trim().toLowerCase();
+  const pw = $("nu-pass").value;
+  const err = $("nu-err");
+  err.textContent = "";
+  if (!_USERNAME_RE.test(uname)) {
+    err.textContent = "username: 3–24 chars, a–z 0–9 _ - only";
+    return;
+  }
+  if (pw.length < 4) { err.textContent = "password: min 4 chars"; return; }
+  let r;
+  try { r = await api("/api/auth/register", { username: uname, password: pw }); }
+  catch (e) {
+    err.textContent = (e && e.auth) ? "session expired — log in again" : "couldn't reach the server";
+    return;
+  }
+  if (!r.ok) { err.textContent = r.error || "create failed"; return; }  // 409: name taken
+  $("nu-user").value = ""; $("nu-pass").value = "";
+  toast("user " + uname + " created — they can log in now");
+  refreshUsers();
+}
+async function resetUserPw(username) {
+  const np = prompt("New password for " + username + " (min 4 chars):");
+  if (np === null) return;
+  try {
+    const r = await api("/api/auth/reset-password", { username: username, new: np });
+    toast(r.ok ? "password reset for " + username : (r.error || "reset failed"));
+  } catch (e) { if (!e.auth) toast("reset failed"); }
+}
+async function deleteUser(username) {
+  if (!confirm("Delete user " + username + "?\n\nTheir account is removed immediately and their vault is archived on the server.")) return;
+  try {
+    const r = await api("/api/auth/delete", { username: username });
+    if (!r.ok) { toast(r.error || "delete failed"); return; }
+    toast("deleted " + username);
+    refreshUsers();
+  } catch (e) { if (!e.auth) toast("delete failed"); }
+}
+$("menu-users").onclick = () => { closeOverlays(); openUsers(); };
+$("users-close").onclick = closeUsers;
+$("nu-go").onclick = createUser;
+$("nu-user").addEventListener("keydown", e => { if (e.key === "Enter") $("nu-pass").focus(); });
+$("nu-pass").addEventListener("keydown", e => { if (e.key === "Enter") createUser(); });
 
 // ---- v5.8: synthesized sound effects — Web Audio, zero audio files --------
 // Every sound is generated: UI blips, paint ticks, generate whoosh, undo/redo
@@ -5251,6 +5526,9 @@ $("pack-btn").onclick = () => { toggleOverlay("sheet-pack"); syncInv(); };
 
 (async function init() {
   try {
+    // v5.27: public mode parks on the login overlay until the user logs
+    // in; local mode skips the gate and boots straight in.
+    if (!(await authGate())) return;
     splashStep(6, "Waking the server\u2026");
     const b = await api("/api/biomes");
     b.biomes.forEach(x => {
@@ -5338,7 +5616,7 @@ $("pack-btn").onclick = () => { toggleOverlay("sheet-pack"); syncInv(); };
     // check's "current" — the running server's version, which is honest.
     function patchVersionPlaceholder(ver) {
       if (!ver) return;
-      document.querySelectorAll("#title small, .splash-sub").forEach(el => {
+      document.querySelectorAll("#title small, .splash-sub, .menu-ver .ver-num").forEach(el => {
         if (el.textContent.includes("%%CRUMBS_VERSION%%"))
           el.textContent = el.textContent.replace(/%%CRUMBS_VERSION%%/g, ver);
       });

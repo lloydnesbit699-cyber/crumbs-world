@@ -3,6 +3,57 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.27 — 2026-09-25
+
+Lloyd's direction: multiple accounts, each with a private vault, plus one
+shared Commons world. Server-verified; not phone-verified.
+
+- **Accounts.** Public mode (`--public`) now has real logins: an owner
+  account is created on first boot (password printed once — write it
+  down), and the owner can register more accounts from the server side.
+  Sessions are signed cookies (`crumbs_sid`, HttpOnly, SameSite=Lax,
+  30-day sliding refresh). Login is rate-limited to 5 tries/minute/IP
+  with a generic "bad login" that never says whether the username exists.
+  Existing top-level user data (maps, sidecars, custom tiles, patrols,
+  backups, trash, recovery) migrates into the owner's vault on first boot.
+- **Private vaults + the Commons.** Every account gets its own vault —
+  its own maps, custom tiles, patrols, backups, everything. The Commons
+  is one shared world every logged-in user can paint in: you save, they
+  refresh, they see it. (Refresh-based for now — no live cursors or
+  real-time tile sync yet; that's the next multiplayer step.) Switching
+  between My vault and Commons saves the dirty vault first, so nothing
+  is ever lost in the swap. World names are strictly `private`/`commons`.
+- **Per-player undo.** Undo/redo stacks are keyed by (player, world): in
+  the Commons, your undo only ever reverts your own paints. A private
+  undo can never leak across a world switch either.
+- **Custom tiles stay home.** Each vault has its own custom shelf; the
+  Commons has its own, writable by everyone logged in. Private imports
+  never appear in the Commons and vice versa. The shipped starter library
+  stays available everywhere.
+- **New UI.** Public mode parks on a login overlay until you log in (any
+  expired session re-opens it). The Setup menu shows your name, current
+  world, a world switcher, change-password, and logout — the owner also
+  gets a Users… panel for managing accounts. The old share-key
+  flow still works as an owner master bypass.
+- **Owner safety.** The owner can reset any user's password (old sessions
+  die immediately) and clear the Commons without touching private vaults.
+  Setup → Users… (owner only) is the account desk: a create-user form
+  with username/password fields (same rules as the server — 3–24 chars,
+  a–z 0–9 _ -), an instant user list with created dates and the ⭐ owner
+  badge, and per-user reset-password and delete. New accounts work the
+  moment they're created — no approval queue, no pending state. Deleting
+  a user kills their sessions at once and archives their vault under
+  `vaults/.deleted/` so a mistake is recoverable; the owner account
+  itself can't be deleted. Non-owners never see the panel or its menu
+  entry — the server re-checks owner on every one of these calls.
+  Break-glass: if the owner password is lost, set the `CRUMBS_OWNER_PASSWORD`
+  environment variable to a new password and restart the server — the
+  owner password resets and all owner sessions are invalidated. Unset the
+  variable afterwards. (Access-gate security, not encryption: anyone with
+  the server's files can read the vaults.)
+- **Local mode unchanged.** Without `--public` there are no accounts, no
+  logins, no vaults — the classic single-user HUD, exactly as before.
+
 ## v5.26 — 2026-09-25
 
 Lloyd's direction: harden the categorization, and give straight colors

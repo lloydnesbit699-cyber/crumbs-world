@@ -452,7 +452,8 @@ def _update_remote_version():
     raw = _update_fetch("crumbs_hud.py").decode("utf-8", "replace")
     m = re.search(r'^APP_VERSION\s*=\s*"([^"]+)"', raw, re.M)
     return m.group(1) if m else None
-SCHEMA_VERSION = 1  # v5.16: stamped on every save; migrations run on load
+SCHEMA_VERSION = 2  # v5.29: height_override + the .portals.json sidecar;
+                        # migrations run on load (see _migrate_sidecar)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 HTML_PATH = os.path.join(SCRIPT_DIR, "editor.html")
 DEFAULT_SAVE = "hud_map.json"
@@ -796,6 +797,7 @@ def _vault_fresh_state(vault_id):
     _load_items(DEFAULT_SAVE)
     _load_npcs(DEFAULT_SAVE)
     _load_gear(DEFAULT_SAVE)
+    _load_portals(DEFAULT_SAVE)  # v5.29: this map's pocket links (or none)
     _vault_stash_current()
 
 
@@ -844,7 +846,8 @@ _MIGRATE_FILES = ("hud_map.json", "custom_tiles.json", "hud_patrols.json",
                   "entitlements.json")
 _SIDECAR_SUFFIXES = (".rules.json", ".traits.json", ".names.json",
                      ".missions.json", ".items.json", ".npcs.json",
-                     ".gear.json", ".slots.json")
+                     ".gear.json", ".slots.json",
+                     ".portals.json")  # v5.29: pocket-map links ride along
 
 
 def _git_tracked(fname):
@@ -1554,6 +1557,12 @@ def _migrate_sidecar(kind, doc):
         # each loader already defaults, so just record the migration.
         doc["schema"] = 1
         doc["_migrated_from"] = v
+    if v < 2:
+        # v1 -> v2: per-cell height overrides and the .portals.json sidecar
+        # are new. Old saves default cleanly — a blank height grid and no
+        # portal links — so there is nothing to backfill, just re-stamp.
+        doc["schema"] = 2
+        doc["_migrated_from"] = v
     return doc
 
 
@@ -1925,6 +1934,16 @@ _npcs = []           # [{id,name,tile_id,x,y,role,line,stock:[{item,price,qty}]}
 _npc_seq = {"next": 1}
 _hero_inv = []       # [{item, qty}] — this run's pack, stacking
 _gold = 25           # this run's coin
+
+# ---- v5.29: pocket-map portals ---------------------------------------------
+# "x,y" -> {target, seed, biome, preset, width, height, label, return_xy}.
+# A portal links one cell to a pocket map (generated or hand-picked); the
+# link lives in a <map>.portals.json sidecar so old saves keep loading and
+# untouched maps never grow a portal key.
+_portals = {}
+_warp_guard = None   # (file, x, y) — the landing cell of a warp; the play
+                     # handlers skip the portal check there once so the hero
+                     # doesn't bounce straight back through the return link.
 _equipped = {"weapon": None, "tool": None}  # item ids, or None
 _npc_near = set()    # npc ids the hero is already beside (no repeat hellos)
 
@@ -2486,12 +2505,229 @@ def _validate_map():
 _NON_MAPS = {"custom_tiles.json", "sprite_library.json", "shared_library.json",
              "hud_patrols.json"}
 
+def _safe_name(name):
+    """Basename-only map filenames; no path traversal."""
+    name = os.path.basename(str(name or "")).strip()
+    return name if name else None
+
+
+# ---- v5.29: pocket-map portals ---------------------------------------------
+# A portal links one cell ("x,y") to a pocket map — a small generated cave,
+# dungeon, or clearing the hero can step into and back out of. The links live
+# in a <map>.portals.json sidecar (migrated, bundled, renamed, trashed, and
+# restored alongside the map), so old saves load untouched and untouched maps
+# never grow portal keys. A freshly generated pocket always gets a return
+# portal back to its parent, so the hero can never get stuck.
+def _portals_path(name):
+    base = name[:-5] if name.endswith(".json") else name
+    return _vpath(base + ".portals.json")
+
+
+def _sanitize_portal(p):
+    """v5.29: coerce one portal dict into the canonical shape, or None."""
+    if not isinstance(p, dict):
+        return None
+    target = _safe_name(str(p.get("target", "")))
+    if not target:
+        return None
+    try:
+        x = int(p.get("x", 0)); y = int(p.get("y", 0))
+        w = int(p.get("width", 16)); h = int(p.get("height", 16))
+    except (TypeError, ValueError):
+        return None
+    if not (0 <= x < world.width and 0 <= y < world.height):
+        return None
+    w = max(4, min(64, w)); h = max(4, min(64, h))
+    seed = p.get("seed")
+    try:
+        seed = int(seed) if seed is not None else None
+    except (TypeError, ValueError):
+        seed = None
+    biome = str(p.get("biome", "dungeon"))
+    if biome not in core.BIOMES:
+        biome = "dungeon"
+    preset = p.get("preset")
+    if preset not in (core.GENERATION_PRESETS or {}):
+        preset = None
+    label = str(p.get("label", "") or "")[:40]
+    rxy = p.get("return_xy")
+    return_xy = None
+    if (isinstance(rxy, (list, tuple)) and len(rxy) == 2
+            and all(isinstance(v, int) for v in rxy)):
+        return_xy = [rxy[0], rxy[1]]
+    return {"x": x, "y": y, "target": target, "seed": seed, "biome": biome,
+            "preset": preset, "width": w, "height": h, "label": label,
+            "return_xy": return_xy}
+
+
+def _load_portals(name):
+    """v5.29: read this map's portal links; missing/corrupt -> none."""
+    global _portals
+    _portals = {}
+    saved, err = _load_json_file(_portals_path(name), "portals", {})
+    if err:
+        _log_event(f"portals sidecar: {err['detail']}")
+        return
+    rows = (saved or {}).get("portals", {})
+    if isinstance(rows, dict):
+        for k, v in rows.items():
+            try:
+                px, py = (int(n) for n in str(k).split(","))
+            except (TypeError, ValueError):
+                continue
+            v = dict(v) if isinstance(v, dict) else {}
+            v["x"], v["y"] = px, py
+            clean = _sanitize_portal(v)
+            if clean:
+                _portals[k] = clean
+
+
+def _save_portals(name):
+    """v5.29: persist this map's portal links. Best-effort, like the others."""
+    _write_portal_sidecar(name, _portals)
+
+
+def _write_portal_sidecar(name, portals):
+    """v5.29: write a portals dict to any map's sidecar — used for the live
+    map (_save_portals) and for a fresh pocket's return link."""
+    base = name[:-5] if name.endswith(".json") else name
+    try:
+        with open(_vpath(base + ".portals.json"), "w") as f:
+            json.dump(_stamp({"portals": portals}), f)
+        return True
+    except OSError as e:
+        print(f"[hud] could not save portals: {e}")
+        return False
+
+
+def _portal_at(x, y):
+    """v5.29: the portal link on this cell, or None."""
+    return _portals.get(f"{x},{y}")
+
+
+def _switch_map(name, path):
+    """v5.29: one shared map-switch path for /api/load, portal warps, and
+    anything else that changes which file is live. Returns (ok, meta)."""
+    global _warp_guard
+    _warp_guard = None  # a manual switch clears any pending warp landing
+    ok = world.load(path) or world.load_csv(path)
+    if not ok:
+        return False, None
+    history.undo_stack.clear()
+    history.redo_stack.clear()
+    _load_rules(name)   # also sets _current_map = name
+    _load_traits(name)
+    _load_names(name)
+    _load_missions(name)
+    _load_items(name)
+    _load_npcs(name)
+    _load_portals(name)  # v5.29
+    _mission_reconcile_patrols()
+    _log_event(f"loaded {name}")
+    return True, {"width": world.width, "height": world.height,
+                  "rules": rules}
+
+
+def _pocket_spawn():
+    """v5.29: a walkable spawn cell near the middle of the current map."""
+    sx, sy = world.width // 2, world.height // 2
+    if 0 <= sx < world.width and 0 <= sy < world.height \
+            and _walkable(sx, sy):
+        return sx, sy
+    for y in range(world.height):
+        for x in range(world.width):
+            if _walkable(x, y):
+                return x, y
+    return 0, 0
+
+
+def _unique_pocket_name(base):
+    """v5.29: base-pocket.json, base-pocket-2.json, ... — never collides."""
+    base = base[:-5] if base.endswith(".json") else base
+    cand = f"{base}-pocket.json"
+    n = 2
+    while os.path.isfile(_vpath(cand)):
+        cand = f"{base}-pocket-{n}.json"
+        n += 1
+    return cand
+
+
+def _generate_map_file(name, seed, biome, preset_id, w, h):
+    """v5.29: deterministically build a pocket map file on disk (plus its
+    rules sidecar). The live world is untouched. Returns True on success."""
+    w = max(4, min(64, int(w or 16)))
+    h = max(4, min(64, int(h or 16)))
+    noise_over = None
+    if preset_id:
+        preset = core.GENERATION_PRESETS.get(preset_id)
+        if preset:
+            biome = preset["biome"]
+            noise_over = preset["noise"] or None
+    pocket = core.WorldMap(w, h, assets)
+    pocket.generate_biome(biome, seed, noise_over)
+    meta = {"biome": biome, "seed": seed}
+    if preset_id:
+        meta["preset"] = preset_id
+    if not pocket.save(_vpath(name), schema=SCHEMA_VERSION):
+        return False
+    try:
+        with open(_rules_path(name), "w") as f:
+            json.dump(_stamp({"tweaks": dict(DEFAULT_RULES),
+                              "meta": dict(meta, modified=int(time.time()),
+                                            description="")}), f)
+    except OSError as e:
+        print(f"[hud] could not save pocket rules: {e}")
+        return False
+    return True
+
+
+def _pocket_target_meta(portal):
+    """v5.29: (name, seed, biome, preset, w, h) for a portal's target map."""
+    return (portal.get("target"), portal.get("seed"), portal.get("biome"),
+            portal.get("preset"), portal.get("width"), portal.get("height"))
+
+
+def _warp_to(portal):
+    """v5.29: switch the live map to a portal's target. Returns (ok, payload);
+    payload is the warp descriptor the client needs to rebuild its view.
+    The hero lands on the portal's return cell (or the target's spawn), and
+    _warp_guard is set so the landing cell doesn't bounce straight back."""
+    global _warp_guard
+    target = _safe_name(portal.get("target") or "")
+    if not target:
+        return False, None
+    tp = _vpath(target)
+    if not os.path.isfile(tp):
+        # the pocket file is gone — rebuild it from the portal's own recipe
+        seed, biome = portal.get("seed"), portal.get("biome")
+        if seed is None or not biome:
+            return False, None
+        if not _generate_map_file(target, seed, biome, portal.get("preset"),
+                                  portal.get("width"), portal.get("height")):
+            return False, None
+    ok, meta = _switch_map(target, tp)
+    if not ok:
+        return False, None
+    rxy = portal.get("return_xy")
+    if (isinstance(rxy, (list, tuple)) and len(rxy) == 2
+            and all(isinstance(v, int) for v in rxy)):
+        lx, ly = rxy[0], rxy[1]
+    else:
+        lx, ly = _pocket_spawn()
+    if not (0 <= lx < world.width and 0 <= ly < world.height
+            and _walkable(lx, ly)):
+        lx, ly = _pocket_spawn()
+    _warp_guard = (target, lx, ly)
+    return True, {"file": target, "x": lx, "y": ly,
+                  "width": meta["width"], "height": meta["height"]}
+
+
 def _map_sidecars(name):
     base = name[:-5] if name.endswith(".json") else name
     return [_vpath(base + ext)
             for ext in (".json", ".rules.json", ".traits.json", ".names.json",
                         ".missions.json", ".items.json",
-                        ".npcs.json")]  # v5.12, v5.13
+                        ".npcs.json", ".portals.json")]  # v5.12, v5.13, v5.29
 
 def _slots_path():
     base = _current_map or DEFAULT_SAVE
@@ -2538,16 +2774,24 @@ def _snapshot_state():
         "game_seq": copy.deepcopy(_game_seq),
         "world": copy.deepcopy(world_profile),
         "meta": copy.deepcopy(map_meta),
+        "height_override": [row[:] for row in world.height_override],  # v5.29
+        "portals": copy.deepcopy(_portals),  # v5.29: links undo too
     }
 
 
 def _restore_state(s):
     global _patrols, _patrol_seq, traits_grid, rules, game_rules
-    global _game_seq, map_meta, object_names
+    global _game_seq, map_meta, object_names, _portals  # v5.29: +_portals
     world.width, world.height = s["width"], s["height"]
     world.data = [row[:] for row in s["tiles"]]
     world.object_layer = [row[:] for row in s["objects"]]
     world.collision_layer = [row[:] for row in s["collision"]]
+    # v5.29: per-cell height overrides ride undo/redo (old states: blank)
+    world.height_override = [row[:] for row in
+                             s.get("height_override",
+                                   [[None] * s["width"]
+                                    for _ in range(s["height"])])]
+    _portals = copy.deepcopy(s.get("portals", {}))  # v5.29
     _patrols = copy.deepcopy(s["patrols"])
     _patrol_seq = copy.deepcopy(s["patrol_seq"])
     traits_grid = copy.deepcopy(s["traits"])
@@ -2562,6 +2806,7 @@ def _restore_state(s):
     _save_traits(_current_map)
     _save_names(_current_map)  # v5.1
     _save_rules(_current_map)
+    _save_portals(_current_map)  # v5.29
     _mark_dirty()
 
 
@@ -2575,11 +2820,19 @@ def _undoable(label, fn):
     return out
 
 
+def _preset_noise_over():
+    """v5.29: the active generation preset's noise recipe, if any — so the
+    eraser restores exactly what a preset build placed, not the raw biome."""
+    preset = core.GENERATION_PRESETS.get(map_meta.get("preset") or "")
+    return (preset or {}).get("noise") or None
+
+
 def _natural_tile(x, y):
     """v5.0: what the eraser restores — the seed's own ground for this cell,
     or the map's most common ground tile when the seed is unknown."""
     t = core.natural_tile_at(assets.tiles, map_meta.get("biome"),
-                             map_meta.get("seed"), x, y)
+                             map_meta.get("seed"), x, y,
+                             noise_over=_preset_noise_over())  # v5.29
     if t is not None:
         return t
     return _common_ground()
@@ -2596,7 +2849,8 @@ def _common_ground():
 def _natural_grid():
     """v5.0: the whole seed-ground grid for the eraser preview cache."""
     g = core.natural_grid(assets.tiles, map_meta.get("biome"),
-                          map_meta.get("seed"), world.width, world.height)
+                          map_meta.get("seed"), world.width, world.height,
+                          noise_over=_preset_noise_over())  # v5.29
     if g is not None:
         return g
     base = _common_ground()
@@ -2799,6 +3053,7 @@ _load_names(DEFAULT_SAVE)   # v5.1: per-instance names (or none)
 _load_missions(DEFAULT_SAVE)  # v5.12: Melody's missions (or none)
 _load_items(DEFAULT_SAVE)    # v5.13: this map's gear (or none)
 _load_npcs(DEFAULT_SAVE)     # v5.13: this map's folks (or none)
+_load_portals(DEFAULT_SAVE)  # v5.29: this map's pocket links (or none)
 
 # v3.2: built-in water/ocean colors are swimmable — slow the hero, don't block
 for _tid, _t in assets.tiles.items():
@@ -3034,6 +3289,7 @@ def _save_now(name=DEFAULT_SAVE):
         _save_state["dirty"] = False
         _save_state["last"] = time.strftime("%H:%M:%S")
         _save_rules(name)  # v3.7: rules ride alongside the map
+        _save_portals(name)  # v5.29: portal links ride alongside the map
         _checkpoint_save()  # v5.21.x: checkpoint rides alongside the save
         return True
     return False
@@ -3125,7 +3381,8 @@ def _tileset_png_bytes(used):
 
 _BUNDLE_EXTS = (".rules.json", ".traits.json", ".names.json",
                 ".missions.json", ".items.json", ".npcs.json",
-                ".gear.json", ".slots.json")  # v5.16: gear rides the bundle
+                ".gear.json", ".slots.json",
+                ".portals.json")  # v5.16: gear rides the bundle; v5.29: portals too
 
 
 def _build_bundle(name):
@@ -3263,6 +3520,7 @@ def _restore_backup(name):
                                 (".missions.json", _load_missions),
                                 (".items.json", _load_items),
                                 (".npcs.json", _load_npcs),
+                                (".portals.json", _load_portals),  # v5.29
                                 (".gear.json", _load_gear)):
                 if name == cb + ext:
                     loader(_current_map)
@@ -3314,12 +3572,6 @@ def _paint_value(layer, tile_id):
 
 def _default_value(layer):
     return {"tiles": 0, "objects": None, "collision": False}[layer]
-
-
-def _safe_name(name):
-    """Basename-only map filenames; no path traversal."""
-    name = os.path.basename(str(name or "")).strip()
-    return name if name else None
 
 
 def _map_state():
@@ -4012,6 +4264,9 @@ class Handler(BaseHTTPRequestHandler):
             # the height overlay, and line-of-sight.
             self._send_json({"w": world.width, "h": world.height,
                              "grid": core.height_grid(world)})
+        elif path == "/api/portals":
+            # v5.29: read-only pocket-map links — the editor GETs this one.
+            self._send_json({"ok": True, "portals": _portals})
         elif path == "/api/visibility":
             # v5.10: ?x=&y= — 2D bool grid of cells visible from (x, y)
             # via line_of_sight (fog-of-war lite for play mode).
@@ -4151,8 +4406,8 @@ class Handler(BaseHTTPRequestHandler):
                     continue
                 if not (f.endswith(".json") or f.endswith(".txt")):
                     continue
-                if f.endswith((".rules.json", ".traits.json", ".names.json",
-                               ".slots.json")):
+                # v5.29: every canonical sidecar suffix stays out of the picker
+                if f.endswith(_SIDECAR_SUFFIXES):
                     continue
                 p = os.path.join(vdir, f)
                 w = h = None
@@ -4456,6 +4711,7 @@ class Handler(BaseHTTPRequestHandler):
         global traits_grid, hero_override  # v5.6: slots/load rebinds these
         global _current_map, mission_run  # v5.12: rename + mission runs
         global _gold, _item_cells  # v5.13: coin + ground items
+        global _warp_guard  # v5.29: portal warps set/clear it in play endpoints
         if not self._is_json_request():
             return self._send_json({"ok": False, "error": "Content-Type must be application/json"}, 415)
         if not self._same_origin_ok():
@@ -5778,6 +6034,9 @@ class Handler(BaseHTTPRequestHandler):
                 map_meta["seed"] = seed
                 if preset_id:
                     map_meta["preset"] = preset_id  # v5.16: which recipe
+                # v5.29: a fresh build has no hand-set heights
+                world.height_override = [[None] * world.width
+                                         for _ in range(world.height)]
                 rules.clear()
                 rules.update(DEFAULT_RULES)  # v3.7: fresh build, fresh rules
                 world_profile["meters"] = dict(DEFAULT_WORLD["meters"])  # v4.0
@@ -5806,6 +6065,8 @@ class Handler(BaseHTTPRequestHandler):
                                       for _ in range(h)]
                 world.collision_layer = [[False for _ in range(w)]
                                          for _ in range(h)]
+                # v5.29: a blank map has no hand-set heights
+                world.height_override = [[None] * w for _ in range(h)]
                 rules.clear()
                 rules.update(DEFAULT_RULES)  # v3.7: fresh build, fresh rules
                 world_profile["meters"] = dict(DEFAULT_WORLD["meters"])  # v4.0
@@ -5891,20 +6152,217 @@ class Handler(BaseHTTPRequestHandler):
                     p = os.path.join(SCRIPT_DIR, name)
                 if not os.path.isfile(p):
                     return self._send_json({"ok": False, "error": "file not found"}, 404)
-            ok = world.load(p) or world.load_csv(p)
-            if ok:
-                history.undo_stack.clear()
-                history.redo_stack.clear()
-                _load_rules(name)  # v3.7: this build's rules come with it
-                _load_traits(name)  # v4.0: this build's nature comes with it
-                _load_names(name)  # v5.1: this build's names come with it
-                _load_missions(name)  # v5.12: Melody's missions come with it
-                _load_items(name)  # v5.13: this map's gear
-                _load_npcs(name)  # v5.13: this map's folks
-                _mission_reconcile_patrols()  # v5.13: hazards stay on their map
-                _log_event(f"loaded {name}")
+            # v5.29: one shared switch path (loads portals too)
+            ok, _meta = _switch_map(name, p)
             return self._send_json({"ok": ok, "width": world.width,
                                     "height": world.height, "rules": rules})
+
+        if path == "/api/height-set":
+            # v5.29: the height/depth tool — one POST per stroke.
+            # {cells: [[x, y, h|null], ...]} — h in -2..3, null clears the
+            # override back to tile-driven. One undo step per stroke.
+            cells = body.get("cells")
+            if not isinstance(cells, list):
+                return self._send_json({"ok": False,
+                                        "error": "cells required"}, 400)
+            clean = []
+            for c in cells:
+                if not isinstance(c, (list, tuple)) or len(c) != 3:
+                    continue
+                x, y, h = c
+                if not isinstance(x, int) or not isinstance(y, int):
+                    continue
+                if not (0 <= x < world.width and 0 <= y < world.height):
+                    continue
+                if h is None:
+                    clean.append((x, y, None))
+                elif isinstance(h, int):
+                    clean.append((x, y, max(core.HEIGHT_MIN,
+                                            min(core.HEIGHT_MAX, h))))
+            if not clean:
+                return self._send_json({"ok": True, "cells": 0})
+
+            def _do():
+                for x, y, h in clean:
+                    world.height_override[y][x] = h
+                _mark_dirty()
+            _undoable("height stroke", _do)
+            return self._send_json({"ok": True, "cells": len(clean)})
+
+        if path == "/api/portals":
+            # v5.29: this map's pocket links (POST form; the editor also
+            # GETs it — see do_GET).
+            return self._send_json({"ok": True, "portals": _portals})
+
+        if path == "/api/portals/set":
+            # v5.29: link (or re-link) the portal at x,y. With no "target"
+            # a fresh pocket map is generated from seed/biome/preset and a
+            # return portal is written into the pocket's own sidecar, so
+            # the hero can always get back out.
+            try:
+                x = int(body.get("x")); y = int(body.get("y"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False,
+                                        "error": "x/y ints required"}, 400)
+            if not (0 <= x < world.width and 0 <= y < world.height):
+                return self._send_json({"ok": False,
+                                        "error": "x/y out of bounds"}, 400)
+            label = str(body.get("label", "") or "")[:40]
+            target = _safe_name(body.get("target") or "")
+            seed = body.get("seed")
+            try:
+                seed = int(seed) if seed is not None else None
+            except (TypeError, ValueError):
+                seed = None
+            biome = str(body.get("biome", "dungeon") or "dungeon")
+            if biome not in core.BIOMES:
+                return self._send_json({"ok": False,
+                                        "error": "unknown biome"}, 400)
+            preset = body.get("preset")
+            if preset not in (core.GENERATION_PRESETS or {}):
+                preset = None
+            try:
+                w = max(4, min(64, int(body.get("width", 16))))
+                h = max(4, min(64, int(body.get("height", 16))))
+            except (TypeError, ValueError):
+                w, h = 16, 16
+            key = f"{x},{y}"
+
+            def _do():
+                tgt = target
+                s = seed
+                rxy = None
+                # v5.29: the return portal must resolve to a file on disk —
+                # make sure the parent map itself is saved before linking.
+                _save_now(_current_map)
+                if not tgt:
+                    # generate a fresh pocket map for this link
+                    tgt = _unique_pocket_name(_current_map or DEFAULT_SAVE)
+                    if s is None:
+                        s = random.randrange(1_000_000_000)
+                    if not _generate_map_file(tgt, s, biome, preset, w, h):
+                        raise RuntimeError("pocket generation failed")
+                    # find a walkable cell in the pocket for its return
+                    # portal — regenerate the same map in memory to look.
+                    pb = biome
+                    pover = None
+                    if preset:
+                        pp = core.GENERATION_PRESETS.get(preset)
+                        if pp:
+                            pb = pp["biome"]
+                            pover = pp["noise"] or None
+                    mem = core.WorldMap(w, h, assets)
+                    mem.generate_biome(pb, s, pover)
+                    sx, sy = w // 2, h // 2
+                    if mem.collision_layer[sy][sx]:
+                        for yy in range(h):
+                            for xx in range(w):
+                                if not mem.collision_layer[yy][xx]:
+                                    sx, sy = xx, yy
+                                    break
+                            else:
+                                continue
+                            break
+                    # the pocket links straight back home, landing on this
+                    # very cell. Written to the pocket's own sidecar.
+                    ret = {"target": _current_map or DEFAULT_SAVE,
+                           "seed": None, "biome": biome, "preset": None,
+                           "width": world.width, "height": world.height,
+                           "label": "Back", "return_xy": [x, y]}
+                    _write_portal_sidecar(tgt, {f"{sx},{sy}": ret})
+                    rxy = [sx, sy]
+                _portals[key] = {"x": x, "y": y, "target": tgt, "seed": s,
+                                 "biome": biome, "preset": preset,
+                                 "width": w, "height": h, "label": label,
+                                 "return_xy": rxy}
+                _save_portals(_current_map)
+                _mark_dirty()
+            try:
+                _undoable("link pocket map", _do)
+            except RuntimeError as e:
+                return self._send_json({"ok": False, "error": str(e)}, 500)
+            p = _portals.get(key, {})
+            return self._send_json({"ok": True, "target": p.get("target"),
+                                    "seed": p.get("seed"), "x": x, "y": y})
+
+        if path == "/api/portals/clear":
+            # v5.29: unlink the portal at x,y. The pocket map file itself
+            # stays on disk — delete it from the Load picker if unwanted.
+            try:
+                x = int(body.get("x")); y = int(body.get("y"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False,
+                                        "error": "x/y ints required"}, 400)
+            key = f"{x},{y}"
+
+            def _do():
+                _portals.pop(key, None)
+                _save_portals(_current_map)
+                _mark_dirty()
+            _undoable("unlink portal", _do)
+            return self._send_json({"ok": True})
+
+        if path == "/api/portals/regenerate":
+            # v5.29: rebuild the portal's pocket map from a (possibly new)
+            # seed/biome/preset. The link stays; the file is replaced (the
+            # old build is archived to .backup by world.save).
+            try:
+                x = int(body.get("x")); y = int(body.get("y"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False,
+                                        "error": "x/y ints required"}, 400)
+            p = _portal_at(x, y)
+            if not p:
+                return self._send_json({"ok": False,
+                                        "error": "no portal there"}, 404)
+            seed = body.get("seed", p.get("seed"))
+            try:
+                seed = int(seed) if seed is not None else None
+            except (TypeError, ValueError):
+                seed = None
+            if seed is None:
+                seed = random.randrange(1_000_000_000)
+            biome = str(body.get("biome", p.get("biome") or "dungeon"))
+            if biome not in core.BIOMES:
+                return self._send_json({"ok": False,
+                                        "error": "unknown biome"}, 400)
+            preset = body.get("preset", p.get("preset"))
+            if preset not in (core.GENERATION_PRESETS or {}):
+                preset = None
+            target = p["target"]
+
+            def _do():
+                if not _generate_map_file(target, seed, biome, preset,
+                                          p["width"], p["height"]):
+                    raise RuntimeError("pocket regeneration failed")
+                p["seed"], p["biome"], p["preset"] = seed, biome, preset
+                _save_portals(_current_map)
+                _mark_dirty()
+            try:
+                _undoable("regenerate pocket", _do)
+            except RuntimeError as e:
+                return self._send_json({"ok": False, "error": str(e)}, 500)
+            _log_event(f"regenerated pocket {target} (seed {seed})")
+            return self._send_json({"ok": True, "target": target,
+                                    "seed": seed})
+
+        if path == "/api/portals/enter":
+            # v5.29: the editor's "step through" — switch to the portal's
+            # target without play mode running.
+            try:
+                x = int(body.get("x")); y = int(body.get("y"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False,
+                                        "error": "x/y ints required"}, 400)
+            p = _portal_at(x, y)
+            if not p:
+                return self._send_json({"ok": False,
+                                        "error": "no portal there"}, 404)
+            ok, payload = _warp_to(p)
+            if not ok:
+                return self._send_json({"ok": False,
+                                        "error": "warp failed"}, 500)
+            return self._send_json({"ok": True, **payload})
 
         if path == "/api/validate":
             # v5.6: one-tap map check — spawn, reachability, tile ids
@@ -6092,6 +6550,7 @@ class Handler(BaseHTTPRequestHandler):
                 hero_override = None
             play["active"] = True
             play["tx"], play["ty"] = sx, sy
+            _warp_guard = None  # v5.29: a fresh run has no pending landing
             _reset_rule_session()  # v3.9: fresh keys, messages, win/lose
                                    # v4.0: fresh meters + inventory
             active = next((m for m in _missions if m.get("active")), None)
@@ -6132,10 +6591,26 @@ class Handler(BaseHTTPRequestHandler):
             cells = cells[:kept]
             if cells:
                 play["tx"], play["ty"] = cells[-1]
+            # v5.29: stepping onto a portal cell warps to its pocket map.
+            # The warp guard covers exactly one arrival so the hero doesn't
+            # bounce straight back through the return link.
+            warp = None
+            p = _portal_at(play["tx"], play["ty"])
+            if p is not None and \
+                    _warp_guard != (_current_map, play["tx"], play["ty"]):
+                ok, payload = _warp_to(p)
+                if ok:
+                    play["tx"], play["ty"] = payload["x"], payload["y"]
+                    warp = payload
+            if warp is None:
+                # v5.29: the guard survives a warp's own arrival — it only
+                # clears once the hero actually moves on.
+                _warp_guard = None
             return self._send_json({"ok": True, "path": [list(c) for c in cells],
                                     "swim": swim[:kept], "deep": deep[:kept],
                                     "events": events, "nature": _nature_state(),
-                                    "x": play["tx"], "y": play["ty"]})
+                                    "x": play["tx"], "y": play["ty"],
+                                    "warp": warp})
 
         if path == "/api/play/step":
             # v3.7: single-step hero movement for the D-pad / controller.
@@ -6152,16 +6627,29 @@ class Handler(BaseHTTPRequestHandler):
                 play["tx"], play["ty"] = nx, ny
             # v3.9: game rules fire when the hero actually arrives
             events = _check_rules(play["tx"], play["ty"]) if can else []
+            warp = None  # v5.29
             if can:
                 events += _apply_nature(play["tx"], play["ty"])  # v4.0
                 events += _check_mission(play["tx"], play["ty"])  # v5.12
                 events += _check_items(play["tx"], play["ty"])  # v5.13
                 events += _check_npcs(play["tx"], play["ty"])  # v5.13
+                # v5.29: stepping onto a portal cell warps to its pocket map
+                p = _portal_at(play["tx"], play["ty"])
+                if p is not None and \
+                        _warp_guard != (_current_map, play["tx"], play["ty"]):
+                    ok, payload = _warp_to(p)
+                    if ok:
+                        play["tx"], play["ty"] = payload["x"], payload["y"]
+                        warp = payload
+            if warp is None:
+                # v5.29: the guard survives a warp's own arrival — it only
+                # clears once the hero actually moves on.
+                _warp_guard = None
             return self._send_json({"ok": True, "x": play["tx"], "y": play["ty"],
                                     "swim": _swim_at(play["tx"], play["ty"]),
                                     "deep": _deep_at(play["tx"], play["ty"]),
                                     "events": events, "nature": _nature_state(),
-                                    "blocked": not can})
+                                    "blocked": not can, "warp": warp})
 
         if path == "/api/rules":
             # v3.7: per-build game rules. POST sets any of walk_ms

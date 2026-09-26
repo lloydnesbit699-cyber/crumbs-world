@@ -5,6 +5,23 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.29.2 — 2026-09-26
+
+Melody bootloader (Lloyd's spec: she warms up before she thinks):
+
+- **Boot phases.** `boot → warmup → ready` (plus `offline` if the health
+  check fails). A status dot (🟡/🟢/⚫) in her panel header and a status
+  line ("Melody is waking up…", "💄 Putting her makeup on…") show where
+  she is — no more dead "initiating" box.
+- **Governor.** Send and the mic refuse while she isn't ready, with a
+  gentle "she's still getting ready" nudge instead of firing into the void.
+- **No more re-reading everything every boot.** Her remembered
+  conversation is cached per user (localStorage) — the panel paints
+  instantly from cache, then refreshes from the server behind her back.
+  Clearing the chat wipes the cache too.
+- The makeup beat is ~1s (0.7s for the pre-login demo) — character without
+  the wait.
+
 ## v5.29.1 — 2026-09-26
 
 Melody voice fixes (iPhone-only bugs Lloyd caught on-device):

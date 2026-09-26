@@ -233,6 +233,7 @@
   #melody-head { display: flex; align-items: center; gap: 8px;
     padding: 8px 10px; background: #1d1d28; border-bottom: 1px solid #2a2a38; }
   #melody-title { color: #ffd75f; font-weight: bold; font-size: 14px; flex: 1; }
+  #melody-dot { font-size: 12px; }  /* v5.29.2: bootloader status dot */
   #melody-quota { color: #888; font-size: 11px; }
   #melody-head button { background: none; border: none; color: #aaa;
     font-size: 16px; cursor: pointer; padding: 2px 6px; }
@@ -6499,7 +6500,40 @@ $("pack-btn").onclick = () => { toggleOverlay("sheet-pack"); syncInv(); };
 
 // v5.28: Melody chat dock — Phase 1 agent (teach + diagnose, read-only).
 // v5.28.1: demo mode — pre-login taste, knowledge-base only, 5/day/IP.
-const MELODY = { open: false, ready: false, busy: false, demo: false };
+const MELODY = { open: false, ready: false, busy: false, demo: false, phase: "boot" };
+// v5.29.2: bootloader — she warms up before she thinks. Phases:
+// boot (loading her remembered self) -> warmup (the makeup beat) ->
+// ready (she takes questions) | offline (health check failed).
+function melodyPhase(p) {
+  MELODY.phase = p;
+  MELODY.ready = (p === "ready");
+  const dot = $("melody-dot"), ty = $("melody-typing"), send = $("melody-send");
+  if (send) send.disabled = (p !== "ready") || MELODY.busy;
+  if (dot) {
+    dot.textContent = p === "ready" ? "\uD83D\uDFE2" : p === "offline" ? "\u26AB" : "\uD83D\uDFE1";
+    dot.title = p === "ready" ? "Melody is ready" :
+      p === "offline" ? "Melody is offline" : "Melody is getting ready\u2026";
+  }
+  if (ty && !MELODY.busy) {
+    if (p === "boot") { ty.hidden = false; ty.textContent = "Melody is waking up\u2026"; }
+    else if (p === "warmup") { ty.hidden = false; ty.textContent = "\uD83D\uDC84 Putting her makeup on\u2026"; }
+    else { ty.hidden = true; }
+  }
+}
+// v5.29.2: her remembered self is cached per user — the dock paints instantly
+// from cache and refreshes behind her back, instead of re-reading her
+// whole memory on every single boot.
+function melHistKey() { return "melody-hist-" + (MEL_TTS.user || "anon"); }
+function melHistLoad() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(melHistKey()) || "[]");
+    return Array.isArray(arr) ? arr.slice(-40) : [];
+  } catch (e) { return []; }
+}
+function melHistSave(hist) {
+  try { localStorage.setItem(melHistKey(), JSON.stringify((hist || []).slice(-40))); }
+  catch (e) {}
+}
 function melodyEsc(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -6642,6 +6676,10 @@ async function melSendClip(mime) {
 }
 async function melodyMicTap() {
   if (MELODY.demo) return;  // mic is hidden in demo — belt and suspenders
+  if (MELODY.phase !== "ready") {  // v5.29.2: bootloader governor
+    toast("Give her a sec \u2014 she's still getting ready \uD83D\uDC84");
+    return;
+  }
   if (melRec) { melStopRec(); return; }  // tap again to stop early
   if (!window.MediaRecorder || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     melSay("This browser can't do voice input \u2014 type it for me instead?");
@@ -6678,6 +6716,10 @@ function melodyGreet() {
 }
 async function melodySend() {
   melTtsUnlock();  // v5.29.1: send is a tap — her reply may speak
+  if (MELODY.phase !== "ready") {  // v5.29.2: bootloader governor — no thinking before she's dressed
+    toast("Give her a sec \u2014 she's still getting ready \uD83D\uDC84");
+    return;
+  }
   const inp = $("melody-input");
   const msg = inp.value.trim();
   if (!msg || MELODY.busy) return;
@@ -6685,6 +6727,7 @@ async function melodySend() {
   melodyAdd("user", msg);
   MELODY.busy = true;
   $("melody-send").disabled = true;
+  $("melody-typing").textContent = "Melody is thinking\u2026";
   $("melody-typing").hidden = false;
   try {
     // v5.28.1: demo posts to the no-auth taste endpoint
@@ -6693,7 +6736,16 @@ async function melodySend() {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: msg }) });
     const j = await r.json();
-    if (j.ok) { melSay(j.reply); melodySetQuota(j.quota); }
+    if (j.ok) {
+      melSay(j.reply); melodySetQuota(j.quota);
+      // v5.29.2: keep the cached self current for the next boot
+      try {
+        melHistSave([...$("melody-log").children].map(d => ({
+          role: d.classList.contains("user") ? "user" : "mel",
+          content: d.textContent
+        })));
+      } catch (e) {}
+    }
     else melodyAdd("mel", j.detail || j.error ||
       "Hmm, that didn't go through \u2014 try again?");
   } catch (e) {
@@ -6701,16 +6753,18 @@ async function melodySend() {
       "is crumbs_hud.py running?");
   }
   MELODY.busy = false;
-  $("melody-send").disabled = false;
-  $("melody-typing").hidden = true;
+  if (MELODY.phase === "ready") {  // v5.29.2: stay governed if she's still warming up
+    $("melody-send").disabled = false;
+    $("melody-typing").hidden = true;
+  }
   inp.focus();
 }
 async function melodyInit() {
+  melodyPhase("boot");
   let h;
   try { h = await (await fetch("/api/melody/health")).json(); }
-  catch (e) { return; }
-  if (!h || !h.ok) return;  // agent module missing — dock stays hidden
-  MELODY.ready = true;
+  catch (e) { melodyPhase("offline"); return; }
+  if (!h || !h.ok) { melodyPhase("offline"); return; }  // agent module missing — dock stays hidden
   // v5.28.1: leaving demo mode behind — full dock for the logged-in player
   MELODY.demo = false;
   $("melody-dock").classList.remove("demo");
@@ -6743,15 +6797,30 @@ async function melodyInit() {
       await fetch("/api/melody/clear", { method: "POST",
         headers: { "Content-Type": "application/json" }, body: "{}" });
     } catch (e) { /* best effort */ }
+    melHistSave([]);  // v5.29.2: clearing wipes the cached self too
     $("melody-log").innerHTML = "";
     melodyGreet();
   };
-  let hist = [];
+  // v5.29.2: bootloader — paint her remembered self instantly from cache,
+  // then refresh her memory behind her back while she warms up.
+  melHistLoad().forEach(m => melodyAdd(m.role === "user" ? "user" : "mel", m.content));
+  melodyPhase("boot");
+  let hist = null;
   try {
     hist = (await (await fetch("/api/melody/history")).json()).history || [];
-  } catch (e) { /* offline — greet fresh */ }
-  hist.forEach(m => melodyAdd(m.role === "user" ? "user" : "mel", m.content));
-  if (!hist.length) melodyGreet();
+  } catch (e) { /* offline — the cached self stands in */ }
+  if (hist) {
+    if (hist.length || $("melody-log").children.length) {
+      $("melody-log").innerHTML = "";
+      hist.forEach(m => melodyAdd(m.role === "user" ? "user" : "mel", m.content));
+    }
+    melHistSave(hist);
+  }
+  if (!$("melody-log").children.length) melodyGreet();
+  // v5.29.2: the makeup beat — she's loaded, now she gets dressed
+  melodyPhase("warmup");
+  await new Promise(r => setTimeout(r, 1100));
+  melodyPhase("ready");
 }
 // v5.28.1: pre-login demo — the taste before the profile. Knowledge-base
 // only (zero brain cost), 5 questions/day/IP, nothing remembered.
@@ -6762,12 +6831,12 @@ function melodyGreetDemo() {
 }
 async function melodyDemo() {
   if (MELODY.busy) return;
+  melodyPhase("boot");  // v5.29.2: bootloader even for the taste
   let h;
   try { h = await (await fetch("/api/melody/health")).json(); }
-  catch (e) { return; }
-  if (!h || !h.ok) return;
+  catch (e) { melodyPhase("offline"); return; }
+  if (!h || !h.ok) { melodyPhase("offline"); return; }
   MELODY.demo = true;
-  MELODY.ready = true;
   melTtsUnlock();  // v5.29.1: demo tap is a gesture — prime her voice too
   $("melody-dock").classList.add("demo");
   $("melody-title").textContent = "Melody (demo)";
@@ -6788,6 +6857,9 @@ async function melodyDemo() {
   $("melody-dock").hidden = false;
   MELODY.open = true;
   melodyGreetDemo();
+  melodyPhase("warmup");  // v5.29.2: the makeup beat, then she's all yours
+  await new Promise(r => setTimeout(r, 700));
+  melodyPhase("ready");
   $("melody-input").focus();
 }
 (function () {  // demo button lives on the login overlay (pre-login)
@@ -7129,6 +7201,7 @@ async function deleteMission(id) {
 <button id="melody-fab" hidden title="Ask Melody">Mel</button>
 <div id="melody-dock" hidden>
   <div id="melody-head">
+    <span id="melody-dot" title="Melody is getting ready&#8230;">&#128993;</span>
     <span id="melody-title">Melody</span>
     <span id="melody-quota"></span>
     <button id="melody-speaker" title="Melody's voice">&#128266;</button>

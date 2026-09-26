@@ -465,6 +465,178 @@ def tab_for_subcategory(sub):
         return "objects"
 
 
+# ==========================================
+# v5.29: object-instance attributes (entities workstream)
+# ------------------------------------------
+# An object-layer cell is None | int | dict. The int is the legacy form — a
+# bare tile id with every default applied. The dict form carries per-instance
+# attributes on top of the tile it was stamped from:
+#   {tid, size?, hero?, flavor?, interactive?, role?}
+# Only non-default keys are stored, so a fully-default instance saves as the
+# bare int and old saves load unchanged. Never mutate a dict cell in place —
+# the undo snapshots copy rows shallowly, so always REPLACE the cell.
+OBJ_SIZE_MIN, OBJ_SIZE_MAX = 0.25, 3.0   # a mouse ~0.4, a person 1.0
+OBJ_ROLES = ("none", "enemy", "mentor")   # "insert" roles: the defined,
+                                          # non-hack way an object acts
+OBJ_FLAVORS = ("world", "decor")          # world = natural, decor = made
+OBJ_DEFAULTS = {"size": 1.0, "hero": False, "flavor": None,
+                "interactive": True, "role": "none"}
+
+
+def obj_tid(cell):
+    """Tile id of an object-layer cell, whatever its shape. Never raises."""
+    try:
+        if cell is None:
+            return None
+        if isinstance(cell, dict):
+            tid = cell.get("tid")
+            return tid if isinstance(tid, int) else None
+        return cell if isinstance(cell, int) else None
+    except Exception:
+        return None
+
+
+def obj_attrs(cell):
+    """Effective per-instance attributes: defaults + whatever the cell
+    carries. The legacy int form gets every default. Never raises."""
+    a = dict(OBJ_DEFAULTS)
+    try:
+        if isinstance(cell, dict):
+            for k in OBJ_DEFAULTS:
+                if k in cell:
+                    a[k] = cell[k]
+    except Exception:
+        pass
+    return a
+
+
+def obj_hero(cell):
+    """True when this placed instance is flagged as a hero."""
+    try:
+        return bool(cell.get("hero")) if isinstance(cell, dict) else False
+    except Exception:
+        return False
+
+
+def obj_interactive(cell):
+    """False only when the builder explicitly toggled it off."""
+    try:
+        if isinstance(cell, dict) and "interactive" in cell:
+            return bool(cell["interactive"])
+    except Exception:
+        pass
+    return True
+
+
+def obj_role(cell):
+    """The insert role: 'none', 'enemy', or 'mentor'."""
+    try:
+        if isinstance(cell, dict) and cell.get("role") in OBJ_ROLES:
+            return cell["role"]
+    except Exception:
+        pass
+    return "none"
+
+
+def obj_size(cell):
+    """Render scale of this instance, clamped. 1.0 = one cell."""
+    try:
+        if isinstance(cell, dict) and isinstance(cell.get("size"), (int, float)):
+            return max(OBJ_SIZE_MIN, min(OBJ_SIZE_MAX, float(cell["size"])))
+    except Exception:
+        pass
+    return 1.0
+
+
+def make_obj_cell(tid, attrs=None):
+    """Build the cell to stamp: bare int when everything is default, dict
+    otherwise. attrs may carry any of size/hero/flavor/interactive/role.
+    Unknown keys are dropped; values are validated. Never raises."""
+    tid = tid if isinstance(tid, int) else None
+    if tid is None:
+        return None
+    a = dict(attrs or {})
+    cell = {"tid": tid}
+    try:
+        s = a.get("size", 1.0)
+        if isinstance(s, (int, float)) and abs(float(s) - 1.0) > 1e-9:
+            cell["size"] = max(OBJ_SIZE_MIN, min(OBJ_SIZE_MAX, float(s)))
+        if a.get("hero"):
+            cell["hero"] = True
+        if a.get("flavor") in OBJ_FLAVORS:
+            cell["flavor"] = a["flavor"]
+        if "interactive" in a and not a["interactive"]:
+            cell["interactive"] = False
+        if a.get("role") in OBJ_ROLES and a["role"] != "none":
+            cell["role"] = a["role"]
+    except Exception:
+        pass
+    if len(cell) == 1:
+        return tid  # all defaults — the legacy shape, on purpose
+    return cell
+
+
+def norm_obj_cell(cell):
+    """Load-time migration for one object-layer cell (schema v1 -> v2):
+    None and ints pass through untouched; dicts are re-validated through
+    make_obj_cell so hand-edited saves can't smuggle junk in. Never raises."""
+    if cell is None or isinstance(cell, int):
+        return cell
+    if isinstance(cell, dict):
+        tid = obj_tid(cell)
+        return make_obj_cell(tid, cell) if tid is not None else None
+    return None
+
+
+# flavor hints — world = natural (trees, forests, dirt, gravel),
+# decor = unnatural (buildings, walls, torches, paintings, tables, chests).
+# An additive attribute on the tile definition; the category system itself
+# (tabs, subcategories, routing) is untouched. Characters get no flavor —
+# they're entities, not scenery.
+FLAVOR_HINTS = [
+    ("world", ["tree", "forest", "grove", "grass", "dirt", "gravel", "sand",
+               "rock", "boulder", "pebble", "bush", "flower", "moss",
+               "mushroom", "leaf", "leaves", "vine", "root", "stump", "log",
+               "pine", "oak", "palm", "willow", "birch", "cactus", "reed",
+               "pond", "river", "lake", "ocean", "beach", "swamp", "mud",
+               "ice", "snow", "lava", "cave", "cliff", "hill", "garden"]),
+    ("decor", ["building", "house", "hut", "cabin", "tower", "castle", "wall",
+               "torch", "lamp", "lantern", "candle", "brazier", "chandelier",
+               "painting", "portrait", "tapestry", "table", "chair", "stool",
+               "bench", "desk", "throne", "bed", "shelf", "cabinet",
+               "dresser", "chest", "barrel", "crate", "box", "sack", "pot",
+               "urn", "basket", "coffer", "door", "gate", "portal", "statue",
+               "pillar", "column", "altar", "fountain", "well", "forge",
+               "anvil", "furnace", "counter", "banner", "sign", "rug",
+               "carpet", "stairs", "trap", "tent", "bridge", "fence", "cart",
+               "brick", "plank", "marble", "beam", "roof"]),
+]
+_FLAVOR_PRESET = {"wall": "decor", "door": "decor",
+                  "water": "world", "deepwater": "world",
+                  "hill": "world", "mountain": "world"}
+# NOTE: the generic "decor" preset is NOT mapped — an imported oak tree and
+# an imported throne share that preset, and guessing "unnatural" for the
+# tree would be a lie. Name keywords decide; unknown stays None.
+
+
+def guess_flavor(name, preset=None):
+    """v5.29: world/decor flavor derived from the tile's name (or preset
+    fallback). Additive — the palette tabs and subcategory routing are
+    untouched. Returns 'world', 'decor', or None. Never raises."""
+    try:
+        if preset == "character":
+            return None  # entities aren't scenery
+        tokens = set(re.split(r"[^a-z0-9]+", (name or "").lower()))
+        tokens.discard("")
+        for flavor, kws in FLAVOR_HINTS:
+            for kw in kws:
+                if kw in tokens:
+                    return flavor
+        return _FLAVOR_PRESET.get(preset)
+    except Exception:
+        return None
+
+
 _BIOME_PREFIXES = ("dungeon", "grassland", "desert", "arctic", "forest",
                    "ocean", "core")
 def display_name(name):
@@ -942,7 +1114,11 @@ class WorldMap:
                 return [[fill] * w for _ in range(h)]
 
             self.data = _grid('tiles', 0)
-            self.object_layer = _grid('objects', None)
+            # v5.29: schema v1 -> v2 migration runs here — legacy int cells
+            # pass through untouched, dict cells get re-validated. Old
+            # saves load exactly as before.
+            self.object_layer = [[norm_obj_cell(c) for c in row]
+                                 for row in _grid('objects', None)]
             self.collision_layer = _grid('collision', False)
             return True
         except Exception as e:

@@ -452,7 +452,9 @@ def _update_remote_version():
     raw = _update_fetch("crumbs_hud.py").decode("utf-8", "replace")
     m = re.search(r'^APP_VERSION\s*=\s*"([^"]+)"', raw, re.M)
     return m.group(1) if m else None
-SCHEMA_VERSION = 1  # v5.16: stamped on every save; migrations run on load
+SCHEMA_VERSION = 2  # v5.29: object-layer cells may be {tid,size,hero,flavor,
+                      # interactive,role} dicts; legacy int cells load
+                      # unchanged (migrated in core.WorldMap.load)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 HTML_PATH = os.path.join(SCRIPT_DIR, "editor.html")
 DEFAULT_SAVE = "hud_map.json"
@@ -1110,6 +1112,10 @@ def _custom_public(entry):
                             or core.guess_subcategory(entry["name"],
                                                       entry.get("preset"))),
             "display": core.display_name(entry["name"]),
+            # v5.29: world/decor flavor — object flavors for the palette
+            # chips and placement defaults. Additive; tabs untouched.
+            "flavor": (entry.get("flavor")
+                       or core.guess_flavor(entry["name"], entry.get("preset"))),
             "art": bool(assets.tiles.get(tid)),
             "frames": len(entry["files"]), "frame_ms": entry["frame_ms"]}
 
@@ -1463,7 +1469,8 @@ def _body_scope(body):
     return "shared" if body.get("scope") == "shared" else "local"
 
 
-def _store_custom_tile(name, preset, frame_ms, pil_images, scope="local"):
+def _store_custom_tile(name, preset, frame_ms, pil_images, scope="local",
+                       flavor=None):
     """Write PIL frames to the right shelf (this device / shared), register the
     tile, save that shelf's registry. Returns the entry. Rolls back partial
     writes on failure."""
@@ -1492,6 +1499,10 @@ def _store_custom_tile(name, preset, frame_ms, pil_images, scope="local"):
              # v5.25: filename-hint auto-categorization at import time —
              # the docs' "automatic categorization" TODO, done.
              "subcategory": core.guess_subcategory(name, preset),
+             # v5.29: world/decor flavor — explicit wins, else name guess.
+             # Additive: the palette tabs and routing are untouched.
+             "flavor": (flavor if flavor in core.OBJ_FLAVORS else
+                        core.guess_flavor(name, preset)),
              "swim": bool(TILE_PRESETS[preset].get("swim", False)),
              "deep": bool(TILE_PRESETS[preset].get("deep", False)),
              "frame_ms": frame_ms, "files": files, "scope": scope}
@@ -1549,10 +1560,12 @@ def _migrate_sidecar(kind, doc):
                 "detail": f"this {kind} file was written by schema {v}; "
                           f"this build understands schema {SCHEMA_VERSION}. "
                           "Update the app to open it."}
-    if v < 1:
-        # v0 -> v1: nothing structural changed; stamp and fill the keys
-        # each loader already defaults, so just record the migration.
-        doc["schema"] = 1
+    if v < SCHEMA_VERSION:
+        # v0/v1 -> v2: nothing structural changed in the sidecars (the v2
+        # change lives in the map file's object layer, migrated in
+        # core.WorldMap.load); each loader already defaults, so just
+        # record the migration.
+        doc["schema"] = SCHEMA_VERSION
         doc["_migrated_from"] = v
     return doc
 
@@ -1705,7 +1718,7 @@ def _mission_clear_hazards(mission):
     _patrols = [p for p in _patrols if p.get("mission_id") != mid]
     for x, y in mission.get("placed", []):
         if 0 <= x < world.width and 0 <= y < world.height:
-            if world.object_layer[y][x] == mission.get("enemy_tile"):
+            if core.obj_tid(world.object_layer[y][x]) == mission.get("enemy_tile"):
                 world.object_layer[y][x] = None
     mission["placed"] = []
     mission["danger"] = []
@@ -1837,7 +1850,7 @@ def _check_mission(x, y):
                     and (hp.get("x"), hp.get("y")) == (x, y):
                 _patrols.remove(hp)
                 et = mission.get("enemy_tile")
-                if et is not None and world.object_layer[y][x] == et:
+                if et is not None and core.obj_tid(world.object_layer[y][x]) == et:
                     world.object_layer[y][x] = None
                 mission["danger"] = sorted(
                     {tuple(c) for q in _patrols
@@ -2422,7 +2435,7 @@ def _map_png(scale=4, data=None, objects=None, w=None, h=None):
     img = core.Image.new("RGBA", (w * ts, h * ts), (0, 0, 0, 255))
     for y in range(h):
         for x in range(w):
-            for tid in (data[y][x], objects[y][x]):
+            for tid in (data[y][x], core.obj_tid(objects[y][x])):
                 if not tid:
                     continue
                 th = assets.get_thumbnail(tid, size=32)
@@ -2476,7 +2489,7 @@ def _validate_map():
                            "msg": f"{unreachable} floor tile(s) can't be reached from spawn."})
     bad = sum(
         1 for y in range(world.height) for x in range(world.width)
-        for tid in (world.data[y][x], world.object_layer[y][x])
+        for tid in (world.data[y][x], core.obj_tid(world.object_layer[y][x]))
         if tid and tid not in assets.tiles)
     if bad:
         issues.append({"kind": "bad_tile",
@@ -2842,9 +2855,9 @@ def _tile_at_any_layer(x, y):
     """Tile id under the hero's feet — the objects layer sits on top of the
     tiles layer, so a key lying on grass reads as the key, not the grass."""
     try:
-        o = world.object_layer[y][x]
-        if o:
-            return o
+        tid = core.obj_tid(world.object_layer[y][x])
+        if tid:
+            return tid
         return world.data[y][x]
     except IndexError:
         return None
@@ -2859,8 +2872,11 @@ def _clear_tile_everywhere(tid):
         for y in range(world.height):
             row = grid[y]
             for x in range(world.width):
-                if row[x] == tid:
-                    _rule_mods.append((layer, x, y, tid))
+                # v5.29: object cells are instances now — match by tile id
+                hit = (core.obj_tid(row[x]) == tid) if layer == "objects" \
+                    else row[x] == tid
+                if hit:
+                    _rule_mods.append((layer, x, y, row[x]))
                     row[x] = empty
 
 
@@ -2876,7 +2892,14 @@ def _check_rules(x, y):
         if kind == "message":
             if "tile" in r:
                 # v4.6: words riding a character/object — the hero bumps into him
-                if _tile_at_any_layer(x, y) == r["tile"] and r["id"] not in _rule_shown:
+                # v5.29: a mentor-role instance speaks for itself (see
+                # _check_object_roles below); a non-interactive instance is
+                # scenery and stays silent.
+                oc = world.object_layer[y][x]
+                if (_tile_at_any_layer(x, y) == r["tile"]
+                        and core.obj_role(oc) != "mentor"
+                        and core.obj_interactive(oc)
+                        and r["id"] not in _rule_shown):
                     _rule_shown.add(r["id"])
                     events.append({"t": "message",
                                    "text": r["text"] or "He nods at you."})
@@ -2885,7 +2908,11 @@ def _check_rules(x, y):
                 events.append({"t": "message",
                                "text": r["text"] or "Something catches your eye…"})
         elif kind == "keydoor":
-            if r["id"] not in _rule_keys and _tile_at_any_layer(x, y) == r["key"]:
+            # v5.29: a key riding a non-interactive instance can't be picked
+            # up — scenery doesn't hand you things.
+            if (r["id"] not in _rule_keys
+                    and _tile_at_any_layer(x, y) == r["key"]
+                    and core.obj_interactive(world.object_layer[y][x])):
                 _rule_keys.add(r["id"])
                 _clear_tile_everywhere(r["key"])
                 _clear_tile_everywhere(r["door"])
@@ -2903,6 +2930,44 @@ def _check_rules(x, y):
                 events.append({"t": "lose",
                                "text": r["text"] or "Oh no — game over."})
                 break
+    events += _check_object_roles(x, y)  # v5.29: insert objects act
+    return events
+
+
+def _check_object_roles(x, y):
+    """v5.29: the "insert" — an object acting as enemy/mentor because the
+    builder said so. Only interactive instances act; scenery never does.
+    Enemy bumps hurt (when the build has a health meter); a mentor speaks
+    its set-text, or a default line, once per run."""
+    global _rule_over
+    events = []
+    if _rule_over:
+        return events
+    try:
+        cell = world.object_layer[y][x]
+    except IndexError:
+        return events
+    role = core.obj_role(cell)
+    if role == "none" or not core.obj_interactive(cell):
+        return events
+    tid = core.obj_tid(cell)
+    nm = (object_names.get(_name_key(x, y))
+          or core.display_name((assets.tiles.get(tid) or {}).get("name", "")))
+    if role == "enemy":
+        _mission_bump_meters(d_health=-1)
+        events.append({"t": "toast", "text": f"⚔️ {nm} lunges at you!"})
+        if _meters.get("health", 10) <= 0:
+            _rule_over = "lose"
+            events.append({"t": "lose", "text": f"The {nm} got you…"})
+    elif role == "mentor":
+        key = f"mentor:{x},{y}"
+        if key not in _rule_shown:
+            _rule_shown.add(key)
+            said = next((r for r in game_rules
+                         if r.get("kind") == "message"
+                         and r.get("tile") == tid and r.get("text")), None)
+            line = said["text"] if said else "Walk soft, and keep your torch lit."
+            events.append({"t": "message", "text": f"🛡 {nm}: “{line}”"})
     return events
 
 # ---- v3.6 SWIM HOOK ----------------------------------------------------------
@@ -2941,15 +3006,35 @@ def _swim_at(tx, ty):
     return bool(tile and tile.get("properties", {}).get("swim"))
 
 
+def _hero_instances():
+    """v5.29: every placed instance flagged as a hero, in scan order.
+    The first one is the PC — the one the player walks."""
+    out = []
+    for y in range(world.height):
+        for x in range(world.width):
+            cell = world.object_layer[y][x]
+            if core.obj_hero(cell):
+                tid = core.obj_tid(cell)
+                out.append({"x": x, "y": y, "tid": tid,
+                            "name": object_names.get(_name_key(x, y)),
+                            "size": core.obj_size(cell)})
+    return out
+
+
 def _find_spawn():
     # v4.9: the crowned hero starts where he stands — the selected PC's
     # placed instance is the spawn point, so "set as hero" puts YOU there.
+    # v5.29: hero-flagged instances first (first flag = the PC), then the
+    # legacy hero_tile pick for older maps, then the center fallback.
+    for h in _hero_instances():
+        if _walkable(h["x"], h["y"]) and not _swim_at(h["x"], h["y"]):
+            return h["x"], h["y"]
     ht = rules.get("hero_tile")
     if ht is not None:
         for y in range(world.height):
             for x in range(world.width):
-                if (world.object_layer[y][x] == ht and _walkable(x, y)
-                        and not _swim_at(x, y)):
+                if (core.obj_tid(world.object_layer[y][x]) == ht
+                        and _walkable(x, y) and not _swim_at(x, y)):
                     return x, y
     cx, cy = world.width // 2, world.height // 2
     if _walkable(cx, cy) and not _swim_at(cx, cy):
@@ -3299,7 +3384,7 @@ def _snapshot():
             [r[:] for r in world.collision_layer])
 
 
-def _paint_value(layer, tile_id):
+def _paint_value(layer, tile_id, attrs=None):
     if layer == "collision":
         # v3.1: collision is 0 = open, 1 = solid, 2 = locked (both block)
         try:
@@ -3308,7 +3393,10 @@ def _paint_value(layer, tile_id):
             return False
         return v if v in (1, 2) else bool(v)
     if layer == "objects":
-        return None if tile_id is None else int(tile_id)
+        # v5.29: attrs stamp per-instance attributes (size/hero/flavor/
+        # interactive/role); a fully-default instance stays the bare int.
+        return None if tile_id is None else core.make_obj_cell(int(tile_id),
+                                                              attrs)
     return int(tile_id)
 
 
@@ -4048,7 +4136,13 @@ class Handler(BaseHTTPRequestHandler):
                                "tab": core.tab_for_subcategory(
                                    t.get("subcategory", "other")),
                                "display": core.display_name(t["name"]),
-                               "preset": t.get("preset")})
+                               "preset": t.get("preset"),
+                               # v5.29: world/decor flavor for palette chips
+                               # + placement defaults (additive; the tile's
+                               # own value wins over the name guess)
+                               "flavor": (t.get("flavor")
+                                          or core.guess_flavor(t["name"],
+                                                               t.get("preset")))})
             self._send_json({"tiles": sp})
         elif path == "/api/presets":
             # v3.0: tile function presets for the import picker
@@ -4197,6 +4291,9 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/object-names":
             # v5.1: per-instance names, "x,y" -> name
             self._send_json({"ok": True, "names": object_names})
+        elif path == "/api/heroes":
+            # v5.29: every hero-flagged instance, scan order (first = PC).
+            self._send_json({"ok": True, "heroes": _hero_instances()})
         elif path == "/api/natural":
             # v5.0: the seed's own ground per cell — the eraser preview cache.
             # Falls back to the map's most common ground when seed unknown.
@@ -4767,9 +4864,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": False, "error": "no tile selected"}, 400)
             # v5.0: "natural" = the eraser — restore the seed's own ground
             # for this cell instead of a fixed tile 0.
+            # v5.29: attrs stamps per-instance attributes on object placement
+            # (size/hero/flavor/interactive/role); non-dicts are ignored.
+            attrs = body.get("attrs")
+            if not isinstance(attrs, dict):
+                attrs = None
             new_val = _natural_tile(x, y) \
                 if layer == "tiles" and tile_id == "natural" \
-                else _paint_value(layer, tile_id)
+                else _paint_value(layer, tile_id, attrs)
             grid = _grid(layer)
             if grid[y][x] == new_val:
                 return self._send_json({"ok": True, "noop": True})
@@ -4796,6 +4898,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": False, "error": "cells list and layer required"}, 400)
             paints = []
             seen = set()
+            # v5.29: object strokes may carry instance attrs (size/hero/
+            # flavor/interactive/role) — per cell, or once for the stroke.
+            stroke_attrs = body.get("attrs")
+            if not isinstance(stroke_attrs, dict):
+                stroke_attrs = None
             for c in cells:
                 x, y = c.get("x"), c.get("y")
                 if not isinstance(x, int) or not isinstance(y, int):
@@ -4809,9 +4916,12 @@ class Handler(BaseHTTPRequestHandler):
                     continue  # nothing selected: skip instead of crashing
                 # v5.0: "natural" = the eraser — the seed's own ground per cell
                 tid = c.get("tile_id")
+                cell_attrs = c.get("attrs")
+                if not isinstance(cell_attrs, dict):
+                    cell_attrs = stroke_attrs
                 new_val = _natural_tile(x, y) \
                     if layer == "tiles" and tid == "natural" \
-                    else _paint_value(layer, tid)
+                    else _paint_value(layer, tid, cell_attrs)
                 grid = _grid(layer)
                 if grid[y][x] != new_val:
                     paints.append((x, y, new_val))
@@ -4947,7 +5057,8 @@ class Handler(BaseHTTPRequestHandler):
                     raw = base64.b64decode(durl.split(",", 1)[1])
                     pil_images.append(self._safe_open_image(raw, f"frame {i}"))
                 entry = _store_custom_tile(name, preset, frame_ms, pil_images,
-                                           _body_scope(body))
+                                           _body_scope(body),
+                                           flavor=body.get('flavor'))
             except Exception as e:
                 return self._send_json({"ok": False, "error": str(e)}, 400)
             return self._send_json({"ok": True, "tile": _custom_public(entry)})
@@ -4974,7 +5085,8 @@ class Handler(BaseHTTPRequestHandler):
                 raw = base64.b64decode(durl.split(",", 1)[1])
                 frames = _autoslice_pil(self._safe_open_image(raw, "autoslice"))
                 entry = _store_custom_tile(name, preset, frame_ms, frames,
-                                           _body_scope(body))
+                                           _body_scope(body),
+                                           flavor=body.get('flavor'))
             except Exception as e:
                 return self._send_json({"ok": False, "error": str(e)}, 400)
             return self._send_json({"ok": True, "tile": _custom_public(entry),
@@ -5008,7 +5120,8 @@ class Handler(BaseHTTPRequestHandler):
                     frames = _walkbob_frames(img)
                     method = "walk"
                 entry = _store_custom_tile(name, preset, frame_ms, frames,
-                                           _body_scope(body))
+                                           _body_scope(body),
+                                           flavor=body.get('flavor'))
             except Exception as e:
                 return self._send_json({"ok": False, "error": str(e)}, 400)
             return self._send_json({"ok": True, "tile": _custom_public(entry),
@@ -5114,7 +5227,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": False, "error": "anchor x/y required"}, 400)
             if not (0 <= ax < world.width and 0 <= ay < world.height):
                 return self._send_json({"ok": False, "error": "anchor off the map"}, 400)
-            if world.object_layer[ay][ax] != tid:
+            if core.obj_tid(world.object_layer[ay][ax]) != tid:
                 # v5.0: a patrol never creates its character — the tile must
                 # already be standing at the anchor.
                 return self._send_json(
@@ -5696,7 +5809,7 @@ class Handler(BaseHTTPRequestHandler):
                 for x in range(world.width):
                     if world.data[y][x] == tid:
                         world.data[y][x] = 0
-                    if world.object_layer[y][x] == tid:
+                    if core.obj_tid(world.object_layer[y][x]) == tid:
                         world.object_layer[y][x] = None
             _save_custom_registry(scope)
             _mark_dirty()
@@ -6277,6 +6390,46 @@ class Handler(BaseHTTPRequestHandler):
                 _mark_dirty()
             _undoable("name " + (name or "unnamed"), _do)
             return self._send_json({"ok": True, "name": name or None})
+
+        if path == "/api/object-attrs":
+            # v5.29: merge-patch per-instance attributes on one placed
+            # object — {x, y, attrs: {size?, hero?, flavor?, interactive?,
+            # role?}}. Unknown keys are dropped, values validated; the cell
+            # is REPLACED (never mutated) so undo snapshots stay exact.
+            if play["active"]:
+                return self._send_json({"ok": False,
+                                        "error": "leave play mode first"}, 400)
+            try:
+                x, y = int(body.get("x")), int(body.get("y"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False,
+                                        "error": "x/y ints required"}, 400)
+            if not (0 <= x < world.width and 0 <= y < world.height):
+                return self._send_json({"ok": False,
+                                        "error": "off the map"}, 400)
+            cell = world.object_layer[y][x]
+            tid = core.obj_tid(cell)
+            if tid is None:
+                return self._send_json({"ok": False,
+                                        "error": "nothing there to change"}, 400)
+            attrs = body.get("attrs")
+            if not isinstance(attrs, dict) or not attrs:
+                return self._send_json({"ok": False,
+                                        "error": "attrs dict required"}, 400)
+            merged = core.obj_attrs(cell)
+            merged.update({k: v for k, v in attrs.items()
+                           if k in core.OBJ_DEFAULTS})
+            new_cell = core.make_obj_cell(tid, merged)
+            if new_cell == cell:
+                return self._send_json({"ok": True, "noop": True,
+                                        "obj": {"tid": tid, **merged}})
+            def _do():
+                world.object_layer[y][x] = new_cell
+                _mark_dirty()
+            _undoable("object attrs", _do)
+            return self._send_json({"ok": True,
+                                    "obj": {"tid": tid,
+                                            **core.obj_attrs(new_cell)}})
 
         if path == "/api/world":
             # v4.0: this build's world profile — which meters exist.

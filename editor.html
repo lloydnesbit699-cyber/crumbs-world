@@ -6890,7 +6890,9 @@ async function melSendClip(mime) {
       melodySetQuota(j.quota);
       melSay("Got it \u2014 check my hearing below, then hit Send!");
     } else {
-      melSay(j.detail || j.error || "Voice input hiccuped \u2014 type it for me?");
+      const why = j.retry_after ? ("slow down — try again in " + j.retry_after + "s")
+                                : (j.detail || j.error || "Voice input hiccuped \u2014 type it for me?");
+      melSay(why);
     }
   } catch (e) {
     $("melody-typing").hidden = true;
@@ -6969,8 +6971,11 @@ async function melodySend() {
         })));
       } catch (e) {}
     }
-    else melodyAdd("mel", j.detail || j.error ||
-      "Hmm, that didn't go through \u2014 try again?");
+    else {
+      const why = j.retry_after ? ("slow down — try again in " + j.retry_after + "s")
+                                : (j.detail || j.error || "Hmm, that didn't go through \u2014 try again?");
+      melodyAdd("mel", why);
+    }
   } catch (e) {
     melodyAdd("mel", "I can't reach the server right now \u2014 " +
       "is crumbs_hud.py running?");

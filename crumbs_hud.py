@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.30.0"
+APP_VERSION = "5.31.0"
 # v5.24: unique per process boot. After an update the server re-execs into
 # the new files; the page waits for a DIFFERENT instance id (plus the new
 # version) instead of mistaking the old process — still answering during
@@ -1169,6 +1169,35 @@ def _login_rate(ip):
         arr.append(now)
         _rl_buckets[("LOGIN", ip)] = arr
         return True, limit - len(arr), 0
+
+# ---- v5.31: Melody brain-spending rate limits --------------------------------
+# Per-user sliding windows on the endpoints that spend Lloyd's model money.
+# stdlib only, same bucket style as the login armor. Generous for a human
+# tapping away; stops a script from machine-gunning the brain or Whisper.
+# Demo keeps its own 5/day/IP taste counter (unchanged).
+_RL_MELODY_CHAT = (20, 60)   # chat turns per minute per user
+_RL_MELODY_STT = (10, 60)    # voice clips per minute per user
+
+
+def _melody_rate(kind, user):
+    """Consume one Melody brain-spend attempt for this user.
+
+    Returns (allowed, retry_after_secs). Buckets are keyed (kind, user) so
+    one account can't crowd out another. Local single-player mode shares
+    the one "local" bucket — it's one human, that's fine."""
+    limit, window = _RL_MELODY_CHAT if kind == "chat" else _RL_MELODY_STT
+    now = time.monotonic()
+    key = ("MELODY", kind, user)
+    with _rl_lock:
+        arr = [t for t in _rl_buckets.get(key, []) if now - t < window]
+        if len(arr) >= limit:
+            _rl_buckets[key] = arr
+            retry = max(1, int(math.ceil(window - (now - arr[0])))) \
+                if arr else window
+            return False, retry
+        arr.append(now)
+        _rl_buckets[key] = arr
+        return True, 0
 
 # ---- v3.0: custom imported tiles -------------------------------------------
 # v5.27: the "local" shelf is per-vault (each vault — private or Commons —
@@ -4496,7 +4525,9 @@ class Handler(BaseHTTPRequestHandler):
             if not self._same_origin_ok():
                 return self._send_json(
                     {"ok": False, "error": "origin/host check failed"}, 403)
-            body = self._read_json()
+            # v5.31: demo questions are capped at 500 chars server-side;
+            # 8KB of JSON is more than enough — reject floods early.
+            body = self._read_json(max_bytes=8192)
             if not isinstance(body, dict):
                 return self._send_json({"ok": False, "error": "bad JSON"},
                                        400)
@@ -4512,6 +4543,11 @@ class Handler(BaseHTTPRequestHandler):
             # taste can never burn model calls. Law 18 by construction: the
             # only path touched is built from the authenticated username;
             # the audio clip itself is never stored, only transcribed.
+            # v5.31: per-user rate limit on top — voice clips cost money.
+            ok, retry = _melody_rate("stt", user)
+            if not ok:
+                return self._send_json({"ok": False, "error": "slow down",
+                                        "retry_after": retry}, 429)
             if not self._same_origin_ok():
                 return self._send_json(
                     {"ok": False, "error": "origin/host check failed"}, 403)
@@ -4539,6 +4575,11 @@ class Handler(BaseHTTPRequestHandler):
             _melody_agent.audit(SCRIPT_DIR, user, "history-clear", "")
             return self._send_json({"ok": True})
         if path == "/api/melody/chat" and is_post:
+            # v5.31: per-user rate limit — chat turns spend brain calls.
+            ok, retry = _melody_rate("chat", user)
+            if not ok:
+                return self._send_json({"ok": False, "error": "slow down",
+                                        "retry_after": retry}, 429)
             if not self._is_json_request():
                 return self._send_json(
                     {"ok": False,
@@ -4546,7 +4587,9 @@ class Handler(BaseHTTPRequestHandler):
             if not self._same_origin_ok():
                 return self._send_json(
                     {"ok": False, "error": "origin/host check failed"}, 403)
-            body = self._read_json()
+            # v5.31: 32KB is plenty for a chat message (agent caps at 2000
+            # chars); reject anything bigger before reading it.
+            body = self._read_json(max_bytes=32768)
             if not isinstance(body, dict):
                 return self._send_json({"ok": False, "error": "bad JSON"},
                                        400)

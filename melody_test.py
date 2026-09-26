@@ -133,7 +133,8 @@ check("tool ran", res.get("tools_used") == ["map_validate"],
 check("tool result in reply", "valid" in res.get("reply", "").lower(),
       res.get("reply", "")[:100])
 _, remaining, _, _ = ma.quota_check(tmp2, "bob", "free")
-check("brain turn burns one quota", remaining == 199, f"remaining={remaining}")
+check("brain turn burns one quota per real call (2 calls here)",
+      remaining == 198, f"remaining={remaining}")
 # audit line exists
 audit_path = os.path.join(tmp2, "vaults", "bob", "melody", "audit.jsonl")
 with open(audit_path) as f:

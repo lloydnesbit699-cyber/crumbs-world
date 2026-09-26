@@ -5,6 +5,31 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.31.0 — 2026-09-26
+
+Hardened Melody (both servers):
+
+**Crumbs World Melody**
+- Quota honesty: every real brain call burns one quota unit (was per-turn).
+  Tool-heavy turns cost what they cost; mid-turn exhaustion says so honestly.
+- Per-user rate limits: 20 chat/min, 10 voice clips/min (429 + retry_after).
+- Prompt-injection tripwire: blatant override phrases get a fixed decline —
+  no brain call, no quota burned, attack text kept out of her history.
+- Tool allowlist + argument validation + Law 18 path choke point: every
+  vault path is built from the authenticated username alone.
+- Server-side input caps (32KB chat / 8KB demo); 8 tool calls max per round.
+- melody_hardening_test.py: 48/48. melody_test.py: 66/66.
+
+**Chromebook melody_server.py**
+- Timing-safe token compare; empty key file now denies everyone (was an
+  auth bypass). Request bodies capped at 256KB. Chat input validated.
+- Errors no longer leak internals to clients. History bounded per client.
+  Concurrent turns capped at 4. Slowloris socket timeout. Static path
+  traversal fixed (encoded forms too). Boring Server header.
+- melody-revive.sh / melody-tunnel.sh: stale pidfiles reaped, real ssh pid
+  pinned, port-held-by-stuck-process reported instead of blind respawn.
+
+
 ## v5.30.0 — 2026-09-26
 
 Public accounts — signup, sign-in, optional 2FA:

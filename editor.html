@@ -6523,7 +6523,19 @@ function melodySetQuota(q) {
 // TTS is client-side Web Speech only (no server change, zero cost);
 // the mic records with MediaRecorder and POSTs to /api/melody/stt,
 // which transcribes with Groq Whisper on the chat brain's key.
-const MEL_TTS = { on: true, user: "" };
+const MEL_TTS = { on: true, user: "", unlocked: false };
+// v5.29.1: iOS Safari refuses speechSynthesis until a user gesture primes it —
+// her voice stays gated behind an unlock that only real taps can trigger.
+function melTtsUnlock() {  // call from tap handlers only: needs the gesture
+  if (MEL_TTS.unlocked) return;
+  try {
+    if (!("speechSynthesis" in window)) return;
+    const u = new SpeechSynthesisUtterance(" ");  // near-silent primer
+    u.volume = 0;
+    speechSynthesis.speak(u);
+    MEL_TTS.unlocked = true;
+  } catch (e) {}
+}
 function melTtsKey() { return "melody-tts-" + (MEL_TTS.user || "anon"); }
 function melTtsLoad() {
   try {
@@ -6560,7 +6572,7 @@ function melPlain(text) {  // strip markdown for the voice — speak words, not 
     .replace(/\s+/g, " ").trim().slice(0, 600);
 }
 function melSpeak(text) {
-  if (!MEL_TTS.on) return;
+  if (!MEL_TTS.on || !MEL_TTS.unlocked) return;  // v5.29.1: silent until a tap unlocks her voice
   try {
     if (!("speechSynthesis" in window)) return;
     speechSynthesis.cancel();
@@ -6573,6 +6585,7 @@ function melSpeak(text) {
 }
 function melSay(text) { melodyAdd("mel", text); melSpeak(text); }  // she speaks her replies
 function melTtsToggle() {
+  melTtsUnlock();  // v5.29.1: tap counts as the gesture, so the test line always plays
   MEL_TTS.on = !MEL_TTS.on; melTtsSave(); melTtsIcon();
   try { speechSynthesis.cancel(); } catch (e) {}
   if (MEL_TTS.on) melSpeak("Voice on, sugar!");
@@ -6664,6 +6677,7 @@ function melodyGreet() {
     "Ask me how to paint, find tiles, undo, or what's wrong with your map!");
 }
 async function melodySend() {
+  melTtsUnlock();  // v5.29.1: send is a tap — her reply may speak
   const inp = $("melody-input");
   const msg = inp.value.trim();
   if (!msg || MELODY.busy) return;
@@ -6713,7 +6727,11 @@ async function melodyInit() {
     const dock = $("melody-dock");
     dock.hidden = !dock.hidden;
     MELODY.open = !dock.hidden;
-    if (MELODY.open) $("melody-input").focus();
+    melTtsUnlock();  // v5.29.1: real tap — prime her voice (iOS needs this first)
+    // v5.29.1: on touch screens don't yank the keyboard up — the tap already
+    // opened the panel, and iOS can shove a bottom-fixed panel behind the keyboard
+    if (MELODY.open && !matchMedia("(pointer: coarse)").matches)
+      $("melody-input").focus();
   };
   $("melody-min").onclick = () => {
     $("melody-dock").hidden = true; MELODY.open = false;
@@ -6750,6 +6768,7 @@ async function melodyDemo() {
   if (!h || !h.ok) return;
   MELODY.demo = true;
   MELODY.ready = true;
+  melTtsUnlock();  // v5.29.1: demo tap is a gesture — prime her voice too
   $("melody-dock").classList.add("demo");
   $("melody-title").textContent = "Melody (demo)";
   $("melody-quota").textContent = "";

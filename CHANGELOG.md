@@ -5,6 +5,21 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.29.1 — 2026-09-26
+
+Melody voice fixes (iPhone-only bugs Lloyd caught on-device):
+
+- **Her voice choked on iPhone.** The greeting tried to speak at login,
+  before any tap — iOS Safari refuses speech synthesis without a user
+  gesture, so it died instead of playing. Her voice is now gated behind a
+  first-tap unlock (Mel button, Send, speaker toggle, or demo button all
+  prime it); until then she stays text-only instead of glitching.
+- **Panel vs keyboard.** Tapping Mel force-focused the text box, slamming
+  the keyboard up over the bottom-fixed panel. Touch screens no longer
+  auto-focus — tap the box when you want to type.
+- Speaker toggle (🔊, mutes her voice) and mic button (🎙️, voice input)
+  both live inside her chat panel.
+
 ## v5.29 — 2026-09-26
 
 Editor-feedback batch (seven workstreams, all workspace-tested — NOT yet

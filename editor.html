@@ -485,6 +485,7 @@
   #tile-edit-form { background: #1c1c1c; border: 1px solid #444; border-radius: 10px;
     padding: 10px; margin-top: 8px; }
   #tile-edit-name { width: 100%; box-sizing: border-box; margin-bottom: 4px; }
+  #tile-edit-home { flex: 1; min-width: 0; }   /* v5.29: the tile's home picker */
   #tile-edit-presets { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
   #tile-edit-presets button { flex: 1 1 28%; margin: 0; padding: 8px 4px; font-size: 12px; }
   #tile-edit-presets button.on { border-color: #4da3ff; color: #4da3ff; }
@@ -703,6 +704,11 @@
   <div id="sel-empty" class="tray-hint">select tool → tap a placed character to manage him</div>
   <div id="tile-edit-form" hidden>
     <input id="tile-edit-name" maxlength="24" placeholder="tile name">
+    <div class="row2">
+      <span class="lbl">home</span>
+      <select id="tile-edit-home"
+        title="which menu this tile lives in — the server checks it (a chest can't land in creatures) and says so if it moves it"></select>
+    </div>
     <div id="tile-edit-presets"></div>
     <div id="tile-edit-height">
       <span class="lbl">height</span>
@@ -765,7 +771,7 @@
          so the Tiles tab stays pure art tiles. Paints to the tiles layer. -->
     <button data-layer="colors" class="on">Colors</button>
     <button data-layer="objects">Objects</button>
-    <!-- v5.25: characters & creatures get their own menu — the brush still
+    <!-- v5.25: characters, animals & creatures get their own menu — the brush still
          paints onto the objects layer, where characters live. -->
     <button data-layer="characters">Characters</button>
     <button data-layer="collision">Collision</button>
@@ -3370,29 +3376,39 @@ function updatePaletteProbe() {
 }
 // ---- v5.25: subcategory filters -------------------------------------------
 // Minecraft-style separation: tiles → walls/floors/doors/roofs/materials/
-// natural, objects → furniture/containers/props/lighting, and characters &
-// creatures get their own menu. Chips are built from the data on hand — an
-// empty group never renders a chip (Law 11: no dead buttons).
-const SUBCAT_ORDER = {
+// natural, objects → furniture/containers/props/lighting, and characters,
+// animals & creatures get their own menu. Chips are built from the data on
+// hand — an empty group never renders a chip (Law 11: no dead buttons).
+// v5.29: Law 15 — the SERVER owns the one routing table, served at
+// /api/taxonomy. The copies below are only the boot fallback (old server,
+// dead server); loadTaxonomy() replaces them with the live table at boot,
+// so chips, labels and tab routing can never drift apart again.
+let SUBCAT_ORDER = {
   tiles: ["walls", "floors", "doors", "roofs", "materials", "natural"],
   objects: ["furniture", "containers", "props", "lighting"],
-  characters: ["characters", "creatures"],
+  characters: ["characters", "animals", "creatures"],
 };
-// v5.26: hardened taxonomy — every subcategory has exactly ONE home tab,
-// mirroring the server's SUBCATEGORY_TABS. The server sends t.tab; this is
-// the fallback for payloads that predate it.
-const SUBCAT_TABS = { walls: "tiles", floors: "tiles", doors: "tiles",
+let SUBCAT_TABS = { walls: "tiles", floors: "tiles", doors: "tiles",
   roofs: "tiles", materials: "tiles", natural: "tiles",
   furniture: "objects", containers: "objects", props: "objects",
   lighting: "objects", other: "objects",
-  characters: "characters", creatures: "characters" };
-function tabOf(t) { return t.tab || SUBCAT_TABS[subOf(t)] || "objects"; }
-const SUBCAT_LABEL = { walls: "Walls", floors: "Floors", doors: "Doors",
+  characters: "characters", animals: "characters", creatures: "characters" };
+let SUBCAT_LABEL = { walls: "Walls", floors: "Floors", doors: "Doors",
   roofs: "Roofs", materials: "Materials", natural: "Natural",
   furniture: "Furniture", containers: "Containers", props: "Props",
-  lighting: "Lighting", characters: "Characters", creatures: "Creatures",
-  other: "Other" };
-const isCharSub = s => s === "characters" || s === "creatures";
+  lighting: "Lighting", characters: "Characters", animals: "Animals",
+  creatures: "Creatures", other: "Other" };
+async function loadTaxonomy() {
+  try {
+    const r = await api("/api/taxonomy");
+    const t = r && r.taxonomy;
+    if (t && t.tabs && t.order && t.labels) {
+      SUBCAT_TABS = t.tabs; SUBCAT_ORDER = t.order; SUBCAT_LABEL = t.labels;
+    }
+  } catch (e) { /* fallback tables above stay in force */ }
+}
+function tabOf(t) { return t.tab || SUBCAT_TABS[subOf(t)] || "objects"; }
+const isCharSub = s => (SUBCAT_ORDER.characters || []).includes(s);
 const subFilter = { tiles: "all", objects: "all", characters: "all" };  // per-tab memory
 let customTabKey = "objects";   // v5.25: which tab buildCustomTiles filters for
 const subOf = t => t.subcategory || "other";
@@ -3492,8 +3508,8 @@ function buildPalette() {
          () => selectTile(t.id));
     });
   } else {
-    // v5.25: the Objects tab, or the Characters tab — characters &
-    // creatures get their own menu. Both paint onto the objects layer.
+    // v5.25: the Objects tab, or the Characters tab — characters, animals
+    // & creatures get their own menu. Both paint onto the objects layer.
     // v5.26: customs are routed by their ONE home tab — tile-like customs
     // (walls/floors/…) no longer leak into Objects; they live in Tiles.
     const charTab = layer === "characters";
@@ -3577,7 +3593,7 @@ function buildCustomTiles() {
   const q = stripQuery.trim().toLowerCase();
   const match = t => !q || t.name.toLowerCase().includes(q);
   // v5.25: the strip follows the active tab — the Characters tab shows only
-  // characters & creatures, the Objects tab shows everything else, and the
+  // characters, animals & creatures, the Objects tab shows everything else, and the
   // subcategory chips filter both.
   // v5.26: hardened — a custom appears on exactly ONE tab, its home tab
   // (floors in Tiles, not Objects). tabOf() falls back to the local table
@@ -3912,6 +3928,9 @@ $("import-animate").onclick = async () => {
   await loadCustomTiles();
   selTile = r.tile.id;
   buildPalette();
+  // v5.29: a guardrail correction outranks the flourish — he needs to
+  // know where it landed more than that it walked.
+  if (r.note) { toast(r.note); return; }
   toast(r.method === "sliced"
     ? "Found " + r.frames + " poses — he's alive! Tap the map to place him"
     : "One picture, no problem — I made him walk! Tap the map to place him");
@@ -3923,7 +3942,7 @@ $("import-add").onclick = async () => {
   const files = importFiles.slice();
   const base = $("import-name").value.trim().slice(0, 24) || "custom";
   $("import-form").hidden = true; importFiles = [];
-  let made = 0, lastId = null, fail = 0;
+  let made = 0, lastId = null, fail = 0, note = null;
   for (const f of files) {
     const r = await api("/api/custom-tiles", {
       name: files.length > 1 ? f.name.slice(0, 24) : base,
@@ -3932,13 +3951,16 @@ $("import-add").onclick = async () => {
       frame_ms: +$("import-ms").value || 400,
       frames: [f.dataUrl],
     });
-    if (r.ok) { made++; lastId = r.tile.id; } else fail++;
+    if (r.ok) { made++; lastId = r.tile.id; if (r.note) note = r.note; } else fail++;
   }
   await loadCustomTiles();
   if (made) { selTile = lastId; buildPalette(); }
+  // v5.29: a guardrail correction rides along with the count — he needs
+  // to know where it landed, not just how many.
   toast(made + (made === 1 ? " character" : " characters") + " added" +
         (fail ? " — " + fail + " failed" : "") +
-        (made ? " — tap the map to place " + (made === 1 ? "it" : "them") : ""));
+        (made ? " — tap the map to place " + (made === 1 ? "it" : "them") : "") +
+        (note ? " · " + note : ""));
 };
 
 // ---- v5.11: sprite-sheet importer -------------------------------------------
@@ -4202,8 +4224,12 @@ $("sheet-import").onclick = async () => {
       b.classList.toggle("on", b.dataset.layer === layer));
     buildPalette();
     render();
+    // v5.29: guardrail corrections ride along — he needs to know a tile
+    // landed somewhere other than its name implied.
+    const note = (r.notes || [])[0];
     toast("🧩 imported " + r.count + (r.count === 1 ? " tile" : " tiles") +
-          " — selected and ready to place");
+          " — selected and ready to place" +
+          (note ? " · " + note : ""));
   } else {
     toast("🧩 import returned no usable tile");
   }
@@ -4225,10 +4251,38 @@ function openTileEditor(id) {
   syncHeightUI();
   $("tile-edit-form").hidden = false;
   $("tile-edit-name").value = editingTile.name;
+  buildTileEditHome(editingTile.subcategory || "other");  // v5.29
   // v3.8: Share publishes to the shared library; shared tiles can come home
   $("tile-edit-share").textContent =
     (editingTile.scope || "local") === "shared" ? "Make private" : "Share";
   buildTileEditPresets();
+}
+// v5.29: the tile's home, hand-picked — every subcategory is choosable,
+// grouped by tab. The server validates the pick (guardrails: a chest
+// can't land in creatures) and the save toasts if it moved the tile.
+// The pick is only sent when the user actually touched the dropdown —
+// otherwise a rename keeps re-deriving the home from the new name.
+let homeTouched = false;
+function buildTileEditHome(cur) {
+  const sel = $("tile-edit-home"); sel.innerHTML = "";
+  homeTouched = false;
+  sel.onchange = () => { homeTouched = true; };
+  const tabName = { tiles: "Tiles", objects: "Objects", characters: "Characters" };
+  for (const tab of ["tiles", "objects", "characters"]) {
+    const subs = Object.keys(SUBCAT_TABS).filter(s => SUBCAT_TABS[s] === tab);
+    const ordered = (SUBCAT_ORDER[tab] || [])
+      .concat(subs.filter(s => !(SUBCAT_ORDER[tab] || []).includes(s)));
+    if (!ordered.length) continue;
+    const g = document.createElement("optgroup");
+    g.label = tabName[tab] || tab;
+    for (const s of ordered) {
+      const o = document.createElement("option");
+      o.value = s; o.textContent = SUBCAT_LABEL[s] || s;
+      if (s === cur) o.selected = true;
+      g.appendChild(o);
+    }
+    sel.appendChild(g);
+  }
 }
 $("tile-edit-share").onclick = async () => {
   if (!editingTile) return;
@@ -4267,12 +4321,16 @@ $("tile-h-plus").onclick = ev => { ev.preventDefault(); editHeight++; syncHeight
 $("tile-edit-done").onclick = () => { $("tile-edit-form").hidden = true; editingTile = null; };
 $("tile-edit-save").onclick = async () => {
   if (!editingTile) return;
-  const r = await api("/api/custom/update", {
+  const body = {
     id: editingTile.id,
     name: $("tile-edit-name").value.trim().slice(0, 24),
     preset: editPreset,
     height: editHeight,   // v5.10: explicit per-tile height
-  });
+  };
+  // v5.29: hand-picked home goes along only when he touched the picker —
+  // an untouched picker means the rename re-derives the category instead.
+  if (homeTouched) body.subcategory = $("tile-edit-home").value;
+  const r = await api("/api/custom/update", body);
   if (!r.ok) { toast("couldn't save: " + (r.error || "unknown")); return; }
   const renamed = editingTile.id;
   $("tile-edit-form").hidden = true; editingTile = null;
@@ -4280,7 +4338,9 @@ $("tile-edit-save").onclick = async () => {
   await refreshHeight();   // v5.10: faces/shadows/overlay follow the new height
   selTile = renamed;
   buildPalette();
-  toast("saved");
+  // v5.29: the guardrail note explains a correction ("a chest can't land
+  // in creatures") — it replaces the plain "saved", not hides behind it.
+  toast(r.note || "saved");
 };
 $("tile-edit-delete").onclick = async () => {
   if (!editingTile) return;
@@ -5755,6 +5815,7 @@ async function melodyDemo() {
       };
     } catch (e) {}
     splashStep(28, "Loading recipes\u2026");
+    await loadTaxonomy();   // v5.29: the server's one routing table (Law 15)
     const p = await api("/api/palette");
     palette = p.tiles;
     splashStep(42, "Loading tiles\u2026");

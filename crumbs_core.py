@@ -410,36 +410,68 @@ SUBCATEGORY_HINTS = [
 ]
 # creature name-tokens — a character-preset tile matching one of these
 # lands in "creatures", otherwise in "characters".
-CREATURE_HINTS = ["goblin", "orc", "rat", "bat", "spider", "wolf", "snake",
-                  "imp", "skeleton", "zombie", "dragon", "slime", "hound",
-                  "scorpion", "troll", "ghost", "demon", "beast", "critter",
-                  "serpent"]
+# v5.29: split into animals vs creatures — Lloyd's feedback item 4.
+# ANIMAL_HINTS are real-world critters (usually passive); CREATURE_HINTS are
+# fantasy/hostile monsters. Order matters: animals are checked first.
+ANIMAL_HINTS = ["rat", "bat", "spider", "wolf", "snake", "hound",
+                "scorpion", "serpent", "rabbit", "bunny", "deer", "horse",
+                "cow", "pig", "sheep", "goat", "chicken", "bird", "crow",
+                "owl", "frog", "toad", "fish", "shark", "crab", "turtle",
+                "squirrel", "mouse", "fox", "bear", "lion", "tiger", "cat",
+                "dog", "duck", "bee", "ant", "butterfly", "lizard", "penguin",
+                "parrot", "hawk", "beast", "critter", "pet", "animal"]
+CREATURE_HINTS = ["goblin", "orc", "imp", "skeleton", "zombie", "dragon",
+                  "slime", "troll", "ghost", "demon", "wraith", "lich",
+                  "golem", "mimic", "basilisk", "hydra", "kraken", "griffin",
+                  "phoenix", "unicorn", "fairy", "pixie", "cyclops",
+                  "minotaur", "ogre", "yeti", "mermaid", "monster"]
 # palette display order per tab ("other" is appended only when non-empty —
 # Law 11: no dead buttons, so empty groups never render a chip).
 SUBCATEGORY_ORDER = {
     "tiles": ["walls", "floors", "doors", "roofs", "materials", "natural"],
     "objects": ["furniture", "containers", "props", "lighting"],
-    "characters": ["characters", "creatures"],
+    # v5.29: animals get their own chip — characters / animals / creatures
+    # are distinct (Lloyd's feedback item 4).
+    "characters": ["characters", "animals", "creatures"],
+}
+# v5.29: the preset is explicit data about what a tile IS, so when the name
+# gives no hint it decides the home (hardens the starter pack — "Starter
+# Teal tiles" is a floor even though its name says nothing the guesser
+# knows). Name hints still win when they match.
+PRESET_SUBCATEGORY = {
+    "floor": "floors", "wall": "walls", "door": "doors",
+    "water": "natural", "deepwater": "natural",
+    "hill": "natural", "mountain": "natural",
 }
 
 
 def guess_subcategory(name, preset=None, category="tiles"):
     """v5.25: filename/name-hint auto-categorization. Returns a subcategory
-    string; never raises, never returns empty."""
+    string; never raises, never returns empty.
+    v5.29: animals split off from creatures (real-world critters vs fantasy
+    monsters), and the preset decides the home when the name gives no hint."""
     try:
         tokens = set(re.split(r"[^a-z0-9]+", (name or "").lower()))
         tokens.discard("")
-        # characters & creatures are their own group — by preset, or by the
-        # hero token for built-ins that predate presets (e.g. "Hood Hero").
+        # characters, animals & creatures are their own group — by preset, or
+        # by the hero token for built-ins that predate presets (e.g. "Hood
+        # Hero"). A hero is always a character, even a spider hero.
         if preset == "character" or "hero" in tokens:
+            for kw in ANIMAL_HINTS:
+                if kw in tokens and "hero" not in tokens:
+                    return "animals"
             for kw in CREATURE_HINTS:
-                if kw in tokens:
+                if kw in tokens and "hero" not in tokens:
                     return "creatures"
             return "characters"
         for sub, kws in SUBCATEGORY_HINTS:
             for kw in kws:
                 if kw in tokens:
                     return sub
+        # v5.29: no name hint — the preset decides (never "other" for a
+        # tile whose function is known).
+        if preset in PRESET_SUBCATEGORY:
+            return PRESET_SUBCATEGORY[preset]
     except Exception:
         pass
     return "other"
@@ -454,7 +486,19 @@ SUBCATEGORY_TABS = {
     "roofs": "tiles", "materials": "tiles", "natural": "tiles",
     "furniture": "objects", "containers": "objects", "props": "objects",
     "lighting": "objects", "other": "objects",
-    "characters": "characters", "creatures": "characters",
+    # v5.29: animals share the characters tab (characters / animals /
+    # creatures are chips, not tabs — Lloyd's feedback item 4).
+    "characters": "characters", "animals": "characters",
+    "creatures": "characters",
+}
+# v5.29: chip labels — part of the shared routing table, served at
+# /api/taxonomy so the client never carries a stale copy of its own.
+SUBCATEGORY_LABELS = {
+    "walls": "Walls", "floors": "Floors", "doors": "Doors",
+    "roofs": "Roofs", "materials": "Materials", "natural": "Natural",
+    "furniture": "Furniture", "containers": "Containers", "props": "Props",
+    "lighting": "Lighting", "characters": "Characters", "animals": "Animals",
+    "creatures": "Creatures", "other": "Other",
 }
 def tab_for_subcategory(sub):
     """v5.26: which palette tab a subcategory belongs to. Never raises,
@@ -465,22 +509,83 @@ def tab_for_subcategory(sub):
         return "objects"
 
 
+def taxonomy_table():
+    """v5.29: THE single routing table, per Law 15 — the canonical
+    subcategory->tab map, chip order, and labels. The server is the
+    authority; the client fetches this at /api/taxonomy on boot and
+    refreshes its local copy. Never raises."""
+    try:
+        return {"version": 1,
+                "tabs": dict(SUBCATEGORY_TABS),
+                "order": {k: list(v) for k, v in SUBCATEGORY_ORDER.items()},
+                "labels": dict(SUBCATEGORY_LABELS)}
+    except Exception:
+        return {"version": 1, "tabs": {}, "order": {}, "labels": {}}
+
+
+# v5.29: category guardrails — subcategory names the client is allowed to
+# claim explicitly (anything else is auto-corrected, never kept).
+CHARACTER_SUBS = ("characters", "animals", "creatures")
+def validate_taxonomy(name, preset, subcategory):
+    """v5.29: validate a tile's category — on import AND on explicit
+    assignment. Returns (subcategory, corrected, note).
+
+    The home is decided by what the tile IS (name + preset, per Law 15).
+    A claimed subcategory that contradicts the data is AUTO-CORRECTED
+    with a note — never silently kept, and never rejected: a reject would
+    strand the tile with no home and force a re-import on the phone,
+    while the server can always derive the right home. The caller toasts
+    the note so the correction is explained, not hidden.
+
+    Never raises, never returns empty."""
+    try:
+        claimed = (subcategory or "").strip().lower()
+        fresh = guess_subcategory(name, preset)
+        if not claimed or claimed not in SUBCATEGORY_TABS:
+            # unknown or blank — file it somewhere sane.
+            if claimed:
+                return ("other", True,
+                        "unknown category '%s' — filed under Other" % claimed)
+            return (fresh, False, None)
+        if preset == "character":
+            # character-preset tiles can never live in Tiles/Objects —
+            # a tree must not land in the tiles section, so a character
+            # must not land outside the character group.
+            if claimed not in CHARACTER_SUBS:
+                label = SUBCATEGORY_LABELS.get(fresh, fresh)
+                return (fresh, True,
+                        "'%s' is a character — moved to %s" % (name, label))
+            return (claimed, False, None)
+        if claimed in CHARACTER_SUBS:
+            # only character-preset tiles live under Characters — a chest
+            # must not land in creatures.
+            label = SUBCATEGORY_LABELS.get(fresh, fresh)
+            return (fresh, True,
+                    "'%s' isn't a character — moved to %s" % (name, label))
+        return (claimed, False, None)
+    except Exception:
+        return ("other", False, None)
+
+
 _BIOME_PREFIXES = ("dungeon", "grassland", "desert", "arctic", "forest",
                    "ocean", "core")
 def display_name(name):
     """v5.26: the automatic name system — one clean human-readable label
     derived from the raw tile name. 'dungeon_wall_dark' -> 'Dark Wall',
     'Starter Dark floor' -> 'Starter Dark Floor', 'cell_4521' -> 'Cell 4521'.
-    Never raises, never returns empty."""
+    v5.29: also strips filename collision suffixes ('torch_2' -> 'Torch'),
+    dashes, and stray punctuation. Never raises, never returns empty."""
     try:
-        s = (name or "").replace("_", " ").strip()
+        s = (name or "").replace("_", " ").replace("-", " ").strip()
+        s = re.sub(r"\.(png|jpe?g|gif|webp|bmp|heic)$", "", s,
+                   flags=re.IGNORECASE).strip()
         low = s.lower()
         for b in _BIOME_PREFIXES:
             if low.startswith(b + " ") and len(s) > len(b) + 1:
                 s = s[len(b) + 1:].strip()
                 break
-        words = s.split()
-        if words and words[-1].lower() in ("dark", "light"):
+        words = re.sub(r"[^a-z0-9 ]+", "", s.lower()).split()
+        if words and words[-1] in ("dark", "light"):
             words.insert(0, words.pop())
         labeled = " ".join(w[:1].upper() + w[1:] for w in words)
         return labeled or "Tile"
@@ -548,8 +653,13 @@ class AssetManager:
     def create_default_tiles(self):
         colors = [('#1a4d6b', 'deep_water'), ('#2d6b9e', 'water'), ('#c2b280', 'sand'),
                   ('#3d6b2e', 'grass_dark'), ('#4a7c23', 'grass'), ('#5a5a5a', 'stone')]
+        # v5.29: hardened — default tiles carry explicit subcategories, never
+        # left to the guesser (Lloyd's feedback item 2).
+        subs = {'deep_water': 'natural', 'water': 'natural', 'sand': 'natural',
+                'grass_dark': 'natural', 'grass': 'natural', 'stone': 'materials'}
         for i, (color, name) in enumerate(colors):
-            self.add_tile(i, 'color', {'color': color, 'name': name, 'category': 'tiles'})
+            self.add_tile(i, 'color', {'color': color, 'name': name, 'category': 'tiles',
+                                       'subcategory': subs[name]})
 
     def create_biome_tiles(self):
         for biome_name, data in BIOMES.items():

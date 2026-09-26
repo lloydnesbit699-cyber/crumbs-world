@@ -36,3 +36,9 @@ vaults/
 # v5.28: local-mode Melody state (melody/ dir) — per-device, never in the repo
 melody/
 .crumbs_secret
+
+# v5.29: private runtime data never enters the repo (were tracked by
+# Replit's publish commits; untracked per owner approval 2026-09-26)
+.crumbs_secret
+users.json
+vaults/

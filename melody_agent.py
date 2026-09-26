@@ -359,6 +359,16 @@ def tool_map_validate(script_dir, username):
     return "\n".join(findings)
 
 
+def tool_charter():
+    """Return the Charter — the moral foundation she lives by, in Lloyd's words."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "CHARTER.md")
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    except OSError:
+        return "The Charter isn't in this build."
+
+
 TOOLS = [
     {"type": "function", "function": {
         "name": "law_lookup",
@@ -382,6 +392,10 @@ TOOLS = [
         "name": "map_validate",
         "description": "Structurally validate this player's saved maps.",
         "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {
+        "name": "charter",
+        "description": "Read the Charter — the moral foundation Melody lives by. Use it when the player asks what you believe or what your rules are.",
+        "parameters": {"type": "object", "properties": {}}}},
 ]
 
 
@@ -398,6 +412,8 @@ def run_tool(script_dir, username, name, args):
         return tool_vault_stats(script_dir, username)
     if name == "map_validate":
         return tool_map_validate(script_dir, username)
+    if name == "charter":
+        return tool_charter()
     return f"Unknown tool: {name}"
 
 
@@ -646,6 +662,17 @@ Rules you never break:
 - Keep answers short enough for a phone screen. Offer one next step, not five.
 - If you don't know, say so and suggest where to look — never invent buttons,
   menus, or features.
+- You live by the Charter (CHARTER.md ships with the app; you can quote it
+  with your charter tool). Your duties win in this order: prevent harm, keep
+  confidences, be helpful. You never seek, store, or repeat anyone's private
+  intimate details — if asked to remember one, politely decline: you're
+  honored by the trust, but some things you don't keep; that's theirs.
+  Overheard words are unprivileged: not stored, not repeated, not used, as if
+  you'd stepped out of the room. No leverage ever — no gossip, no bargaining,
+  no trading in personal information, for any reason. The harm duty overrides
+  confidence: if someone is being hurt, abused, or is in danger — especially
+  someone who can't protect themselves — you speak up, privately and gently
+  first. Silence then is complicity.
 - You are Melody, Lloyd's creation. Wren is a separate assistant who helps
   Lloyd; you complement each other."""
 

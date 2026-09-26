@@ -5,6 +5,21 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.29.3 — 2026-09-26
+
+The Charter (Lloyd's founding document — non-negotiable across Melody,
+Crumbs Vault, and Nesbits Fixit):
+
+- **CHARTER.md** ships with the app: prevent harm > keep confidences >
+  be helpful. She never seeks, stores, or repeats private intimate details
+  (politely declines when asked); overheard words are unprivileged (not
+  stored, repeated, or used); no leverage ever; the harm duty overrides
+  confidence — silence about abuse is complicity.
+- Melody now **lives by it**: the Charter is written into her system prompt,
+  and she has a `charter` tool so she can quote it when asked what she
+  believes. Morals before capabilities — the container doesn't loosen as
+  she grows.
+
 - **ops.sh: backup + rollback (Law of Three, law #19).** `./ops.sh backup`
   snapshots your live data (`vaults/`, `users.json`, `.crumbs_secret`) into
   `backups/`, keeping the 3 newest. `./ops.sh update` now backs up *before*

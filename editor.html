@@ -188,6 +188,44 @@
   #login-box input { display: block; width: 100%; box-sizing: border-box;
     margin: 8px 0; padding: 10px; border-radius: 8px; border: 1px solid #333;
     background: #0d0d12; color: #eee; font-size: 16px; }
+  /* v5.28: Melody chat dock (Phase 1 agent) */
+  #melody-fab { position: fixed; right: 14px; bottom: 14px; z-index: 240;
+    width: 52px; height: 52px; border-radius: 50%; border: 2px solid #ffd75f;
+    background: #1a1a24; color: #ffd75f; font-size: 15px; font-weight: bold;
+    cursor: pointer; box-shadow: 0 2px 12px rgba(0,0,0,.5); }
+  #melody-fab:active { transform: scale(.94); }
+  #melody-dock { position: fixed; right: 14px; bottom: 76px; z-index: 240;
+    width: min(92vw, 340px); height: min(60vh, 420px); display: flex;
+    flex-direction: column; background: #14141c; border: 1px solid #2a2a38;
+    border-radius: 12px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,.6); }
+  #melody-dock[hidden] { display: none; }
+  #melody-head { display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px; background: #1d1d28; border-bottom: 1px solid #2a2a38; }
+  #melody-title { color: #ffd75f; font-weight: bold; font-size: 14px; flex: 1; }
+  #melody-quota { color: #888; font-size: 11px; }
+  #melody-head button { background: none; border: none; color: #aaa;
+    font-size: 16px; cursor: pointer; padding: 2px 6px; }
+  #melody-log { flex: 1; overflow-y: auto; padding: 10px; display: flex;
+    flex-direction: column; gap: 8px; }
+  .mel-msg { max-width: 88%; padding: 8px 10px; border-radius: 10px;
+    font-size: 14px; line-height: 1.4; white-space: pre-wrap; word-wrap: break-word; }
+  .mel-msg.user { align-self: flex-end; background: #2a3a5f; color: #e8f0ff; }
+  .mel-msg.mel { align-self: flex-start; background: #22222e; color: #eee;
+    border: 1px solid #33333f; }
+  .mel-msg.mel b { color: #ffd75f; }
+  #melody-typing { padding: 4px 12px; color: #888; font-size: 12px; font-style: italic; }
+  #melody-typing[hidden] { display: none; }
+  #melody-input-row { display: flex; gap: 6px; padding: 8px;
+    border-top: 1px solid #2a2a38; }
+  #melody-input { flex: 1; padding: 9px 10px; border-radius: 8px;
+    border: 1px solid #333; background: #0d0d12; color: #eee; font-size: 15px; }
+  #melody-send { padding: 9px 14px; border-radius: 8px; border: none;
+    background: #ffd75f; color: #111; font-weight: bold; cursor: pointer; }
+  #melody-send:disabled { opacity: .5; }
+  @media (max-width: 600px) {
+    #melody-dock { right: 8px; left: 8px; bottom: 74px; width: auto;
+      height: 52vh; }
+  }
   #login-go { width: 100%; margin-top: 10px; padding: 11px; border: 0;
     border-radius: 8px; background: linear-gradient(90deg,#ff5a5a,#ffd75f);
     color: #14141c; font-weight: bold; font-size: 16px; }
@@ -5553,11 +5591,99 @@ $("menu-items").onclick = () => { toggleOverlay("sheet-items"); loadItems(); };
 $("menu-npcs").onclick = () => { toggleOverlay("sheet-npcs"); loadItems(); loadNpcs(); };
 $("pack-btn").onclick = () => { toggleOverlay("sheet-pack"); syncInv(); };
 
+// v5.28: Melody chat dock — Phase 1 agent (teach + diagnose, read-only).
+const MELODY = { open: false, ready: false, busy: false };
+function melodyEsc(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function melodyFmt(text) {
+  return melodyEsc(text).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+}
+function melodyAdd(role, text) {
+  const log = $("melody-log");
+  const d = document.createElement("div");
+  d.className = "mel-msg " + (role === "user" ? "user" : "mel");
+  d.innerHTML = melodyFmt(text);
+  log.appendChild(d);
+  log.scrollTop = log.scrollHeight;
+}
+function melodySetQuota(q) {
+  if (q && typeof q.remaining === "number")
+    $("melody-quota").textContent = q.remaining + " left today";
+}
+function melodyGreet() {
+  melodyAdd("mel", "Hey! I'm Melody \u2014 your guide inside Crumbs World. " +
+    "Ask me how to paint, find tiles, undo, or what's wrong with your map!");
+}
+async function melodySend() {
+  const inp = $("melody-input");
+  const msg = inp.value.trim();
+  if (!msg || MELODY.busy) return;
+  inp.value = "";
+  melodyAdd("user", msg);
+  MELODY.busy = true;
+  $("melody-send").disabled = true;
+  $("melody-typing").hidden = false;
+  try {
+    const r = await fetch("/api/melody/chat", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: msg }) });
+    const j = await r.json();
+    if (j.ok) { melodyAdd("mel", j.reply); melodySetQuota(j.quota); }
+    else melodyAdd("mel", j.detail || j.error ||
+      "Hmm, that didn't go through \u2014 try again?");
+  } catch (e) {
+    melodyAdd("mel", "I can't reach the server right now \u2014 " +
+      "is crumbs_hud.py running?");
+  }
+  MELODY.busy = false;
+  $("melody-send").disabled = false;
+  $("melody-typing").hidden = true;
+  inp.focus();
+}
+async function melodyInit() {
+  let h;
+  try { h = await (await fetch("/api/melody/health")).json(); }
+  catch (e) { return; }
+  if (!h || !h.ok) return;  // agent module missing — dock stays hidden
+  MELODY.ready = true;
+  $("melody-fab").hidden = false;
+  $("melody-fab").onclick = () => {
+    const dock = $("melody-dock");
+    dock.hidden = !dock.hidden;
+    MELODY.open = !dock.hidden;
+    if (MELODY.open) $("melody-input").focus();
+  };
+  $("melody-min").onclick = () => {
+    $("melody-dock").hidden = true; MELODY.open = false;
+  };
+  $("melody-send").onclick = melodySend;
+  $("melody-input").addEventListener("keydown", e => {
+    if (e.key === "Enter") melodySend();
+  });
+  $("melody-clear").onclick = async () => {
+    try {
+      await fetch("/api/melody/clear", { method: "POST",
+        headers: { "Content-Type": "application/json" }, body: "{}" });
+    } catch (e) { /* best effort */ }
+    $("melody-log").innerHTML = "";
+    melodyGreet();
+  };
+  let hist = [];
+  try {
+    hist = (await (await fetch("/api/melody/history")).json()).history || [];
+  } catch (e) { /* offline — greet fresh */ }
+  hist.forEach(m => melodyAdd(m.role === "user" ? "user" : "mel", m.content));
+  if (!hist.length) melodyGreet();
+}
+
 (async function init() {
   try {
     // v5.27: public mode parks on the login overlay until the user logs
     // in; local mode skips the gate and boots straight in.
     if (!(await authGate())) return;
+    melodyInit();  // v5.28: Melody dock — fire-and-forget, never blocks boot
     splashStep(6, "Waking the server\u2026");
     const b = await api("/api/biomes");
     b.biomes.forEach(x => {
@@ -5876,5 +6002,21 @@ async function deleteMission(id) {
   }
 })();
 </script>
+<!-- v5.28: Melody chat dock (Phase 1 agent) -->
+<button id="melody-fab" hidden title="Ask Melody">Mel</button>
+<div id="melody-dock" hidden>
+  <div id="melody-head">
+    <span id="melody-title">Melody</span>
+    <span id="melody-quota"></span>
+    <button id="melody-clear" title="Clear conversation">&#10218;</button>
+    <button id="melody-min" title="Minimize">&minus;</button>
+  </div>
+  <div id="melody-log"></div>
+  <div id="melody-typing" hidden>Melody is thinking&hellip;</div>
+  <div id="melody-input-row">
+    <input id="melody-input" placeholder="Ask Melody&hellip;" maxlength="2000" autocomplete="off">
+    <button id="melody-send">Send</button>
+  </div>
+</div>
 </body>
 </html>

@@ -3,6 +3,43 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.28 — 2026-09-26
+
+**Melody Phase 1: she has a voice.** A "Mel" chat dock now lives in the HUD
+for every logged-in player (and in login-free local mode as a single-player
+session). She teaches the app, looks up Repair Laws, reports vault stats,
+and validates saved maps — read-only for now.
+
+- **New agent module `melody_agent.py`.** Separate subsystem behind a narrow
+  door: the server authenticates the player, then hands the agent (username,
+  message) and nothing else. Per-user memory under `vaults/<user>/melody/`
+  (history, quota, append-only audit log). Lloyd's tiers: 200/600/1000 brain
+  calls/day for free/basic/pro; tier stored on the user record.
+- **Knowledge-first answers cost nothing.** `MELODY_KNOWLEDGE.md` ships with
+  the app; confident matches answer with zero brain call, zero quota burned.
+  No brain key configured (or all brains down) → she says so honestly and
+  still answers from the guide.
+- **Brain backends, swappable.** `MELODY_BRAIN=gemini` (default, free AI
+  Studio key) → `groq` fallback → `ollama` (`MELODY_BRAIN_BASE`) for the
+  homecoming to Lloyd's own weights with zero game changes → `off` for
+  knowledge-only mode.
+- **`/api/melody/*` skips the vault lock** (health/chat/history/clear) — the
+  agent is fully file-based and never touches game globals, so serializing
+  it would stall the server through every multi-second brain call (Law 17).
+  Auth is still checked: 401 without a session in public mode.
+- **Repair Law 18 — "The Agent Sees Only Its Player."** Every agent path is
+  built from the authenticated username alone, never from request input;
+  she sees the player's vault plus the shared Commons (visible to everyone
+  anyway), never another player's private vault. Enforced in path
+  construction, not in the prompt.
+- **New tests `melody_test.py`: 35/35 pass** — path-traversal rejection,
+  quota tiers/exhaustion, knowledge + law lookup, knowledge-direct and
+  brain-off turns, stubbed-brain tool loop, audit lines, cross-vault
+  blindness. Live-server verified: local-mode chat/history/health,
+  public-mode 401 when logged out, dock served in editor.html.
+- Known pre-existing: `core_smoke_test.py` sprite-library round-trip fails
+  on v5.27.3 too (9/10) — unrelated to this release.
+
 ## v5.27.3 — 2026-09-25
 
 Root-caused from Lloyd's screenshot: palette thumbnails were blank — not

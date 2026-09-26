@@ -116,6 +116,13 @@ import sys
 import uuid
 import threading
 import time
+
+# v5.28: Melody's agent module. Guarded import — a missing or broken
+# melody_agent.py degrades the chat dock, never the game.
+try:
+    import melody_agent as _melody_agent
+except Exception:
+    _melody_agent = None
 import math
 import subprocess
 import heapq
@@ -147,7 +154,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.27.3"
+APP_VERSION = "5.28"
 # v5.24: unique per process boot. After an update the server re-execs into
 # the new files; the page waits for a DIFFERENT instance id (plus the new
 # version) instead of mistaking the old process — still answering during
@@ -3699,6 +3706,72 @@ class Handler(BaseHTTPRequestHandler):
                 self._issue_session(user)  # sliding 30-day refresh
         return True
 
+    # -- v5.28: Melody ----------------------------------------------------
+    # Phase 1 agent endpoints. The agent is fully file-based — per-user
+    # history/quota/audit under vaults/<user>/melody/, never game globals —
+    # so these endpoints skip the vault lock entirely. Holding the lock
+    # through a multi-second brain call would serialize the whole server
+    # (Repair Law 17). Auth is still checked; Law 18 is enforced by
+    # construction: every agent path is built from the authenticated
+    # username alone, never from request input.
+    def _melody_user(self):
+        """Authenticated Melody identity, or None. Local mode: "local"."""
+        if not PUBLIC_MODE:
+            return "local"  # login-free single-player session
+        user = self._session_user()
+        if user:
+            return user
+        if self._write_key_ok():
+            return _owner_username()  # write key = owner's master bypass
+        return None
+
+    def _melody_tier(self, username):
+        rec = _load_users().get(username) or {}
+        tier = rec.get("tier", "free")
+        return tier if tier in ("free", "basic", "pro") else "free"
+
+    def _do_melody_impl(self, path, is_post):
+        if _melody_agent is None:
+            return self._send_json({"ok": False,
+                                    "error": "melody unavailable"}, 500)
+        if path == "/api/melody/health":
+            # no auth — the page checks this before showing the dock.
+            st = _melody_agent.brain_status()
+            st.update({"ok": True, "version": APP_VERSION, "phase": 1,
+                       "public_mode": PUBLIC_MODE})
+            return self._send_json(st)
+        user = self._melody_user()
+        if not user:
+            return self._send_json({"ok": False, "error": "login required"},
+                                   401)
+        if path == "/api/melody/history" and not is_post:
+            return self._send_json({
+                "ok": True,
+                "history": _melody_agent.history_load(SCRIPT_DIR, user)})
+        if path == "/api/melody/clear" and is_post:
+            _melody_agent.history_clear(SCRIPT_DIR, user)
+            _melody_agent.audit(SCRIPT_DIR, user, "history-clear", "")
+            return self._send_json({"ok": True})
+        if path == "/api/melody/chat" and is_post:
+            if not self._is_json_request():
+                return self._send_json(
+                    {"ok": False,
+                     "error": "Content-Type must be application/json"}, 415)
+            if not self._same_origin_ok():
+                return self._send_json(
+                    {"ok": False, "error": "origin/host check failed"}, 403)
+            body = self._read_json()
+            if not isinstance(body, dict):
+                return self._send_json({"ok": False, "error": "bad JSON"},
+                                       400)
+            res = _melody_agent.handle_chat(SCRIPT_DIR, user,
+                                            body.get("message", ""),
+                                            self._melody_tier(user))
+            status = 200 if res.get("ok") else (
+                429 if res.get("error") == "quota" else 400)
+            return self._send_json(res, status)
+        return self._send_json({"ok": False, "error": "not found"}, 404)
+
     def handle_one_request(self):
         # v1.4: a phone browser often hangs up mid-write (iOS froze the server,
         # user reloaded, etc.). Swallow the dead-socket noise, keep serving.
@@ -3808,6 +3881,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"ok": False, "error": "slow down"}, 429)
         path = urlparse(self.path).path
         self._outgoing_cookie = None
+        # v5.28: Melody's endpoints skip the vault lock — the agent is
+        # fully file-based (per-user melody/ dir, no game globals), so
+        # serializing it would stall the server through every brain call
+        # (Repair Law 17). Auth is still checked inside the handler.
+        if path.startswith("/api/melody/"):
+            return self._do_melody_impl(path, is_post=False)
         # v5.27.3: thumbnails are vault-independent (they render from the
         # global art registry, never vault globals), so they skip the vault
         # lock entirely — otherwise an 80-thumbnail palette loads single-file
@@ -4310,6 +4389,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"ok": False, "error": "slow down"}, 429)
         path = urlparse(self.path).path
         self._outgoing_cookie = None
+        # v5.28: Melody's endpoints skip the vault lock (see do_GET note) —
+        # the agent never touches game globals, and a brain call can take
+        # seconds. Auth is still checked inside the handler.
+        if path.startswith("/api/melody/"):
+            return self._do_melody_impl(path, is_post=True)
         # v5.27: public mode serializes /api/* on the vault lock — one
         # request's globals can never bleed into another's.
         if PUBLIC_MODE and path.startswith("/api/"):

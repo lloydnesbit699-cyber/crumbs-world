@@ -33,4 +33,6 @@ entitlements.json
 # v5.27: accounts + vaults — never in the repo
 users.json
 vaults/
+# v5.28: local-mode Melody state (melody/ dir) — per-device, never in the repo
+melody/
 .crumbs_secret

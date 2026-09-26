@@ -119,3 +119,17 @@ independence (thumbnails render from the global art registry) and exempt
 it. When you add a global lock, audit every path it now covers — the
 innocent ones will be the ones your users feel.
 (Lloyd's report, 2026-09-25: palette thumbnails blank, never arriving.)
+
+### 18. The Agent Sees Only Its Player
+An agent that serves many players must be blind by construction, not by
+promise. Melody's endpoints authenticate the requester, then build every
+path from that username alone — `vaults/<username>/melody/` — never from
+request input, never from another player's vault. The shared Commons is the
+one exception, and it's not really one: every player can already see the
+Commons, so the agent seeing it alongside its player leaks nothing. The rule
+is about private vaults: the agent must never read, carry, or reveal one
+player's private world to another player — or into the Commons. Enforce it
+in the path construction, not in the prompt; a system prompt can be
+talked around, a path that can't be spelled can't be walked.
+(Lloyd's question, 2026-09-26: "how is she gonna handle common worlds?" —
+the Commons is shared by design, private vaults are the boundary.)

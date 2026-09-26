@@ -139,6 +139,37 @@
   .maprow .mmeta { font-size: 11px; color: #888; }
   .maprow .macts { display: flex; gap: 4px; flex: none; }
   .maprow .macts button { font-size: 11px; padding: 6px 8px; }
+  /* v5.29: map picker — whole-row load target, current badge, busy state */
+  .maprow { cursor: pointer; }
+  .maprow .mname { pointer-events: none; font-weight: 600; }
+  .maprow .curbadge { display: inline-block; font-size: 10px; color: #0a0a0a;
+    background: #4da3ff; border-radius: 8px; padding: 1px 7px; margin-left: 6px;
+    font-weight: 700; vertical-align: 1px; }
+  .maprow .mdate { font-size: 11px; color: #777; }
+  .maprow .thumb-fallback { width: 72px; height: 48px; background: #101018;
+    border-radius: 6px; flex: none; display: flex; align-items: center;
+    justify-content: center; font-size: 20px; }
+  #load-list.busy .maprow { opacity: 0.55; pointer-events: none; }
+  /* v5.29: stage-level loading veil — the map never half-draws mid-load */
+  #load-veil { position: fixed; inset: 0; z-index: 999; display: flex;
+    align-items: center; justify-content: center; background: rgba(8,8,12,0.72); }
+  #load-veil[hidden] { display: none; }
+  #load-veil .veil-card { background: #16161c; border: 1px solid #3a3a44;
+    border-radius: 14px; padding: 22px 30px; text-align: center; }
+  #load-veil .spinner { width: 34px; height: 34px; margin: 0 auto 10px;
+    border: 4px solid #333; border-top-color: #4da3ff; border-radius: 50%;
+    animation: veil-spin 0.8s linear infinite; }
+  @keyframes veil-spin { to { transform: rotate(360deg); } }
+  #load-veil .veil-text { font-size: 14px; color: #cfd8ff; }
+  /* v5.29: height + portal tools */
+  #btn-height.on { border-color: #7fbf3a; color: #c8f09a; }
+  #btn-portal.on { border-color: #b48aff; color: #d9c6ff; }
+  #sheet-portal .field { margin-bottom: 10px; }
+  #sheet-portal .field .lbl { display: block; font-size: 12px; color: #9db3ff;
+    margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+  #sheet-portal input, #sheet-portal select { width: 100%; box-sizing: border-box; }
+  #sheet-portal .row2 { display: flex; gap: 8px; }
+  #sheet-portal .row2 .field { flex: 1; }
   #slots-list .slotrow, #check-list .checkrow { margin-bottom: 8px; padding: 8px;
             background: #1b1b1b; border: 1px solid #333; border-radius: 10px; }
   #slots-list .slotrow { display: flex; gap: 8px; align-items: center; }
@@ -736,6 +767,11 @@
 </div>
 
 <div id="stage"><canvas id="grid"></canvas></div>
+<!-- v5.29: stage-level loading veil — shown for the whole map switch, so the
+     canvas never renders a half-loaded map (the load "warp" came from
+     render() running between /api/load and the follow-up fetches). -->
+<div id="load-veil" hidden><div class="veil-card"><div class="spinner"></div>
+<div class="veil-text" id="veil-text">Loading…</div></div></div>
 <div id="height-legend" hidden>
   <b>elevation</b>
   <span><i style="background:#1a3a8f"></i>&minus;2 deep water</span>
@@ -859,6 +895,8 @@
   <div class="tray-head">Tools</div>
   <button id="btn-select" title="Inspect whatever is on a tile">Select</button>
   <button id="btn-eraser" title="Eraser">Eraser</button>
+  <button id="btn-height" title="Raise/lower terrain elevation — drag to sculpt">Height</button>
+  <button id="btn-portal" title="Link a door/cave tile to its own pocket map">Portal</button>
   <button id="btn-patrol" title="Make a character walk a route">Patrol</button>
   <button id="btn-patrol-done" hidden title="Finish this patrol route">Done ✓</button>
   <button id="btn-traits" title="Stamp nature traits: hot, cold, sharp, wood, food">Traits</button>
@@ -877,6 +915,42 @@
       <button id="inspect-textcancel" class="ghost">Cancel</button>
     </div>
   </div>
+</div>
+
+<!-- v5.29: pocket-map portal editor — link a door/cave tile to its own
+     seeded pocket map. Blank target = generate a fresh one. -->
+<div id="sheet-portal" class="sheet">
+  <div class="grab"></div>
+  <div class="tray-head">Portal <span id="portal-xy" class="tray-hint"></span></div>
+  <div id="portal-existing" hidden>
+    <div class="opt-row" style="margin-bottom:10px">
+      <span id="portal-target-label" style="flex:1;font-size:14px"></span>
+    </div>
+  </div>
+  <div class="field"><span class="lbl">Label</span>
+    <input id="portal-label" maxlength="60" placeholder="e.g. Dark cave"></div>
+  <div class="field"><span class="lbl">Pocket map (blank = generate new)</span>
+    <input id="portal-target" placeholder="existing-map.json or blank"></div>
+  <div class="row2">
+    <div class="field"><span class="lbl">Seed</span>
+      <input id="portal-seed" type="number" placeholder="blank = random"></div>
+    <div class="field"><span class="lbl">Biome</span><select id="portal-biome"></select></div>
+  </div>
+  <div class="row2">
+    <div class="field"><span class="lbl">Preset</span><select id="portal-preset"><option value="">none</option></select></div>
+    <div class="field"><span class="lbl">Size</span>
+      <div class="row2"><input id="portal-w" type="number" value="24" min="4" max="64">
+      <input id="portal-h" type="number" value="24" min="4" max="64"></div></div>
+  </div>
+  <div class="opt-row">
+    <button id="portal-save">Link portal</button>
+    <button id="portal-enter" class="ghost" hidden>Enter →</button>
+    <button id="portal-regen" class="ghost" hidden>Regenerate</button>
+    <button id="portal-unlink" class="ghost danger" hidden>Unlink</button>
+  </div>
+  <div class="opt-row"><small style="color:#888">The pocket map is generated from
+    this seed — regenerating rebuilds it identically. A return portal is
+    created inside the pocket so the hero can come back.</small></div>
 </div>
 
 <div id="sheet-setup" class="sheet">
@@ -1997,24 +2071,51 @@ function render() {
       }
     }
   }
-  // v5.10: height overlay — tint cells by elevation, numbered levels
+  // v5.29: height overlay — stacked cliff faces instead of numbers. Each
+  // level above 0 draws a shaded earth band rising from the cell's south
+  // edge; each level below 0 carves a dark water band down from the north
+  // edge. Hills literally stack, pits visibly deepen.
   if (showHeight && heightGrid && heightGrid.length === H) {
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    const fs = Math.max(10, Math.round(tilePx * 0.30));
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       const h = heightGrid[y][x];
       if (!h) continue;
-      ctx.globalAlpha = 0.45;
-      ctx.fillStyle = HEIGHT_COLORS[String(h)] || "#888";
-      ctx.fillRect(x * tilePx, y * tilePx, tilePx, tilePx);
-      ctx.globalAlpha = 1;
-      const tx = x * tilePx + tilePx / 2, ty = y * tilePx + tilePx / 2;
-      const label = (h > 0 ? "+" : "") + h;
-      ctx.font = "bold " + fs + "px sans-serif";
-      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,0.65)";
-      ctx.strokeText(label, tx, ty);
-      ctx.fillStyle = h < 0 ? "#cfe6ff" : "#ffffff";
-      ctx.fillText(label, tx, ty);
+      const px = x * tilePx, py = y * tilePx;
+      const band = Math.max(2, Math.round(tilePx * 0.16));
+      if (h > 0) {
+        ctx.fillStyle = "rgba(127,191,58,0.16)";  // sunlit top face
+        ctx.fillRect(px, py, tilePx, Math.max(0, tilePx - h * band));
+        for (let i = 1; i <= h; i++) {
+          const by = py + tilePx - i * band;
+          ctx.fillStyle = "rgba(101,67,33," + (0.55 + i * 0.13).toFixed(2) + ")";
+          ctx.fillRect(px, by, tilePx, band);
+          ctx.fillStyle = "rgba(255,235,200,0.28)";  // lit lip of each face
+          ctx.fillRect(px, by, tilePx, Math.max(1, Math.round(band * 0.2)));
+          ctx.fillStyle = "rgba(0,0,0,0.35)";  // shadow under each face
+          ctx.fillRect(px, by + band - 1, tilePx, 1);
+        }
+      } else {
+        for (let i = 1; i <= -h; i++) {
+          const by = py + (i - 1) * band;
+          ctx.fillStyle = "rgba(20,50,110," + (0.5 + i * 0.15).toFixed(2) + ")";
+          ctx.fillRect(px, by, tilePx, band);
+          ctx.fillStyle = "rgba(0,0,0,0.4)";
+          ctx.fillRect(px, by + band - 1, tilePx, 1);
+        }
+      }
+    }
+  }
+  // v5.29: pocket-map portal markers — edit mode always shows where the
+  // doors are, so a linked tile is never a mystery.
+  if (!playMode) {
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    const pfs = Math.max(12, Math.round(tilePx * 0.44));
+    ctx.font = pfs + "px sans-serif";
+    for (const k in portals) {
+      const c = k.split(",");
+      const qx = +c[0], qy = +c[1];
+      if (!(qx >= 0 && qy >= 0 && qx < W && qy < H)) continue;
+      ctx.fillText("\ud83c\udf00",
+        qx * tilePx + tilePx / 2, qy * tilePx + tilePx / 2);
     }
   }
   // v4.0: nature traits — a small emoji in the cell corner, edit + play
@@ -2296,6 +2397,7 @@ canvas.addEventListener("pointerdown", async e => {
     // v2.1: second finger down — drop any in-progress paint, gesture takes over
     gesture = null;
     if (stroke) { stroke = null; refresh(); }
+    if (hstroke) { hstroke = null; refresh(); }  // v5.29
     panStart = null;
     return;
   }
@@ -2333,6 +2435,8 @@ canvas.addEventListener("pointerdown", async e => {
   if (itemPlace) { itemPlaceTap(cell); return; }      // v5.13: dropping gear
   if (npcPlace) { npcPlaceTap(cell); return; }        // v5.13: placing folks
   if (erasing && await eraseGearTap(cell)) return;    // v5.13: eraser lifts gear/folks
+  if (heightTool) { hstroke = { cells: new Map() }; heightStrokeAdd(cell); return; }  // v5.29
+  if (portalTool) { portalTap(cell); return; }  // v5.29: link a pocket map
   stroke = { cells: new Map(), linkCells: new Map(), layer: paintLayer() };
   // v5.29: the WIRE layer, not the tab name — the server only knows
   // tiles/objects/collision, and a "characters"/"colors" tab name used to
@@ -2366,6 +2470,11 @@ canvas.addEventListener("pointermove", e => {
     panX = panStart.px + (e.clientX - panStart.x);
     panY = panStart.py + (e.clientY - panStart.y);
     clampPan(); layout();
+    return;
+  }
+  if (hstroke) {  // v5.29: sculpting drag
+    e.preventDefault();
+    const cell = evCell(e); if (cell) heightStrokeAdd(cell);
     return;
   }
   if (!stroke) return;
@@ -2416,11 +2525,11 @@ function endStroke() {
 canvas.addEventListener("pointerup", e => {
   ptrs.delete(e.pointerId);
   if (ptrs.size < 2) gesture = null;
-  if (ptrs.size === 0) endStroke();
+  if (ptrs.size === 0) { endStroke(); endHeightStroke(); }  // v5.29
 });
 canvas.addEventListener("pointercancel", e => {
   ptrs.delete(e.pointerId);
-  gesture = null; stroke = null; panStart = null; refresh();
+  gesture = null; stroke = null; hstroke = null; panStart = null; refresh();  // v5.29
 });
 
 // v1.7 camera: Move toggles pan mode, -/+ zoom, Fit re-fits the screen
@@ -2484,6 +2593,7 @@ async function playTap(cell) {
   if (heroTimer || playOver) return;  // let the current walk finish first
   const r = await api("/api/play/move", { x: cell.x, y: cell.y });
   if (!r.ok) { toast("play failed"); return; }
+  if (r.warp) { await warpRefresh(r); return; }   // v5.29: stepped through a portal
   syncNature(r);   // v4.0: the walk may change meters / inventory
   const path = r.path || [];
   if (!path.length) { toast("can't reach that tile"); return; }
@@ -2522,6 +2632,7 @@ $("btn-play").onclick = async () => {
     grCancel();   // v3.9: a half-drafted rule doesn't follow you into play
     traitTool = false; $("btn-traits").classList.remove("on");  // v4.0: stamping rests
     selectTool = false; $("btn-select").classList.remove("on");  // v4.3: inspecting rests
+    setHeightTool(false); portalTool = false; $("btn-portal").classList.remove("on");  // v5.29: tools rest
     syncNature(r);   // v4.0: meters + inventory onto the HUD
     natureTimer = setInterval(natureTick, 2000);   // v4.0: ambient nature
     wxStart();   // v4.1: the sky performs
@@ -3217,12 +3328,157 @@ $("btn-traits").onclick = () => {
     // one nature tool at a time — the patrol tool rests
     cancelPatrol();
     selectTool = false; $("btn-select").classList.remove("on");   // v4.3
+    setHeightTool(false); portalTool = false; $("btn-portal").classList.remove("on");  // v5.29: tools rest
     toggleOverlay("sheet-traits");
   }
 };
 $("trait-clear").onclick = () => {
   traitBrush = null; buildTraitList();
   toast("tap tiles to clear their traits");
+};
+// v5.29: the height/depth tool — drag to sculpt terrain elevation. Tapping
+// the active button cycles raise (+1) / lower (−1) / clear (tile-driven).
+let heightTool = false, heightDir = 1, hstroke = null;
+const HEIGHT_MODE_LABEL = { "1": "Height +", "-1": "Height \u2212", "0": "Height \u00d7" };
+async function setHeightTool(on) {
+  heightTool = on;
+  $("btn-height").classList.toggle("on", on);
+  $("btn-height").textContent = HEIGHT_MODE_LABEL[String(heightDir)];
+  if (on) {
+    // one tool at a time — the other stamping tools rest
+    cancelPatrol();
+    traitTool = false; $("btn-traits").classList.remove("on");
+    selectTool = false; $("btn-select").classList.remove("on");
+    erasing = false; $("btn-eraser").classList.remove("on");
+    portalTool = false; $("btn-portal").classList.remove("on");
+    closeOverlays();
+    if (!heightGrid) await refreshHeight();  // need current levels to sculpt
+    toast("height tool — drag to " +
+      (heightDir === 1 ? "raise" : heightDir === -1 ? "lower" : "clear") + " terrain");
+  }
+  render();
+}
+$("btn-height").onclick = async () => {
+  if (playMode) return;
+  if (heightTool) {  // repeat taps cycle the mode — no extra UI needed
+    heightDir = heightDir === 1 ? -1 : heightDir === -1 ? 0 : 1;
+    $("btn-height").textContent = HEIGHT_MODE_LABEL[String(heightDir)];
+    toast("height mode: " + (heightDir === 1 ? "raise +1" :
+      heightDir === -1 ? "lower \u22121" : "clear back to tile-driven"));
+    return;
+  }
+  setHeightTool(true);
+};
+function heightStrokeAdd(cell) {
+  const k = cell.x + "," + cell.y;
+  if (hstroke.cells.has(k) || !heightGrid || !heightGrid[cell.y]) return;
+  const cur = heightGrid[cell.y][cell.x] || 0;
+  const nh = heightDir === 0 ? null : Math.max(-2, Math.min(3, cur + heightDir));
+  if (nh === cur) return;
+  hstroke.cells.set(k, [cell.x, cell.y, nh]);
+  heightGrid[cell.y][cell.x] = nh === null ? 0 : nh;  // optimistic — server reconciles
+  heightSig++;
+  queueRender();
+}
+async function endHeightStroke() {
+  // v5.7 pattern: one call, one undo step — the whole drag is a single edit
+  const s = hstroke; hstroke = null;
+  if (!s || !s.cells.size) return;
+  const r = await api("/api/height-set", { cells: [...s.cells.values()] });
+  if (!r.ok) toast("height failed: " + (r.error || ""));
+  await refreshHeight();  // server is source of truth
+}
+// v5.29: pocket-map portals — tap a door/cave tile, link it to its own
+// seeded pocket map. Blank target = generate a fresh one (a return portal
+// is created inside so the hero can come back).
+let portalTool = false, portals = {}, portalPos = null;
+async function refreshPortals() {
+  try {
+    const r = await api("/api/portals");
+    portals = (r && r.ok && r.portals) || {};
+  } catch (e) { portals = {}; }
+  queueRender();
+}
+$("btn-portal").onclick = () => {
+  if (playMode) return;
+  portalTool = !portalTool;
+  $("btn-portal").classList.toggle("on", portalTool);
+  if (portalTool) {
+    // one tool at a time — the other stamping tools rest
+    cancelPatrol();
+    traitTool = false; $("btn-traits").classList.remove("on");
+    selectTool = false; $("btn-select").classList.remove("on");
+    erasing = false; $("btn-eraser").classList.remove("on");
+    setHeightTool(false);
+    closeOverlays();
+    refreshPortals();
+    toast("portal tool — tap a door or cave tile to link its pocket map");
+  }
+  render();
+};
+async function portalTap(cell) {
+  portalPos = cell;
+  await refreshPortals();
+  const p = portals[cell.x + "," + cell.y];
+  $("portal-xy").textContent = cell.x + "," + cell.y;
+  $("portal-existing").hidden = !p;
+  $("portal-target-label").textContent = p ?
+    ("\u2192 " + p.target + (p.seed != null ? " \u00b7 seed " + p.seed : "")) : "";
+  $("portal-label").value = p ? (p.label || "") : "";
+  $("portal-target").value = "";
+  $("portal-seed").value = p && p.seed != null ? p.seed : "";
+  $("portal-biome").value = p ? p.biome : "dungeon";
+  $("portal-preset").value = p ? (p.preset || "") : "";
+  $("portal-w").value = p ? p.width : 24;
+  $("portal-h").value = p ? p.height : 24;
+  $("portal-save").textContent = p ? "Update link" : "Link portal";
+  $("portal-enter").hidden = !p;
+  $("portal-regen").hidden = !p;
+  $("portal-unlink").hidden = !p;
+  toggleOverlay("sheet-portal");
+}
+$("portal-save").onclick = async () => {
+  if (!portalPos) return;
+  const seedRaw = $("portal-seed").value.trim();
+  const btn = $("portal-save"); btn.disabled = true;
+  try {
+    const r = await api("/api/portals/set", {
+      x: portalPos.x, y: portalPos.y,
+      label: $("portal-label").value.trim(),
+      target: $("portal-target").value.trim(),
+      seed: seedRaw === "" ? null : parseInt(seedRaw, 10),
+      biome: $("portal-biome").value, preset: $("portal-preset").value || null,
+      width: parseInt($("portal-w").value, 10) || 24,
+      height: parseInt($("portal-h").value, 10) || 24 });
+    if (r.ok) {
+      toast("portal linked \u2192 " + r.target + " (seed " + r.seed + ")");
+      Sfx.save();
+      await refreshPortals();
+      renderLoadList();  // a fresh pocket map appears in the picker
+      portalTap(portalPos);  // re-open the sheet in its linked state
+    } else { toast("portal failed: " + (r.error || "")); Sfx.error(); }
+  } finally { btn.disabled = false; }
+};
+$("portal-unlink").onclick = async () => {
+  if (!portalPos) return;
+  const r = await api("/api/portals/clear", { x: portalPos.x, y: portalPos.y });
+  if (r.ok) { toast("portal unlinked — the pocket map file stays");
+              await refreshPortals(); closeOverlays(); }
+  else toast("unlink failed: " + (r.error || ""));
+};
+$("portal-regen").onclick = async () => {
+  if (!portalPos) return;
+  if (!confirm("Regenerate this pocket map from its seed? Your edits inside it will be replaced.")) return;
+  const r = await api("/api/portals/regenerate", { x: portalPos.x, y: portalPos.y });
+  if (r.ok) { toast("regenerated " + r.target + " (seed " + r.seed + ")"); renderLoadList(); }
+  else toast("regenerate failed: " + (r.error || ""));
+};
+$("portal-enter").onclick = () => {
+  if (!portalPos) return;
+  const p = portals[portalPos.x + "," + portalPos.y];
+  if (!p) return;
+  closeOverlays();
+  enterPortal(p.target, portalPos.x, portalPos.y);
 };
 // v4.3: the Select tool — tap anything, inspect and micromanage everything on
 // that tile: the ground, the object, its patrol, collision, trait, and rules.
@@ -3238,6 +3494,7 @@ $("btn-select").onclick = () => {
     cancelPatrol();
     traitTool = false; $("btn-traits").classList.remove("on");
     erasing = false; $("btn-eraser").classList.remove("on");
+    setHeightTool(false); portalTool = false; $("btn-portal").classList.remove("on");  // v5.29: tools rest
     closeOverlays();
     toast("select — tap a tile to see everything living on it");
   }
@@ -3522,6 +3779,7 @@ async function doStep(dx, dy, repeat) {
   try { r = await api("/api/play/step", { dx, dy }); }
   catch (e) { return; }
   if (!r.ok) return;
+  if (r.warp) { await warpRefresh(r); return; }   // v5.29: stepped through a portal
   hero = { x: r.x, y: r.y };
   heroSwimming = !!r.swim; heroInDeep = !!r.deep;
   syncNature(r);   // v4.0: meters move on every step
@@ -3609,6 +3867,7 @@ $("btn-patrol").onclick = () => {
   restoreBrush();   // v5.5: toggling off mid-draft hands the brush back too
   erasing = false; $("btn-eraser").classList.remove("on");
   selectTool = false; $("btn-select").classList.remove("on");   // v4.3
+  setHeightTool(false); portalTool = false; $("btn-portal").classList.remove("on");  // v5.29: tools rest
   toast(patrolTool ? "patrol — tap one of your placed characters first, then his stops, then Done" : "patrol off");
   render();
 };
@@ -4843,6 +5102,7 @@ $("btn-eraser").onclick = () => {
   // v3.4: patrol tool rests when the eraser takes over
     cancelPatrol();
   selectTool = false; $("btn-select").classList.remove("on");   // v4.3
+  setHeightTool(false); portalTool = false; $("btn-portal").classList.remove("on");  // v5.29: tools rest
   toast(erasing ? "eraser on" : "eraser off");
 };
 // v5.0: undo/redo are top-bar citizens now — one pair of functions drives
@@ -4895,6 +5155,7 @@ $("btn-gen").onclick = async () => {
   const preset = $("gen-preset").value || undefined;  // v5.16
   const r = await api("/api/generate", { biome: $("biome").value, seed: seedRaw === "" ? null : parseInt(seedRaw, 10), preset });
   if (r.ok) {
+    $("seed").value = r.seed;   // v5.29: a blank seed still shows the real one — reproducible
     await refresh();
     await loadTraits();   // v4.0: fresh build, fresh nature
     await loadWorld();    // v4.0: fresh build, default meters
@@ -4924,6 +5185,7 @@ $("btn-biome-overlay").onclick = async () => {
   try {
     const r = await api("/api/generate-overlay", {biome, preset, seed: seedRaw === "" ? null : parseInt(seedRaw,10), mode});
     if (!r.ok) { toast("overlay failed: " + (r.error || "unknown")); Sfx.error(); return; }
+    $("seed").value = r.seed;   // v5.29: keep the seed visible and reproducible
     await refresh(); await loadNatural();
     currentTheme = r.biome || currentTheme; $("theme-sel").value = currentTheme;
     buildPalette(); render(); toast("applied " + r.biome + " (" + r.painted + " tiles)");
@@ -4949,29 +5211,134 @@ async function doSaveAs() {
   if (r.ok) { setFile(r.file); toast("saved " + r.file); pollStatus(); }
   else toast("save failed");
 }
+// v5.29: map loading is atomic — one veil, cache invalidation up front, one
+// refresh. The old "warp" was render() running between /api/load and the
+// follow-up fetches with stale height/visibility grids and base canvas.
+let loadingMap = false;
+function showVeil(text) { $("veil-text").textContent = text || "Loading…"; $("load-veil").hidden = false; }
+function hideVeil() { $("load-veil").hidden = true; }
+function friendlyName(file) { return String(file || "").replace(/\.(json|txt)$/i, ""); }
+function fmtModified(ts) {
+  if (!ts) return "date unknown";
+  const d = new Date(ts * 1000);
+  if (isNaN(d)) return "date unknown";
+  return d.toLocaleString([], { month: "short", day: "numeric", year: "numeric",
+                               hour: "numeric", minute: "2-digit" });
+}
+async function reloadMapView(file) {
+  // v5.29: the second half of every map switch — invalidate every old-map
+  // cache BEFORE the first draw, then one atomic refresh. Zoom is preserved
+  // explicitly; the view re-corners and clamps to the new dims.
+  setFile(file);
+  heightGrid = null; visGrid = null; heightSig++;
+  naturalGrid = [];
+  panX = 0; panY = 0;
+  await refreshAll();
+  await refreshPortals();   // v5.29: pocket links ride the map
+  clampPan(); layout();
+  closeOverlays();
+}
+async function endMapSwitch() {
+  hideVeil();
+  const list = $("load-list");
+  if (list) list.classList.remove("busy");
+  loadingMap = false;
+  renderLoadList();  // repaint badges / sort with the new current map
+}
+async function loadMapFile(file) {
+  if (loadingMap) return;
+  loadingMap = true;
+  $("load-list").classList.add("busy");
+  showVeil("Loading " + friendlyName(file) + "…");
+  try {
+    const r = await api("/api/load", { filename: file });
+    if (!r.ok) throw new Error(r.error || "load failed");
+    await reloadMapView(file);
+    toast("loaded " + file);
+  } catch (e) { toast("load failed: " + (e.message || e)); Sfx.error(); }
+  endMapSwitch();
+}
+async function enterPortal(file, x, y) {
+  // v5.29: edit-mode walk through a portal — the server saves the map we're
+  // leaving first, then the same atomic refresh as a load.
+  if (loadingMap) return;
+  loadingMap = true;
+  $("load-list").classList.add("busy");
+  showVeil("Entering " + friendlyName(file) + "…");
+  try {
+    const r = await api("/api/portals/enter", { x, y });
+    if (!r.ok) throw new Error(r.error || "enter failed");
+    await reloadMapView(r.file);
+    toast("entered " + r.file);
+  } catch (e) { toast("enter failed: " + (e.message || e)); Sfx.error(); }
+  endMapSwitch();
+}
+async function warpRefresh(r) {
+  // v5.29: play-mode portal warp — the server already switched maps mid-move,
+  // so skip the walk animation and do the atomic refresh straight away.
+  if (heroTimer) { clearInterval(heroTimer); heroTimer = null; }
+  showVeil("Entering " + friendlyName(r.warp.file) + "…");
+  try {
+    await reloadMapView(r.warp.file);
+    hero = { x: r.x, y: r.y };
+    heroSwimming = false; heroInDeep = false;
+    npcs = []; await buildNpcs();   // the pocket has its own cast
+    await refreshSight();
+    syncMissionHud();
+    toast("entered " + r.warp.file);
+  } catch (e) { toast("warp failed: " + (e.message || e)); }
+  hideVeil();
+  render();
+}
 async function renderLoadList() {
   const list = $("load-list");
   list.innerHTML = "";
   renderBackups();  // v5.16: backups live under the maps
   try {
     const m = await api("/api/maps");
-    if (!m.maps.length) list.innerHTML = "<small>no saved maps yet</small>";
-    m.maps.forEach(mp => {
+    if (!m.maps.length) { list.innerHTML = "<small>no saved maps yet</small>"; return; }
+    // v5.29: current map first, then newest-modified — the map you were just
+    // editing is always at the top.
+    const maps = m.maps.slice().sort((a, b) =>
+      ((b.file === currentFile) - (a.file === currentFile)) ||
+      ((b.modified || 0) - (a.modified || 0)));
+    maps.forEach(mp => {
       const row = document.createElement("div");
-      row.className = "maprow" + (mp.file === currentFile ? " cur" : "");
-      const dims = (mp.width && mp.height) ? ` ${mp.width}\u00d7${mp.height}` : "";
-      const desc = mp.description ? `<div class="mmeta">${escHtml(mp.description)}</div>` : "";
-      row.innerHTML =
-        `<img class="thumb" src="/api/map/thumb?file=${encodeURIComponent(mp.file)}" alt="">` +
-        `<div class="minfo"><button class="mname">${escHtml(mp.file)}</button>` +
-        `<div class="mmeta">${dims}</div>${desc}</div>` +
-        `<div class="macts"></div>`;
-      row.querySelector(".mname").onclick = async () => {
-        const r = await api("/api/load", { filename: mp.file });
-        if (r.ok) { setFile(mp.file); panX = 0; panY = 0; await refresh(); await refreshRules(); await loadWorld(); await loadNatural(); await loadPatrols(); await loadItems(); await loadNpcs(); closeOverlays(); toast("loaded " + mp.file); }
-        else toast("load failed: " + (r.error || ""));
+      const isCur = mp.file === currentFile;
+      row.className = "maprow" + (isCur ? " cur" : "");
+      const dims = (mp.width && mp.height) ? mp.width + "\u00d7" + mp.height : "—";
+      // v5.29: textContent throughout — no raw HTML from map metadata.
+      const img = document.createElement("img");
+      img.className = "thumb"; img.alt = "";
+      img.src = "/api/map/thumb?file=" + encodeURIComponent(mp.file);
+      img.onerror = () => {   // v5.29: broken thumbs get a visible fallback
+        const fb = document.createElement("div");
+        fb.className = "thumb-fallback"; fb.textContent = "\ud83d\uddfa";
+        img.replaceWith(fb);
       };
-      const acts = row.querySelector(".macts");
+      const info = document.createElement("div");
+      info.className = "minfo";
+      const nameEl = document.createElement("div");
+      nameEl.className = "mname";
+      nameEl.textContent = friendlyName(mp.file);
+      if (isCur) {
+        const badge = document.createElement("span");
+        badge.className = "curbadge"; badge.textContent = "current";
+        nameEl.appendChild(badge);
+      }
+      const meta = document.createElement("div");
+      meta.className = "mmeta"; meta.textContent = dims;
+      const date = document.createElement("div");
+      date.className = "mdate"; date.textContent = fmtModified(mp.modified);
+      info.appendChild(nameEl); info.appendChild(meta); info.appendChild(date);
+      if (mp.description) {
+        const d2 = document.createElement("div");
+        d2.className = "mmeta"; d2.textContent = mp.description;
+        info.appendChild(d2);
+      }
+      row.appendChild(img); row.appendChild(info);
+      const acts = document.createElement("div");
+      acts.className = "macts";
       const mk = (label, fn) => {
         const b = document.createElement("button");
         b.textContent = label; b.className = "ghost";
@@ -5009,6 +5376,9 @@ async function renderLoadList() {
         else toast("delete failed: " + (r.error || ""));
       };
       acts.appendChild(del);
+      row.appendChild(acts);
+      // v5.29: the whole row is the load button — one unambiguous target.
+      row.onclick = () => { if (!loadingMap) loadMapFile(mp.file); };
       list.appendChild(row);
     });
   } catch (e) { list.innerHTML = "<small>couldn't reach server</small>"; }
@@ -6434,6 +6804,10 @@ async function melodyDemo() {
         if (sel && sel.dataset.biome) $("biome").value = sel.dataset.biome;
       };
     } catch (e) {}
+    // v5.29: the portal sheet mirrors the main biome/preset picks
+    $("portal-biome").innerHTML = $("biome").innerHTML;
+    $("portal-preset").innerHTML = $("gen-preset").innerHTML;
+    $("portal-biome").value = "dungeon";
     splashStep(28, "Loading recipes\u2026");
     await loadTaxonomy();   // v5.29: the server's one routing table (Law 15)
     const p = await api("/api/palette");

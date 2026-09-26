@@ -59,53 +59,67 @@ BIOMES = {
         "colors": {
             "deep_water": "#2a6b9e", "water": "#3d8bce", "sand": "#d2c290",
             "grass_dark": "#4a8c2e", "grass": "#5a9c33", "grass_light": "#6ab844",
-            "dirt": "#7b5233", "stone": "#6a6a6a", "snow": "#f0f8ff"
+            "dirt": "#7b5233", "stone": "#6a6a6a", "snow": "#f0f8ff",
+            "hill": "#7a9c4a", "mountain": "#8a8a8a"
         },
-        "noise_settings": {"water_level": 0.35, "sand_level": 0.42, "grass_level": 0.65, "stone_level": 0.85}
+        # v5.29: rugged shapes the elevation noise — 0 is table-flat, 1 is
+        # jagged. Biomes influence height, not just tile type.
+        "noise_settings": {"water_level": 0.35, "sand_level": 0.42, "grass_level": 0.65, "stone_level": 0.85,
+                           "rugged": 0.45}
     },
     "desert": {
         "name": "Desert",
         "colors": {
             "deep_water": "#1a4d6b", "water": "#2d6b9e", "sand_dark": "#a0825a",
             "sand": "#c2b280", "sand_light": "#e6c88a", "rock": "#8b7355",
-            "stone": "#6b5a4a", "cactus": "#2d5a2e"
+            "stone": "#6b5a4a", "cactus": "#2d5a2e",
+            "hill": "#b89a6a", "mountain": "#7a6a5a"
         },
-        "noise_settings": {"water_level": 0.25, "sand_level": 0.40, "grass_level": 0.70, "stone_level": 0.90}
+        "noise_settings": {"water_level": 0.25, "sand_level": 0.40, "grass_level": 0.70, "stone_level": 0.90,
+                           "rugged": 0.35}
     },
     "arctic": {
         "name": "Arctic",
         "colors": {
             "deep_water": "#1a3d5b", "water": "#2d5b8e", "ice": "#a8d8ea",
             "snow_dark": "#e8f4f8", "snow": "#ffffff", "ice_rock": "#6b7c85",
-            "stone": "#4a5a6a"
+            "stone": "#4a5a6a",
+            "hill": "#c8e0ea", "mountain": "#7a8a94"
         },
-        "noise_settings": {"water_level": 0.30, "sand_level": 0.45, "grass_level": 0.60, "stone_level": 0.80}
+        "noise_settings": {"water_level": 0.30, "sand_level": 0.45, "grass_level": 0.60, "stone_level": 0.80,
+                           "rugged": 0.50}
     },
     "forest": {
         "name": "Forest",
         "colors": {
             "deep_water": "#0d3d5b", "water": "#1d5b7e", "mud": "#4a3728",
             "grass_dark": "#1d4a1a", "grass": "#2d5a1a", "grass_light": "#3d6a2a",
-            "dirt": "#3d2818", "stone": "#2a2a2a"
+            "dirt": "#3d2818", "stone": "#2a2a2a",
+            "hill": "#4a7a3a", "mountain": "#5a5a5a"
         },
-        "noise_settings": {"water_level": 0.30, "sand_level": 0.40, "grass_level": 0.70, "stone_level": 0.88}
+        "noise_settings": {"water_level": 0.30, "sand_level": 0.40, "grass_level": 0.70, "stone_level": 0.88,
+                           "rugged": 0.40}
     },
     "ocean": {
         "name": "Ocean",
         "colors": {
             "deep_ocean": "#0a1628", "ocean": "#1a3d5b", "water": "#2d6b9e",
             "shallow": "#4a90c2", "sand": "#f4d03f", "beach": "#e6c88a",
-            "grass": "#3d8b3d", "stone": "#5a5a5a"
+            "grass": "#3d8b3d", "stone": "#5a5a5a",
+            "hill": "#4a8b4d", "mountain": "#6a6a6a"
         },
-        "noise_settings": {"water_level": 0.50, "sand_level": 0.60, "grass_level": 0.75, "stone_level": 0.90}
+        "noise_settings": {"water_level": 0.50, "sand_level": 0.60, "grass_level": 0.75, "stone_level": 0.90,
+                           "rugged": 0.15}
     },
     "dungeon": {
         "name": "Dungeon",
         "colors": {
             "floor": "#757575", "floor_dark": "#555555", "wall": "#9a9a9a",
-            "wall_dark": "#6a6a6a", "door": "#8b5a2b", "chest": "#c9a227"
+            "wall_dark": "#6a6a6a", "door": "#8b5a2b", "chest": "#c9a227",
+            "hill": "#8a8a8a", "mountain": "#5a5a5a"
         },
-        "noise_settings": {"water_level": 0.0, "sand_level": 0.0, "grass_level": 0.0, "stone_level": 0.0}
+        "noise_settings": {"water_level": 0.0, "sand_level": 0.0, "grass_level": 0.0, "stone_level": 0.0,
+                           "rugged": 0.0}
     }
 }
 
@@ -1102,7 +1116,11 @@ def _build_color_map(assets_tiles, biome_name):
     # dungeon fallbacks resolve from the biome's own generated tiles,
     # not hardcoded IDs (7 and 8 are grassland water/sand)
     fallback = {'water': 1, 'sand': 2, 'grass': 4, 'stone': 5,
-                'floor': color_map.get('floor', 0), 'wall': color_map.get('wall', 0)}
+                'floor': color_map.get('floor', 0), 'wall': color_map.get('wall', 0),
+                # v5.29: elevation tiles fall back to stone when the biome
+                # has no hill/mountain of its own.
+                'hill': color_map.get('hill', color_map.get('stone', 5)),
+                'mountain': color_map.get('mountain', color_map.get('stone', 5))}
     return color_map, fallback
 
 
@@ -1119,11 +1137,22 @@ def _biome_cell(biome_name, color_map, fallback, settings, noise, x, y):
         return color_map.get('sand', fallback['sand'])
     elif v < settings["grass_level"]:
         return color_map.get('grass', fallback['grass'])
-    else:
-        return color_map.get('stone', fallback['stone'])
+    # v5.29: high ground gets real elevation. A second, decorrelated noise
+    # field (different scale + offset) shaped by the biome's ruggedness
+    # places hills and mountains — biomes influence height, not just tile
+    # type. Same seed + same settings = the same peaks, every time.
+    # (Thresholds are calibrated to noise2d's real ~0.23..0.81 range.)
+    e = (noise.noise2d(x / 37.0 + 100.0, y / 37.0 + 100.0) + 1) / 2
+    rugged = settings.get("rugged", 0.4)
+    if rugged > 0:
+        if e > 0.78 - 0.18 * rugged:
+            return color_map.get('mountain', fallback['mountain'])
+        if e > 0.66 - 0.22 * rugged:
+            return color_map.get('hill', fallback['hill'])
+    return color_map.get('stone', fallback['stone'])
 
 
-def natural_tile_at(assets_tiles, biome_name, seed, x, y):
+def natural_tile_at(assets_tiles, biome_name, seed, x, y, noise_over=None):
     """v5.0: the tile generate_biome(biome_name, seed) would have placed at
     (x, y) — the seed's own ground. The eraser restores this instead of a
     fixed tile 0. Returns None when the map has no known biome/seed."""
@@ -1131,11 +1160,14 @@ def natural_tile_at(assets_tiles, biome_name, seed, x, y):
         return None
     biome = BIOMES[biome_name]
     color_map, fallback = _build_color_map(assets_tiles, biome_name)
+    settings = dict(biome["noise_settings"])
+    if noise_over:  # v5.29: preset recipes tweak the noise
+        settings.update(noise_over)
     return _biome_cell(biome_name, color_map, fallback,
-                       biome["noise_settings"], NoiseGenerator(seed), x, y)
+                       settings, NoiseGenerator(seed), x, y)
 
 
-def natural_grid(assets_tiles, biome_name, seed, w, h):
+def natural_grid(assets_tiles, biome_name, seed, w, h, noise_over=None):
     """v5.0: the whole seed-ground grid at once (one noise/color-map build).
     None when the map has no known biome/seed."""
     if biome_name not in BIOMES or seed is None:
@@ -1143,7 +1175,9 @@ def natural_grid(assets_tiles, biome_name, seed, w, h):
     biome = BIOMES[biome_name]
     color_map, fallback = _build_color_map(assets_tiles, biome_name)
     noise = NoiseGenerator(seed)
-    settings = biome["noise_settings"]
+    settings = dict(biome["noise_settings"])
+    if noise_over:  # v5.29: preset recipes tweak the noise — the eraser must
+        settings.update(noise_over)  # restore exactly what the seed placed
     return [[_biome_cell(biome_name, color_map, fallback, settings,
                          noise, x, y) for x in range(w)] for y in range(h)]
 
@@ -1155,12 +1189,17 @@ class WorldMap:
         self.data = [[0 for _ in range(width)] for _ in range(height)]
         self.object_layer = [[None for _ in range(width)] for _ in range(height)]
         self.collision_layer = [[False for _ in range(width)] for _ in range(height)]
+        # v5.29: per-cell height overrides from the height/depth tool.
+        # None = no override — the cell's height comes from its tiles.
+        # A number (-2..3) wins over whatever the tiles say.
+        self.height_override = [[None for _ in range(width)] for _ in range(height)]
 
     def resize(self, w, h):
         # keep every tile/object/collision in the overlapping region —
         # resizing must never wipe the map
         old_w, old_h = self.width, self.height
         old_data, old_obj, old_col = self.data, self.object_layer, self.collision_layer
+        old_ho = self.height_override
         self.width, self.height = w, h
         self.data = [[old_data[y][x] if y < old_h and x < old_w else 0
                       for x in range(w)] for y in range(h)]
@@ -1168,6 +1207,9 @@ class WorldMap:
                               for x in range(w)] for y in range(h)]
         self.collision_layer = [[old_col[y][x] if y < old_h and x < old_w else False
                                 for x in range(w)] for y in range(h)]
+        # v5.29: hand-tuned heights survive a resize too
+        self.height_override = [[old_ho[y][x] if y < old_h and x < old_w else None
+                                 for x in range(w)] for y in range(h)]
 
     def generate_biome(self, biome_name, seed=None, noise_overrides=None):
         biome = BIOMES.get(biome_name, BIOMES["grassland"])
@@ -1193,7 +1235,10 @@ class WorldMap:
                 'height': self.height,
                 'tiles': self.data,
                 'objects': self.object_layer,
-                'collision': self.collision_layer
+                'collision': self.collision_layer,
+                # v5.29: per-cell height overrides (None = tile-driven).
+                # Old saves simply lack the key and load the same as before.
+                'height_override': self.height_override,
             }
             if schema is not None:  # v5.16: data-schema stamp for migrations
                 data['schema'] = schema
@@ -1235,6 +1280,14 @@ class WorldMap:
             self.object_layer = [[norm_obj_cell(c) for c in row]
                                  for row in _grid('objects', None)]
             self.collision_layer = _grid('collision', False)
+            # v5.29: height overrides are optional (pre-v5.29 saves lack
+            # them) and sanitized — a hand-edited value outside -2..3 or a
+            # non-number falls back to None (tile-driven height).
+            raw_ho = _grid('height_override', None)
+            self.height_override = [
+                [(_sanitize_height_override(v)) for v in row]
+                for row in raw_ho
+            ]
             return True
         except Exception as e:
             print(f"ERROR loading map: {e}")
@@ -1258,6 +1311,7 @@ class WorldMap:
             self.data = [[rows[y][x] if x < len(rows[y]) else 0 for x in range(w)] for y in range(h)]
             self.object_layer = [[None] * w for _ in range(h)]
             self.collision_layer = [[False] * w for _ in range(h)]
+            self.height_override = [[None] * w for _ in range(h)]  # v5.29
             return True
         except Exception as e:
             print(f"ERROR loading CSV map: {e}")
@@ -1368,11 +1422,32 @@ def tile_height(tile):
     return _builtin_height_from_name(tile.get("name"))
 
 
+def _sanitize_height_override(v):
+    """v5.29: one height-override cell from a save file. None (or anything
+    that isn't a number) means tile-driven; numbers clamp to -2..3."""
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return max(HEIGHT_MIN, min(HEIGHT_MAX, int(round(v))))
+    return None
+
+
 def cell_height(world, x, y):
-    """Effective height of a map cell: the tallest of its ground tile and
-    any object sitting on it. Out of bounds -> 0."""
+    """Effective height of a map cell. A hand-set override (the height/depth
+    tool, v5.29) wins; otherwise the tallest of its ground tile and any
+    object sitting on it. Out of bounds -> 0."""
     if not (0 <= x < world.width and 0 <= y < world.height):
         return 0
+    ho = getattr(world, "height_override", None)
+    if ho is not None:
+        try:
+            ov = ho[y][x]
+        except (IndexError, TypeError):
+            ov = None
+        if ov is not None:
+            return max(HEIGHT_MIN, min(HEIGHT_MAX, int(ov)))
     tiles = world.assets.tiles
     h = tile_height(tiles.get(world.data[y][x]))
     obj = world.object_layer[y][x]

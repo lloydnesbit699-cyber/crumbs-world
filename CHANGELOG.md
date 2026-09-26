@@ -5,6 +5,48 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.29 — 2026-09-26
+
+Editor-feedback batch (seven workstreams, all workspace-tested — NOT yet
+phone-verified; iPhone/Chromebook/Replit checks are Lloyd's):
+
+- **Thumbnails + painting.** Vault-scoped thumbnail cache (no more
+  cross-vault tile-ID collisions); thumbnail fetch runs unlocked and in
+  parallel; failed thumbs retry after 15s instead of staying `?`.
+  Serialized paint queue — an old refresh can't wipe newer optimistic
+  painting. Root-caused the "characters poof": the client sent palette
+  *tab* names, the server only knows wire *layer* names — tab aliases
+  (`characters → objects`, `colors → tiles`) now translate both sides.
+- **Taxonomy.** Server-authoritative (`GET /api/taxonomy`); imports
+  auto-correct and explain with a toast instead of rejecting. New
+  **Animals** category; conservative migration; cleaner import names
+  (`giant_rat.png → Giant Rat`).
+- **Entities.** Any placed tile gets per-instance size (0.25–3×), a ⭐
+  hero flag (many allowed — first flagged walks as the PC), 🌿/🏛
+  world-vs-decor flavor, interactive toggle, and explicit ⚔️ enemy / 🛡
+  mentor insert roles — all badged on the map and editable from the
+  inspector. Schema 1→2; legacy integer cells still load.
+- **Modes.** Paint-during-play: the sim pauses (gold chip shows), you
+  paint, it resyncs and resumes — no session wipe. Hero persists across
+  modes with a ⭐ ring in paint mode; `rules["hero_tiles"]` list with a
+  legacy `hero_tile` mirror.
+- **Maps.** Loading veil/spinner; friendlier map picker (name, size,
+  modified date, description, current marker). Height as stacked bands;
+  raise/lower/clear brush (one undo step per stroke); deterministic seed
+  input + biome elevation. Pocket maps through portals, with return
+  portals and anti-bounce. Known follow-ups: portals aren't restricted
+  to door/cave art yet; generate/reset clears height but not portal links.
+- **Panels.** Persistent ◨ panel control: 20–100% opacity + hide-all,
+  per-player prefs. D-pad can't fall offscreen anymore — coordinates
+  clamp while dragging, before saving, on load, and on resize.
+- **Melody voice.** Spoken answers (warm female English voice, toggle in
+  the dock) and 🎤 voice input — Groq Whisper transcribes into the input
+  box for confirmation, never auto-sends. Audio stays in memory, never
+  saved or logged. Mic is off pre-login (demo stays zero-cost); one STT
+  request = one brain-call quota unit.
+- Tests: Melody 66/66 (22 new voice tests), core smoke 9/10 (known
+  pre-existing sprite-library round-trip failure), recovery smoke PASS.
+
 - **ops.sh** — Lloyd's permanent Replit workflow (committed to the repo):
   `./ops.sh update` stops the server, stashes local changes (including
   untracked files), pulls `--rebase`, re-applies the stash, and restarts —

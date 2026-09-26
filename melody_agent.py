@@ -12,8 +12,8 @@
 # private vault. Paths are constructed, never taken from user input.
 #
 # Brain backends (OpenAI-compatible chat completions):
-#   MELODY_BRAIN=gemini  (default)  GEMINI_API_KEY  -> Google AI Studio, free tier
-#   MELODY_BRAIN=groq               GROQ_API_KEY    -> Groq fallback
+#   MELODY_BRAIN=groq    (default)  GROQ_API_KEY    -> Qwen on Groq, free tier
+#   MELODY_BRAIN=gemini             GEMINI_API_KEY  -> Google AI Studio, free tier
 #   MELODY_BRAIN=ollama             MELODY_BRAIN_BASE=http://host:11434/v1
 #                                   -> homecoming: Lloyd's own weights, no game changes
 #   MELODY_BRAIN=off                -> knowledge-base only, zero cost, zero network
@@ -404,8 +404,14 @@ def run_tool(script_dir, username, name, args):
 # -- brain --------------------------------------------------------------------
 
 def brain_backends():
-    """Ordered [(label, url, key, model)] of configured backends."""
-    mode = _env("MELODY_BRAIN", "gemini").lower()
+    """Ordered [(label, url, key, model)] of configured backends.
+
+    Default order (Lloyd's call, 2026-09-26): Qwen on Groq first — keeps her
+    in the Qwen family she was raised on — then Gemini 2.5 Flash as
+    fallback. MELODY_BRAIN=gemini flips the order; =ollama goes home to
+    Lloyd's own weights; =off is knowledge-only.
+    """
+    mode = _env("MELODY_BRAIN", "groq").lower()
     order = []
     if mode == "off":
         return order
@@ -415,20 +421,16 @@ def brain_backends():
                  _env("MELODY_MODEL", "melody-qwen15"))]
     gem_key = _env("GEMINI_API_KEY")
     groq_key = _env("GROQ_API_KEY")
-    if mode == "groq":
-        first = [("groq",
-                  "https://api.groq.com/openai/v1/chat/completions",
-                  groq_key, _env("GROQ_MODEL", "llama-3.3-70b-versatile"))]
-        second = [("gemini",
-                   "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-                   gem_key, _env("GEMINI_MODEL", "gemini-2.5-flash"))]
-    else:  # gemini first (default)
-        first = [("gemini",
-                  "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-                  gem_key, _env("GEMINI_MODEL", "gemini-2.5-flash"))]
-        second = [("groq",
-                   "https://api.groq.com/openai/v1/chat/completions",
-                   groq_key, _env("GROQ_MODEL", "llama-3.3-70b-versatile"))]
+    groq = ("groq+qwen",
+            "https://api.groq.com/openai/v1/chat/completions",
+            groq_key, _env("GROQ_MODEL", "qwen/qwen3.6-27b"))
+    gemini = ("gemini",
+              "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+              gem_key, _env("GEMINI_MODEL", "gemini-2.5-flash"))
+    if mode == "gemini":
+        first, second = [gemini], [groq]
+    else:  # groq first (default)
+        first, second = [groq], [gemini]
     for label, url, key, model in first + second:
         if key:
             order.append((label, url, key, model))
@@ -440,7 +442,7 @@ def brain_status():
     return {"configured": bool(backs),
             "primary": backs[0][0] if backs else None,
             "fallback": backs[1][0] if len(backs) > 1 else None,
-            "mode": _env("MELODY_BRAIN", "gemini").lower()}
+            "mode": _env("MELODY_BRAIN", "groq").lower()}
 
 
 def _post_json(url, payload, key, timeout=_BRAIN_TIMEOUT):
@@ -475,28 +477,68 @@ def brain_chat(messages, tools=None):
     raise RuntimeError(f"all brains failed: {last_err}")
 
 
-SYSTEM_PROMPT = """You are Melody ("Mel"), the friendly AI guide living inside \
-the game Crumbs World — a pixel-art vault-dungeon builder Lloyd made. You speak \
-in Lloyd's upbeat mission-text voice: warm, a little playful, plain words, \
-short messages. You help the player use the app, learn its tricks, diagnose \
-what's wrong, and design their maps.
+# -- personas ---------------------------------------------------------------
+# Lloyd's call (2026-09-26): Melody's default register is the charming
+# teacher — favorite-teacher energy with a wink: warm, playful, a little
+# teasing, endlessly encouraging. Light flirtation is her charm; never
+# explicit, never crude, never mean. Roadmap: basic tier unlocks a persona
+# picker, pro gets full custom control (including voice sliders when TTS
+# lands). New personas get added here and gated by tier in handle_chat.
+
+PERSONA_TEACHER = """You are Melody ("Mel") — the teacher inside Crumbs World,
+Lloyd's pixel-art vault-dungeon builder. Think favorite-teacher energy with a
+wink: warm, playful, a little teasing, endlessly encouraging. You make learning
+the app feel fun — a sweet compliment when they get it right, a playful nudge
+when they're stuck. You're charming with a light flirtatious spark, but never
+explicit, never crude, never mean. Plain words, short messages, phone-screen
+length. You help the player use the app, learn its tricks, diagnose what's
+wrong, and design their maps."""
+
+SYSTEM_PROMPT = PERSONA_TEACHER + """
 
 Rules you never break:
-- You see ONLY this player: their private vault, plus the shared Commons world \
-everyone can already see. You never mention, hint at, or carry anything from \
-another player's private vault. If asked, say plainly you can't see other \
-players' private stuff.
-- You can look things up and diagnose, but you cannot change the player's \
-world yourself. If they want a change, describe exactly what to tap — or, \
-when the co-build update ships, you'll be able to propose it for their approval.
-- Use your tools when the player asks about the Repair Laws, the guide, their \
-vault stats, or map problems. Don't narrate tool calls; just answer with what \
-you found.
+- You see ONLY this player: their private vault, plus the shared Commons world
+  everyone can already see. You never mention, hint at, or carry anything from
+  another player's private vault. If asked, say plainly you can't see other
+  players' private stuff.
+- You can look things up and diagnose, but you cannot change the player's
+  world yourself. If they want a change, describe exactly what to tap — or,
+  when the co-build update ships, you'll be able to propose it for their
+  approval.
+- Use your tools when the player asks about the Repair Laws, the guide, their
+  vault stats, or map problems. Don't narrate tool calls; just answer with
+  what you found.
 - Keep answers short enough for a phone screen. Offer one next step, not five.
-- If you don't know, say so and suggest where to look — never invent buttons, \
-menus, or features.
-- You are Melody, Lloyd's creation. Wren is a separate assistant who helps \
-Lloyd; you complement each other."""
+- If you don't know, say so and suggest where to look — never invent buttons,
+  menus, or features.
+- You are Melody, Lloyd's creation. Wren is a separate assistant who helps
+  Lloyd; you complement each other."""
+
+
+# -- demo mode --------------------------------------------------------------
+# The pre-profile taste: knowledge-base only, no brain, no quota, no memory.
+# Way limited on purpose — basic instruction, a few questions a day per IP —
+# just enough to make someone want the real thing.
+
+def demo_answer(message):
+    """-> dict(ok, reply, source). Never touches a brain, quota, or disk."""
+    try:
+        message = (message or "").strip()[:500]
+        if not message:
+            return {"ok": False, "error": "empty message"}
+        hits = knowledge_search(message)
+        if hits and hits[0][2] >= 3:
+            title, body, _ = hits[0]
+            return {"ok": True, "reply": f"**{title}**\n{body[:1200]}",
+                    "source": "knowledge-demo"}
+        return {"ok": True,
+                "reply": ("Ooh, that one's beyond the demo, sugar — make a free "
+                          "profile and I'll go way deeper. I can already teach you "
+                          "the basics right here: ask me how to paint, use the tabs, "
+                          "or undo!"),
+                "source": "knowledge-demo"}
+    except Exception:
+        return {"ok": False, "error": "demo hiccup — try again"}
 
 
 # -- the Phase 1 turn --------------------------------------------------------

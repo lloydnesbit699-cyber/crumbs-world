@@ -154,5 +154,51 @@ check("alice validate sees no mallory maps", "mallory" not in mv and "secret" no
 for d in (tmp, tmp2, tmp3):
     shutil.rmtree(d, ignore_errors=True)
 
+print("== demo mode (pre-profile taste) ==")
+res = ma.demo_answer("how do I paint tiles on the map?")
+check("demo kb hit", res.get("ok") and res.get("source") == "knowledge-demo",
+      str(res)[:80])
+res = ma.demo_answer("tell me about quantum flibbertigibbet economics")
+check("demo graceful beyond-scope",
+      res.get("ok") and "beyond the demo" in res.get("reply", ""))
+res = ma.demo_answer("   ")
+check("demo empty rejected", not res.get("ok"))
+# demo burns no quota and writes no history
+tmp4 = fresh_dir()
+ma.demo_answer("how do I undo?")
+_, remaining, _, _ = ma.quota_check(tmp4, "alice", "free")
+check("demo burns no quota", remaining == 200)
+check("demo writes no history",
+      ma.history_load(tmp4, "alice") == [])
+shutil.rmtree(tmp4, ignore_errors=True)
+
+print("== brain order: Qwen on Groq first (Lloyd's call) ==")
+old_env = {k: os.environ.get(k) for k in
+           ("MELODY_BRAIN", "GROQ_API_KEY", "GEMINI_API_KEY", "GROQ_MODEL")}
+os.environ["MELODY_BRAIN"] = "groq"
+os.environ["GROQ_API_KEY"] = "test-key"
+os.environ.pop("GEMINI_API_KEY", None)
+os.environ.pop("GROQ_MODEL", None)
+backs = ma.brain_backends()
+check("groq+qwen primary",
+      backs and backs[0][0] == "groq+qwen"
+      and backs[0][1] == "https://api.groq.com/openai/v1/chat/completions"
+      and backs[0][3] == "qwen/qwen3.6-27b",
+      str([(b[0], b[3]) for b in backs]))
+check("no llama default anywhere",
+      all("llama" not in b[3] for b in backs))
+st = ma.brain_status()
+check("default mode groq", st["mode"] == "groq" and st["primary"] == "groq+qwen")
+os.environ["MELODY_BRAIN"] = "gemini"
+os.environ["GEMINI_API_KEY"] = "test-key-2"
+backs = ma.brain_backends()
+check("MELODY_BRAIN=gemini flips order",
+      backs[0][0] == "gemini" and backs[1][0] == "groq+qwen")
+for k, v in old_env.items():
+    if v is None:
+        os.environ.pop(k, None)
+    else:
+        os.environ[k] = v
+
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

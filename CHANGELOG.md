@@ -3,6 +3,31 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.28.1 — 2026-09-26
+
+Melody Phase 1 refinements from Lloyd's answers:
+
+- **Brain: Qwen on Groq first, Gemini fallback.** Lloyd's call — keeps her
+  in the Qwen family she was raised on. `GROQ_MODEL` defaults to
+  `qwen/qwen3.6-27b` (env-overridable; Groq is retiring the old Llama
+  defaults, so the previous `llama-3.3-70b-versatile` default is gone).
+  `MELODY_BRAIN=gemini` flips the order; `ollama`/`off` unchanged. Lloyd
+  needs a free `GROQ_API_KEY` (console.groq.com, no card) as a server
+  secret — he has Groq on his phone already.
+- **Pre-profile demo mode.** The login overlay has a "Try Melody — free
+  demo" button: no account needed, knowledge-base answers only (zero brain
+  cost), 5 questions/day/IP, nothing remembered. Beyond-scope questions get
+  a nudge to make a free profile. The demo dock floats above the login
+  overlay and hands off cleanly to the full dock after login.
+- **Persona: the charming teacher.** Melody's default register is now
+  favorite-teacher energy with a wink — warm, playful, a little teasing,
+  never explicit. `PERSONA_TEACHER` scaffold in the agent for the roadmap:
+  basic tier unlocks a persona picker, pro gets full custom control
+  (voice sliders when TTS lands).
+- **Local mode is tier-based too** (`MELODY_LOCAL_TIER`, default free).
+- Tests: 44/44 pass. Live-server verified: demo 200×5 then 429 with the
+  limit message, health, chat, history.
+
 ## v5.28 — 2026-09-26
 
 **Melody Phase 1: she has a voice.** A "Mel" chat dock now lives in the HUD

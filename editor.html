@@ -221,7 +221,12 @@
     border: 1px solid #333; background: #0d0d12; color: #eee; font-size: 15px; }
   #melody-send { padding: 9px 14px; border-radius: 8px; border: none;
     background: #ffd75f; color: #111; font-weight: bold; cursor: pointer; }
+  #melody-dock.demo { z-index: 310; }  /* v5.28.1: demo floats over login */
   #melody-send:disabled { opacity: .5; }
+  .login-demo-btn { margin-top: 12px; background: none; border: 1px solid #ffd75f;
+    color: #ffd75f; border-radius: 8px; padding: 8px 14px; font-size: 14px;
+    cursor: pointer; }
+  .login-demo-btn:active { transform: scale(.96); }
   @media (max-width: 600px) {
     #melody-dock { right: 8px; left: 8px; bottom: 74px; width: auto;
       height: 52vh; }
@@ -963,6 +968,7 @@
     <button id="login-go">Log in</button>
     <div id="login-err"></div>
     <div class="login-hint">No account yet? Ask the HUD owner to register one for you.</div>
+    <button id="login-demo" class="login-demo-btn">&#10024; Try Melody — free demo</button>
   </div>
 </div>
 
@@ -5592,7 +5598,8 @@ $("menu-npcs").onclick = () => { toggleOverlay("sheet-npcs"); loadItems(); loadN
 $("pack-btn").onclick = () => { toggleOverlay("sheet-pack"); syncInv(); };
 
 // v5.28: Melody chat dock — Phase 1 agent (teach + diagnose, read-only).
-const MELODY = { open: false, ready: false, busy: false };
+// v5.28.1: demo mode — pre-login taste, knowledge-base only, 5/day/IP.
+const MELODY = { open: false, ready: false, busy: false, demo: false };
 function melodyEsc(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -5626,7 +5633,9 @@ async function melodySend() {
   $("melody-send").disabled = true;
   $("melody-typing").hidden = false;
   try {
-    const r = await fetch("/api/melody/chat", {
+    // v5.28.1: demo posts to the no-auth taste endpoint
+    const url = MELODY.demo ? "/api/melody/demo" : "/api/melody/chat";
+    const r = await fetch(url, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: msg }) });
     const j = await r.json();
@@ -5648,6 +5657,12 @@ async function melodyInit() {
   catch (e) { return; }
   if (!h || !h.ok) return;  // agent module missing — dock stays hidden
   MELODY.ready = true;
+  // v5.28.1: leaving demo mode behind — full dock for the logged-in player
+  MELODY.demo = false;
+  $("melody-dock").classList.remove("demo");
+  $("melody-title").textContent = "Melody";
+  $("melody-clear").style.display = "";
+  $("melody-log").innerHTML = "";
   $("melody-fab").hidden = false;
   $("melody-fab").onclick = () => {
     const dock = $("melody-dock");
@@ -5659,9 +5674,7 @@ async function melodyInit() {
     $("melody-dock").hidden = true; MELODY.open = false;
   };
   $("melody-send").onclick = melodySend;
-  $("melody-input").addEventListener("keydown", e => {
-    if (e.key === "Enter") melodySend();
-  });
+  $("melody-input").onkeydown = e => { if (e.key === "Enter") melodySend(); };
   $("melody-clear").onclick = async () => {
     try {
       await fetch("/api/melody/clear", { method: "POST",
@@ -5677,6 +5690,41 @@ async function melodyInit() {
   hist.forEach(m => melodyAdd(m.role === "user" ? "user" : "mel", m.content));
   if (!hist.length) melodyGreet();
 }
+// v5.28.1: pre-login demo — the taste before the profile. Knowledge-base
+// only (zero brain cost), 5 questions/day/IP, nothing remembered.
+function melodyGreetDemo() {
+  melodyAdd("mel", "Hey sugar, I'm Melody \u2014 this is just a little taste! " +
+    "Ask me how to paint, use the tabs, or undo. Want the real me, with a " +
+    "memory and a brain? Make a free profile and log in!");
+}
+async function melodyDemo() {
+  if (MELODY.busy) return;
+  let h;
+  try { h = await (await fetch("/api/melody/health")).json(); }
+  catch (e) { return; }
+  if (!h || !h.ok) return;
+  MELODY.demo = true;
+  MELODY.ready = true;
+  $("melody-dock").classList.add("demo");
+  $("melody-title").textContent = "Melody (demo)";
+  $("melody-quota").textContent = "";
+  $("melody-clear").style.display = "none";
+  $("melody-log").innerHTML = "";
+  // wire the dock the same way the full init does
+  $("melody-send").onclick = melodySend;
+  $("melody-input").onkeydown = e => { if (e.key === "Enter") melodySend(); };
+  $("melody-min").onclick = () => {
+    $("melody-dock").hidden = true; MELODY.open = false;
+  };
+  $("melody-dock").hidden = false;
+  MELODY.open = true;
+  melodyGreetDemo();
+  $("melody-input").focus();
+}
+(function () {  // demo button lives on the login overlay (pre-login)
+  const b = $("login-demo");
+  if (b) b.onclick = melodyDemo;
+})();
 
 (async function init() {
   try {

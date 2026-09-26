@@ -154,7 +154,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.28"
+APP_VERSION = "5.28.1"
 # v5.24: unique per process boot. After an update the server re-execs into
 # the new files; the page waits for a DIFFERENT instance id (plus the new
 # version) instead of mistaking the old process — still answering during
@@ -3726,9 +3726,32 @@ class Handler(BaseHTTPRequestHandler):
         return None
 
     def _melody_tier(self, username):
+        if username == "local":
+            # v5.28.1: local single-player session is tier-based too.
+            t = os.environ.get("MELODY_LOCAL_TIER", "free")
+            return t if t in ("free", "basic", "pro") else "free"
         rec = _load_users().get(username) or {}
         tier = rec.get("tier", "free")
         return tier if tier in ("free", "basic", "pro") else "free"
+
+    # v5.28.1: pre-profile demo — knowledge-base only, no auth, no brain.
+    # In-memory per-IP daily taste counter (5/day); a restart resets it,
+    # which is fine for a free taste.
+    _demo_buckets = {}
+    _demo_lock = threading.Lock()
+
+    def _demo_ok(self):
+        ip = self._client_ip()
+        today = time.strftime("%Y-%m-%d")
+        with self._demo_lock:
+            day, used = self._demo_buckets.get(ip, (None, 0))
+            if day != today:
+                day, used = today, 0
+            if used >= 5:
+                self._demo_buckets[ip] = (day, used)
+                return False
+            self._demo_buckets[ip] = (day, used + 1)
+            return True
 
     def _do_melody_impl(self, path, is_post):
         if _melody_agent is None:
@@ -3740,6 +3763,29 @@ class Handler(BaseHTTPRequestHandler):
             st.update({"ok": True, "version": APP_VERSION, "phase": 1,
                        "public_mode": PUBLIC_MODE})
             return self._send_json(st)
+        if path == "/api/melody/demo" and is_post:
+            # v5.28.1: pre-profile taste. No auth, knowledge-base only —
+            # zero brain cost to Lloyd. 5 questions/day/IP, basic
+            # instruction only, nothing persisted.
+            if not self._demo_ok():
+                return self._send_json(
+                    {"ok": False, "error": "demo-limit",
+                     "detail": "That's the whole demo taste for today, sugar "
+                               "— make a free profile for the real me!"},
+                    429)
+            if not self._is_json_request():
+                return self._send_json(
+                    {"ok": False,
+                     "error": "Content-Type must be application/json"}, 415)
+            if not self._same_origin_ok():
+                return self._send_json(
+                    {"ok": False, "error": "origin/host check failed"}, 403)
+            body = self._read_json()
+            if not isinstance(body, dict):
+                return self._send_json({"ok": False, "error": "bad JSON"},
+                                       400)
+            res = _melody_agent.demo_answer(body.get("message", ""))
+            return self._send_json(res, 200 if res.get("ok") else 400)
         user = self._melody_user()
         if not user:
             return self._send_json({"ok": False, "error": "login required"},

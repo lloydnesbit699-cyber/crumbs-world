@@ -3,6 +3,16 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## Unreleased
+
+- **ops.sh** — Lloyd's permanent Replit workflow (committed to the repo):
+  `./ops.sh update` stops the server, stashes local changes (including
+  untracked files), pulls `--rebase`, re-applies the stash, and restarts —
+  aborting cleanly on conflicts with nothing lost. Also `status`, `start`,
+  `stop`, `restart`, `logs`, `cherry-pick <sha>`, `stash`/`stash-pop`/
+  `stash-list`. Supersedes the stop/start half of the old `sync.sh`
+  (which stays for plain syncs).
+
 ## v5.28.1 — 2026-09-26
 
 Melody Phase 1 refinements from Lloyd's answers:

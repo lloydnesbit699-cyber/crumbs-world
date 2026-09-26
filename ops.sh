@@ -3,6 +3,10 @@
 # ops.sh — Lloyd's permanent Replit workflow. Lives in the repo so it
 # survives restarts, syncs, and fresh clones. Run from the repo root.
 #
+#   ./ops.sh boot                — for Replit's run button: sync to origin/main,
+#                                  then start the server. Never leaves the
+#                                  server down — if git fails it starts with
+#                                  local code and says so.
 #   ./ops.sh update              — THE one command: stop server, stash your
 #                                  changes, pull --rebase, re-apply stash,
 #                                  restart server. Safe on conflicts: aborts
@@ -21,6 +25,9 @@
 set -u
 
 PORT="${PORT:-5000}"
+# PUBLIC=1 = multi-user server mode (--public), matching Replit's run button.
+# PUBLIC=0 = local single-user mode. Override per-command: PUBLIC=0 ./ops.sh start
+PUBLIC="${PUBLIC:-1}"
 APP="crumbs_hud.py"
 LOG="server.log"
 BRANCH="${OPS_BRANCH:-main}"
@@ -70,8 +77,13 @@ do_start() {
     return 0
   fi
   [ -f "$APP" ] || die "can't find $APP — run this from the repo root"
-  say "starting server on port $PORT (log: $LOG)"
-  PORT="$PORT" nohup python3 "$APP" >>"$LOG" 2>&1 &
+  if [ "$PUBLIC" = "1" ]; then
+    say "starting server on port $PORT --public (log: $LOG)"
+    PORT="$PORT" nohup python3 "$APP" --public >>"$LOG" 2>&1 &
+  else
+    say "starting server on port $PORT, local single-user mode (log: $LOG)"
+    PORT="$PORT" nohup python3 "$APP" >>"$LOG" 2>&1 &
+  fi
   sleep 3
   if [ -n "$(server_pids)" ]; then
     say "server running: $(server_pids)"
@@ -128,6 +140,42 @@ do_update() {
   say "update done"
 }
 
+do_boot() {
+  # Boot-safe auto-update, wired to Replit's run button (.replit points here).
+  # Same shape as update, but it NEVER dies before the server is up: any git
+  # failure just means "start with local code" plus a loud warning in the log.
+  do_stop
+  local synced="no"
+  if git fetch origin 2>/dev/null; then
+    local dirty=0
+    if [ -n "$(git status --porcelain)" ]; then dirty=1; fi
+    if [ "$dirty" = 1 ]; then
+      say "stashing local changes for boot pull"
+      git stash push -u -m "ops.sh boot-stash $(date '+%F %T')" 2>/dev/null || dirty=0
+    fi
+    if git pull --rebase origin "$BRANCH" 2>/dev/null; then
+      synced="yes"
+      say "boot synced: $(git log --oneline -1)"
+    else
+      git rebase --abort 2>/dev/null || true
+      say "!! boot pull failed — starting with local code"
+    fi
+    if [ "$dirty" = 1 ]; then
+      git stash pop 2>/dev/null \
+        || say "!! boot stash needs attention — './ops.sh stash-list'; files are safe in the stash"
+    fi
+  else
+    say "!! boot fetch failed (offline?) — starting with local code"
+  fi
+  if [ "$synced" = "no" ]; then
+    say "now at (local): $(git log --oneline -1)"
+  else
+    say "now at: $(git log --oneline -1)"
+  fi
+  do_start
+  say "boot done"
+}
+
 do_cherry_pick() {
   local sha="${1:-}"
   [ -n "$sha" ] || die "usage: ./ops.sh cherry-pick <commit-sha>"
@@ -163,6 +211,7 @@ case "$cmd" in
   status)     do_status ;;
   logs)       do_logs ;;
   update)     do_update ;;
+  boot)       do_boot ;;
   cherry-pick|cherrypick|cp) do_cherry_pick "${2:-}" ;;
   stash)      do_stash ;;
   stash-pop)  do_stash_pop ;;

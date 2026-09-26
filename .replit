@@ -3,7 +3,7 @@
 # v5.22.9: use the workspace repl's webview URL, NOT a Deployment —
 # deployments get an ephemeral disk, so map saves would vanish on
 # restart. The workspace filesystem persists.
-run = "PORT=5000 python3 crumbs_hud.py --public"
+run = "./ops.sh boot"
 modules = ["python-3.12", "web", "bash"]
 
 [nix]

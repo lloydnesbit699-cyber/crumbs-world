@@ -468,6 +468,12 @@
             background: rgba(10,14,20,.78); border: 1px solid #2a3340;
             border-radius: 10px; padding: 6px 10px; font-size: 15px; }
   #meters.show { display: block; }
+  /* v5.29: build-break chip — the sim is paused while he paints mid-play.
+     It stays visible so the frozen sim is never mistaken for a live one. */
+  #buildbreak-chip { position: fixed; top: 8px; left: 10px; z-index: 65;
+            background: rgba(20,16,8,.88); border: 1px solid #ffd75f; color: #ffd75f;
+            border-radius: 10px; padding: 6px 10px; font-size: 14px; cursor: pointer; }
+  #buildbreak-chip[hidden] { display: none; }
   #btn-fire { position: fixed; right: 12px; bottom: 170px; z-index: 60; display: none;
               background: #3a2410; border: 1px solid #e08a2d; color: #ffd9a0;
               border-radius: 10px; padding: 8px 12px; font-size: 14px; }
@@ -525,7 +531,7 @@
                z-index: 2; }
   #dpad-grip:active { cursor: grabbing; background: #2a2a35; }
   /* v4.3: clean screen — hide every play button for recordings */
-  body.clean #dpad.show, body.clean #meters, body.clean #btn-fire { display: none !important; }
+  body.clean #dpad.show, body.clean #meters, body.clean #btn-fire, body.clean #buildbreak-chip { display: none !important; }
   #dpad button { font-size: 18px; padding: 0; min-height: 0; margin: 0;
                  background: rgba(28,28,38,.85); border-radius: 10px; touch-action: none; }
   #dpad button:active { background: #4da3ff; }
@@ -659,6 +665,7 @@
 </div>
 <div id="m-play" class="menu-drop">
   <button id="btn-play" title="Walk the map">&#9654; Play</button>
+  <button id="btn-buildbreak" title="Pause the sim and paint the map without leaving play">&#128396;&#65039; Touch up (pause sim)</button>
   <button id="btn-record" title="Record the screen as a video">&#9679; Record</button>
 </div>
 <div id="m-setup" class="menu-drop">
@@ -957,6 +964,7 @@
 <button id="pack-btn" hidden>&#127890; Pack</button>
 
 <div id="mission-hud" hidden></div>
+<div id="buildbreak-chip" hidden title="Tap to resume play">&#9208; sim paused — painting &middot; tap to resume</div>
 
 <!-- v5.27: login overlay (public mode only) -->
 <div id="login-overlay">
@@ -1174,7 +1182,9 @@ document.querySelectorAll("#import-scope button").forEach(b => {
 let customEditMode = false;          // v3.3: tile manager edit mode
 let editingTile = null, editPreset = null;
 let animOnMap = new Set();          // custom animated tile ids currently placed
-let heroTileId = null;              // sprite tile used as the play-mode hero
+let heroTileIds = [];              // v5.29: designated heroes (list); [0] is the PC —
+// the designation survives mode switches, never nulled by paint mode
+function primaryHeroTile() { return heroTileIds.length ? heroTileIds[0] : null; }
 let colorOf = {};                   // tile id -> css color
 let layer = "colors";   // v5.26: boot on Colors — the flat-color paint flow,
 // so open-and-paint works exactly like the old Tiles tab did.
@@ -1237,6 +1247,8 @@ let panX = 0, panY = 0;                 // v2.2: canvas offset in px, relative t
 const ptrs = new Map();                 // v2.1: active pointers for gestures
 let gesture = null;                     // v2.1: two-finger pan/pinch state
 let playMode = false, hero = null, heroTimer = null, heroSwimming = false;   // v3.2: swim state
+let buildBreak = false;   // v5.29: paint-during-play — the sim is paused and the
+                          // brush is unlocked; the play session itself never stops
 let heroInDeep = false;   // v3.6 SWIM HOOK: true on deep-water steps (only once SWIM_UNLOCKED flips server-side)
 // v3.4: patrol NPCs — routes from the server, live walkers in play mode
 let patrolTool = false, draftPoints = [], patrols = [], npcs = [], npcTimer = null;
@@ -1923,7 +1935,7 @@ function render() {
     if (heroInDeep) {
       // TODO(swim): draw the swim animation (strokes, splash, submerged bob).
     }
-    const him = heroTileId != null ? tileFrameImage(heroTileId) : null;
+    const him = primaryHeroTile() != null ? tileFrameImage(primaryHeroTile()) : null;
     if (him) {
       ctx.drawImage(him, hx, hy, tilePx, tilePx);
     } else {
@@ -2017,7 +2029,7 @@ function render() {
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const oid = objects[y][x];
     if (oid === null || oid === undefined) continue;
-    if (playMode && heroTileId != null && oid === heroTileId) continue;   // v4.9: he walks himself now — no twin left standing at the spawn
+    if (playMode && oid === primaryHeroTile()) continue;   // v4.9: he walks himself now — no twin left standing at the spawn
     if (playMode && walkingAnchors.has(x + "," + y)) continue;   // v5.0: he's walking his patrol — the npc draws him, no twin at the anchor
     const oim = tileFrameImage(oid);   // v3.0: custom tiles work as objects too
     if (oim) {
@@ -2034,6 +2046,20 @@ function render() {
       ctx.beginPath();
       ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r, cy); ctx.lineTo(cx, cy + r); ctx.lineTo(cx - r, cy);
       ctx.closePath(); ctx.fill(); ctx.stroke();
+    }
+    // v5.29: the hero persists in paint mode — a ⭐ ring on every designated
+    // hero's placed instance, so the pick is visible outside play too.
+    if (!playMode && heroTileIds.includes(oid)) {
+      ctx.strokeStyle = "#ffd75f"; ctx.lineWidth = Math.max(2, tilePx * 0.07);
+      ctx.beginPath();
+      ctx.ellipse(x * tilePx + tilePx / 2, y * tilePx + tilePx * 0.88,
+                  tilePx * 0.38, tilePx * 0.15, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.save();
+      ctx.font = "bold " + Math.round(tilePx * 0.34) + "px sans-serif";
+      ctx.textAlign = "center"; ctx.fillStyle = "#ffd75f";
+      ctx.fillText("⭐", x * tilePx + tilePx / 2, y * tilePx + tilePx * 0.30);
+      ctx.restore();
     }
   }
   // v5.3: grid lines live in the base layer now — pre-rendered, not rebuilt.
@@ -2097,6 +2123,7 @@ function localGrid() { const pl = paintLayer(); return pl === "objects" ? object
 function strokeAdd(cell) {
   const key = cell.x + "," + cell.y;
   if (stroke.cells.has(key)) return;
+  if (buildBreak && hero && cell.x === hero.x && cell.y === hero.y) return;  // v5.29: never paint over him mid-drag
   const bv = brushValue();
   // v5.0: the erase preview paints the seed's ground from the cache
   // (the server re-resolves on pointer-up, so undo stays exact).
@@ -2134,7 +2161,17 @@ canvas.addEventListener("pointerdown", async e => {
     return;
   }
   const cell = evCell(e); if (!cell) return;
-  if (playMode) { playTap(cell); return; }
+  if (playMode && !buildBreak) { playTap(cell); return; }
+  if (buildBreak) {
+    // v5.29: build-break — the sim is paused, so taps paint instead of walking.
+    // Only the brush (and tile eraser): inspect/select/patrol/rule/trait tools
+    // stay rested, and the eraser never lifts gear/folks (they belong to the
+    // paused run). The hero's own cell is off-limits — never strand him.
+    if (hero && cell.x === hero.x && cell.y === hero.y) { toast("that's where the hero stands"); return; }
+    stroke = { cells: new Map(), linkCells: new Map(), layer };
+    strokeAdd(cell);
+    return;
+  }
   // v5.23.3: direct object inspect.
   if (!selectTool && paintLayer() === "objects" && !erasing &&
       objects[cell.y] && objects[cell.y][cell.x] != null) {
@@ -2291,6 +2328,7 @@ async function playTap(cell) {
 }
 $("btn-play").onclick = async () => {
   if (!playMode) {
+    buildBreakUIOff();   // v5.29: a fresh run never starts mid-break
     const r = await api("/api/play/start", {});
     if (!r.ok) { toast("play failed"); return; }
     playMode = true; hero = { x: r.x, y: r.y };
@@ -2317,6 +2355,7 @@ $("btn-play").onclick = async () => {
     toast("play mode — tap a tile to walk there");
   } else {
     await api("/api/play/stop", {});
+    if (buildBreak) buildBreakUIOff();   // v5.29: leaving play ends the break too (timers already cleared below)
     playMode = false; hero = null; heroSwimming = false; heroInDeep = false;
     if (heroTimer) { clearInterval(heroTimer); heroTimer = null; }
     if (npcTimer) { clearInterval(npcTimer); npcTimer = null; }   // v3.4: walkers rest
@@ -2335,6 +2374,62 @@ $("btn-play").onclick = async () => {
   }
   render();
 };
+// v5.29: build-break — paint while play is active (Lloyd's feedback #12).
+// Chosen approach: unlock the brush with the simulation PAUSED — not save-state
+// snapshot/restore. Why: a snapshot would have to serialize the whole server
+// play session (hero pos, rule session, meters, mission run, NPCs, weather)
+// and restore it exactly — any missed field corrupts the run. Pausing tears
+// nothing down: the server session sits idle untouched, the client stops its
+// timers, and painting goes through the normal /api/paint + /api/stroke
+// endpoints (which already accept paint while a session is active). Resume =
+// syncMap + restart timers. Nothing serialized, nothing to restore wrong.
+function buildBreakUIOff() {
+  buildBreak = false;
+  const b = $("btn-buildbreak");
+  b.classList.remove("on");
+  b.innerHTML = "&#128396;&#65039; Touch up (pause sim)";
+  $("buildbreak-chip").hidden = true;
+}
+async function toggleBuildBreak() {
+  if (!playMode) { toast("play first, then touch up"); return; }
+  if (playOver) { toast("the run is over — play again first"); return; }
+  if (!buildBreak) {
+    if (heroTimer) { toast("let the hero finish walking first"); return; }
+    // freeze the sim: no walks, no NPC steps, no nature ticks, no weather.
+    // The server session (hero pos, keys, meters, NPCs) is untouched — idle.
+    clearTimeout(stepTimer); stepTimer = null; runMode = false;  // D-pad repeat halts
+    if (npcTimer) { clearInterval(npcTimer); npcTimer = null; }   // walkers rest
+    if (natureTimer) { clearInterval(natureTimer); natureTimer = null; }  // nature holds its breath
+    wxStop();   // the sky rests
+    buildBreak = true;
+    const b = $("btn-buildbreak");
+    b.classList.add("on");
+    b.innerHTML = "&#9654; Resume play";
+    $("buildbreak-chip").hidden = false;
+    updateDpad();   // the pad hides while painting
+    toast("sim paused — paint away");
+  } else {
+    await exitBuildBreak();
+    toast("sim resumed — right where you left it");
+  }
+  render();
+}
+async function exitBuildBreak() {
+  // The session never died, so resume = re-sync the painted map and restart
+  // the ambient timers. Hero, keys, meters, NPCs never moved.
+  buildBreakUIOff();
+  await syncMap();      // painted changes are the server's truth now
+  refreshSight();       // new walls change what the hero can see
+  if (playMode && !playOver) {
+    natureTimer = setInterval(natureTick, 2000);   // v4.0: ambient nature
+    wxStart();   // v4.1: the sky performs
+    if (npcs.length) npcTimer = setInterval(() => npcTick(0.1), 100);  // v3.4
+    padStart();   // v3.7: controller polling (no-op if already running)
+  }
+  updateDpad();
+}
+$("btn-buildbreak").onclick = toggleBuildBreak;
+$("buildbreak-chip").onclick = () => { if (buildBreak) toggleBuildBreak(); };
 // v3.1: fog/lighting toggle for play mode
 $("btn-light").onclick = () => {
   lightingOn = !lightingOn;
@@ -2430,7 +2525,7 @@ async function finishRecording() {
 // Rules live per build (server sidecar) + per user (localStorage defaults).
 // Movement: tap-to-walk, on-screen D-pad (draggable), or a real controller
 // (Bluetooth/wired via the Gamepad API — iOS Safari 10.3+).
-let RULES = { walk_ms: 140, swim_mult: 3, ghost: false, touch: true, hero_tile: null };
+let RULES = { walk_ms: 140, swim_mult: 3, ghost: false, touch: true, hero_tiles: [] };
 async function refreshRules() {
   try {
     const r = await api("/api/rules");
@@ -2443,7 +2538,12 @@ async function refreshRules() {
 // v5.23: hero selection is explicit only.
 function resolveHero() {
   // v5.23.3: hero selection is explicit only; never infer from tile names.
-  heroTileId = RULES.hero_tile != null ? RULES.hero_tile : null;
+  // v5.29: the designation is a list — legacy single hero_tile migrates in.
+  // It is loaded on map load and play enter, and NEVER nulled by paint mode:
+  // the hero persists across modes, and play never overrides the player's pick.
+  const hl = Array.isArray(RULES.hero_tiles) ? RULES.hero_tiles
+    : (RULES.hero_tile != null ? [RULES.hero_tile] : []);
+  heroTileIds = hl.filter(t => Number.isInteger(t));
 }
 function syncRulesSheet() {
   document.querySelectorAll("#rules-walk button").forEach(b =>
@@ -2654,7 +2754,7 @@ function renderInspect() {
     const p = patrols.find(p => (p.x != null && p.x === x && p.y === y) ||
                                 (p.x == null && p.tile_id === ov));
     const said = gameRules.find(r => r.kind === "message" && r.tile === ov);
-    const isHero = heroTileId != null && ov === heroTileId;
+    const isHero = heroTileIds.includes(ov);
     const iname = instanceName(x, y);   // v5.1: HIS name, not the tile's
     let v = "🚶 " + esc(iname || tileLabel(ov));
     if (iname) v += '<br><small>' + esc(tileLabel(ov)) + '</small>';
@@ -2729,8 +2829,10 @@ async function inspectAction(act, d) {
     renderInspect(); render();
     return;
   } else if (act === "sethero") {
-    // v4.8: this one is you — the PC, unmistakable in play mode
-    const r = await api("/api/rules", { hero_tile: ov });
+    // v4.8: this one is you — the PC, unmistakable in play mode.
+    // v5.29: the inspector's single pick crowns [0] of the hero list;
+    // ws/entities owns the multi-hero pick UI — the list model is ready.
+    const r = await api("/api/rules", { hero_tiles: [ov] });
     if (!r.ok) { toast("couldn't crown him"); return; }
     RULES = r.rules; resolveHero();
     renderInspect(); render();
@@ -2883,8 +2985,9 @@ function paintMeters() {
   fb.classList.toggle("show", woodCount >= 2);
 }
 async function natureTick() {
-  // v4.0: ambient nature — cold bites even when the hero stands still
-  if (!playMode || playOver) return;
+  // v4.0: ambient nature — cold bites even when the hero stands still.
+  // v5.29: the interval is cleared on a build-break; this guard is the belt.
+  if (!playMode || playOver || buildBreak) return;
   try {
     const r = await api("/api/play/tick", {});
     if (!r.ok) return;
@@ -3039,7 +3142,7 @@ function placeDpad() {
   }
 }
 function updateDpad() {
-  dpad.classList.toggle("show", playMode && RULES.touch);
+  dpad.classList.toggle("show", playMode && RULES.touch && !buildBreak);  // v5.29: pad hides while painting
   placeDpad();
 }
 // v4.3: grab the ⠿ handle and drag the pad anywhere — no mode to enter first
@@ -3068,7 +3171,7 @@ let runMode = false, lastTap = { t: 0, btn: null }, runHintShown = false;
 dpad.querySelectorAll("button").forEach(b => {
   const dx = +b.dataset.dx, dy = +b.dataset.dy;
   b.addEventListener("pointerdown", e => {
-    if (!playMode) return;
+    if (!playMode || buildBreak) return;   // v5.29: the pad rests during a build-break
     e.preventDefault();
     const now = performance.now();
     runMode = (lastTap.btn === b && now - lastTap.t < 320);
@@ -3084,7 +3187,7 @@ dpad.querySelectorAll("button").forEach(b => {
     }));
 });
 async function doStep(dx, dy, repeat) {
-  if (!playMode || playOver) return;   // v3.9: a win/lose freezes movement
+  if (!playMode || playOver || buildBreak) return;   // v3.9: a win/lose freezes movement; v5.29: so does a build-break
   let r;
   try { r = await api("/api/play/step", { dx, dy }); }
   catch (e) { return; }
@@ -3733,7 +3836,7 @@ function renderSelCard() {
   const nm = instanceName(x, y);
   const tname = tileLabel(tid);
   const c = customById[tid];
-  const isHero = heroTileId != null && tid === heroTileId;
+  const isHero = heroTileIds.includes(tid);
   // v5.0 patrols anchor to THIS cell; older ones match by tile.
   const p = patrols.find(pp => (pp.x != null && pp.x === x && pp.y === y) ||
                                (pp.x == null && pp.tile_id === tid));

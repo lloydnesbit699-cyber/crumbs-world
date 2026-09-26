@@ -200,5 +200,113 @@ for k, v in old_env.items():
     else:
         os.environ[k] = v
 
+print("== voice input: /api/melody/stt (agent half) ==")
+# whisper runs on the chat brain's GROQ_API_KEY — set a dummy so backends
+# exist; the "no key" test below pops it
+_saved_groq_key = os.environ.get("GROQ_API_KEY")
+os.environ["GROQ_API_KEY"] = "test-speech-key"
+# stub the HTTP call — never hits the network in tests
+stt_posted = {}
+
+
+def fake_stt_post(url, body, content_type, key, timeout=60):
+    stt_posted["url"] = url
+    stt_posted["key"] = key
+    stt_posted["content_type"] = content_type
+    return {"text": "  hello melody  "}
+
+
+ma._stt_post = fake_stt_post
+tmp5 = fresh_dir()
+res = ma.handle_stt(tmp5, "alice", b"x" * 5000, "voice.webm", "free")
+check("stt ok, text trimmed", res.get("ok") and res.get("text") == "hello melody",
+      str(res))
+check("stt hits whisper endpoint",
+      stt_posted.get("url") == "https://api.groq.com/openai/v1/audio/transcriptions",
+      str(stt_posted.get("url")))
+check("stt posts multipart",
+      "multipart/form-data" in stt_posted.get("content_type", ""))
+_, remaining, _, _ = ma.quota_check(tmp5, "alice", "free")
+check("stt burns one brain-call quota", remaining == 199,
+      f"remaining={remaining}")
+# Law 18: quota + audit live under vaults/<user>/melody only
+qpath = os.path.join(tmp5, "vaults", "alice", "melody", "quota.json")
+check("stt quota under vaults/alice", os.path.isfile(qpath), qpath)
+with open(os.path.join(tmp5, "vaults", "alice", "melody", "audit.jsonl")) as f:
+    alines = f.read()
+check("stt audit recorded", '"action": "stt"' in alines)
+check("stt audit never keeps the words", "hello melody" not in alines)
+# audio never touches disk anywhere
+leftovers = []
+for r, ds, fs in os.walk(tmp5):
+    leftovers += [f for f in fs
+                  if f.rsplit(".", 1)[-1].lower() in
+                  ("webm", "mp4", "m4a", "wav", "ogg")]
+check("audio never touches disk", not leftovers, str(leftovers))
+
+# demo / no session -> login required (zero model calls pre-login)
+res = ma.handle_stt(tmp5, None, b"x" * 5000)
+check("stt unauthenticated -> login required",
+      not res.get("ok") and res.get("error") == "login required", str(res))
+res = ma.handle_stt(tmp5, "", b"x" * 5000)
+check("stt empty username -> login required",
+      not res.get("ok") and res.get("error") == "login required")
+res = ma.handle_stt(tmp5, "../../etc", b"x" * 5000)
+check("stt traversal username rejected", not res.get("ok"), str(res))
+res = ma.handle_stt(tmp5, "__commons__", b"x" * 5000)
+check("stt commons id rejected", not res.get("ok"))
+
+# bad audio handling
+res = ma.handle_stt(tmp5, "alice", b"")
+check("stt empty audio rejected",
+      not res.get("ok") and "empty" in res.get("error", "").lower(),
+      str(res))
+res = ma.handle_stt(tmp5, "alice", b"x" * (ma._STT_MAX_BYTES + 1))
+check("stt oversize rejected",
+      not res.get("ok") and "long" in res.get("error", "").lower(),
+      str(res))
+res = ma.transcribe_audio(b"")
+check("transcribe_audio empty -> clear error", not res.get("ok"))
+
+# no key configured -> clear, honest error (no hardcoding, env only)
+saved_key = os.environ.pop("GROQ_API_KEY", None)
+res = ma.transcribe_audio(b"x" * 5000)
+check("stt no key -> clear error",
+      not res.get("ok") and "key" in res.get("error", "").lower(),
+      res.get("error"))
+check("stt no key -> no backends", ma.stt_backends() == [])
+if saved_key is not None:
+    os.environ["GROQ_API_KEY"] = saved_key
+
+# backend failure -> clear error, no quota burned
+def fake_stt_fail(url, body, content_type, key, timeout=60):
+    raise RuntimeError("boom")
+
+
+ma._stt_post = fake_stt_fail
+_, before, _, _ = ma.quota_check(tmp5, "alice", "free")
+res = ma.handle_stt(tmp5, "alice", b"x" * 5000, "voice.mp4")
+check("stt backend failure -> clear error", not res.get("ok"), str(res))
+_, after, _, _ = ma.quota_check(tmp5, "alice", "free")
+check("stt failure burns no quota", before == after,
+      f"before={before} after={after}")
+
+# cross-vault: bob's stt writes only under vaults/bob (Law 18)
+ma._stt_post = fake_stt_post
+res = ma.handle_stt(tmp5, "bob", b"x" * 5000)
+check("stt for bob ok", res.get("ok"), str(res))
+check("stt bob quota under vaults/bob",
+      os.path.isfile(os.path.join(tmp5, "vaults", "bob", "melody",
+                                   "quota.json")))
+check("stt bob touched no alice paths",
+      not os.path.exists(os.path.join(tmp5, "vaults", "bob", "melody",
+                                       "alice")))
+shutil.rmtree(tmp5, ignore_errors=True)
+# voice tests are done — restore whatever GROQ_API_KEY the env had before
+if _saved_groq_key is None:
+    os.environ.pop("GROQ_API_KEY", None)
+else:
+    os.environ["GROQ_API_KEY"] = _saved_groq_key
+
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

@@ -303,6 +303,11 @@
   .sw.sel .chip { border-color: #ffd75f; border-width: 3px; box-shadow: 0 0 12px #ffd75f; }
   .sw.sel { background: rgba(255,215,95,0.15); border-radius: 12px; }
   .sw .lbl { font-size: 10px; color: #bbb; margin-top: 2px; word-break: break-word; }
+  /* v5.29: flavor chip — the tile's kind (world 🌿 / decor 🏛) on its swatch */
+  .sw { position: relative; }
+  .sw .fchip { position: absolute; top: 2px; right: 2px; font-size: 13px;
+               line-height: 1; pointer-events: none;
+               filter: drop-shadow(0 1px 1px rgba(0,0,0,0.8)); }
 
   /* v3.0: custom imported tiles + import form */
   /* v5.23.2: the palette is a scrollable grid now, not a sideways strip —
@@ -579,6 +584,14 @@
   #sheet-rules .opt-row { display: flex; gap: 6px; margin: 2px 0 10px; }
   #sheet-rules .opt-row button { flex: 1; margin: 0; }
   #sheet-rules .opt-row button.on { border-color: #4da3ff; color: #4da3ff; }
+  /* v5.29: the Heroes list rows */
+  #heroes-list .hero-row { display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px; margin: 4px 0; background: rgba(255,215,95,0.08);
+    border: 1px solid rgba(255,215,95,0.35); border-radius: 10px;
+    cursor: pointer; }
+  #heroes-list .hero-row:active { background: rgba(255,215,95,0.2); }
+  #heroes-list .hero-row small { color: #9aa; }
+  #heroes-list .hero-star { font-size: 14px; }
   #sheet-rules .lbl { font-size: 12px; color: #9aa; }
   .row2 { display: flex; gap: 8px; }
   .row2 button { flex: 1; margin: 0; }
@@ -1068,6 +1081,9 @@
   <div class="opt-row">
     <button id="rules-defaults" title="Use these rules for maps you generate">&#9733; My defaults</button>
   </div>
+  <div class="lbl" style="margin-top:8px">Heroes — the party</div>
+  <div id="heroes-list"></div>
+  <div><small>Any tile can be the hero — flag as many as you like. The first one on the map walks as you in play mode. Set or unset from an object's inspect card.</small></div>
   <div><small>Controller: <span id="pad-status">none — press a button on it</span></small></div>
   <div><small>Rules save with this map. Defaults apply to new maps you generate.</small></div>
   </div>
@@ -1307,6 +1323,7 @@ let gesture = null;                     // v2.1: two-finger pan/pinch state
 let playMode = false, hero = null, heroTimer = null, heroSwimming = false;   // v3.2: swim state
 let buildBreak = false;   // v5.29: paint-during-play — the sim is paused and the
                           // brush is unlocked; the play session itself never stops
+let playHeroTid = null, playHeroSize = 1.0;   // v5.29: the flagged PC's sprite + size for this run
 let heroInDeep = false;   // v3.6 SWIM HOOK: true on deep-water steps (only once SWIM_UNLOCKED flips server-side)
 // v3.4: patrol NPCs — routes from the server, live walkers in play mode
 let patrolTool = false, draftPoints = [], patrols = [], npcs = [], npcTimer = null;
@@ -1773,6 +1790,40 @@ async function refreshAll() {
 
 // v3.0: animator — which frame of a tile is showing right now
 function frameIdx(t) { return Math.floor(performance.now() / t.frame_ms) % t.frames; }
+// v5.29: object-layer cells are None | int | {tid,size,hero,flavor,
+// interactive,role}. The int is the legacy shape — a bare tile id with
+// every default. Helpers keep every reader honest.
+function objTid(c) {
+  if (c == null) return null;
+  if (typeof c === "object") return (typeof c.tid === "number") ? c.tid : null;
+  return (typeof c === "number") ? c : null;
+}
+function objA(c) {
+  // effective per-instance attributes — defaults + whatever the cell carries
+  const d = { size: 1.0, hero: false, flavor: null, interactive: true, role: "none" };
+  if (c && typeof c === "object") {
+    for (const k of Object.keys(d)) if (k in c) d[k] = c[k];
+  }
+  return d;
+}
+function objSize(c) {
+  const a = objA(c);
+  return Math.min(3, Math.max(0.25, +a.size || 1));
+}
+function flagHeroes() {
+  // every hero-flagged instance, scan order — the first is the PC
+  const out = [];
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const c = objects[y] && objects[y][x];
+    if (c && objA(c).hero) out.push({ x, y, tid: objTid(c), size: objSize(c) });
+  }
+  return out;
+}
+function tileDefById(tid) {
+  // the palette definition behind a tile id (sprites + customs)
+  return (spriteTiles.find(t => t.id === tid) ||
+          customTiles.find(t => t.id === tid) || null);
+}
 // v3.0: current drawable image for any tile id (custom animated frame,
 // sprite thumbnail, or null while still loading)
 function tileFrameImage(id) {
@@ -1993,9 +2044,14 @@ function render() {
     if (heroInDeep) {
       // TODO(swim): draw the swim animation (strokes, splash, submerged bob).
     }
-    const him = primaryHeroTile() != null ? tileFrameImage(primaryHeroTile()) : null;
+    // v5.29: PC sprite — flagged instance first (mirrors server _find_spawn),
+    // then the tile-level hero designation, then the gold circle fallback.
+    const pcTid = playHeroTid != null ? playHeroTid : primaryHeroTile();
+    const him = pcTid != null ? tileFrameImage(pcTid) : null;
     if (him) {
-      ctx.drawImage(him, hx, hy, tilePx, tilePx);
+      // v5.29: the PC keeps his build size — a mouse hero stays mouse-sized
+      const _hw = tilePx * playHeroSize, _hh = tilePx * playHeroSize;
+      ctx.drawImage(him, hx + (tilePx - _hw) / 2, hy + tilePx - _hh, _hw, _hh);
     } else {
       const cx = hero.x * tilePx + tilePx / 2, cy = hero.y * tilePx + tilePx / 2, r = tilePx * 0.32;
       ctx.fillStyle = "#ffd75f"; ctx.strokeStyle = "#000"; ctx.lineWidth = 2;
@@ -2083,42 +2139,62 @@ function render() {
       ctx.restore();
     }
   }
-  // object markers
+  // object markers — v5.29: per-instance size (a mouse is not a person),
+  // hero flags, insert roles, interactive + flavor badges.
+  const _fh = flagHeroes();   // hero-flagged instances, scan order
+  const _pcKey = (_fh.length && playMode) ? _fh[0].x + "," + _fh[0].y : null;
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    const oid = objects[y][x];
-    if (oid === null || oid === undefined) continue;
-    if (playMode && oid === primaryHeroTile()) continue;   // v4.9: he walks himself now — no twin left standing at the spawn
-    if (playMode && walkingAnchors.has(x + "," + y)) continue;   // v5.0: he's walking his patrol — the npc draws him, no twin at the anchor
+    const ocell = objects[y][x];
+    const oid = objTid(ocell);
+    if (oid == null) continue;
+    const oa = objA(ocell);
+    if (playMode) {
+      if (_pcKey != null) { if (x + "," + y === _pcKey) continue; }   // he walks himself now — no twin at the spawn
+      else if (primaryHeroTile() != null && oid === primaryHeroTile()) continue;  // v5.29: designated hero walks himself too
+      if (walkingAnchors.has(x + "," + y)) continue;   // v5.0: he's walking his patrol — the npc draws him, no twin at the anchor
+    }
+    const sz = objSize(ocell);
     const oim = tileFrameImage(oid);   // v3.0: custom tiles work as objects too
     if (oim) {
       ctx.fillStyle = "rgba(0,0,0,0.30)";   // v3.1: shadow under art objects
       ctx.beginPath();
       ctx.ellipse(x * tilePx + tilePx / 2, y * tilePx + tilePx * 0.88,
-                  tilePx * 0.34, tilePx * 0.13, 0, 0, Math.PI * 2);
+                  tilePx * 0.34 * sz, tilePx * 0.13 * sz, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.drawImage(oim, x * tilePx, y * tilePx, tilePx, tilePx);
+      // v5.29: scale about the cell's bottom-center — big things grow up,
+      // small things shrink to the ground
+      const _w = tilePx * sz, _h = tilePx * sz;
+      ctx.drawImage(oim, x * tilePx + (tilePx - _w) / 2, y * tilePx + tilePx - _h, _w, _h);
     } else {
-      const cx = x * tilePx + tilePx / 2, cy = y * tilePx + tilePx / 2, r = tilePx * 0.28;
+      const cx = x * tilePx + tilePx / 2, cy = y * tilePx + tilePx / 2, r = tilePx * 0.28 * sz;
       ctx.fillStyle = colorOf[oid] || "#fff";
       ctx.strokeStyle = "#000"; ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r, cy); ctx.lineTo(cx, cy + r); ctx.lineTo(cx - r, cy);
       ctx.closePath(); ctx.fill(); ctx.stroke();
     }
-    // v5.29: the hero persists in paint mode — a ⭐ ring on every designated
-    // hero's placed instance, so the pick is visible outside play too.
-    if (!playMode && heroTileIds.includes(oid)) {
-      ctx.strokeStyle = "#ffd75f"; ctx.lineWidth = Math.max(2, tilePx * 0.07);
-      ctx.beginPath();
-      ctx.ellipse(x * tilePx + tilePx / 2, y * tilePx + tilePx * 0.88,
-                  tilePx * 0.38, tilePx * 0.15, 0, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.save();
-      ctx.font = "bold " + Math.round(tilePx * 0.34) + "px sans-serif";
-      ctx.textAlign = "center"; ctx.fillStyle = "#ffd75f";
-      ctx.fillText("⭐", x * tilePx + tilePx / 2, y * tilePx + tilePx * 0.30);
-      ctx.restore();
+    // v5.29: instance badges — what this placed thing IS, at a glance.
+    // Ring color names the specialness; corner emoji name it twice.
+    // v5.29: the hero persists in paint mode — tile-level designated heroes
+    // get the ⭐ treatment on their placed instances too, not just flags.
+    const _isHero = oa.hero || (!playMode && heroTileIds.includes(oid));
+    let _ring = null;
+    if (_isHero) _ring = "#ffd75f";                                // ⭐ hero
+    else if (oa.role === "enemy") _ring = "rgba(255,90,90,0.95)";  // ⚔️ insert: enemy
+    else if (oa.role === "mentor") _ring = "rgba(110,230,200,0.95)"; // 🛡 insert: mentor
+    if (_ring) {
+      ctx.strokeStyle = _ring; ctx.lineWidth = Math.max(2, tilePx * 0.07);
+      ctx.strokeRect(x * tilePx + 3, y * tilePx + 3, tilePx - 6, tilePx - 6);
     }
+    ctx.font = Math.round(tilePx * 0.32) + "px sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    const _bx = x * tilePx, _by = y * tilePx;
+    if (!playMode && oa.flavor)   // flavor is a builder's note — edit mode only
+      ctx.fillText(oa.flavor === "world" ? "🌿" : "🏛", _bx + tilePx * 0.18, _by + tilePx * 0.20);
+    if (_isHero) ctx.fillText("⭐", _bx + tilePx * 0.82, _by + tilePx * 0.20);
+    else if (oa.role === "enemy") ctx.fillText("⚔️", _bx + tilePx * 0.82, _by + tilePx * 0.80);
+    else if (oa.role === "mentor") ctx.fillText("🛡", _bx + tilePx * 0.82, _by + tilePx * 0.80);
+    if (!oa.interactive) ctx.fillText("🚫", _bx + tilePx * 0.18, _by + tilePx * 0.80);
   }
   // v5.3: grid lines live in the base layer now — pre-rendered, not rebuilt.
   // v3.1: fog/lighting — darkness over the map with a pool of light around
@@ -2185,11 +2261,21 @@ function strokeAdd(cell) {
   const bv = brushValue();
   // v5.0: the erase preview paints the seed's ground from the cache
   // (the server re-resolves on pointer-up, so undo stays exact).
-  const pv = (bv === "natural")
+  let pv = (bv === "natural")
     ? ((naturalGrid[cell.y] && naturalGrid[cell.y][cell.x] != null)
        ? naturalGrid[cell.y][cell.x] : tiles[cell.y][cell.x])
     : bv;
-  stroke.cells.set(key, { x: cell.x, y: cell.y, tile_id: bv });
+  const cellOut = { x: cell.x, y: cell.y, tile_id: bv };
+  // v5.29: object strokes carry placement attrs — the palette flavor goes
+  // with the tile so a placed tree is 🌿 unless the builder says otherwise.
+  if (layer === "objects" && !erasing && bv !== "erase") {
+    const def = tileDefById(bv);
+    if (def && def.flavor) {
+      cellOut.attrs = { flavor: def.flavor };
+      pv = { tid: pv, flavor: def.flavor };   // optimistic preview, dict shape
+    }
+  }
+  stroke.cells.set(key, cellOut);
   localGrid()[cell.y][cell.x] = pv;   // optimistic preview
   // v3.1: "stamp collision" — painting a solid wall stamps its collision too
   if (linkCollision && layer !== "collision" && !erasing) {
@@ -2424,6 +2510,11 @@ $("btn-play").onclick = async () => {
     const r = await api("/api/play/start", {});
     if (!r.ok) { toast("play failed"); return; }
     playMode = true; hero = { x: r.x, y: r.y };
+    // v5.29: the flagged PC leads this run — his sprite and his size.
+    // No flags: the tile pick (or the gold circle, as before).
+    const _fh0 = flagHeroes();
+    playHeroTid = _fh0.length ? _fh0[0].tid : primaryHeroTile();
+    playHeroSize = _fh0.length ? _fh0[0].size : 1.0;
     refreshSight();   // v5.10: fog of war starts from the spawn
     erasing = false; $("btn-eraser").classList.remove("on");   // v3.1: the eraser
     // v3.4: patrol tool rests during play; NPCs start walking their routes
@@ -2449,6 +2540,7 @@ $("btn-play").onclick = async () => {
     await api("/api/play/stop", {});
     if (buildBreak) buildBreakUIOff();   // v5.29: leaving play ends the break too (timers already cleared below)
     playMode = false; hero = null; heroSwimming = false; heroInDeep = false;
+    playHeroTid = null; playHeroSize = 1.0;   // v5.29: run's hero pick rests
     if (heroTimer) { clearInterval(heroTimer); heroTimer = null; }
     if (npcTimer) { clearInterval(npcTimer); npcTimer = null; }   // v3.4: walkers rest
     if (natureTimer) { clearInterval(natureTimer); natureTimer = null; }  // v4.0: nature rests
@@ -2673,8 +2765,38 @@ async function refreshRules() {
     if (r.ok && r.rules) RULES = r.rules;
   } catch (e) { /* offline — keep last known */ }
   syncRulesSheet();
+  renderHeroes();   // v5.29: the party list rides with the rules sheet
   updateDpad();
   resolveHero();   // v4.8: the saved PC pick applies
+}
+// v5.29: the Heroes list — every flagged hero instance. Tap one to open
+// his card (unset him there). The first row is the one who walks as you.
+function renderHeroes() {
+  const box = $("heroes-list");
+  if (!box) return;
+  const fh = flagHeroes();
+  if (!fh.length) {
+    box.innerHTML = '<div><small style="color:#777">no heroes yet — open an object\'s card and tap ⭐ Hero</small></div>';
+    return;
+  }
+  box.innerHTML = "";
+  fh.forEach((h, i) => {
+    const row = document.createElement("div");
+    row.className = "hero-row";
+    const nm = instanceName(h.x, h.y);
+    row.innerHTML = '<span class="hero-star">' + (i === 0 ? "⭐ PC" : "⭐") + '</span> ' +
+      esc(nm || tileLabel(h.tid)) + ' <small>(' + h.x + ", " + h.y + ')</small>';
+    row.title = "tap to open his card";
+    row.onclick = () => {
+      inspectPos = { x: h.x, y: h.y };
+      selectedInstance = { x: h.x, y: h.y };
+      textEdit = null; $("inspect-textedit").hidden = true;
+      $("inspect-xy").textContent = "(" + h.x + ", " + h.y + ")";
+      renderSelCard(); renderInspect(); render();
+      toggleOverlay("sheet-inspect");
+    };
+    box.appendChild(row);
+  });
 }
 // v5.23: hero selection is explicit only.
 function resolveHero() {
@@ -2834,7 +2956,7 @@ function ruleWords(r) {
 // Which rules touch a cell? Goals/messages live on it; hazards ride the tile
 // kind under it; key/door rules ride either tile under it.
 function rulesOnCell(x, y) {
-  const tv = tiles[y][x], ov = objects[y][x];
+  const tv = tiles[y][x], ov = objTid(objects[y][x]);
   return gameRules.filter(r => {
     if (r.kind === "goal") return r.x === x && r.y === y;
     if (r.kind === "message") {
@@ -2885,7 +3007,7 @@ function inspRow(k, v, btns) {
 function renderInspect() {
   if (!inspectPos) return;
   const x = inspectPos.x, y = inspectPos.y;
-  const tv = tiles[y][x], ov = objects[y][x], cv = coll[y][x];
+  const tv = tiles[y][x], ocell = objects[y][x], ov = objTid(ocell), oa = objA(ocell), cv = coll[y][x];
   const tr = (traitGrid[y] && traitGrid[y][x]) || null;
   let h = "";
   h += inspRow("tile", esc(tileLabel(tv)), "");
@@ -2895,16 +3017,24 @@ function renderInspect() {
     const p = patrols.find(p => (p.x != null && p.x === x && p.y === y) ||
                                 (p.x == null && p.tile_id === ov));
     const said = gameRules.find(r => r.kind === "message" && r.tile === ov);
-    const isHero = heroTileIds.includes(ov);
+    const isHero = oa.hero || heroTileIds.includes(ov);
     const iname = instanceName(x, y);   // v5.1: HIS name, not the tile's
     let v = "🚶 " + esc(iname || tileLabel(ov));
     if (iname) v += '<br><small>' + esc(tileLabel(ov)) + '</small>';
-    if (isHero) v += '<br><small>⭐ your hero — the PC</small>';
+    if (oa.hero) v += '<br><small>⭐ hero — one of the party</small>';
+    else if (isHero) v += '<br><small>⭐ your hero — the PC</small>';
+    if (oa.role === "enemy") v += '<br><small>⚔️ insert — acts as an enemy</small>';
+    else if (oa.role === "mentor") v += '<br><small>🛡 insert — acts as a mentor</small>';
+    const kindBits = [];
+    if (oa.flavor) kindBits.push(oa.flavor === "world" ? "🌿 world" : "🏛 decor");
+    if (!oa.interactive) kindBits.push("🚫 not interactive");
+    if (+oa.size !== 1) kindBits.push("📏 " + (+oa.size).toFixed(2) + "×");
+    if (kindBits.length) v += '<br><small>' + kindBits.join(" · ") + '</small>';
     if (p) v += '<br><small>patrol — ' + p.points.length + ' stops</small>';
     if (said) v += '<br><small>💬 “' + esc(said.text) + '”</small>';
     let btns = '<button data-act="delobj" class="danger">Remove</button>';
     btns += '<button data-act="move">' + (moveArmed ? "Cancel move" : "Move") + "</button>";
-    if (!isHero) btns += '<button data-act="sethero">Set as hero</button>';
+    btns += '<button data-act="sethero">' + (oa.hero ? "Unset hero" : "⭐ Hero") + "</button>";
     if (p) btns += '<button data-act="reroute" data-pid="' + p.id + '">Re-route</button>' +
                    '<button data-act="delpatrol" data-pid="' + p.id + '" class="danger">End patrol</button>';
     else btns += '<button data-act="givepatrol">Give patrol</button>';
@@ -2912,6 +3042,24 @@ function renderInspect() {
                    '<button data-act="cleartext" data-rid="' + said.id + '" class="danger">Clear text</button>'
                  : '<button data-act="settext">Set text</button>';
     h += inspRow("object", v, btns);
+    // v5.29: entity controls — size, kind (world/decor + interactive),
+    // and the insert role. One tap each, all saved with the map.
+    h += '<div class="insp-row"><div class="k">size</div><div class="v">' +
+         '<input type="range" min="0.25" max="2" step="0.05" value="' + (+oa.size) + '" data-size style="width:130px"> ' +
+         '<span data-sizeval>' + (+oa.size).toFixed(2) + '×</span><br>' +
+         '<small>a mouse and a person don\'t render the same size</small></div></div>';
+    h += '<div class="insp-row"><div class="k">kind</div><div class="v"><div class="seg">' +
+         '<button data-act="flavor" data-v="world" class="' + (oa.flavor === "world" ? "on" : "") + '">🌿 world</button>' +
+         '<button data-act="flavor" data-v="decor" class="' + (oa.flavor === "decor" ? "on" : "") + '">🏛 decor</button>' +
+         '<button data-act="flavor" data-v="" class="' + (!oa.flavor ? "on" : "") + '">✕</button>' +
+         '</div> <button data-act="interactive" class="' + (oa.interactive ? "on" : "") + '">' +
+         (oa.interactive ? "👆 interactive" : "🚫 quiet") + '</button><br>' +
+         '<small>world = natural · decor = made · quiet things are scenery</small></div></div>';
+    h += '<div class="insp-row"><div class="k">insert</div><div class="v"><div class="seg">' +
+         '<button data-act="role" data-v="none" class="' + (oa.role === "none" ? "on" : "") + '">✕ none</button>' +
+         '<button data-act="role" data-v="enemy" class="' + (oa.role === "enemy" ? "on" : "") + '">⚔️ enemy</button>' +
+         '<button data-act="role" data-v="mentor" class="' + (oa.role === "mentor" ? "on" : "") + '">🛡 mentor</button>' +
+         '</div><br><small>an object acting as enemy/mentor — because you can</small></div></div>';
   } else {
     h += inspRow("object", '<span style="color:#777">nothing here</span>', "");
   }
@@ -2939,9 +3087,26 @@ function renderInspect() {
   box.querySelectorAll("button[data-act]").forEach(b => {
     b.onclick = () => inspectAction(b.dataset.act, b.dataset);
   });
+  // v5.29: the size slider previews live, commits on release
+  const sizeInp = box.querySelector("input[data-size]");
+  if (sizeInp) {
+    const val = box.querySelector("[data-sizeval]");
+    sizeInp.oninput = () => { if (val) val.textContent = (+sizeInp.value).toFixed(2) + "×"; };
+    sizeInp.onchange = () => inspectAction("size", { v: +sizeInp.value });
+  }
 }
 async function inspectAction(act, d) {
-  const x = inspectPos.x, y = inspectPos.y, ov = objects[y][x];
+  const x = inspectPos.x, y = inspectPos.y, ocell = objects[y][x], ov = objTid(ocell);
+  // v5.29: one shared commit for every per-instance attribute change —
+  // merge-patch the cell, re-pull, re-render everything that shows him.
+  const commitAttrs = async (attrs, what) => {
+    const r = await api("/api/object-attrs", { x, y, attrs });
+    if (!r.ok) { toast(r.error || "couldn't change that"); return false; }
+    await refresh();
+    renderInspect(); renderSelCard(); render();
+    if (what) toast(what);
+    return true;
+  };
   if (act === "delobj") {
     // v5.0: lifting him ends his patrol too — one undo step.
     const r = await api("/api/remove-object", { x, y });
@@ -2970,14 +3135,23 @@ async function inspectAction(act, d) {
     renderInspect(); render();
     return;
   } else if (act === "sethero") {
-    // v4.8: this one is you — the PC, unmistakable in play mode.
-    // v5.29: the inspector's single pick crowns [0] of the hero list;
-    // ws/entities owns the multi-hero pick UI — the list model is ready.
-    const r = await api("/api/rules", { hero_tiles: [ov] });
-    if (!r.ok) { toast("couldn't crown him"); return; }
-    RULES = r.rules; resolveHero();
-    renderInspect(); render();
-    toast("he's you now");
+    // v5.29: hero is a per-instance flag now — a spider can be the hero,
+    // and the party can hold many. First flag in scan order walks as the PC.
+    const now = !objA(objects[y][x]).hero;
+    await commitAttrs({ hero: now }, now ? "⭐ they're in the party now" : "no longer a hero");
+  } else if (act === "size") {
+    await commitAttrs({ size: +d.v });
+  } else if (act === "flavor") {
+    await commitAttrs({ flavor: d.v || null },
+      d.v === "world" ? "🌿 marked as world (natural)" : d.v === "decor" ? "🏛 marked as decor (made)" : "kind cleared");
+  } else if (act === "interactive") {
+    const now = !objA(objects[y][x]).interactive;
+    await commitAttrs({ interactive: now }, now ? "👆 interactive again" : "🚫 quiet — scenery now");
+  } else if (act === "role") {
+    // v5.29: the insert — an explicit flag, not a hack. Enemy bumps hurt,
+    // mentors talk; both wear their badge on the map.
+    await commitAttrs({ role: d.v || "none" },
+      d.v === "enemy" ? "⚔️ they'll fight for real now" : d.v === "mentor" ? "🛡 they'll mentor now" : "insert cleared");
   } else if (act === "settext" || act === "edittext") {
     // v4.6: words for the character — the little editor opens under the rows
     const rid = +(d.rid || 0);
@@ -3229,7 +3403,7 @@ document.querySelectorAll("#gr-kinds button").forEach(b => {
 function cellTileId(cell) {
   // tiles layer first, then objects — a rule binds the art that's there
   return (tiles[cell.y] && tiles[cell.y][cell.x]) ||
-         (objects[cell.y] && objects[cell.y][cell.x]) || 0;
+         (objects[cell.y] && objTid(objects[cell.y][cell.x])) || 0;
 }
 function ruleTap(cell) {
   const d = ruleDraft;
@@ -3439,7 +3613,7 @@ $("btn-patrol").onclick = () => {
   render();
 };
 function patrolTap(cell) {
-  const ov = objects[cell.y] && objects[cell.y][cell.x];
+  const ov = objTid(objects[cell.y] && objects[cell.y][cell.x]);
   if (!patrolAnchor && rerouteId == null) {
     // no character chosen yet — this tap picks him (or removes a patrol)
     if (ov == null) {
@@ -3499,13 +3673,15 @@ async function buildNpcs() {
     let way = p.points;
     let sx = p.points[0][0], sy = p.points[0][1];
     if (p.x != null && p.y != null) {
-      const oid = objects[p.y] && objects[p.y][p.x];
+      const oid = objTid(objects[p.y] && objects[p.y][p.x]);
       if (oid !== p.tile_id) return;   // his character is gone — the patrol waits
       way = [[p.x, p.y], ...p.points];
       sx = p.x; sy = p.y;
       walkingAnchors.add(p.x + "," + p.y);
     }
-    starts[pi] = { x: sx, y: sy, tile_id: p.tile_id };
+    starts[pi] = { x: sx, y: sy, tile_id: p.tile_id,
+      // v5.29: anchored walkers keep the anchor instance's size
+      size: (p.x != null) ? objSize(objects[p.y] && objects[p.y][p.x]) : 1.0 };
     for (let i = 0; i < way.length; i++)
       legs.push({ pi, from: way[i], to: way[(i + 1) % way.length] });
   });
@@ -3516,6 +3692,7 @@ async function buildNpcs() {
     const loop = [];
     legs.forEach((l, li) => { if (l.pi === pi && paths[li] && paths[li].length) loop.push(...paths[li]); });
     if (loop.length) npcs.push({ tile_id: starts[pi].tile_id, loop, seg: 0,
+      size: starts[pi].size || 1.0,   // v5.29: walkers keep their build size
       x: starts[pi].x, y: starts[pi].y, flip: false, away: false,
       hazard: !!patrols[pi].hazard });  // v5.12: Melody's hazard patrols
   });
@@ -3546,15 +3723,18 @@ function drawNpc(n) {
   const im = n.away ? npcSilhouette(n.tile_id) : tileFrameImage(n.tile_id);
   if (!im) return;
   const px = n.x * tilePx, py = n.y * tilePx;
+  const sz = n.size || 1.0;   // v5.29: walkers keep their build size
+  const dw = tilePx * sz, dh = tilePx * sz;
+  const dx = px + (tilePx - dw) / 2, dy = py + tilePx - dh;
   ctx.fillStyle = "rgba(0,0,0,0.30)";
   ctx.beginPath();
-  ctx.ellipse(px + tilePx / 2, py + tilePx * 0.88, tilePx * 0.34, tilePx * 0.13, 0, 0, Math.PI * 2);
+  ctx.ellipse(px + tilePx / 2, py + tilePx * 0.88, tilePx * 0.34 * sz, tilePx * 0.13 * sz, 0, 0, Math.PI * 2);
   ctx.fill();
   if (!n.away && n.flip) {   // walking left — mirror him (no flip needed for a back view)
-    ctx.save(); ctx.translate(px + tilePx, py); ctx.scale(-1, 1);
-    ctx.drawImage(im, 0, 0, tilePx, tilePx); ctx.restore();
+    ctx.save(); ctx.translate(dx + dw, dy); ctx.scale(-1, 1);
+    ctx.drawImage(im, 0, 0, dw, dh); ctx.restore();
   } else {
-    ctx.drawImage(im, px, py, tilePx, tilePx);
+    ctx.drawImage(im, dx, dy, dw, dh);
   }
   if (n.hazard) {   // v5.12: Melody's challengers wear a red ring
     ctx.strokeStyle = "rgba(255,90,90,0.95)"; ctx.lineWidth = Math.max(2, tilePx / 16);
@@ -3773,7 +3953,14 @@ function buildPalette() {
     renderSubChips(tabKey, sprites.concat(customs));
     customTabKey = tabKey;   // v5.25: buildCustomTiles filters on this too
     sprites.filter(t => subMatch(tabKey, subOf(t))).forEach(t => {
-      sw(t.id === selTile, (t.display || t.name) + " (#" + t.id + " · " + t.type + ")",
+      // v5.29: flavor chip — the palette names the tile's kind at a glance
+      const fchip = t.flavor
+        ? '<div class="fchip" title="' + (t.flavor === "world" ? "world — natural" : "decor — made") + '">' +
+          (t.flavor === "world" ? "🌿" : "🏛") + "</div>"
+        : "";
+      sw(t.id === selTile, (t.display || t.name) + " (#" + t.id + " · " + t.type + ")" +
+         (t.flavor ? " · " + t.flavor : ""),
+         fchip +
          '<div class="chip"><img src="/api/thumb/' + t.id + '" alt="" onerror="thumbImgFail(this)"></div>' +
          '<div class="lbl">' + esc(t.display || t.name) + "</div>",
          () => selectTile(t.id));
@@ -3967,8 +4154,15 @@ function customSwatch(t) {
   const label = t.display || t.name;   // v5.26: automatic display name
   const d = document.createElement("div");
   d.className = "sw" + (t.id === selTile ? " sel" : "");
-  d.title = label + " (" + t.preset + (t.frames > 1 ? ", " + t.frames + " frames" : "") + ")";
-  d.innerHTML = '<canvas width="48" height="48" data-tid="' + t.id + '"></canvas>' +
+  d.title = label + " (" + t.preset + (t.frames > 1 ? ", " + t.frames + " frames" : "") +
+            (t.flavor ? ", " + t.flavor : "") + ")";
+  // v5.29: flavor chip — world/decor reads at a glance in the strip
+  const fchip = t.flavor
+    ? '<div class="fchip" title="' + (t.flavor === "world" ? "world — natural" : "decor — made") + '">' +
+      (t.flavor === "world" ? "🌿" : "🏛") + "</div>"
+    : "";
+  d.innerHTML = fchip +
+                '<canvas width="48" height="48" data-tid="' + t.id + '"></canvas>' +
                 '<div class="lbl">' + esc(label) + '</div>' +
                 '<div class="preset-tag">' + esc(t.preset) + '</div>';
   paintSwatch(d.querySelector("canvas"), t.id);   // v4.7: still chip, painted now if loaded
@@ -4012,24 +4206,31 @@ function renderSelCard() {
   if (!selectedInstance) { card.hidden = true; empty.hidden = false; return; }
   if (renaming) return;   // don't clobber the inline rename editor
   const x = selectedInstance.x, y = selectedInstance.y;
-  const tid = objects[y][x];
+  const ocell = objects[y][x], tid = objTid(ocell), oa = objA(ocell);
   card.hidden = false; empty.hidden = true;
   paintSelThumb(tid);   // his thumbnail
   const nm = instanceName(x, y);
   const tname = tileLabel(tid);
   const c = customById[tid];
-  const isHero = heroTileIds.includes(tid);
+  const isHero = oa.hero || heroTileIds.includes(tid);
   // v5.0 patrols anchor to THIS cell; older ones match by tile.
   const p = patrols.find(pp => (pp.x != null && pp.x === x && pp.y === y) ||
                                (pp.x == null && pp.tile_id === tid));
   $("sel-name").innerHTML = esc(nm || tname) +
     ' <span class="edit-hint">tap to rename</span>';
+  // v5.29: the card names what he IS — size, kind, insert role
+  const bits = [];
+  if (oa.hero) bits.push("⭐ hero");
+  if (oa.role !== "none") bits.push(oa.role === "enemy" ? "⚔️ enemy" : "🛡 mentor");
+  if (oa.flavor) bits.push(oa.flavor === "world" ? "🌿 world" : "🏛 decor");
+  if (!oa.interactive) bits.push("🚫 quiet");
+  if (+oa.size !== 1) bits.push("📏 " + (+oa.size).toFixed(2) + "×");
   $("sel-desig").textContent =
     (c ? c.preset : "tile") + " · (" + x + ", " + y + ")" +
-    (isHero ? " · ⭐ your hero" : "") +
+    (bits.length ? " · " + bits.join(" · ") : "") +
     (p ? " · 🚶 " + p.points.length + " stops" : "");
   const acts = [];
-  if (!isHero) acts.push(["sethero", "⭐ Hero"]);
+  acts.push(["sethero", oa.hero ? "⭐ Unset hero" : "⭐ Hero"]);
   acts.push(p ? ["reroute", "🚶 Re-route"] : ["givepatrol", "🚶 Patrol"]);
   if (p) acts.push(["delpatrol", "End patrol"]);
   acts.push(["settext", "💬 Text"]);
@@ -4061,7 +4262,7 @@ function renameInstance() {
   el.innerHTML = "";
   const inp = document.createElement("input");
   inp.value = cur; inp.maxLength = 40;
-  inp.placeholder = tileLabel(objects[y][x]);
+  inp.placeholder = tileLabel(objTid(objects[y][x]));
   el.appendChild(inp);
   inp.focus(); inp.select();
   let done = false;

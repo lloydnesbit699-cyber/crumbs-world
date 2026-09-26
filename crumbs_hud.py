@@ -1260,6 +1260,9 @@ def _register_custom_tile(entry, tile_dir):
         "name": entry["name"],
         "category": "custom",
         "preset": entry.get("preset", "decor"),
+        # v5.29: the validated subcategory travels with the entry, so the
+        # asset tile and the registry always agree on the tile's home.
+        "subcategory": entry.get("subcategory"),
         "height": entry["height"],
         "frames": frames,
         "frame_ms": int(entry.get("frame_ms", 400)),
@@ -1288,6 +1291,59 @@ def _register_custom_tile(entry, tile_dir):
 
 
 _shared_shelf_done = False  # v5.27: the shipped shelf registers once per process
+
+
+def _migrate_taxonomy():
+    """v5.29: one-time taxonomy migration over the loaded registries.
+    Rule (Lloyd's feedback item 4): existing tiles STAY where they are
+    UNLESS they are clearly an animal (name tokens match ANIMAL_HINTS but
+    the tile predates the Animals chip) or their stored home contradicts
+    their preset (guardrail backfill — a character can't stay outside the
+    character group, a chest can't stay in creatures).
+    Only moved entries are rewritten — untouched entries keep no stamp,
+    so a server with nothing to migrate writes nothing back (the shared
+    library file stays byte-identical). Old saves without stamps stay
+    loadable; the migration is idempotent. Never raises."""
+    moved = 0
+    dirty = {"local": False, "shared": False}
+    try:
+        for store, scope in ((_custom_tiles, "local"),
+                             (_shared_tiles, "shared")):
+            for entry in store:
+                old = entry.get("subcategory")
+                name, preset = entry.get("name"), entry.get("preset")
+                fresh = core.guess_subcategory(name, preset)
+                new, corrected, _note = core.validate_taxonomy(
+                    name, preset, old)
+                if corrected:
+                    entry["subcategory"] = new
+                elif fresh == "animals" and old in ("characters",
+                                                    "creatures"):
+                    # clearly an animal, categorized before Animals existed
+                    entry["subcategory"] = "animals"
+                else:
+                    continue
+                entry["subcategory_auto"] = True
+                entry["taxonomy_v"] = 1  # migrated — skip next boot
+                try:
+                    t = assets.tiles.get(int(entry["id"]))
+                except (TypeError, ValueError):
+                    t = None
+                if t is not None:
+                    t["subcategory"] = entry["subcategory"]
+                moved += 1
+                dirty[scope] = True
+                print(f"[hud] taxonomy: '{name}' {old} -> "
+                      f"{entry['subcategory']}")
+        for scope, was in dirty.items():
+            if was:
+                _save_custom_registry(scope)
+        if moved:
+            print(f"[hud] taxonomy: migrated {moved} tile(s) — animals "
+                  "split + guardrail backfill")
+    except Exception as e:
+        print(f"[hud] taxonomy migration skipped: {e}")
+    return moved
 
 
 def _load_custom_tiles():
@@ -1333,6 +1389,9 @@ def _load_custom_tiles():
           f"{len(_shared_tiles)} shared (starter pack)"
           + (f", {len(_shared_skipped)} utumno dormant"
              if _shared_skipped else ""))
+    # v5.29: one-time taxonomy migration — animals split + guardrails,
+    # before the art packs load so their fresh guesses are current too.
+    _migrate_taxonomy()
     # v5.14: drop-in art packs — any *.pack.json in custom_tiles/ loads
     # additively. Pack entries are never merged into custom_tiles.json, so
     # deleting the pack files uninstalls the pack cleanly.
@@ -1549,8 +1608,9 @@ def _body_scope(body):
 
 def _store_custom_tile(name, preset, frame_ms, pil_images, scope="local"):
     """Write PIL frames to the right shelf (this device / shared), register the
-    tile, save that shelf's registry. Returns the entry. Rolls back partial
-    writes on failure."""
+    tile, save that shelf's registry. Returns (entry, note) — note carries a
+    category-guardrail correction for the client to toast, or None.
+    Rolls back partial writes on failure."""
     tile_dir = SHARED_DIR if scope == "shared" else _custom_dir()
     store = _shared_tiles if scope == "shared" else _custom_tiles
     tid = assets._next_id()
@@ -1570,19 +1630,31 @@ def _store_custom_tile(name, preset, frame_ms, pil_images, scope="local"):
             except OSError:
                 pass
         raise
+    # v5.29: category guardrails — the subcategory is validated server-side
+    # at import time (never trust the client alone); a contradicting
+    # assignment is auto-corrected with a note, never silently kept.
+    sub, _moved, note = core.validate_taxonomy(
+        name, preset, core.guess_subcategory(name, preset))
     entry = {"id": tid, "name": name, "preset": preset,
              "solid": TILE_PRESETS[preset]["solid"],
              "height": TILE_PRESETS[preset]["height"],
              # v5.25: filename-hint auto-categorization at import time —
              # the docs' "automatic categorization" TODO, done.
-             "subcategory": core.guess_subcategory(name, preset),
+             "subcategory": sub,
+             # v5.29: True while the subcategory is machine-derived; a
+             # rename re-derives it, an explicit assignment clears this.
+             "subcategory_auto": True,
+             # v5.29: taxonomy version — the boot migration skips entries
+             # stamped with the current version. Old saves stay loadable;
+             # a missing stamp just means "migrate me once".
+             "taxonomy_v": 1,
              "swim": bool(TILE_PRESETS[preset].get("swim", False)),
              "deep": bool(TILE_PRESETS[preset].get("deep", False)),
              "frame_ms": frame_ms, "files": files, "scope": scope}
     store.append(entry)
     _register_custom_tile(entry, tile_dir)
     _save_custom_registry(scope)
-    return entry
+    return entry, note
 
 # ---- v3.4: patrol routes ----------------------------------------------------
 _patrols = []          # [{id, tile_id, points: [[x, y], ...]}]
@@ -4281,6 +4353,12 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/presets":
             # v3.0: tile function presets for the import picker
             self._send_json({"presets": [{"id": k, **v} for k, v in TILE_PRESETS.items()]})
+        elif path == "/api/taxonomy":
+            # v5.29: Law 15 — THE single routing table both sides share.
+            # The server is the authority; the client fetches this at boot
+            # and refreshes its local copy, so tabs/chips/labels can never
+            # drift apart again.
+            self._send_json({"ok": True, "taxonomy": core.taxonomy_table()})
         elif path == "/api/custom-tiles":
             # v3.0: imported tiles with animation metadata
             # v3.8: both shelves — shared first, then this device's
@@ -5149,11 +5227,14 @@ class Handler(BaseHTTPRequestHandler):
                         raise ValueError(f"frame {i}: too large (keep each under ~1MB)")
                     raw = base64.b64decode(durl.split(",", 1)[1])
                     pil_images.append(self._safe_open_image(raw, f"frame {i}"))
-                entry = _store_custom_tile(name, preset, frame_ms, pil_images,
-                                           _body_scope(body))
+                entry, note = _store_custom_tile(name, preset, frame_ms, pil_images,
+                                                   _body_scope(body))
             except Exception as e:
                 return self._send_json({"ok": False, "error": str(e)}, 400)
-            return self._send_json({"ok": True, "tile": _custom_public(entry)})
+            resp = {"ok": True, "tile": _custom_public(entry)}
+            if note:  # v5.29: guardrail correction — the client toasts this
+                resp["note"] = note
+            return self._send_json(resp)
 
         if path == "/api/autoslice":
             # v3.3: one-button animation — body: {name, preset, frame_ms,
@@ -5176,12 +5257,15 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("too large (keep under ~1MB)")
                 raw = base64.b64decode(durl.split(",", 1)[1])
                 frames = _autoslice_pil(self._safe_open_image(raw, "autoslice"))
-                entry = _store_custom_tile(name, preset, frame_ms, frames,
-                                           _body_scope(body))
+                entry, note = _store_custom_tile(name, preset, frame_ms, frames,
+                                                 _body_scope(body))
             except Exception as e:
                 return self._send_json({"ok": False, "error": str(e)}, 400)
-            return self._send_json({"ok": True, "tile": _custom_public(entry),
-                                    "frames": len(frames), "single": len(frames) == 1})
+            resp = {"ok": True, "tile": _custom_public(entry),
+                    "frames": len(frames), "single": len(frames) == 1}
+            if note:  # v5.29: guardrail correction — the client toasts this
+                resp["note"] = note
+            return self._send_json(resp)
 
         if path == "/api/bring-to-life":
             # v3.4: one picture -> living character. If it's a sheet, slice the
@@ -5210,12 +5294,15 @@ class Handler(BaseHTTPRequestHandler):
                 if len(frames) == 1:
                     frames = _walkbob_frames(img)
                     method = "walk"
-                entry = _store_custom_tile(name, preset, frame_ms, frames,
-                                           _body_scope(body))
+                entry, note = _store_custom_tile(name, preset, frame_ms, frames,
+                                                 _body_scope(body))
             except Exception as e:
                 return self._send_json({"ok": False, "error": str(e)}, 400)
-            return self._send_json({"ok": True, "tile": _custom_public(entry),
-                                    "frames": len(frames), "method": method})
+            resp = {"ok": True, "tile": _custom_public(entry),
+                    "frames": len(frames), "method": method}
+            if note:  # v5.29: guardrail correction — the client toasts this
+                resp["note"] = note
+            return self._send_json(resp)
 
         if path == "/api/sprite/import":
             # v5.11: sprite-sheet importer. Body:
@@ -5240,6 +5327,7 @@ class Handler(BaseHTTPRequestHandler):
                                        400)
             scope = _body_scope(body)
             made = []
+            notes = []  # v5.29: guardrail corrections to toast client-side
             try:
                 for sh in sheets:
                     durl = sh.get("image", "")
@@ -5278,14 +5366,18 @@ class Handler(BaseHTTPRequestHandler):
                             fim = core.Image.new("RGBA", (32, 32))
                             fim.putdata([tuple(p) for p in up["pixels"]])
                             frames.append(fim)
-                        entry = _store_custom_tile(
+                        entry, note = _store_custom_tile(
                             job["name"], job["preset"], job["frame_ms"],
                             frames, scope)
+                        if note:  # v5.29: guardrail correction, toasted client-side
+                            notes.append(note)
                         made.append(_custom_public(entry))
             except Exception as e:
                 return self._send_json({"ok": False, "error": str(e)}, 400)
-            return self._send_json({"ok": True, "tiles": made,
-                                    "count": len(made)})
+            resp = {"ok": True, "tiles": made, "count": len(made)}
+            if notes:
+                resp["notes"] = notes
+            return self._send_json(resp)
 
         if path == "/api/patrols/create":
             # v3.4: {tile_id, points: [[x,y], ...]} — 2-8 walkable stops.
@@ -5792,6 +5884,11 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/custom/update":
             # v3.3: rename / re-designate an imported tile — {id, name?, preset?}
+            # v5.29: + explicit category assignment {subcategory?}. Guardrails
+            # are enforced server-side (never trust the client alone): a
+            # contradicting assignment is auto-corrected with a note, never
+            # rejected. A rename re-derives the category only while it is
+            # machine-assigned; an explicit hand wins.
             try:
                 tid = int(body.get("id"))
             except (TypeError, ValueError):
@@ -5799,17 +5896,50 @@ class Handler(BaseHTTPRequestHandler):
             entry, scope = _find_custom(tid)
             if entry is None:
                 return self._send_json({"ok": False, "error": "not found"}, 404)
+            note = None
+            renamed = False
+            preset_changed = False
             if "name" in body:
-                entry["name"] = str(body.get("name", "")).strip()[:24] or entry["name"]
+                new_name = str(body.get("name", "")).strip()[:24] or entry["name"]
+                renamed = new_name != entry["name"]
+                entry["name"] = new_name
             if "preset" in body:
                 preset = body.get("preset")
                 if preset not in TILE_PRESETS:
                     return self._send_json({"ok": False, "error": "unknown preset"}, 400)
+                preset_changed = preset != entry["preset"]
                 entry["preset"] = preset
                 entry["solid"] = TILE_PRESETS[preset]["solid"]
                 entry["height"] = TILE_PRESETS[preset]["height"]
                 entry["swim"] = bool(TILE_PRESETS[preset].get("swim", False))
                 entry["deep"] = bool(TILE_PRESETS[preset].get("deep", False))
+            # v5.29: category assignment — explicit wins over auto, but the
+            # guardrails validate it either way.
+            if "subcategory" in body:
+                sub, moved, note = core.validate_taxonomy(
+                    entry["name"], entry["preset"], body.get("subcategory"))
+                entry["subcategory"] = sub
+                # v5.29: a corrected assignment was never the user's hand —
+                # it stays machine-assigned so a later rename re-derives it;
+                # an accepted hand becomes explicit.
+                entry["subcategory_auto"] = moved
+            elif ((renamed or preset_changed)
+                    and entry.get("subcategory_auto", True)):
+                # the name or preset changed and nobody hand-picked the
+                # home — re-derive it from the new data.
+                sub, _m, note = core.validate_taxonomy(
+                    entry["name"], entry["preset"],
+                    core.guess_subcategory(entry["name"], entry["preset"]))
+                entry["subcategory"] = sub
+            elif preset_changed:
+                # the hand was picked for the OLD preset — re-check it
+                # against the new one (a character can't stay in containers).
+                sub, moved, note = core.validate_taxonomy(
+                    entry["name"], entry["preset"],
+                    entry.get("subcategory"))
+                if moved:
+                    entry["subcategory"] = sub
+                    entry["subcategory_auto"] = True
             if "height" in body:
                 # v5.10: explicit per-tile height override (-2..3)
                 try:
@@ -5821,13 +5951,19 @@ class Handler(BaseHTTPRequestHandler):
             if t is not None:
                 t["name"] = entry["name"]
                 t["preset"] = entry["preset"]
+                # v5.29: the asset tile follows the registry's validated home
+                t["subcategory"] = entry.get("subcategory")
                 t["height"] = entry["height"]
                 t["properties"]["height"] = entry["height"]
                 t["properties"]["solid"] = bool(entry.get("solid", False))
                 t["properties"]["swim"] = bool(entry.get("swim", False))
                 t["properties"]["deep"] = bool(entry.get("deep", False))
+            entry["taxonomy_v"] = 1  # v5.29: validated — skip boot migration
             _save_custom_registry(scope)
-            return self._send_json({"ok": True, "tile": _custom_public(entry)})
+            resp = {"ok": True, "tile": _custom_public(entry)}
+            if note:  # v5.29: guardrail correction — the client toasts this
+                resp["note"] = note
+            return self._send_json(resp)
 
         if path == "/api/custom/share":
             # v3.8: move an imported tile between shelves — {id, scope}.

@@ -5,6 +5,22 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.30.0 — 2026-09-26
+
+Public accounts — signup, sign-in, optional 2FA:
+
+- **Sign up tab** on the login overlay: username + **email (required)** +
+  password. Signed up means logged in. `DISABLE_OPEN_SIGNUP=1` closes public
+  signup; the owner's Users panel still works as before.
+- **Email** is validated and unique per account (one account per email).
+- **Optional TOTP two-factor auth** (Setup → Two-factor auth…): authenticator
+  apps, stdlib-only RFC 6238, ±30s clock-skew window. Setup shows the secret
+  once; enabling shows 8 single-use recovery codes once (hashed at rest).
+  Disabling needs password + a current code. 2FA secrets live in users.json
+  next to the password hashes — server-side only, never logged or echoed.
+- Login with 2FA on: password first, then a 6-digit code step (recovery codes
+  work there too). A 🔐 marks 2FA accounts in the Setup menu.
+
 ## v5.29.3 — 2026-09-26
 
 The Charter (Lloyd's founding document — non-negotiable across Melody,

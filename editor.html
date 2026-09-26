@@ -273,6 +273,42 @@
     color: #14141c; font-weight: bold; font-size: 16px; }
   #login-err { color: #ff7a7a; font-size: 13px; min-height: 18px; margin-top: 8px; }
   #login-box .login-hint { color: #777; font-size: 11px; margin-top: 10px; }
+  /* v5.30: login/signup tabs + 2FA */
+  #login-box .login-tabs { display: flex; gap: 6px; margin-bottom: 4px; }
+  #login-box .login-tabs button { flex: 1; padding: 8px; border-radius: 8px;
+    border: 1px solid #333; background: #0d0d12; color: #aaa; font-size: 14px;
+    cursor: pointer; }
+  #login-box .login-tabs button.on { background: #2a2a38; color: #ffd75f;
+    border-color: #ffd75f; }
+  #su-go, #tfa-go { width: 100%; margin-top: 10px; padding: 11px; border: 0;
+    border-radius: 8px; background: linear-gradient(90deg,#ff5a5a,#ffd75f);
+    color: #14141c; font-weight: bold; font-size: 16px; }
+  #su-err, #tfa-err { color: #ff7a7a; font-size: 13px; min-height: 18px; margin-top: 8px; }
+  #tfa-overlay { position: fixed; inset: 0; z-index: 300; display: none;
+    align-items: center; justify-content: center; background: rgba(5,5,12,.92); }
+  #tfa-overlay.show { display: flex; }
+  #tfa-box { background: #14141c; border: 1px solid #2a2a38; border-radius: 12px;
+    padding: 20px; width: min(86vw, 340px); max-height: 80vh; overflow-y: auto; }
+  #tfa-box h2 { color: #ffd75f; margin: 0; font-size: 18px; }
+  #tfa-box .users-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  #tfa-box .users-head button { background: none; border: none; color: #aaa; font-size: 18px; cursor: pointer; }
+  .tfa-text { color: #bbb; font-size: 13px; line-height: 1.5; margin-bottom: 10px; }
+  .tfa-text b { color: #ffd75f; }
+  .tfa-secret { background: #0d0d12; border: 1px solid #ffd75f; border-radius: 8px;
+    padding: 12px; font-family: monospace; font-size: 17px; color: #ffd75f;
+    letter-spacing: 1px; margin-bottom: 10px; word-break: break-all; user-select: all; }
+  .tfa-codes { background: #0d0d12; border: 1px solid #333; border-radius: 8px;
+    padding: 10px; font-family: monospace; font-size: 14px; color: #eee;
+    margin-bottom: 10px; user-select: all; }
+  .tfa-codes div { padding: 3px 0; }
+  .tfa-input { display: block; width: 100%; box-sizing: border-box; margin: 8px 0;
+    padding: 10px; border-radius: 8px; border: 1px solid #333;
+    background: #0d0d12; color: #eee; font-size: 16px; }
+  .tfa-btn { width: 100%; margin-top: 6px; padding: 11px; border: 0; border-radius: 8px;
+    background: linear-gradient(90deg,#ff5a5a,#ffd75f); color: #14141c;
+    font-weight: bold; font-size: 15px; }
+  .tfa-btn.tfa-danger { background: #3a1f1f; color: #ff8a8a; border: 1px solid #5f2a2a; }
+  .tfa-err { color: #ff7a7a; font-size: 13px; min-height: 18px; margin-top: 8px; }
   /* v5.27: owner Users panel */
   #users-overlay { position: fixed; inset: 0; z-index: 300; display: none;
     align-items: center; justify-content: center; background: rgba(5,5,12,.92); }
@@ -762,6 +798,7 @@
     <div class="user-line"><span id="user-name"></span><span id="world-label"></span></div>
     <button id="btn-world-switch" title="Switch between My vault and the shared Commons">&#x1F310; Switch world</button>
     <button id="btn-change-pass" title="Change your password">&#x1F511; Change password</button>
+    <button id="btn-2fa" title="Two-factor authentication">&#x1F510; Two-factor auth</button>
     <button id="btn-logout" title="Log out">&#x23FB; Log out</button>
   </div>
   <button id="menu-users" hidden title="Create accounts, reset passwords">&#x1F465; Users&hellip;</button>
@@ -1102,13 +1139,41 @@
 <div id="login-overlay">
   <div id="login-box">
     <h2>&#x1F9F1; Crumbs HUD</h2>
-    <div class="login-sub">Log in to your vault</div>
-    <input id="login-user" type="text" placeholder="username" autocomplete="username" autocapitalize="none" autocorrect="off">
-    <input id="login-pass" type="password" placeholder="password" autocomplete="current-password">
-    <button id="login-go">Log in</button>
-    <div id="login-err"></div>
-    <div class="login-hint">No account yet? Ask the HUD owner to register one for you.</div>
+    <div class="login-tabs">
+      <button id="tab-login" class="on">Log in</button>
+      <button id="tab-signup">Sign up</button>
+    </div>
+    <div id="pane-login">
+      <div class="login-sub">Log in to your vault</div>
+      <input id="login-user" type="text" placeholder="username" autocomplete="username" autocapitalize="none" autocorrect="off">
+      <input id="login-pass" type="password" placeholder="password" autocomplete="current-password">
+      <button id="login-go">Log in</button>
+      <div id="login-err"></div>
+    </div>
+    <div id="pane-signup" hidden>
+      <div class="login-sub">Create your vault — email required</div>
+      <input id="su-user" type="text" placeholder="username (3-24 chars)" autocomplete="username" autocapitalize="none" autocorrect="off">
+      <input id="su-email" type="email" placeholder="email" autocomplete="email" autocapitalize="none" autocorrect="off">
+      <input id="su-pass" type="password" placeholder="password (min 4 chars)" autocomplete="new-password">
+      <button id="su-go">Create account</button>
+      <div id="su-err"></div>
+    </div>
+    <div id="pane-2fa" hidden>
+      <div class="login-sub">Two-factor check — enter the 6-digit code from your authenticator app</div>
+      <input id="tfa-code" type="text" inputmode="text" autocomplete="one-time-code" placeholder="123456 or recovery code" maxlength="12" autocapitalize="none" autocorrect="off" spellcheck="false">
+      <button id="tfa-go">Verify</button>
+      <div id="tfa-err"></div>
+    </div>
+    <div class="login-hint">Two-factor auth is optional — turn it on later in Setup.</div>
     <button id="login-demo" class="login-demo-btn">&#10024; Try Melody — free demo</button>
+  </div>
+</div>
+
+<!-- v5.30: two-factor auth setup panel -->
+<div id="tfa-overlay">
+  <div id="tfa-box">
+    <div class="users-head"><h2>&#x1F510; Two-factor auth</h2><button id="tfa-close">&#x2715;</button></div>
+    <div id="tfa-body"></div>
   </div>
 </div>
 
@@ -1482,9 +1547,76 @@ let PUBLIC_MODE = false;
 
 function showLogin(msg) {
   if (msg) $("login-err").textContent = msg;
+  loginTab("login");
   $("login-overlay").classList.add("show");
   setTimeout(() => $("login-user").focus(), 50);
 }
+// ---- v5.30: Log in / Sign up tabs + the 2FA step ---------------------------
+function loginTab(which) {
+  $("tab-login").classList.toggle("on", which === "login");
+  $("tab-signup").classList.toggle("on", which === "signup");
+  $("pane-login").hidden = which !== "login";
+  $("pane-signup").hidden = which !== "signup";
+  $("pane-2fa").hidden = true;
+  $("login-err").textContent = "";
+  $("su-err").textContent = "";
+  $("tfa-err").textContent = "";
+}
+$("tab-login").onclick = () => loginTab("login");
+$("tab-signup").onclick = () => loginTab("signup");
+// one funnel for every successful auth (login, 2FA, signup)
+function loginComplete(r) {
+  ME = { username: r.username, is_owner: r.is_owner, world: r.world || "private",
+         email: r.email || "", totp_enabled: !!r.totp_enabled };
+  hideLogin();
+  updateUserMenu();
+  if (window._loginResolve) {
+    const res = window._loginResolve; window._loginResolve = null; res(true);
+  } else {
+    location.reload();  // session expired mid-use — reboot into a clean state
+  }
+}
+async function doSignup() {
+  const u = $("su-user").value.trim().toLowerCase();
+  const e = $("su-email").value.trim().toLowerCase();
+  const p = $("su-pass").value;
+  const err = m => { $("su-err").textContent = m; };
+  if (!u || !e || !p) return err("fill in all three");
+  if (!_USERNAME_RE.test(u)) return err("username: 3-24 chars, a-z 0-9 _ -");
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) return err("that email doesn't look right");
+  if (p.length < 4) return err("password too short (min 4)");
+  err("");
+  try {
+    const r = await api("/api/auth/signup", { username: u, email: e, password: p });
+    if (!r.ok) {
+      if (r.retry_after) { err("slow down — try again in " + r.retry_after + "s"); return; }
+      err(r.error || "signup failed");
+      return;
+    }
+    loginComplete(r);
+  } catch (ex) {
+    if (!ex.auth) err("can't reach the server");
+  }
+}
+$("su-go").onclick = doSignup;
+$("su-user").addEventListener("keydown", e => { if (e.key === "Enter") $("su-email").focus(); });
+$("su-email").addEventListener("keydown", e => { if (e.key === "Enter") $("su-pass").focus(); });
+$("su-pass").addEventListener("keydown", e => { if (e.key === "Enter") doSignup(); });
+let _tfaChallenge = null;
+async function do2fa() {
+  const c = $("tfa-code").value.trim();
+  if (!c) { $("tfa-err").textContent = "enter the 6-digit code"; return; }
+  $("tfa-err").textContent = "";
+  try {
+    const r = await api("/api/auth/2fa/challenge", { challenge: _tfaChallenge, code: c });
+    if (!r.ok) { $("tfa-err").textContent = r.error || "bad code"; return; }
+    loginComplete(r);
+  } catch (ex) {
+    if (!ex.auth) $("tfa-err").textContent = "can't reach the server";
+  }
+}
+$("tfa-go").onclick = do2fa;
+$("tfa-code").addEventListener("keydown", e => { if (e.key === "Enter") do2fa(); });
 function hideLogin() {
   $("login-overlay").classList.remove("show");
   $("login-err").textContent = "";
@@ -1502,7 +1634,8 @@ function updateUserMenu() {
   if (usersBtn) usersBtn.hidden = !(ME && ME.is_owner);
   if (!ME) { sec.hidden = true; return; }
   sec.hidden = false;
-  $("user-name").textContent = (ME.is_owner ? "\u2B50 " : "") + ME.username;
+  $("user-name").textContent = (ME.is_owner ? "\u2B50 " : "") +
+    (ME.totp_enabled ? "\u{1F510} " : "") + ME.username;
   $("world-label").textContent = ME.world === "commons"
     ? "\u{1F310} Commons (shared)" : "\u{1F512} My vault";
 }
@@ -1517,7 +1650,8 @@ async function authGate() {
   PUBLIC_MODE = !!me.public_mode;
   if (!PUBLIC_MODE || (me.logged_in && me.username)) {
     ME = me.logged_in
-      ? { username: me.username, is_owner: me.is_owner, world: me.world || "private" }
+      ? { username: me.username, is_owner: me.is_owner, world: me.world || "private",
+          email: me.email || "", totp_enabled: !!me.totp_enabled }
       : null;
     updateUserMenu();
     return true;
@@ -1556,20 +1690,23 @@ async function doLogin() {
     const r = await api("/api/auth/login", { username: u, password: p });
     if (!r.ok) {
       if (r.retry_after) { startLoginCooldown(r.retry_after); return; }
+      if (r.need_2fa) {
+        // v5.30: password was right, but this account has 2FA on.
+        _tfaChallenge = r.challenge;
+        $("pane-login").hidden = true;
+        $("pane-2fa").hidden = false;
+        $("tfa-code").value = "";
+        $("tfa-err").textContent = "";
+        setTimeout(() => $("tfa-code").focus(), 50);
+        return;
+      }
       const left = (typeof r.tries_left === "number")
         ? " \u2014 " + r.tries_left + (r.tries_left === 1 ? " try" : " tries") + " left"
         : "";
       $("login-err").textContent = (r.error || "login failed") + left;
       return;
     }
-    ME = { username: r.username, is_owner: r.is_owner, world: r.world || "private" };
-    hideLogin();
-    updateUserMenu();
-    if (window._loginResolve) {
-      const res = window._loginResolve; window._loginResolve = null; res(true);
-    } else {
-      location.reload();  // session expired mid-use — reboot into a clean state
-    }
+    loginComplete(r);
   } catch (e) {
     if (!e.auth) $("login-err").textContent = "can't reach the server";
   }
@@ -1600,6 +1737,92 @@ $("btn-change-pass").onclick = async () => {
     toast(r.ok ? "password changed" : (r.error || "change failed"));
   } catch (e) { if (!e.auth) toast("change failed"); }
 };
+
+// ---- v5.30: two-factor auth panel (Setup → Two-factor auth…) ----------------
+// Optional per user. Setup shows the secret once; enabling shows 8 one-time
+// recovery codes once. The server never shows either of them again.
+function close2fa() { $("tfa-overlay").classList.remove("show"); }
+$("tfa-close").onclick = close2fa;
+async function open2fa() {
+  const body = $("tfa-body");
+  $("tfa-overlay").classList.add("show");
+  if (ME && ME.totp_enabled) {
+    body.innerHTML =
+      '<div class="tfa-text">2FA is <b>on</b> for this account. ' +
+      'Logins ask for your password plus a 6-digit code.</div>' +
+      '<button id="tfa-disable-go" class="tfa-btn tfa-danger">Disable 2FA</button>' +
+      '<div id="tfa-msg" class="tfa-err"></div>';
+    $("tfa-disable-go").onclick = tfaDisableForm;
+    return;
+  }
+  body.innerHTML =
+    '<div class="tfa-text">Add a second step to logins: after your password, ' +
+    "you'll enter a 6-digit code from an authenticator app " +
+    '(Google Authenticator, Authy, 1Password, …).</div>' +
+    '<button id="tfa-setup-go" class="tfa-btn">Set up 2FA</button>' +
+    '<div id="tfa-msg" class="tfa-err"></div>';
+  $("tfa-setup-go").onclick = tfaSetup;
+}
+$("btn-2fa").onclick = open2fa;
+async function tfaSetup() {
+  const body = $("tfa-body");
+  let r;
+  try { r = await api("/api/auth/2fa/setup", {}); }
+  catch (e) { if (!e.auth) $("tfa-msg").textContent = "can't reach the server"; return; }
+  if (!r.ok) { $("tfa-msg").textContent = r.error || "setup failed"; return; }
+  const spaced = (r.secret.match(/.{1,4}/g) || [r.secret]).join(" ");
+  body.innerHTML =
+    '<div class="tfa-text">1. Open your authenticator app, add an account, ' +
+    'and enter this key:</div><div class="tfa-secret">' + spaced + '</div>' +
+    '<div class="tfa-text">2. Enter the 6-digit code it shows:</div>' +
+    '<input id="tfa-confirm-code" class="tfa-input" inputmode="text" ' +
+    'placeholder="123456" maxlength="12" autocapitalize="none" autocorrect="off">' +
+    '<button id="tfa-confirm-go" class="tfa-btn">Confirm &amp; turn on</button>' +
+    '<div id="tfa-msg" class="tfa-err"></div>';
+  $("tfa-confirm-go").onclick = async () => {
+    const code = $("tfa-confirm-code").value.trim();
+    if (!code) { $("tfa-msg").textContent = "enter the 6-digit code"; return; }
+    let r2;
+    try { r2 = await api("/api/auth/2fa/enable", { code }); }
+    catch (e) { if (!e.auth) $("tfa-msg").textContent = "can't reach the server"; return; }
+    if (!r2.ok) { $("tfa-msg").textContent = r2.error || "bad code"; return; }
+    ME.totp_enabled = true;
+    updateUserMenu();
+    body.innerHTML =
+      '<div class="tfa-text"><b>2FA is on.</b> Save these recovery codes ' +
+      "somewhere safe — each works once if you lose your phone, and they " +
+      "won't be shown again:</div>" +
+      '<div class="tfa-codes">' +
+      r2.recovery_codes.map(c => "<div>" + c + "</div>").join("") +
+      '</div><button id="tfa-done" class="tfa-btn">Done</button>';
+    $("tfa-done").onclick = close2fa;
+  };
+  $("tfa-confirm-code").addEventListener("keydown",
+    e => { if (e.key === "Enter") $("tfa-confirm-go").click(); });
+  setTimeout(() => $("tfa-confirm-code").focus(), 50);
+}
+function tfaDisableForm() {
+  const body = $("tfa-body");
+  body.innerHTML =
+    '<div class="tfa-text">Enter your password and a current 6-digit code ' +
+    "(or one recovery code) to turn 2FA off:</div>" +
+    '<input id="tfa-dis-pass" type="password" class="tfa-input" placeholder="password" autocomplete="current-password">' +
+    '<input id="tfa-dis-code" class="tfa-input" inputmode="text" placeholder="123456 or recovery code" maxlength="12" autocapitalize="none" autocorrect="off" spellcheck="false">' +
+    '<button id="tfa-dis-go" class="tfa-btn tfa-danger">Disable 2FA</button>' +
+    '<div id="tfa-msg" class="tfa-err"></div>';
+  $("tfa-dis-go").onclick = async () => {
+    const pw = $("tfa-dis-pass").value, code = $("tfa-dis-code").value.trim();
+    if (!pw || !code) { $("tfa-msg").textContent = "enter both"; return; }
+    let r;
+    try { r = await api("/api/auth/2fa/disable", { password: pw, code }); }
+    catch (e) { if (!e.auth) $("tfa-msg").textContent = "can't reach the server"; return; }
+    if (!r.ok) { $("tfa-msg").textContent = r.error || "disable failed"; return; }
+    ME.totp_enabled = false;
+    updateUserMenu();
+    close2fa();
+    toast("2FA off");
+  };
+}
 
 // ---- v5.27: owner Users panel -------------------------------------------
 // Setup → Users… is visible only to the owner (see updateUserMenu); the

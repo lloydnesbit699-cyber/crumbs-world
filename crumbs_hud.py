@@ -112,6 +112,7 @@ import secrets
 import socket
 import shutil
 import ssl
+import struct
 import sys
 import uuid
 import threading
@@ -154,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.29.3"
+APP_VERSION = "5.30.0"
 # v5.24: unique per process boot. After an update the server re-execs into
 # the new files; the page waits for a DIFFERENT instance id (plus the new
 # version) instead of mistaking the old process — still answering during
@@ -581,6 +582,101 @@ def _verify_password(password, rec):
     return hmac.compare_digest(want, rec.get("hash", ""))
 
 
+# -- email + two-factor auth (TOTP, stdlib only) ------------------------------
+# v5.30: public signup requires an email; 2FA is optional per user.
+# The Charter: a 2FA secret is a private thing — it lives in users.json next
+# to the password hashes (server-side only, never in the repo), and it is
+# never logged, never echoed, never sent anywhere but the setup response
+# that the logged-in owner of the account is looking at.
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _valid_email(email):
+    email = (email or "").strip()
+    return bool(_EMAIL_RE.match(email)) and len(email) <= 254
+
+
+def _new_totp_secret():
+    return base64.b32encode(secrets.token_bytes(20)).decode("ascii")
+
+
+def _totp_code(secret_b32, t=None):
+    """RFC 6238 TOTP: 6 digits, SHA1, 30-second steps."""
+    key = base64.b32decode(secret_b32)
+    counter = int((time.time() if t is None else t) // 30)
+    mac = hmac.new(key, struct.pack(">Q", counter), hashlib.sha1).digest()
+    off = mac[-1] & 0x0F
+    num = struct.unpack(">I", mac[off:off + 4])[0] & 0x7FFFFFFF
+    return f"{num % 1_000_000:06d}"
+
+
+def _totp_verify(secret_b32, code, window=1):
+    """Accept codes from the previous/current/next step (clock skew)."""
+    code = str(code or "").strip().replace(" ", "")
+    if not (code.isdigit() and len(code) == 6):
+        return False
+    try:
+        now = int(time.time())
+        for step in range(-window, window + 1):
+            if hmac.compare_digest(
+                    _totp_code(secret_b32, now + step * 30), code):
+                return True
+    except (ValueError, TypeError, base64.binascii.Error):
+        return False
+    return False
+
+
+def _new_recovery_codes(n=8):
+    """One-time backup codes for 2FA lockout. Shown once; stored hashed."""
+    alphabet = "abcdefghjkmnpqrstuvwxyz23456789"  # no look-alikes
+    codes = []
+    for _ in range(n):
+        raw = "".join(secrets.choice(alphabet) for _ in range(10))
+        codes.append(raw[:5] + "-" + raw[5:])
+    return codes
+
+
+def _hash_recovery(code):
+    return hashlib.sha256(code.encode("utf-8")).hexdigest()
+
+
+# 2FA login challenges: short-lived and consumed on success. A wrong code
+# does NOT burn the challenge — phone typos shouldn't force a full re-login —
+# but the login rate limiter (5/min/IP) bounds guessing against it, and it
+# expires after 5 minutes regardless.
+_2fa_challenges = {}
+_2fa_lock = threading.Lock()
+_2FA_CHALLENGE_TTL = 300
+
+
+def _2fa_issue(username):
+    token = secrets.token_urlsafe(24)
+    with _2fa_lock:
+        _2fa_challenges[token] = (username, time.monotonic() + _2FA_CHALLENGE_TTL)
+    return token
+
+
+def _2fa_peek(token):
+    """Username for a live challenge, or None. Does not consume it."""
+    with _2fa_lock:
+        rec = _2fa_challenges.get(token)
+    if not rec:
+        return None
+    username, exp = rec
+    return username if time.monotonic() < exp else None
+
+
+def _2fa_redeem(token):
+    """Consume a challenge (call only after the code verified)."""
+    with _2fa_lock:
+        rec = _2fa_challenges.pop(token, None)
+    if not rec:
+        return None
+    username, exp = rec
+    return username if time.monotonic() < exp else None
+
+
 def _load_users():
     try:
         with open(_USERS_FILE) as f:
@@ -595,6 +691,32 @@ def _save_users(users):
     with open(tmp, "w") as f:
         json.dump(users, f, indent=1)
     os.replace(tmp, _USERS_FILE)
+
+
+def _create_user(username, password, email=None, is_owner=False):
+    """-> (ok, error). Writes the record and makes the vault dir. No session.
+
+    Email, when given, must be unique across accounts — one account per
+    email keeps password-reset and abuse handling sane later."""
+    users = _load_users()
+    if username in users:
+        return False, "name taken"
+    email = (email or "").strip().lower()
+    if email:
+        for rec in users.values():
+            if isinstance(rec, dict) and rec.get("email") == email:
+                return False, "email taken"
+    salt = _new_salt()
+    users[username] = {"salt": salt,
+                       "hash": _hash_password(password, salt),
+                       "email": email,
+                       "created": datetime.now(timezone.utc).isoformat(),
+                       "is_owner": is_owner, "token_version": 0,
+                       "world": "private"}
+    _save_users(users)
+    os.makedirs(_user_vault_dir(username), exist_ok=True)
+    _log_event(f"account created: {username}")
+    return True, ""
 
 
 def _owner_username():
@@ -4231,6 +4353,38 @@ class Handler(BaseHTTPRequestHandler):
                 _save_users(users)
         self._outgoing_cookie = _CLEAR_COOKIE
 
+    # -- v5.30: 2FA code check ----------------------------------------------
+    # Accepts a current TOTP code, or burns one single-use recovery code.
+    # Returns True and persists the burn; False leaves everything untouched.
+    def _2fa_code_ok(self, users, rec, username, code):
+        code = str(code or "").strip().replace(" ", "")
+        secret = rec.get("totp_secret")
+        if secret and _totp_verify(secret, code):
+            return True
+        # recovery codes are "XXXXX-XXXXX"; compare hashes, burn on use.
+        hashes = rec.get("recovery_hashes") or []
+        if code and isinstance(hashes, list):
+            want = _hash_recovery(code)
+            for i, h in enumerate(hashes):
+                if hmac.compare_digest(str(h), want):
+                    del hashes[i]
+                    _save_users(users)
+                    _log_event(f"{username} used a 2FA recovery code "
+                               f"({len(hashes)} left)")
+                    return True
+        return False
+        # v5.27: logout kills the token server-side too — bump token_version
+        # so a copied cookie can't survive the logout. (This ends every
+        # session for the user, which is the safe meaning of "log out".)
+        me = self._session_user()
+        if me:
+            users = _load_users()
+            rec = users.get(me)
+            if rec is not None:
+                rec["token_version"] = int(rec.get("token_version", 0)) + 1
+                _save_users(users)
+        self._outgoing_cookie = _CLEAR_COOKIE
+
     def _is_owner_session(self):
         u = self._session_user()
         if not u:
@@ -4676,7 +4830,9 @@ class Handler(BaseHTTPRequestHandler):
                 rec = _load_users().get(u) or {}
                 self._send_json({"ok": True, "logged_in": True, "username": u,
                                  "is_owner": bool(rec.get("is_owner")),
-                                 "world": rec.get("world", "private")})
+                                 "world": rec.get("world", "private"),
+                                 "email": rec.get("email", ""),
+                                 "totp_enabled": bool(rec.get("totp_enabled"))})
         elif path == "/api/auth/users":
             # v5.27: owner-only account list.
             if not self._is_owner_session() and not self._write_key_ok():
@@ -5160,11 +5316,20 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": False, "error": "bad login",
                                         "tries_left": tries_left}, 401)
             os.makedirs(_user_vault_dir(username), exist_ok=True)
+            # v5.30: 2FA is optional per user. Password right but 2FA on?
+            # No session yet — the client trades the challenge for one.
+            if rec.get("totp_enabled"):
+                challenge = _2fa_issue(username)
+                _log_event(f"{username} passed password, 2FA challenge issued")
+                return self._send_json({"ok": False, "need_2fa": True,
+                                        "challenge": challenge})
             self._issue_session(username)
             _log_event(f"{username} logged in")
             return self._send_json({"ok": True, "username": username,
                                     "is_owner": bool(rec.get("is_owner")),
-                                    "world": rec.get("world", "private")})
+                                    "world": rec.get("world", "private"),
+                                    "email": rec.get("email", ""),
+                                    "totp_enabled": bool(rec.get("totp_enabled"))})
 
         if path == "/api/auth/logout":
             self._clear_session()
@@ -5183,20 +5348,52 @@ class Handler(BaseHTTPRequestHandler):
             # slashes, dots, or traversal can ever sneak in.
             if not _valid_username(username):
                 return self._send_json({"ok": False, "error": "username must be 3-24 chars: a-z 0-9 _ -"}, 400)
-            if username in users:
-                return self._send_json({"ok": False, "error": "name taken"}, 409)
             if len(password) < _MIN_PASSWORD_LEN:
                 return self._send_json({"ok": False, "error": "password too short"}, 400)
-            salt = _new_salt()
-            users[username] = {"salt": salt,
-                               "hash": _hash_password(password, salt),
-                               "created": datetime.now(timezone.utc).isoformat(),
-                               "is_owner": False, "token_version": 0,
-                               "world": "private"}
-            _save_users(users)
-            os.makedirs(_user_vault_dir(username), exist_ok=True)
-            _log_event(f"account created: {username}")
+            ok, err = _create_user(username, password,
+                                   email=str(body.get("email") or ""))
+            if not ok:
+                return self._send_json({"ok": False, "error": err}, 409)
             return self._send_json({"ok": True, "username": username})
+
+        if path == "/api/auth/signup":
+            # v5.30: public signup — email required, 2FA optional (later,
+            # in Setup). Same brute-force armor as login. DISABLE_OPEN_SIGNUP=1
+            # closes it; the owner can still create accounts by hand.
+            if os.environ.get("DISABLE_OPEN_SIGNUP") == "1":
+                return self._send_json({"ok": False, "error": "signup closed"}, 403)
+            allowed, tries_left, retry_after = _login_rate(self._client_ip())
+            if not allowed:
+                return self._send_json({"ok": False, "error": "slow down",
+                                        "retry_after": retry_after}, 429)
+            username = str(body.get("username") or "").strip().lower()
+            password = str(body.get("password") or "")
+            email = str(body.get("email") or "").strip().lower()
+            if not _valid_username(username):
+                return self._send_json({"ok": False, "error": "username must be 3-24 chars: a-z 0-9 _ -"}, 400)
+            if not _valid_email(email):
+                return self._send_json({"ok": False, "error": "enter a valid email"}, 400)
+            if len(password) < _MIN_PASSWORD_LEN:
+                return self._send_json({"ok": False, "error": "password too short"}, 400)
+            # dummy work on the taken paths so timing doesn't leak which
+            # field collided — same idea as the login handler.
+            users = _load_users()
+            if username in users or any(
+                    isinstance(r, dict) and r.get("email") == email
+                    for r in users.values()):
+                _hash_password(password, _new_salt())
+                taken_user = username in users
+                return self._send_json({
+                    "ok": False,
+                    "error": "name taken" if taken_user else "email taken"}, 409)
+            ok, err = _create_user(username, password, email=email)
+            if not ok:
+                return self._send_json({"ok": False, "error": err}, 409)
+            self._issue_session(username)  # signed up == logged in
+            _log_event(f"{username} signed up")
+            return self._send_json({"ok": True, "username": username,
+                                    "is_owner": False, "world": "private",
+                                    "email": email, "totp_enabled": False})
 
         if path == "/api/auth/change-password":
             me = self._session_user()
@@ -5218,6 +5415,101 @@ class Handler(BaseHTTPRequestHandler):
             _save_users(users)
             self._issue_session(me)  # this request's session stays alive
             return self._send_json({"ok": True})
+
+        # ---- v5.30: optional two-factor auth (TOTP) ------------------------
+        if path == "/api/auth/2fa/setup":
+            # Logged in. Mint a secret, park it as pending — it only becomes
+            # real when /2fa/enable proves the user can generate codes.
+            me = self._session_user()
+            users = _load_users()
+            rec = users.get(me) if me else None
+            if not isinstance(rec, dict):
+                return self._send_json({"ok": False, "error": "login required"}, 401)
+            if rec.get("totp_enabled"):
+                return self._send_json({"ok": False, "error": "2FA already on"}, 400)
+            secret = _new_totp_secret()
+            rec["totp_pending"] = secret
+            _save_users(users)
+            label = f"CrumbsHUD:{me}"
+            otpauth = (f"otpauth://totp/{label}?secret={secret}"
+                       f"&issuer=CrumbsHUD&algorithm=SHA1&digits=6&period=30")
+            return self._send_json({"ok": True, "secret": secret,
+                                    "otpauth_url": otpauth})
+
+        if path == "/api/auth/2fa/enable":
+            me = self._session_user()
+            users = _load_users()
+            rec = users.get(me) if me else None
+            if not isinstance(rec, dict):
+                return self._send_json({"ok": False, "error": "login required"}, 401)
+            pending = rec.get("totp_pending")
+            if not pending:
+                return self._send_json({"ok": False, "error": "run setup first"}, 400)
+            if not _totp_verify(pending, body.get("code")):
+                return self._send_json({"ok": False, "error": "bad code"}, 401)
+            codes = _new_recovery_codes()
+            rec["totp_secret"] = pending
+            rec["totp_enabled"] = True
+            rec["totp_pending"] = None
+            rec["recovery_hashes"] = [_hash_recovery(c) for c in codes]
+            rec["token_version"] = int(rec.get("token_version", 0)) + 1
+            _save_users(users)
+            self._issue_session(me)  # this request's session stays alive
+            _log_event(f"{me} enabled 2FA")
+            # Plaintext codes go out exactly once — the client shows them
+            # with a "save these, they won't be shown again" warning.
+            return self._send_json({"ok": True, "recovery_codes": codes})
+
+        if path == "/api/auth/2fa/disable":
+            me = self._session_user()
+            users = _load_users()
+            rec = users.get(me) if me else None
+            if not isinstance(rec, dict):
+                return self._send_json({"ok": False, "error": "login required"}, 401)
+            if not rec.get("totp_enabled"):
+                return self._send_json({"ok": False, "error": "2FA not on"}, 400)
+            # Password AND a current code (or a recovery code) — disabling
+            # 2FA is as sensitive as turning it on.
+            if not _verify_password(str(body.get("password") or ""), rec):
+                return self._send_json({"ok": False, "error": "bad login"}, 401)
+            if not self._2fa_code_ok(users, rec, me, str(body.get("code") or "")):
+                return self._send_json({"ok": False, "error": "bad code"}, 401)
+            for k in ("totp_secret", "totp_pending", "recovery_hashes"):
+                rec.pop(k, None)
+            rec["totp_enabled"] = False
+            rec["token_version"] = int(rec.get("token_version", 0)) + 1
+            _save_users(users)
+            self._issue_session(me)
+            _log_event(f"{me} disabled 2FA")
+            return self._send_json({"ok": True})
+
+        if path == "/api/auth/2fa/challenge":
+            # Second half of a 2FA login: trade the challenge token + a code
+            # (TOTP or single-use recovery code) for a session. A wrong code
+            # doesn't burn the challenge (typos happen); the rate limiter
+            # bounds guessing, and success consumes it so it can't replay.
+            allowed, _, retry_after = _login_rate(self._client_ip())
+            if not allowed:
+                return self._send_json({"ok": False, "error": "slow down",
+                                        "retry_after": retry_after}, 429)
+            username = _2fa_peek(str(body.get("challenge") or ""))
+            users = _load_users()
+            rec = users.get(username) if username else None
+            if not isinstance(rec, dict) or not rec.get("totp_enabled"):
+                _hash_password("dummy", _new_salt())  # same-cost dummy work
+                return self._send_json({"ok": False, "error": "bad login"}, 401)
+            if not self._2fa_code_ok(users, rec, username,
+                                     str(body.get("code") or "")):
+                return self._send_json({"ok": False, "error": "bad code"}, 401)
+            _2fa_redeem(str(body.get("challenge") or ""))
+            os.makedirs(_user_vault_dir(username), exist_ok=True)
+            self._issue_session(username)
+            _log_event(f"{username} logged in (2FA)")
+            return self._send_json({"ok": True, "username": username,
+                                    "is_owner": bool(rec.get("is_owner")),
+                                    "world": rec.get("world", "private"),
+                                    "email": rec.get("email", ""),
+                                    "totp_enabled": bool(rec.get("totp_enabled"))})
 
         if path == "/api/auth/reset-password":
             users = _load_users()

@@ -111,14 +111,20 @@ do_update() {
     if [ "$dirty" = 1 ]; then git stash pop 2>/dev/null || true; fi
     die "update aborted cleanly; nothing was lost"
   fi
+  local stash_failed=0
   if [ "$dirty" = 1 ]; then
     say "re-applying your stashed changes"
     if ! git stash pop; then
-      die "stash pop conflicted — your changes are SAFE in the stash. Run: ./ops.sh stash-list"
+      say "!! stash pop hit a snag — your changes are SAFE in the stash."
+      say "!! run './ops.sh stash-list' and sort it out by hand"
+      stash_failed=1
     fi
   fi
   say "now at: $(git log --oneline -1)"
   do_start
+  if [ "$stash_failed" = 1 ]; then
+    die "update finished, server is up — BUT your stashed changes still need attention (see above)"
+  fi
   say "update done"
 }
 

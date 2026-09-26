@@ -463,6 +463,30 @@ _recovery = RecoverySupervisor(_recovery_store) if _recovery_store else None
 # Phase 3B: set once the server has served its first HTTP request.
 _server_served_first_request = False
 LAYERS = ("tiles", "objects", "collision")
+# v5.29: the page's tab names are not layer names — "characters" paints onto
+# the objects layer, "colors" onto the tiles layer. The client sends the real
+# layer now, but the server still accepts the tab aliases so a paint request
+# can never 400 (and "poof" the optimistic preview) over a naming mismatch.
+_LAYER_ALIASES = {"characters": "objects", "colors": "tiles"}
+
+# ---- v5.29: atomic JSON writes -------------------------------------------------
+# Painting autosaves every 30s; a crash or a concurrent read must never meet
+# a half-written sidecar. Write to a temp file in the same directory, flush
+# it to disk, then os.replace() it over the target — the rename is atomic,
+# so readers always see the old file or the new file, never a torn one.
+# NOTE: this def lives up here (not with the other save helpers) because
+# _load_custom_tiles() runs at import time (line ~2858) and reaches
+# _save_custom_registry() whenever custom tiles exist on disk — a later def
+# would NameError the whole process on startup for exactly the users who
+# have custom art.
+def _atomic_write_json(path, doc):
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(doc, f)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
 PUBLIC_MODE = False
 PUBLIC_WRITE_KEY = ""
 WRITE_KEY_HEADER = "X-Crumbs-Key"
@@ -1125,6 +1149,67 @@ def _find_custom(tid):
     return None, None
 
 
+# ---- v5.29: vault-scoped thumbnails (Repair Laws 16/17/18) -------------------
+# /api/thumb used to skip the vault lock entirely: it read the global
+# AssetManager (whose custom tiles belong to whichever vault was last
+# active) and it read/wrote whichever vault's _thumb_cache happened to be
+# bound. Two players sharing a custom tile id could be served — and cache —
+# each other's private art, and bytes landed in the wrong vault's cache.
+# The fix: under the vault lock, activate the caller's vault and snapshot
+# everything the response needs — a PRIVATE copy of the tile's art, an art
+# fingerprint, and the caller's OWN _thumb_cache dict (captured by
+# reference, so a later vault rebind can't redirect the write). The lock is
+# then released and the expensive resize + PNG encode runs lock-free
+# (Law 17 — thumbnails never serialize behind the vault lock again).
+def _snapshot_tile_art(tid, frame_q):
+    """Capture this vault's thumbnail source for tid.
+
+    Call with _vault_lock held (public mode) after the vault is active, or
+    in local mode where there are no vaults. Returns
+    (kind, payload, cache, key) or None when the tile has no art.
+    kind "img" -> payload is a private PIL copy of the source frame (safe to
+    resize after the lock is released); kind "color" -> payload is the color
+    string. cache is THIS vault's own _thumb_cache dict; key is namespaced
+    by vault + tile + frame + art fingerprint, so one vault's bytes can
+    never collide with or overwrite another's (Law 18).
+    """
+    tile = assets.tiles.get(tid)
+    if tile is None:
+        return None
+    vid = _active_vault if PUBLIC_MODE else "local"
+    cache = _thumb_cache  # the active vault's own dict — never the rebound global
+    if tile.get("type") == "color":
+        color = str(tile.get("color") or "#000000")
+        return ("color", color, cache, (vid, tid, "-", ("color", color)))
+    frames = tile.get("frames") or []
+    if not frames:
+        return None
+    try:
+        fi = int(frame_q) % len(frames) if frame_q != "-" else 0
+    except (TypeError, ValueError):
+        fi = 0
+    entry, scope = _find_custom(tid)
+    if entry is not None:
+        # custom tile: fingerprint the actual art files — if the art on disk
+        # changes under a cached key, the key changes too (Law 16: never
+        # cache what can go stale beneath the cache).
+        files = tuple(entry.get("files") or [])
+        cdir = SHARED_DIR if scope == "shared" else _custom_dir()
+        try:
+            mtime = max(os.path.getmtime(os.path.join(cdir, f)) for f in files) \
+                if files else 0
+        except OSError:
+            mtime = -1
+        fp = ("custom", scope, files, mtime)
+    else:
+        fp = ("builtin",)  # shipped art is immutable for the process lifetime
+    try:
+        src = frames[fi].copy()
+    except Exception:
+        return None
+    return ("img", src, cache, (vid, tid, fi, fp))
+
+
 def _save_custom_registry(scope="local"):
     path = SHARED_REG if scope == "shared" else _custom_reg()
     tiles = _shared_tiles if scope == "shared" else _custom_tiles
@@ -1148,8 +1233,7 @@ def _save_custom_registry(scope="local"):
         except Exception:
             doc = {}
         doc["tiles"] = tiles
-        with open(path, "w") as f:
-            json.dump(doc, f)
+        _atomic_write_json(path, doc)
     except Exception as e:
         print(f"[hud] could not save {scope} tile registry: {e}")
 
@@ -1507,8 +1591,8 @@ _patrol_seq = {"next": 1}
 
 def _save_patrols():
     try:
-        with open(_patrol_save(), "w") as f:
-            json.dump(_stamp({"patrols": _patrols, "next": _patrol_seq["next"]}), f)
+        _atomic_write_json(_patrol_save(),
+                           _stamp({"patrols": _patrols, "next": _patrol_seq["next"]}))
     except Exception as e:
         print(f"[hud] could not save patrols: {e}")
 
@@ -2199,7 +2283,9 @@ def _load_patrols():
 assets = core.AssetManager()
 world = core.WorldMap(25, 15, assets)
 history = core.HistoryManager()
-# v5.26: thumbnail byte cache (see /api/thumb) — key (tile id, frame).
+# v5.26: thumbnail byte cache (see /api/thumb) — v5.29 key is
+# (vault, tile id, frame, art fingerprint): one vault's bytes can never
+# collide with or overwrite another's, and re-imported art re-keys.
 _thumb_cache = {}
 _THUMB_CACHE_MAX = 2000
 
@@ -2388,8 +2474,7 @@ def _load_names(name):
 
 def _save_names(name):
     try:
-        with open(_names_path(name), "w") as f:
-            json.dump(_stamp({"names": object_names}), f)
+        _atomic_write_json(_names_path(name), _stamp({"names": object_names}))
     except OSError as e:
         print(f"[hud] could not save names: {e}")
 
@@ -2773,9 +2858,9 @@ def _load_rules(name):
 
 def _save_rules(name):
     try:
-        with open(_rules_path(name), "w") as f:
-            json.dump(_stamp({"tweaks": rules, "game": game_rules,
-                       "world": world_profile, "meta": map_meta}), f)  # v5.0: meta
+        _atomic_write_json(_rules_path(name),
+                           _stamp({"tweaks": rules, "game": game_rules,
+                                   "world": world_profile, "meta": map_meta}))  # v5.0: meta
     except OSError as e:
         print(f"[hud] could not save rules: {e}")
 
@@ -3310,6 +3395,26 @@ def _paint_value(layer, tile_id):
     if layer == "objects":
         return None if tile_id is None else int(tile_id)
     return int(tile_id)
+
+
+def _paint_layer(raw):
+    """v5.29: the page's tab names are not layer names — "characters" paints
+    onto the objects layer, "colors" onto tiles. Map the aliases so a paint
+    request can never 400 (and "poof" the optimistic preview) over a naming
+    mismatch. Truly unknown layers still come back None -> 400."""
+    if raw in LAYERS:
+        return raw
+    return _LAYER_ALIASES.get(raw)
+
+
+def _paint_value_safe(layer, tile_id):
+    """_paint_value without the throw — int("banana") used to kill the whole
+    connection with an empty reply (and the client retried 3x into the same
+    wall). Returns (ok, value)."""
+    try:
+        return True, _paint_value(layer, tile_id)
+    except (TypeError, ValueError):
+        return False, None
 
 
 def _default_value(layer):
@@ -3993,17 +4098,17 @@ class Handler(BaseHTTPRequestHandler):
         # (Repair Law 17). Auth is still checked inside the handler.
         if path.startswith("/api/melody/"):
             return self._do_melody_impl(path, is_post=False)
-        # v5.27.3: thumbnails are vault-independent (they render from the
-        # global art registry, never vault globals), so they skip the vault
-        # lock entirely — otherwise an 80-thumbnail palette loads single-file
-        # and stays blank for a long while on slow hosts. Auth is still
-        # checked; no vault is activated and no session cookie reissued.
-        # Worst case under a concurrent vault switch is a transient "?" for
-        # a per-vault custom tile (the client never caches 404s).
+        # v5.29: thumbnails are vault-scoped but never serialize the expensive
+        # work (Repair Laws 16/17/18 — see _snapshot_tile_art). Auth is
+        # still checked; the handler activates the caller's vault under the
+        # lock just long enough to snapshot the art + the caller's own cache
+        # dict, then encodes lock-free. The old lock-free read of the global
+        # AssetManager could serve and cache one player's private art to
+        # another (same custom tile id, different images).
         if PUBLIC_MODE and path.startswith("/api/thumb/"):
             if not self._session_user() and not self._write_key_ok():
                 return self._send_json({"ok": False, "error": "login required"}, 401)
-            return self._do_GET_impl(path)
+            return self._thumb_impl(path)
         # v5.27: public mode serializes /api/* on the vault lock — one
         # request's globals can never bleed into another's.
         if PUBLIC_MODE and path.startswith("/api/"):
@@ -4015,6 +4120,69 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 _vault_lock.release()
         return self._do_GET_impl(path)
+
+    def _thumb_impl(self, path):
+        """v5.29: vault-scoped thumbnail serving (see _snapshot_tile_art).
+
+        The vault lock is held only for the snapshot — auth, vault
+        activation, and the art copy. The resize + PNG encode runs after the
+        lock is released (Law 17), and bytes are written only to the
+        captured vault dict (Law 18). Failures are never cached, so a
+        transient miss retries clean on the next request.
+        """
+        if not core.PIL_AVAILABLE:
+            return self._send_json({"ok": False, "error": "no thumbnail"}, 404)
+        try:
+            tid = int(path.rsplit("/", 1)[1])
+        except ValueError:
+            return self._send_json({"ok": False, "error": "bad tile id"}, 400)
+        q = parse_qs(urlparse(self.path).query)
+        frame_q = q.get("frame", ["-"])[0] if "frame" in q else "-"
+        if PUBLIC_MODE:
+            _vault_lock.acquire()
+            try:
+                if not self._auth_activate(path):
+                    return
+                snap = _snapshot_tile_art(tid, frame_q)
+            finally:
+                _vault_lock.release()
+        else:
+            snap = _snapshot_tile_art(tid, frame_q)
+        if snap is None:
+            return self._send_json({"ok": False, "error": "no thumbnail"}, 404)
+        return self._serve_thumb_snapshot(snap)
+
+    def _serve_thumb_snapshot(self, snap):
+        kind, payload, cache, key = snap
+        data = cache.get(key)
+        if data is None:
+            # off-lock: the expensive part (Law 17). The payload is a
+            # private copy, so no vault switch can pull it out from under us.
+            try:
+                if kind == "color":
+                    thumb = core.Image.new("RGBA", (64, 64), payload)
+                else:
+                    thumb = payload.resize((64, 64), core.Image.Resampling.NEAREST)
+                buf = io.BytesIO()
+                thumb.save(buf, "PNG")
+                data = buf.getvalue()
+            except Exception:
+                return self._send_json({"ok": False, "error": "no thumbnail"}, 404)
+            # write ONLY to the captured vault dict — the global
+            # _thumb_cache may have been rebound to another vault while we
+            # were encoding (Law 18). Only successes are cached (Law 16).
+            try:
+                if len(cache) >= _THUMB_CACHE_MAX:
+                    cache.pop(next(iter(cache)), None)
+            except RuntimeError:
+                pass  # sibling thread mid-evict; skip eviction this once
+            cache[key] = data
+        self.send_response(200)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "public, max-age=86400")
+        self.end_headers()
+        self.wfile.write(data)
 
     def _do_GET_impl(self, path):
         if path == "/":
@@ -4163,45 +4331,11 @@ class Handler(BaseHTTPRequestHandler):
                 "failed": bool(mission_run and mission_run["failed"]),
             })
         elif path.startswith("/api/thumb/"):
-            try:
-                tid = int(path.rsplit("/", 1)[1])
-            except ValueError:
-                return self._send_json({"ok": False, "error": "bad tile id"}, 400)
-            thumb = None
-            # v3.0: ?frame=N serves a specific animation frame
-            q = parse_qs(urlparse(self.path).query)
-            if "frame" in q and core.PIL_AVAILABLE:
-                fr = (assets.tiles.get(tid) or {}).get("frames") or []
-                if fr:
-                    try:
-                        fi = int(q["frame"][0]) % len(fr)
-                    except ValueError:
-                        fi = 0
-                    thumb = fr[fi].resize((64, 64), core.Image.Resampling.NEAREST)
-            if thumb is None:
-                thumb = assets.get_thumbnail(tid, size=64)
-            if thumb is None:
-                return self._send_json({"ok": False, "error": "no thumbnail"}, 404)
-            # v5.26: thumbnail cache — cropping + PNG-encoding every request
-            # took ~3s on slow hosts, so a full tab of thumbnails "hung".
-            # Cache the bytes in memory and tell the browser to cache too.
-            # Only 200s are cached (never 404s), and backfill only ADDS art,
-            # so a cached thumbnail can never go stale.
-            key = (tid, q.get("frame", ["-"])[0] if "frame" in q else "-")
-            data = _thumb_cache.get(key)
-            if data is None:
-                buf = io.BytesIO()
-                thumb.save(buf, "PNG")
-                data = buf.getvalue()
-                if len(_thumb_cache) >= _THUMB_CACHE_MAX:
-                    _thumb_cache.pop(next(iter(_thumb_cache)))
-                _thumb_cache[key] = data
-            self.send_response(200)
-            self.send_header("Content-Type", "image/png")
-            self.send_header("Content-Length", str(len(data)))
-            self.send_header("Cache-Control", "public, max-age=86400")
-            self.end_headers()
-            self.wfile.write(data)
+            # v5.29: single serving path — vault-scoped snapshot + lock-free
+            # encode (see _thumb_impl). The old inline cache keyed
+            # (tid, frame) is gone: it collided across vaults and could go
+            # stale under re-imported art (Laws 16/18).
+            return self._thumb_impl(path)
         elif path == "/api/maps":
             # v5.6: rich entries — dims, modified time, description — for the picker
             out = []
@@ -4817,8 +4951,9 @@ class Handler(BaseHTTPRequestHandler):
                                     "old_instance": INSTANCE_ID,
                                     "expect_version": _update_disk_version()})
         if path == "/api/paint":
-            x, y, layer = body.get("x"), body.get("y"), body.get("layer", "tiles")
-            if layer not in LAYERS or not isinstance(x, int) or not isinstance(y, int):
+            x, y = body.get("x"), body.get("y")
+            layer = _paint_layer(body.get("layer", "tiles"))
+            if layer is None or not isinstance(x, int) or not isinstance(y, int):
                 return self._send_json({"ok": False, "error": "x/y ints and layer required"}, 400)
             if not (0 <= x < world.width and 0 <= y < world.height):
                 return self._send_json({"ok": False, "error": "out of bounds"}, 400)
@@ -4827,9 +4962,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": False, "error": "no tile selected"}, 400)
             # v5.0: "natural" = the eraser — restore the seed's own ground
             # for this cell instead of a fixed tile 0.
-            new_val = _natural_tile(x, y) \
-                if layer == "tiles" and tile_id == "natural" \
-                else _paint_value(layer, tile_id)
+            # v5.29: a bad tile_id 400s instead of killing the connection.
+            if layer == "tiles" and tile_id == "natural":
+                new_val = _natural_tile(x, y)
+            else:
+                ok, new_val = _paint_value_safe(layer, tile_id)
+                if not ok:
+                    return self._send_json({"ok": False, "error": "bad tile_id"}, 400)
             grid = _grid(layer)
             if grid[y][x] == new_val:
                 return self._send_json({"ok": True, "noop": True})
@@ -4850,9 +4989,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"ok": True})
 
         if path == "/api/stroke":
-            layer = body.get("layer", "tiles")
+            layer = _paint_layer(body.get("layer", "tiles"))
             cells = body.get("cells", [])
-            if layer not in LAYERS or not isinstance(cells, list):
+            if layer is None or not isinstance(cells, list):
                 return self._send_json({"ok": False, "error": "cells list and layer required"}, 400)
             paints = []
             seen = set()
@@ -4868,10 +5007,14 @@ class Handler(BaseHTTPRequestHandler):
                 if layer == "tiles" and c.get("tile_id") is None:
                     continue  # nothing selected: skip instead of crashing
                 # v5.0: "natural" = the eraser — the seed's own ground per cell
+                # v5.29: one bad cell never kills the whole stroke.
                 tid = c.get("tile_id")
-                new_val = _natural_tile(x, y) \
-                    if layer == "tiles" and tid == "natural" \
-                    else _paint_value(layer, tid)
+                if layer == "tiles" and tid == "natural":
+                    new_val = _natural_tile(x, y)
+                else:
+                    ok, new_val = _paint_value_safe(layer, tid)
+                    if not ok:
+                        continue
                 grid = _grid(layer)
                 if grid[y][x] != new_val:
                     paints.append((x, y, new_val))

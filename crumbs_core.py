@@ -917,8 +917,15 @@ class WorldMap:
             }
             if schema is not None:  # v5.16: data-schema stamp for migrations
                 data['schema'] = schema
-            with open(filepath, 'w') as f:
+            # v5.29: atomic — a crash mid-save must never leave a torn map.
+            # Write temp + fsync, then rename over the target; readers see
+            # the old map or the new map, never half a JSON document.
+            tmp = filepath + ".tmp"
+            with open(tmp, 'w') as f:
                 json.dump(data, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, filepath)
             return True
         except Exception as e:
             print(f"ERROR saving map: {e}")

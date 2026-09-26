@@ -2204,7 +2204,11 @@ canvas.addEventListener("pointerdown", async e => {
   if (itemPlace) { itemPlaceTap(cell); return; }      // v5.13: dropping gear
   if (npcPlace) { npcPlaceTap(cell); return; }        // v5.13: placing folks
   if (erasing && await eraseGearTap(cell)) return;    // v5.13: eraser lifts gear/folks
-  stroke = { cells: new Map(), linkCells: new Map(), layer };
+  stroke = { cells: new Map(), linkCells: new Map(), layer: paintLayer() };
+  // v5.29: the WIRE layer, not the tab name — the server only knows
+  // tiles/objects/collision, and a "characters"/"colors" tab name used to
+  // 400 the whole stroke, wiping the optimistic preview on refresh
+  // (placed characters "poofed" the moment the finger lifted).
   strokeAdd(cell);
 });
 // v2.2: two fingers on the map — drag pans, pinch zooms around the fingers
@@ -2239,16 +2243,46 @@ canvas.addEventListener("pointermove", e => {
   e.preventDefault();
   const cell = evCell(e); if (cell) strokeAdd(cell);
 });
-async function endStroke() {
+// v5.29: serialized paint queue. Strokes used to fire overlapping
+// /api/stroke requests, and an earlier stroke's trailing refresh() could
+// land in the middle of a NEW stroke, wiping its optimistic preview
+// (refresh() replaces tiles/objects/coll wholesale). Strokes now queue:
+// one request in flight at a time, and a single refresh() runs only after
+// the queue drains with no stroke active. Failures toast the server's
+// actual error (or the network error) instead of a bare "paint failed",
+// and a failed stroke still funnels through the drain refresh so the
+// canvas can never lie about what stuck.
+let paintQueue = [];   // [{layer, cells, link_cells}]
+let paintBusy = false;
+async function pumpPaintQueue() {
+  if (paintBusy) return;
+  const job = paintQueue.shift();
+  if (!job) {
+    // queue drained — re-sync only when no stroke is mid-flight, so a
+    // trailing refresh can't wipe a new stroke's optimistic preview
+    if (!stroke) { try { await refresh(); } catch (e) {} }
+    return;
+  }
+  paintBusy = true;
+  try {
+    const r = await api("/api/stroke", job);
+    if (!r.ok) toast("paint failed: " + (r.error || "unknown error"));
+  } catch (e) {
+    // v5.27: auth failures already surface the login overlay via api()
+    if (!(e && e.auth)) toast("paint failed: " + ((e && e.message) || "network error"));
+  }
+  paintBusy = false;
+  pumpPaintQueue();
+}
+function endStroke() {
   if (panMode) { panStart = null; return; }
   if (!stroke) return;
   const s = stroke; stroke = null;
-  if (!s.cells.size) return;
-  const r = await api("/api/stroke", { layer: s.layer, cells: [...s.cells.values()],
-    link_cells: [...s.linkCells.values()] });   // v5.7: one call, one undo step
-  if (!r.ok) { toast("paint failed"); await refresh(); return; }
-  // server is source of truth; light re-sync keeps undo/redo exact
-  await refresh();
+  if (s.cells.size) {
+    paintQueue.push({ layer: s.layer, cells: [...s.cells.values()],
+      link_cells: [...s.linkCells.values()] });   // v5.7: one call, one undo step
+  }
+  pumpPaintQueue();
 }
 canvas.addEventListener("pointerup", e => {
   ptrs.delete(e.pointerId);
@@ -3637,6 +3671,13 @@ function buildPalette() {
 // v5.25: thumbnail failure tracking — a tile whose art never arrived used
 // to paint a permanently blank swatch with no way to tell it was broken.
 const thumbFailed = {};   // tile id -> true once its thumbnail 404'd
+// v5.29: a transient thumbnail miss (e.g. a 404 during a server vault
+// switch) used to condemn the tile for the whole session — the dead Image
+// objects were cached forever and every swatch painted "?" from then on.
+// Now a failed tile may retry its fetch (backed off), so the next palette
+// rebuild heals it instead of memorializing the glitch.
+const thumbRetryAt = {};  // tile id -> performance.now() when a retry is allowed
+const THUMB_RETRY_MS = 15000;
 function paintThumbPlaceholder(c) {
   // the honest placeholder: missing art shows as "?", never blank.
   c.clearRect(0, 0, 48, 48);
@@ -3659,6 +3700,12 @@ function thumbImgFail(img) {
 }
 function ensureFrames(t) {
   let fr = customFrames[t.id];
+  if (fr && thumbFailed[t.id] && (thumbRetryAt[t.id] || 0) <= performance.now()) {
+    // the cached Images are permanently errored — drop them and fetch
+    // again; onload repaints the swatch, the sel card, and the base layer.
+    fr = null; customFrames[t.id] = null;
+    thumbRetryAt[t.id] = performance.now() + THUMB_RETRY_MS;
+  }
   if (!fr) {
     fr = [];
     for (let i = 0; i < (t.frames || 0); i++) {
@@ -3679,6 +3726,9 @@ async function loadCustomTiles() {
   const r = await api("/api/custom-tiles");
   customTiles = r.tiles || [];
   customById = {}; customFrames = {};
+  // v5.29: a fresh registry fetch clears the failure ledger too — art that
+  // arrived since the last load gets its thumbnails back instead of a "?".
+  for (const k in thumbFailed) delete thumbFailed[k];
   for (const t of customTiles) customById[t.id] = t;
   // v5.25: the honest count — registry entries whose PNGs never arrived.
   missingArtCount = customTiles.filter(t => !t.art).length;

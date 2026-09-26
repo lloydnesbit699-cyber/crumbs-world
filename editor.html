@@ -532,6 +532,38 @@
   /* v4.3: clean screen — hide every play button for recordings */
   body.clean #dpad.show, body.clean #meters, body.clean #btn-fire,
     body.clean #melody-fab, body.clean #melody-dock { display: none !important; }
+  /* v5.29 (item 19): panel visibility — one always-reachable control for
+     panel opacity + hide-all, persisted per player in localStorage */
+  body { --panel-op: 1; }
+  #panel-ui-btn { position: fixed; top: 56px; right: 10px; z-index: 85;
+    width: 44px; height: 44px; border-radius: 50%; padding: 0; font-size: 19px;
+    background: rgba(42,42,42,.92); border: 1px solid #555; color: #eee;
+    cursor: pointer; min-height: 0; }
+  #panel-ui-btn:active { transform: scale(.94); }
+  #panel-sheet { position: fixed; top: 108px; right: 10px; z-index: 95; display: none;
+    background: #1c1c1c; border: 1px solid #444; border-radius: 12px;
+    padding: 12px; width: 224px; box-shadow: 0 4px 20px rgba(0,0,0,.5); }
+  #panel-sheet.open { display: block; }
+  #panel-sheet .prow { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  #panel-sheet .prow:last-child { margin-bottom: 0; }
+  #panel-sheet label { font-size: 13px; color: #ccc; white-space: nowrap; }
+  #panel-sheet input[type=range] { flex: 1; min-width: 0; min-height: 0; padding: 0; }
+  #panel-sheet .pval { font-size: 12px; color: #999; width: 40px; text-align: right; }
+  #panel-sheet .phint { font-size: 11px; color: #777; line-height: 1.4; }
+  /* every floating panel/hub/tray rides the opacity var (the control + its
+     sheet + toasts/banners stay solid so they stay readable) */
+  #topbar, .tray, .sheet, .edge-tab, .menu-drop, #zoom-cluster,
+  #meters, #btn-fire, #pack-btn, #mission-hud, #gear-hud, #height-legend,
+  #dbg, #melody-dock, #melody-fab { opacity: var(--panel-op); }
+  #dpad { opacity: calc(var(--panel-op) * 0.8); }  /* keep v3.7's 0.8 look, scaled */
+  /* hide-all: pure CSS so each panel's own show/hide state is untouched and
+     comes back exactly as it was */
+  body.panels-hidden #topbar, body.panels-hidden .tray, body.panels-hidden .sheet,
+  body.panels-hidden .edge-tab, body.panels-hidden .menu-drop, body.panels-hidden #zoom-cluster,
+  body.panels-hidden #dpad, body.panels-hidden #meters, body.panels-hidden #btn-fire,
+  body.panels-hidden #pack-btn, body.panels-hidden #mission-hud, body.panels-hidden #gear-hud,
+  body.panels-hidden #height-legend, body.panels-hidden #dbg,
+  body.panels-hidden #melody-dock, body.panels-hidden #melody-fab { display: none !important; }
   #dpad button { font-size: 18px; padding: 0; min-height: 0; margin: 0;
                  background: rgba(28,28,38,.85); border-radius: 10px; touch-action: none; }
   #dpad button:active { background: #4da3ff; }
@@ -1095,6 +1127,20 @@
   <button id="btn-pan" title="Pan the map instead of painting">Move</button>
 </div>
 
+<!-- v5.29 (item 19): always-reachable panel visibility control -->
+<button id="panel-ui-btn" title="Panels: opacity + hide">&#9688;</button>
+<div id="panel-sheet" aria-label="Panel visibility">
+  <div class="prow">
+    <label for="panel-opacity">Panel opacity</label>
+    <input id="panel-opacity" type="range" min="20" max="100" step="5" value="100">
+    <span class="pval" id="panel-op-val">100%</span>
+  </div>
+  <div class="prow">
+    <button id="panel-hide-btn" class="widebtn">&#128683; Hide panels</button>
+  </div>
+  <div class="phint">Dims or hides every panel, tray &amp; hub so the map shows through. Saved per player on this device.</div>
+</div>
+
 <div id="dpad" aria-label="On-screen movement controls">
   <div id="dpad-grip" title="drag to move the controls">&#10247;</div>
   <span class="spacer"></span><button data-dx="0" data-dy="-1" title="Up — double-tap &amp; hold to run">&#9650;</button><span class="spacer"></span>
@@ -1209,7 +1255,7 @@ function fitTiles() {
   const w = $("stage").clientWidth - 16;
   if (w > 0) tilePx = Math.max(8, Math.min(40, Math.floor(w / W)));
 }
-window.addEventListener("resize", () => { fitTiles(); clampPan(); render(); });
+window.addEventListener("resize", () => { fitTiles(); clampPan(); clampDpad(); render(); });
 // v2.2 camera: the canvas is absolutely positioned; layout() centers it in
 // the stage and applies the pan offset. No scroll container is involved, so
 // dragging behaves the same at every zoom level.
@@ -2353,6 +2399,55 @@ $("btn-light").onclick = () => {
 // the clean-screen toggle is a per-device pref for recordings and showing off.
 let uiClean = false;
 try { uiClean = !!(JSON.parse(localStorage.getItem("crumbs_ui") || "{}").clean); } catch (e) {}
+// ---- v5.29: panel opacity + hide-all (item 19) --------------------------------
+// Stored in the same crumbs_ui blob, keyed per player when logged in
+// ("crumbs_ui:<username>") so each player's setting is remembered on this device.
+let panelOpacity = 1, panelsHidden = false;
+function uiPrefsKey() { return "crumbs_ui" + (ME && ME.username ? ":" + ME.username : ""); }
+function readUiPrefs() {
+  let p = {};
+  try { p = JSON.parse(localStorage.getItem("crumbs_ui") || "{}"); } catch (e) {}
+  if (ME && ME.username) {
+    try { p = Object.assign(p, JSON.parse(localStorage.getItem("crumbs_ui:" + ME.username) || "{}")); }
+    catch (e) {}
+  }
+  return p;
+}
+function saveUiPrefs() {
+  try {
+    localStorage.setItem(uiPrefsKey(),
+      JSON.stringify({ clean: uiClean, panelOpacity, panelsHidden }));
+  } catch (e) {}
+}
+function loadUiPrefs() {   // call after authGate — ME is known by then
+  const p = readUiPrefs();
+  if (typeof p.clean === "boolean") uiClean = p.clean;
+  if (typeof p.panelOpacity === "number") panelOpacity = Math.min(1, Math.max(0.2, p.panelOpacity));
+  panelsHidden = !!p.panelsHidden;
+}
+function applyPanelPrefs() {
+  document.body.style.setProperty("--panel-op", panelOpacity);
+  document.body.classList.toggle("panels-hidden", panelsHidden);
+  const s = $("panel-opacity"), v = $("panel-op-val"), hb = $("panel-hide-btn");
+  if (s) s.value = Math.round(panelOpacity * 100);
+  if (v) v.textContent = Math.round(panelOpacity * 100) + "%";
+  if (hb) {
+    hb.innerHTML = panelsHidden ? "&#128064; Show panels" : "&#128683; Hide panels";
+    hb.classList.toggle("on", panelsHidden);
+  }
+}
+$("panel-ui-btn").onclick = () => { $("panel-sheet").classList.toggle("open"); };
+$("panel-opacity").oninput = e => {
+  panelOpacity = e.target.value / 100;
+  applyPanelPrefs(); saveUiPrefs();
+};
+$("panel-hide-btn").onclick = () => {
+  panelsHidden = !panelsHidden;
+  if (panelsHidden) closeOverlays();  // trays/sheets off, scrim off — nothing stranded behind
+  $("panel-sheet").classList.remove("open");
+  applyPanelPrefs(); saveUiPrefs();
+  toast(panelsHidden ? "panels hidden — tap ◨ to bring them back" : "panels back");
+};
 function applyUiClean() {
   document.body.classList.toggle("clean", uiClean);
   $("menu-clean").textContent = uiClean ? "Show buttons" : "Hide buttons";
@@ -2369,7 +2464,7 @@ $("menu-dpad").onclick = async () => {
 };
 $("menu-clean").onclick = () => {
   uiClean = !uiClean;
-  try { localStorage.setItem("crumbs_ui", JSON.stringify({ clean: uiClean })); } catch (e) {}
+  saveUiPrefs();   // v5.29: one blob for all UI prefs (clean + panel opacity/hide)
   applyUiClean(); closeOverlays();
   toast(uiClean ? "buttons hidden — tap \u2630 to bring them back" : "buttons back");
 };
@@ -3043,6 +3138,19 @@ function placeDpad() {
     dpad.style.left = "12px"; dpad.style.bottom = "96px";
     dpad.style.right = "auto"; dpad.style.top = "auto";
   }
+  clampDpad();   // v5.29: stale saved coords (other viewport/rotation) get rescued here
+}
+// v5.29 (item 19): the pad used to be draggable fully offscreen and the stale
+// coords were saved, so it never came back — clamp it to the live viewport.
+function clampDpad() {
+  const w = dpad.offsetWidth || 156, h = dpad.offsetHeight || 156;
+  let x = parseFloat(dpad.style.left), y = parseFloat(dpad.style.top);
+  if (!isFinite(x)) x = 12;
+  if (!isFinite(y)) y = Math.max(56, window.innerHeight - h - 96);
+  x = Math.max(0, Math.min(x, window.innerWidth - w));
+  y = Math.max(48, Math.min(y, window.innerHeight - h - 8));  // below the topbar, above the bottom edge
+  dpad.style.left = x + "px"; dpad.style.top = y + "px";
+  dpad.style.right = "auto"; dpad.style.bottom = "auto";
 }
 function updateDpad() {
   dpad.classList.toggle("show", playMode && RULES.touch);
@@ -3057,11 +3165,13 @@ $("dpad-grip").addEventListener("pointerdown", e => {
     dpad.style.left = (ev.clientX - ox) + "px";
     dpad.style.top = (ev.clientY - oy) + "px";
     dpad.style.right = "auto"; dpad.style.bottom = "auto";
+    clampDpad();   // v5.29: the pad can't leave the viewport mid-drag
   };
   const up = () => {
     window.removeEventListener("pointermove", mv);
     window.removeEventListener("pointerup", up);
     window.removeEventListener("pointercancel", up);
+    clampDpad();   // v5.29: only on-screen coords ever get saved
     try { localStorage.setItem("crumbs_dpad",
       JSON.stringify({ x: dpad.offsetLeft, y: dpad.offsetTop })); } catch (err) {}
   };
@@ -5959,6 +6069,7 @@ async function melodyDemo() {
     await refresh();
     await refreshRules();   // v4.3: RULES.touch known before first D-pad sync
     applyUiClean(); syncMenuDpad();
+    loadUiPrefs(); applyUiClean(); applyPanelPrefs();   // v5.29: per-player UI prefs (ME known now)
     pollStatus();
     setInterval(pollStatus, 10000);
     splashStep(92, "Painting the map\u2026");

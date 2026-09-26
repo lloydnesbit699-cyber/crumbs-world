@@ -11,6 +11,9 @@
 #                                  changes, pull --rebase, re-apply stash,
 #                                  restart server. Safe on conflicts: aborts
 #                                  and hands your files back untouched.
+#                                  Spots a diverged branch first and offers
+#                                  repair (type REPAIR) before touching
+#                                  anything.
 #   ./ops.sh status              — is the server running? which version?
 #   ./ops.sh start               — start the server (PORT=5000 pinned)
 #   ./ops.sh stop                — stop it for real (kills stuck processes)
@@ -27,6 +30,12 @@
 #                                  phone and the data lives in three places.
 #   ./ops.sh rollback            — restore the newest backup (asks first),
 #                                  then restart. The "undo" for a bad update.
+#   ./ops.sh repair              — fix a diverged branch: Replit's publish
+#                                  flow writes local commits that fight
+#                                  GitHub's main and wedge the updater.
+#                                  Shows the local commits, asks for REPAIR,
+#                                  then resets hard to origin/main and
+#                                  restarts. The "un-wedge" for a bad pull.
 #
 set -u
 
@@ -111,12 +120,54 @@ do_status() {
   echo "server: RUNNING (PID $pids) port $PORT  code $(code_version)${health:+  live $health}"
 }
 
+# How many commits the local branch has that origin/$BRANCH doesn't.
+local_ahead() {
+  git rev-list --count "origin/$BRANCH..HEAD" 2>/dev/null || echo 0
+}
+
+unstage_secrets() {
+  # Never let secret files sit staged: a later commit would publish them
+  # to GitHub. (A stuck rebase once staged .crumbs_secret — this is the
+  # guardrail so it can never ride along again.)
+  local f staged
+  staged="$(git diff --cached --name-only 2>/dev/null || true)"
+  for f in .crumbs_secret users.json; do
+    if printf '%s\n' "$staged" | grep -qx "$f"; then
+      say "!! $f was staged — unstaging it (it must never be committed)"
+      git reset -q HEAD -- "$f" 2>/dev/null || true
+    fi
+  done
+}
+
+check_divergence() {
+  # Replit's publish flow writes local commits that wedge pull --rebase.
+  # Ask once, up front, while the server is still running.
+  local ahead ans=""
+  ahead="$(local_ahead)"
+  if [ "$ahead" = 0 ]; then return 0; fi
+  echo "!! branch has diverged: $ahead local commit(s) not on origin/$BRANCH:"
+  git log --oneline "origin/$BRANCH..HEAD" 2>/dev/null || true
+  echo "!! These are Replit's publish checkpoints fighting GitHub's main."
+  echo "!! Your real work is safe — it lives in the commits Wren pushed."
+  printf "Type REPAIR to drop them and continue the update: "
+  read -r ans || true
+  if [ "$ans" = "REPAIR" ]; then
+    say "repairing: resetting to origin/$BRANCH"
+    git reset --hard "origin/$BRANCH" || die "reset failed — fix git state first"
+    unstage_secrets
+  else
+    die "cancelled — nothing changed (server still running). ./ops.sh repair does this on its own."
+  fi
+}
+
 do_update() {
-  # stop -> backup -> stash -> pull --rebase -> pop stash -> start
+  # fetch -> repair check -> stop -> backup -> stash -> pull --rebase ->
+  # pop stash -> start
+  git fetch origin || die "git fetch failed — check network"
+  check_divergence  # dies on decline; server still up at this point
   do_stop
   do_backup  # law of three: snapshot the live data BEFORE the risky part,
              # so a bad update can immediately pull the last working state
-  git fetch origin || die "git fetch failed — check network"
   local dirty=0
   if [ -n "$(git status --porcelain)" ]; then dirty=1; fi
   if [ "$dirty" = 1 ]; then
@@ -128,9 +179,12 @@ do_update() {
   if ! git pull --rebase "origin" "$BRANCH"; then
     say "pull hit conflicts — aborting, giving your files back"
     git rebase --abort 2>/dev/null || true
+    unstage_secrets
     if [ "$dirty" = 1 ]; then git stash pop 2>/dev/null || true; fi
+    unstage_secrets
     die "update aborted cleanly; nothing was lost"
   fi
+  unstage_secrets
   local stash_failed=0
   if [ "$dirty" = 1 ]; then
     say "re-applying your stashed changes"
@@ -139,6 +193,7 @@ do_update() {
       say "!! run './ops.sh stash-list' and sort it out by hand"
       stash_failed=1
     fi
+    unstage_secrets
   fi
   say "now at: $(git log --oneline -1)"
   do_start
@@ -182,6 +237,32 @@ do_boot() {
   fi
   do_start
   say "boot done"
+}
+
+do_repair() {
+  # Standalone un-wedger for a diverged branch. Same repair check_divergence
+  # does inside update, without the stop/backup/pull dance.
+  git fetch origin || die "git fetch failed — check network"
+  local ahead behind ans=""
+  ahead="$(local_ahead)"
+  if [ "$ahead" = 0 ]; then
+    say "branch is not ahead of origin/$BRANCH — nothing to repair"
+    return 0
+  fi
+  behind="$(git rev-list --count "HEAD..origin/$BRANCH" 2>/dev/null || echo 0)"
+  echo "!! $ahead local commit(s) to drop, $behind commit(s) behind origin/$BRANCH:"
+  git log --oneline "origin/$BRANCH..HEAD" 2>/dev/null || true
+  echo "!! These are Replit's publish checkpoints fighting GitHub's main."
+  echo "!! Your real work is safe — it lives in the commits Wren pushed."
+  printf "Type REPAIR to drop the local commits and sync: "
+  read -r ans || true
+  [ "$ans" = "REPAIR" ] || die "cancelled — nothing changed"
+  do_stop
+  git reset --hard "origin/$BRANCH" || die "reset failed — fix git state first"
+  unstage_secrets
+  say "now at: $(git log --oneline -1)"
+  do_start
+  say "repair done"
 }
 
 do_cherry_pick() {
@@ -282,6 +363,7 @@ case "$cmd" in
   stash-list) do_stash_list ;;
   backup)     do_backup ;;
   rollback)   do_rollback ;;
+  repair)     do_repair ;;
   help|--help|-h) sed -n '2,24p' "$0" ;;
   *) die "unknown command: $cmd  (try: ./ops.sh help)" ;;
 esac

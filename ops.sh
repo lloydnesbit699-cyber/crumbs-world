@@ -21,6 +21,12 @@
 #   ./ops.sh stash               — stash local changes (timestamped)
 #   ./ops.sh stash-pop           — re-apply the latest stash
 #   ./ops.sh stash-list          — show stashes
+#   ./ops.sh backup              — snapshot your data (vaults/, users.json,
+#                                  .crumbs_secret) into backups/. Keeps the 3
+#                                  newest (law of three). Download one to your
+#                                  phone and the data lives in three places.
+#   ./ops.sh rollback            — restore the newest backup (asks first),
+#                                  then restart. The "undo" for a bad update.
 #
 set -u
 
@@ -106,8 +112,10 @@ do_status() {
 }
 
 do_update() {
-  # stop -> stash -> pull --rebase -> pop stash -> start
+  # stop -> backup -> stash -> pull --rebase -> pop stash -> start
   do_stop
+  do_backup  # law of three: snapshot the live data BEFORE the risky part,
+             # so a bad update can immediately pull the last working state
   git fetch origin || die "git fetch failed — check network"
   local dirty=0
   if [ -n "$(git status --porcelain)" ]; then dirty=1; fi
@@ -197,6 +205,62 @@ do_stash() {
   say "stashed"
 }
 
+# ---- Law of Three: backup protocol ---------------------------------------
+# Three copies, each runnable: the server that runs (rolling snapshots in
+# backups/), the repo that ships (full git history on GitHub), and Lloyd's
+# phone (a downloaded snapshot). One goes down, the other two pick it up.
+BACKUP_DIR="backups"
+KEEP_BACKUPS=3  # the law of three: three rolling snapshots, no more
+
+do_backup() {
+  mkdir -p "$BACKUP_DIR"
+  local stamp file
+  # PID in the name: two backups inside the same second must never share a
+  # filename, or the newer silently overwrites the older (rollback's
+  # pre-restore snapshot once ate the snapshot it was about to restore).
+  stamp="$(date '+%Y%m%d-%H%M%S')-$$"
+  file="$BACKUP_DIR/crumbs-data-$stamp.tar.gz"
+  # Only pack what actually exists — never fail on a missing piece.
+  local items=()
+  [ -d vaults ] && items+=(vaults)
+  [ -f users.json ] && items+=(users.json)
+  [ -f .crumbs_secret ] && items+=(.crumbs_secret)
+  if [ "${#items[@]}" = 0 ]; then
+    say "nothing to back up (no vaults/, users.json, or .crumbs_secret)"
+    return 0
+  fi
+  tar -czf "$file" "${items[@]}" || die "backup failed"
+  say "backup written: $file"
+  # Prune to the newest $KEEP_BACKUPS.
+  local old
+  old="$(ls -t "$BACKUP_DIR"/crumbs-data-*.tar.gz 2>/dev/null | tail -n +$((KEEP_BACKUPS + 1)) || true)"
+  if [ -n "$old" ]; then
+    echo "$old" | xargs rm -f
+    say "pruned older snapshots (keeping $KEEP_BACKUPS)"
+  fi
+  say "tip: download $file from the file pane to your phone — then your data lives in three places"
+}
+
+do_rollback() {
+  local latest target ans
+  latest="$(ls -t "$BACKUP_DIR"/crumbs-data-*.tar.gz 2>/dev/null | head -1 || true)"
+  [ -n "$latest" ] || die "no backups in $BACKUP_DIR — run ./ops.sh backup first"
+  echo "!! This OVERWRITES your live data with: $latest"
+  echo "!! vaults/, users.json, .crumbs_secret will be replaced."
+  printf "Type RESTORE to continue: "
+  read -r ans
+  [ "$ans" = "RESTORE" ] || die "cancelled — nothing changed"
+  target="$latest"
+  do_stop
+  say "snapshotting current state first (so this rollback is undoable)"
+  do_backup >/dev/null 2>&1 || true
+  say "restoring from $target"
+  tar -xzf "$target" || die "restore failed — your pre-restore snapshot is the newest file in $BACKUP_DIR"
+  do_start
+  say "rollback done — server is back on the restored data"
+}
+# ---- end backup protocol ---------------------------------------------------
+
 do_stash_pop() { git stash pop; }
 do_stash_list() { git stash list; }
 do_logs() {
@@ -216,6 +280,8 @@ case "$cmd" in
   stash)      do_stash ;;
   stash-pop)  do_stash_pop ;;
   stash-list) do_stash_list ;;
-  help|--help|-h) sed -n '2,17p' "$0" ;;
+  backup)     do_backup ;;
+  rollback)   do_rollback ;;
+  help|--help|-h) sed -n '2,24p' "$0" ;;
   *) die "unknown command: $cmd  (try: ./ops.sh help)" ;;
 esac

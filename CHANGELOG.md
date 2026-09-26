@@ -5,6 +5,15 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+- **ops.sh: backup + rollback (Law of Three, law #19).** `./ops.sh backup`
+  snapshots your live data (`vaults/`, `users.json`, `.crumbs_secret`) into
+  `backups/`, keeping the 3 newest. `./ops.sh update` now backs up *before*
+  pulling, so a bad update can immediately pull the last working state.
+  `./ops.sh rollback` restores the newest snapshot (asks for RESTORE first)
+  and snapshots the current state first, so the rollback itself is undoable.
+  Three copies, each runnable: the server's rolling snapshots, the repo's
+  history, and a snapshot downloaded to your phone.
+
 ## v5.29.2 — 2026-09-26
 
 Melody bootloader (Lloyd's spec: she warms up before she thinks):

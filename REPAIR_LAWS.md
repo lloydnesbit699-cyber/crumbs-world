@@ -133,3 +133,16 @@ in the path construction, not in the prompt; a system prompt can be
 talked around, a path that can't be spelled can't be walked.
 (Lloyd's question, 2026-09-26: "how is she gonna handle common worlds?" —
 the Commons is shared by design, private vaults are the boundary.)
+
+### 19. The Law of Three
+No single copy is allowed to be the only copy. The server that runs, the
+repo that ships, and the phone in Lloyd's pocket each keep a runnable
+backup — if one goes down, the other two pick it back up. Concretely:
+`./ops.sh backup` snapshots the live data (`vaults/`, `users.json`,
+`.crumbs_secret`) before every update and keeps three rolling snapshots;
+the repo carries the engine's full history; a snapshot downloaded to the
+phone is the third leg. `rollback` restores the newest snapshot and
+restarts — and it snapshots the current state first, so the rollback
+itself is undoable. Backups are taken before the risky thing, not after
+the regret.
+(Lloyd's rule, 2026-09-26: "we can't afford to risk everything on one bad commit.")

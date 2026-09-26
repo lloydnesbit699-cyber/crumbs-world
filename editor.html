@@ -223,6 +223,11 @@
     background: #ffd75f; color: #111; font-weight: bold; cursor: pointer; }
   #melody-dock.demo { z-index: 310; }  /* v5.28.1: demo floats over login */
   #melody-send:disabled { opacity: .5; }
+  /* v5.29: voice — mic for voice input, speaker for TTS out */
+  #melody-mic { padding: 9px 12px; border-radius: 8px; border: 1px solid #333;
+    background: #1d1d28; color: #eee; font-size: 16px; cursor: pointer; }
+  #melody-mic:active { transform: scale(.94); }
+  #melody-mic.rec { background: #5f1f1f; border-color: #ff5a5a; color: #ff8a8a; }
   .login-demo-btn { margin-top: 12px; background: none; border: 1px solid #ffd75f;
     color: #ffd75f; border-radius: 8px; padding: 8px 14px; font-size: 14px;
     cursor: pointer; }
@@ -525,7 +530,8 @@
                z-index: 2; }
   #dpad-grip:active { cursor: grabbing; background: #2a2a35; }
   /* v4.3: clean screen — hide every play button for recordings */
-  body.clean #dpad.show, body.clean #meters, body.clean #btn-fire { display: none !important; }
+  body.clean #dpad.show, body.clean #meters, body.clean #btn-fire,
+    body.clean #melody-fab, body.clean #melody-dock { display: none !important; }
   #dpad button { font-size: 18px; padding: 0; min-height: 0; margin: 0;
                  background: rgba(28,28,38,.85); border-radius: 10px; touch-action: none; }
   #dpad button:active { background: #4da3ff; }
@@ -5619,8 +5625,148 @@ function melodySetQuota(q) {
   if (q && typeof q.remaining === "number")
     $("melody-quota").textContent = q.remaining + " left today";
 }
+// v5.29: voice both ways (round-1 ask #20) — TTS out, mic in.
+// TTS is client-side Web Speech only (no server change, zero cost);
+// the mic records with MediaRecorder and POSTs to /api/melody/stt,
+// which transcribes with Groq Whisper on the chat brain's key.
+const MEL_TTS = { on: true, user: "" };
+function melTtsKey() { return "melody-tts-" + (MEL_TTS.user || "anon"); }
+function melTtsLoad() {
+  try {
+    const v = localStorage.getItem(melTtsKey());
+    MEL_TTS.on = (v === null) ? true : v === "1";  // default: voice on
+  } catch (e) { MEL_TTS.on = true; }
+}
+function melTtsSave() {
+  try { localStorage.setItem(melTtsKey(), MEL_TTS.on ? "1" : "0"); } catch (e) {}
+}
+function melTtsIcon() {
+  $("melody-speaker").textContent = MEL_TTS.on ? "\uD83D\uDD0A" : "\uD83D\uDD07";
+  $("melody-speaker").title = MEL_TTS.on ? "Melody's voice: on" : "Melody's voice: off";
+}
+function melPickVoice() {
+  try {
+    const all = speechSynthesis.getVoices() || [];
+    const en = all.filter(v => v.lang && v.lang.toLowerCase().indexOf("en") === 0);
+    if (!en.length) return null;
+    // her register is the charming teacher — a warm female voice when one
+    // is on the device, otherwise the first English voice
+    const fem = ["samantha", "zira", "aria", "jenny", "susan", "karen",
+      "moira", "tessa", "google us english", "microsoft aria",
+      "microsoft jenny", "microsoft zira", "microsoft sara"];
+    for (const f of fem) {
+      const hit = en.find(v => v.name.toLowerCase().indexOf(f) >= 0);
+      if (hit) return hit;
+    }
+    return en[0];
+  } catch (e) { return null; }
+}
+function melPlain(text) {  // strip markdown for the voice — speak words, not markup
+  return String(text).replace(/\*\*/g, "").replace(/[*_`#]/g, "")
+    .replace(/\s+/g, " ").trim().slice(0, 600);
+}
+function melSpeak(text) {
+  if (!MEL_TTS.on) return;
+  try {
+    if (!("speechSynthesis" in window)) return;
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(melPlain(text));
+    const v = melPickVoice();
+    if (v) u.voice = v;
+    u.rate = 1.02; u.pitch = 1.05;  // warm and teacher-y
+    speechSynthesis.speak(u);
+  } catch (e) {}
+}
+function melSay(text) { melodyAdd("mel", text); melSpeak(text); }  // she speaks her replies
+function melTtsToggle() {
+  MEL_TTS.on = !MEL_TTS.on; melTtsSave(); melTtsIcon();
+  try { speechSynthesis.cancel(); } catch (e) {}
+  if (MEL_TTS.on) melSpeak("Voice on, sugar!");
+}
+// ---- mic: MediaRecorder -> /api/melody/stt (iOS Safari has no web SpeechRecognition)
+let melRec = null, melChunks = [], melStream = null, melRecTimer = 0;
+function melMicMime() {
+  const cands = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
+  try {
+    for (const m of cands)
+      if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m;
+  } catch (e) {}
+  return "";
+}
+function melStopRec() {
+  clearTimeout(melRecTimer);
+  try { if (melRec && melRec.state !== "inactive") melRec.stop(); } catch (e) {}
+  melRec = null;
+  if (melStream) {
+    try { melStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+    melStream = null;
+  }
+  $("melody-mic").classList.remove("rec");
+  $("melody-mic").title = "Talk to Melody";
+}
+async function melSendClip(mime) {
+  $("melody-typing").textContent = "Heard you \u2014 writing it down\u2026";
+  const blob = new Blob(melChunks, { type: (mime.split(";")[0]) || "audio/webm" });
+  melChunks = [];
+  if (!blob.size) {
+    $("melody-typing").hidden = true;
+    melSay("I didn't catch anything \u2014 try again?");
+    return;
+  }
+  const fd = new FormData();
+  fd.append("audio", blob, "voice." + (mime.indexOf("mp4") >= 0 ? "m4a" : "webm"));
+  try {
+    const r = await fetch("/api/melody/stt", { method: "POST", body: fd });
+    const j = await r.json();
+    $("melody-typing").hidden = true;
+    if (j.ok && j.text) {
+      // her hearing lands in the input for him to confirm and send — never auto-sent
+      $("melody-input").value = j.text;
+      $("melody-input").focus();
+      melodySetQuota(j.quota);
+      melSay("Got it \u2014 check my hearing below, then hit Send!");
+    } else {
+      melSay(j.detail || j.error || "Voice input hiccuped \u2014 type it for me?");
+    }
+  } catch (e) {
+    $("melody-typing").hidden = true;
+    melSay("I can't reach the server right now \u2014 is crumbs_hud.py running?");
+  }
+}
+async function melodyMicTap() {
+  if (MELODY.demo) return;  // mic is hidden in demo — belt and suspenders
+  if (melRec) { melStopRec(); return; }  // tap again to stop early
+  if (!window.MediaRecorder || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    melSay("This browser can't do voice input \u2014 type it for me instead?");
+    return;
+  }
+  try { melStream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch (e) {
+    melSay("I can't hear you \u2014 the mic is blocked. " +
+      "Check the browser's mic permission and tap me again.");
+    return;
+  }
+  melChunks = [];
+  const mime = melMicMime();
+  try { melRec = new MediaRecorder(melStream, mime ? { mimeType: mime } : {}); }
+  catch (e) { melRec = null; }
+  if (!melRec) {
+    try { melStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+    melStream = null;
+    melSay("Recording didn't start on this device \u2014 type it for me?");
+    return;
+  }
+  melRec.ondataavailable = e => { if (e.data && e.data.size) melChunks.push(e.data); };
+  melRec.onstop = () => melSendClip(mime);
+  melRec.start();
+  $("melody-mic").classList.add("rec");
+  $("melody-mic").title = "Recording\u2026 tap to stop";
+  $("melody-typing").hidden = false;
+  $("melody-typing").textContent = "Listening\u2026 tap the mic to stop";
+  melRecTimer = setTimeout(melStopRec, 30000);  // 30s cap — auto-stop
+}
 function melodyGreet() {
-  melodyAdd("mel", "Hey! I'm Melody \u2014 your guide inside Crumbs World. " +
+  melSay("Hey! I'm Melody \u2014 your guide inside Crumbs World. " +
     "Ask me how to paint, find tiles, undo, or what's wrong with your map!");
 }
 async function melodySend() {
@@ -5639,7 +5785,7 @@ async function melodySend() {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: msg }) });
     const j = await r.json();
-    if (j.ok) { melodyAdd("mel", j.reply); melodySetQuota(j.quota); }
+    if (j.ok) { melSay(j.reply); melodySetQuota(j.quota); }
     else melodyAdd("mel", j.detail || j.error ||
       "Hmm, that didn't go through \u2014 try again?");
   } catch (e) {
@@ -5662,6 +5808,11 @@ async function melodyInit() {
   $("melody-dock").classList.remove("demo");
   $("melody-title").textContent = "Melody";
   $("melody-clear").style.display = "";
+  // v5.29: voice — TTS toggle persisted per user, mic for signed-in players
+  MEL_TTS.user = h.user || "anon"; melTtsLoad(); melTtsIcon();
+  $("melody-speaker").onclick = melTtsToggle;
+  $("melody-mic").style.display = "";
+  $("melody-mic").onclick = melodyMicTap;
   $("melody-log").innerHTML = "";
   $("melody-fab").hidden = false;
   $("melody-fab").onclick = () => {
@@ -5693,9 +5844,9 @@ async function melodyInit() {
 // v5.28.1: pre-login demo — the taste before the profile. Knowledge-base
 // only (zero brain cost), 5 questions/day/IP, nothing remembered.
 function melodyGreetDemo() {
-  melodyAdd("mel", "Hey sugar, I'm Melody \u2014 this is just a little taste! " +
+  melSay("Hey sugar, I'm Melody — this is just a little taste! " +
     "Ask me how to paint, use the tabs, or undo. Want the real me, with a " +
-    "memory and a brain? Make a free profile and log in!");
+    "memory, a brain, and a voice? Make a free profile and log in!");
 }
 async function melodyDemo() {
   if (MELODY.busy) return;
@@ -5709,6 +5860,11 @@ async function melodyDemo() {
   $("melody-title").textContent = "Melody (demo)";
   $("melody-quota").textContent = "";
   $("melody-clear").style.display = "none";
+  // v5.29: demo is zero-model-calls by design — no mic here. TTS still
+  // works (it's client-side speech, free). Voice input unlocks with a profile.
+  MEL_TTS.user = "demo"; melTtsLoad(); melTtsIcon();
+  $("melody-speaker").onclick = melTtsToggle;
+  $("melody-mic").style.display = "none";
   $("melody-log").innerHTML = "";
   // wire the dock the same way the full init does
   $("melody-send").onclick = melodySend;
@@ -6056,12 +6212,14 @@ async function deleteMission(id) {
   <div id="melody-head">
     <span id="melody-title">Melody</span>
     <span id="melody-quota"></span>
+    <button id="melody-speaker" title="Melody's voice">&#128266;</button>
     <button id="melody-clear" title="Clear conversation">&#10218;</button>
     <button id="melody-min" title="Minimize">&minus;</button>
   </div>
   <div id="melody-log"></div>
   <div id="melody-typing" hidden>Melody is thinking&hellip;</div>
   <div id="melody-input-row">
+    <button id="melody-mic" title="Talk to Melody">&#127908;</button>
     <input id="melody-input" placeholder="Ask Melody&hellip;" maxlength="2000" autocomplete="off">
     <button id="melody-send">Send</button>
   </div>

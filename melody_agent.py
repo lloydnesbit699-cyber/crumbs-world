@@ -477,6 +477,141 @@ def brain_chat(messages, tools=None):
     raise RuntimeError(f"all brains failed: {last_err}")
 
 
+# -- voice input (STT) ------------------------------------------------------
+# Lloyd's round-1 ask #20 (2026-09-26): a mic for Melody. iOS Safari has no
+# web SpeechRecognition, so the dock records with MediaRecorder and POSTs
+# the clip to /api/melody/stt; we transcribe it with Groq's Whisper API on
+# the same GROQ_API_KEY the chat brain already uses. The audio lives in
+# memory for the request only — never written to disk, never logged,
+# never persisted anywhere. The transcript is returned to the dock, which
+# drops it into the chat input for the player to confirm and send.
+#
+# Quota decision (documented, not redesigned): a voice clip IS a model call,
+# so it burns one brain-call from the same daily pool (free 200 / basic 600
+# / pro 1000). The known turns-vs-calls mismatch is noted in the design doc
+# and left alone here. Demo mode has no session, so /api/melody/stt 401s
+# there — the pre-login taste can never burn model calls.
+#
+# Law 18: the only path ever touched is built from the authenticated
+# username alone (quota + audit under vaults/<user>/melody/). The audio is
+# never stored and the transcript is never written to any file.
+
+_STT_MAX_BYTES = 10 * 1024 * 1024   # ~a minute of phone audio, plenty
+_STT_MIN_BYTES = 100                # anything smaller is a dead clip
+_STT_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
+_STT_MODEL = "whisper-large-v3"
+_STT_TIMEOUT = 60                   # whisper on a long clip can be slow
+
+_STT_TYPES = {".webm": "audio/webm", ".mp4": "audio/mp4",
+              ".m4a": "audio/mp4", ".ogg": "audio/ogg",
+              ".wav": "audio/wav"}
+
+
+def stt_backends():
+    """[(label, url, key, model)] of configured transcription backends."""
+    key = _env("GROQ_API_KEY")
+    return [("groq+whisper", _STT_URL, key, _STT_MODEL)] if key else []
+
+
+def _stt_post(url, body, content_type, key, timeout=_STT_TIMEOUT):
+    req = urllib.request.Request(
+        url, data=body,
+        headers={"Content-Type": content_type,
+                 "Authorization": f"Bearer {key}"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.load(resp)
+
+
+def transcribe_audio(audio_bytes, filename="voice.webm"):
+    """-> dict(ok, text|error). Pure: no disk, no quota touched here."""
+    audio_bytes = audio_bytes or b""
+    if len(audio_bytes) < _STT_MIN_BYTES:
+        return {"ok": False, "error": "empty audio — I didn't catch anything"}
+    if len(audio_bytes) > _STT_MAX_BYTES:
+        return {"ok": False,
+                "error": "that clip's too long — keep it under ~30 seconds"}
+    backs = stt_backends()
+    if not backs:
+        return {"ok": False,
+                "error": ("voice input isn't configured on this server yet — "
+                          "Lloyd still has to plug in her speech key. "
+                          "Type it for me instead?")}
+    label, url, key, model = backs[0]
+    safe = re.sub(r"[^a-zA-Z0-9._-]", "_", (filename or "voice.webm"))[-64:]
+    ext = "." + safe.rsplit(".", 1)[-1].lower() if "." in safe else ""
+    ctype = _STT_TYPES.get(ext, "audio/webm")
+    boundary = "----melstt" + os.urandom(8).hex()
+    parts = [
+        (f'--{boundary}\r\n'
+         f'Content-Disposition: form-data; name="file"; filename="{safe}"\r\n'
+         f'Content-Type: {ctype}\r\n\r\n').encode("ascii"),
+        audio_bytes,
+        (f'\r\n--{boundary}\r\n'
+         'Content-Disposition: form-data; name="model"\r\n\r\n'
+         f'{model}\r\n'
+         f'--{boundary}\r\n'
+         'Content-Disposition: form-data; name="response_format"\r\n\r\n'
+         'json\r\n'
+         f'--{boundary}--\r\n').encode("ascii"),
+    ]
+    body = b"".join(parts)
+    try:
+        data = _stt_post(url, body,
+                         f"multipart/form-data; boundary={boundary}",
+                         key)
+    except Exception:
+        return {"ok": False,
+                "error": "the speech service hiccuped — try again?"}
+    text = (data.get("text") or "").strip() if isinstance(data, dict) else ""
+    if not text:
+        return {"ok": False,
+                "error": "I couldn't make out any words — try again?"}
+    return {"ok": True, "text": text[:2000]}
+
+
+def handle_stt(script_dir, username, audio_bytes, filename="voice.webm",
+               tier=DEFAULT_TIER):
+    """One voice-input turn. -> dict(ok, text|error...); never raises."""
+    try:
+        if not valid_username(username) and username != _LOCAL_USER:
+            # demo / no session: the pre-login taste gets no model calls
+            return {"ok": False, "error": "login required"}
+        audio_bytes = audio_bytes or b""
+        if len(audio_bytes) < _STT_MIN_BYTES:
+            return {"ok": False,
+                    "error": "empty audio — I didn't catch anything"}
+        if len(audio_bytes) > _STT_MAX_BYTES:
+            return {"ok": False,
+                    "error": "that clip's too long — keep it under ~30 seconds"}
+
+        allowed, remaining, quota, tier = quota_check(script_dir, username,
+                                                      tier)
+        if not allowed:
+            audit(script_dir, username, "stt", "quota exhausted")
+            return {"ok": False, "error": "quota",
+                    "detail": (f"That's the day's Melody time on the {tier} "
+                               f"plan ({quota}/day) — she'll be back tomorrow!")}
+
+        res = transcribe_audio(audio_bytes, filename)
+        if not res.get("ok"):
+            audit(script_dir, username, "stt",
+                  "transcribe failed: " + res.get("error", ""))
+            return res
+        text = res["text"]
+        quota_bump(script_dir, username, tier)
+        # accountability without the words: audio and transcript never persist
+        audit(script_dir, username, "stt", f"ok chars={len(text)}")
+        _, remaining, quota, tier = quota_check(script_dir, username, tier)
+        return {"ok": True, "text": text,
+                "quota": {"remaining": remaining, "quota": quota, "tier": tier}}
+    except Exception as exc:  # the agent never crashes the game
+        try:
+            audit(script_dir, username, "stt-error", str(exc)[:200])
+        except Exception:
+            pass
+        return {"ok": False, "error": "voice hiccup — try again"}
+
+
 # -- personas ---------------------------------------------------------------
 # Lloyd's call (2026-09-26): Melody's default register is the charming
 # teacher — favorite-teacher energy with a wink: warm, playful, a little

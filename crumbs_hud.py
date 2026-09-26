@@ -3761,7 +3761,11 @@ class Handler(BaseHTTPRequestHandler):
             # no auth — the page checks this before showing the dock.
             st = _melody_agent.brain_status()
             st.update({"ok": True, "version": APP_VERSION, "phase": 1,
-                       "public_mode": PUBLIC_MODE})
+                       "public_mode": PUBLIC_MODE,
+                       # v5.29: the requester's own identity only — the dock
+                       # uses it to persist per-user prefs (TTS toggle).
+                       # Nothing about anyone else is ever exposed here.
+                       "user": self._melody_user()})
             return self._send_json(st)
         if path == "/api/melody/demo" and is_post:
             # v5.28.1: pre-profile taste. No auth, knowledge-base only —
@@ -3790,6 +3794,30 @@ class Handler(BaseHTTPRequestHandler):
         if not user:
             return self._send_json({"ok": False, "error": "login required"},
                                    401)
+        if path == "/api/melody/stt" and is_post:
+            # v5.29: voice input (round-1 ask #20). Demo has no session, so
+            # _melody_user() returns None there and this 401s — the pre-login
+            # taste can never burn model calls. Law 18 by construction: the
+            # only path touched is built from the authenticated username;
+            # the audio clip itself is never stored, only transcribed.
+            if not self._same_origin_ok():
+                return self._send_json(
+                    {"ok": False, "error": "origin/host check failed"}, 403)
+            ctype = (self.headers.get("Content-Type") or "")
+            if ctype.split(";", 1)[0].strip().lower() != "multipart/form-data":
+                return self._send_json(
+                    {"ok": False, "error": "expected multipart audio"}, 415)
+            body = self._read_body(_melody_agent._STT_MAX_BYTES + 4096)
+            up = self._multipart_audio(body, ctype)
+            if not up:
+                return self._send_json(
+                    {"ok": False, "error": "no audio in request"}, 400)
+            fname, audio = up
+            res = _melody_agent.handle_stt(SCRIPT_DIR, user, audio, fname,
+                                          self._melody_tier(user))
+            status = 200 if res.get("ok") else (
+                429 if res.get("error") == "quota" else 400)
+            return self._send_json(res, status)
         if path == "/api/melody/history" and not is_post:
             return self._send_json({
                 "ok": True,
@@ -3854,6 +3882,38 @@ class Handler(BaseHTTPRequestHandler):
             self._outgoing_cookie = None
         self.end_headers()
         self.wfile.write(body)
+
+    def _read_body(self, max_bytes):
+        """Raw request bytes with a hard cap. -> bytes or None."""
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except (ValueError, TypeError):
+            n = 0
+        if n <= 0 or n > max_bytes:
+            return None
+        try:
+            return self.rfile.read(n)
+        except Exception:
+            return None
+
+    def _multipart_audio(self, body, ctype):
+        """Minimal form-data parse for the voice clip.
+        -> (filename, bytes) or None. Audio is never written to disk."""
+        m = re.search(r"boundary=([^;\s]+)", ctype or "")
+        if not m or not body:
+            return None
+        bound = b"--" + m.group(1).strip().strip('"').encode("ascii", "ignore")
+        for part in body.split(bound):
+            if b'name="audio"' not in part:
+                continue
+            head, sep, payload = part.partition(b"\r\n\r\n")
+            if not sep or not payload:
+                continue
+            fm = re.search(br'filename="([^"]{1,64})"', head)
+            fname = (fm.group(1).decode("ascii", "ignore")
+                     if fm else "voice.webm")
+            return fname, payload.rstrip(b"\r\n")
+        return None
 
     def _read_json(self, max_bytes=MAX_JSON_BYTES):
         try:

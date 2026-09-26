@@ -2369,9 +2369,21 @@ DEFAULT_RULES = {"walk_ms": 140,     # hero step delay: 90 fast / 140 normal / 2
                  "swim_mult": 3,     # water slowdown: 2x / 3x / 4x
                  "ghost": False,     # builder noclip: walk through walls
                  "touch": True,      # show the on-screen controls in play mode
-                 "hero_tile": None}  # v4.8: the chosen PC sprite (inspector assignment)
+                 "hero_tiles": []}  # v5.29: the designated heroes (list); [0] is the PC
 rules = dict(DEFAULT_RULES)
 _current_map = DEFAULT_SAVE
+
+
+def _valid_hero_list(v):
+    """v5.29: sanitize a hero-tile list — ints that exist in the art
+    registry, deduped, order kept. The player's designation is a list so
+    multiple heroes survive (ws/entities owns the multi-pick UI; the model
+    is ready for it)."""
+    out = []
+    for t in v or []:
+        if isinstance(t, int) and t in assets.tiles and t not in out:
+            out.append(t)
+    return out
 
 # ---- v3.9: game rules — what makes a build a *game* --------------------------
 # goals (reach X = win), hazards (touch X = lose), key&door pairs, and
@@ -2913,8 +2925,14 @@ def _load_rules(name):
             rules[k] = v
         elif k in ("ghost", "touch") and isinstance(v, bool):
             rules[k] = v
+        elif k == "hero_tiles" and isinstance(v, list):
+            rules[k] = _valid_hero_list(v)  # v5.29: the hero list survives reloads
         elif k == "hero_tile" and (v is None or (isinstance(v, int) and v in assets.tiles)):
-            rules[k] = v   # v4.8: the chosen PC survives reloads
+            # v5.29: legacy single-hero sidecars migrate to the list. The
+            # "not in tweaks" guard keeps a legacy key from clobbering a
+            # hero_tiles list that an old build already mirrored back.
+            if not rules.get("hero_tiles"):
+                rules["hero_tiles"] = [] if v is None else [v]  # v4.8 pick kept
     for k in DEFAULT_WORLD["meters"]:
         if isinstance(wm.get(k), bool):
             world_profile["meters"][k] = wm[k]
@@ -2930,8 +2948,14 @@ def _load_rules(name):
 
 def _save_rules(name):
     try:
+        tweaks = dict(rules)
+        # v5.29: legacy "hero_tile" mirror (primary hero or None) so old
+        # builds opening this sidecar still crown the right PC. No schema
+        # bump — _load_rules migrates either shape, old or new.
+        ht = rules.get("hero_tiles") or []
+        tweaks["hero_tile"] = ht[0] if ht else None
         _atomic_write_json(_rules_path(name),
-                           _stamp({"tweaks": rules, "game": game_rules,
+                           _stamp({"tweaks": tweaks, "game": game_rules,
                                    "world": world_profile, "meta": map_meta}))  # v5.0: meta
     except OSError as e:
         print(f"[hud] could not save rules: {e}")
@@ -3101,8 +3125,9 @@ def _swim_at(tx, ty):
 def _find_spawn():
     # v4.9: the crowned hero starts where he stands — the selected PC's
     # placed instance is the spawn point, so "set as hero" puts YOU there.
-    ht = rules.get("hero_tile")
-    if ht is not None:
+    # v5.29: the designation is a hero LIST — the first hero with a placed,
+    # walkable instance is the spawn; the player's pick is never overridden.
+    for ht in rules.get("hero_tiles") or []:
         for y in range(world.height):
             for x in range(world.width):
                 if (world.object_layer[y][x] == ht and _walkable(x, y)
@@ -6515,9 +6540,12 @@ class Handler(BaseHTTPRequestHandler):
             for k in ("ghost", "touch"):
                 if isinstance(body.get(k), bool):
                     new_vals[k] = body[k]
-            ht = body.get("hero_tile", "unset")   # v4.8: the inspector's PC pick
+            hts = body.get("hero_tiles", "unset")  # v5.29: the hero list
+            if isinstance(hts, list):
+                new_vals["hero_tiles"] = _valid_hero_list(hts)
+            ht = body.get("hero_tile", "unset")   # v4.8: legacy single-hero pick
             if ht is None or (isinstance(ht, int) and ht in assets.tiles):
-                new_vals["hero_tile"] = ht
+                new_vals["hero_tiles"] = [] if ht is None else [ht]
             # v5.0: no-op changes don't take up an undo step
             new_vals = {k: v for k, v in new_vals.items() if rules.get(k) != v}
             if new_vals:

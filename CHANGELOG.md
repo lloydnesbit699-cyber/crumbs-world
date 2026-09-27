@@ -5,6 +5,14 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.36.1 — 2026-09-27
+
+**Smooth dragging on content-heavy maps.** The two 150ms timers (weather and
+sprite animation) used to force a full canvas redraw ~13×/sec even mid-drag;
+on a large dungeon that saturated the main thread and made pan and paint
+lurch. Timer redraws now pause while a finger is down on the canvas and one
+catch-up redraw fires on lift. Drag/paint/render code itself is unchanged.
+
 ## v5.36.0 — 2026-09-27
 
 **Phase 3: signup-time optional 2FA enrollment.**

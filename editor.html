@@ -1499,6 +1499,8 @@ function zoomAt(clientX, clientY, newPx) {
 }
 let stroke = null;                  // {cells:Map, layer}
 let panMode = false, panStart = null;   // v1.7 camera: pan instead of paint
+let touchDrag = false;                  // v5.36.1: finger down on canvas — the
+                                        // 150ms timers skip redraws until it lifts
 let panX = 0, panY = 0;                 // v2.2: canvas offset in px, relative to centered
 const ptrs = new Map();                 // v2.1: active pointers for gestures
 let gesture = null;                     // v2.1: two-finger pan/pinch state
@@ -2726,6 +2728,7 @@ function strokeAdd(cell) {
 }
 canvas.addEventListener("pointerdown", async e => {
   e.preventDefault();
+  touchDrag = true;   // v5.36.1: timers skip redraws until the finger lifts
   ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
   try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
   if (ptrs.size === 2) {
@@ -2860,10 +2863,11 @@ function endStroke() {
 canvas.addEventListener("pointerup", e => {
   ptrs.delete(e.pointerId);
   if (ptrs.size < 2) gesture = null;
-  if (ptrs.size === 0) { endStroke(); endHeightStroke(); }  // v5.29
+  if (ptrs.size === 0) { touchDrag = false; endStroke(); endHeightStroke(); queueRender(); }  // v5.29; v5.36.1: one catch-up redraw
 });
 canvas.addEventListener("pointercancel", e => {
   ptrs.delete(e.pointerId);
+  touchDrag = false;   // v5.36.1
   gesture = null; stroke = null; hstroke = null; panStart = null; refresh();  // v5.29
 });
 
@@ -3339,7 +3343,7 @@ function drawWeather() {
 function wxStart() {
   wxStop();
   if (worldWeather === "clear") return;
-  wxTimer = setInterval(() => { wxFrame++; queueRender(); }, 150);   // v5.3: batched
+  wxTimer = setInterval(() => { wxFrame++; if (!touchDrag) queueRender(); }, 150);   // v5.3: batched; v5.36.1: no redraws mid-drag
 }
 function wxStop() { if (wxTimer) { clearInterval(wxTimer); wxTimer = null; } }
 
@@ -5192,7 +5196,8 @@ function paintSwatch(cv, tid) {
 // lives on the map, not in the tray.
 let lastAnimSig = "";
 setInterval(() => {
-  if (document.hidden) return;
+  if (document.hidden || touchDrag) return;   // v5.36.1: no redraws mid-drag; the
+                                              // stale lastAnimSig re-renders once after
   let sig = "";
   animOnMap.forEach(id => { const t = customById[id]; if (t) sig += frameIdx(t) + ","; });
   if (!playMode) patrols.forEach(p => {   // v3.4: standing NPCs animate too

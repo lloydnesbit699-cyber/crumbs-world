@@ -118,6 +118,15 @@
   #tray-right button { width: 100%; margin-bottom: 8px; }
   /* v5.33: section divider inside the tools tray (Build-menu items live below it) */
   #tray-right hr { border: none; border-top: 1px solid #333; margin: 10px 0; }
+  /* v5.35: Phase 2 — the morphing selection editor inside the tools tray */
+  #traits-morph { margin: 10px 0; padding: 10px; border: 1px solid #3a3a3a;
+    border-radius: 10px; background: #161616; }
+  #traits-morph .m-head { font-size: 13px; font-weight: 600; color: #ffd98a;
+    margin-bottom: 2px; }
+  #traits-morph .m-scope { font-size: 11px; color: #777; margin-bottom: 8px; }
+  #traits-morph .m-scope a { color: #8ab8ff; cursor: pointer; }
+  #traits-morph .m-scope a.on { color: #ffd98a; font-weight: 600; }
+  #traits-morph .m-note { font-size: 11px; color: #777; margin-top: 8px; }
 
   .sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 55;
            background: #161616; border-top: 1px solid #333;
@@ -942,6 +951,9 @@
 
 <aside class="tray" id="tray-right">
   <div class="tray-head">Tools</div>
+  <!-- v5.35: Phase 2 — the tray morphs into a traits editor for the current
+       selection. Hidden (and layout-neutral) when nothing is selected. -->
+  <div id="traits-morph" hidden></div>
   <button id="btn-select" title="Inspect whatever is on a tile">Select</button>
   <button id="btn-eraser" title="Eraser">Eraser</button>
   <button id="btn-height" title="Raise/lower terrain elevation — drag to sculpt">Height</button>
@@ -2116,7 +2128,9 @@ function objTid(c) {
 }
 function objA(c) {
   // effective per-instance attributes — defaults + whatever the cell carries
-  const d = { size: 1.0, hero: false, flavor: null, interactive: true, role: "none" };
+  // v5.35: Phase 2 — traits carries the per-instance overrides (or null)
+  const d = { size: 1.0, hero: false, flavor: null, interactive: true, role: "none",
+              traits: null };
   if (c && typeof c === "object") {
     for (const k of Object.keys(d)) if (k in c) d[k] = c[k];
   }
@@ -3447,6 +3461,7 @@ function renderInspect() {
     sizeInp.oninput = () => { if (val) val.textContent = (+sizeInp.value).toFixed(2) + "×"; };
     sizeInp.onchange = () => inspectAction("size", { v: +sizeInp.value });
   }
+  refreshTraitsMorph();   // v5.35: Phase 2 — the tools tray morphs
 }
 async function inspectAction(act, d) {
   const x = inspectPos.x, y = inspectPos.y, ocell = objects[y][x], ov = objTid(ocell);
@@ -3742,6 +3757,244 @@ $("btn-select").onclick = () => {
   }
   render();
 };
+// ===== v5.35: Phase 2 — the morphing selection-aware Tools panel ==========
+// The tray stops being a fixed tool list and becomes an editor for whatever
+// is currently selected. Two sources, reused — no parallel selection state:
+//   instance scope: the select tool parked on a placed object (inspectPos)
+//   type scope:     the palette brush (selTile)
+// Trait vocabulary (mirrors the server's TRAIT_*_KEYS):
+//   weapon:    damage, magic, magicCost, combos, attack, sneak
+//   character: health, history, carry, inventory (+ name via the card's rename)
+//   terrain:   elevation
+//   every kind: collision, environment, customRule
+// Resolution order everywhere: per-instance override > per-tile-type trait >
+// global default.
+let tileTraits = {};        // str(tile_id) -> traits — this vault's type registry
+let _morphKey = null;       // identity guard: skip redundant re-renders
+let _morphScopeLock = null; // "instance" | "type" — his manual override, or null
+async function loadTileTraits() {
+  try {
+    const r = await api("/api/tile-traits");
+    if (r.ok && r.traits) tileTraits = r.traits;
+  } catch (e) {}
+  refreshTraitsMorph();
+}
+// Weapon tiles are never hardcoded: the Gear sheet's weapon-kind items and
+// the weapons subcategory both feed this set.
+let _weaponTileIds = null;
+function weaponTileIds() {
+  if (_weaponTileIds) return _weaponTileIds;
+  _weaponTileIds = new Set();
+  try {
+    for (const it of (itemsLib || []))
+      if (it && it.kind === "weapon" && it.tile_id != null)
+        _weaponTileIds.add(+it.tile_id);
+  } catch (e) {}
+  return _weaponTileIds;
+}
+function tileKind(tid) {
+  try {
+    if (weaponTileIds().has(+tid)) return "weapon";
+    const c = customById[tid];
+    const sub = String((c && c.subcategory) || "").toLowerCase();
+    if (sub === "weapons") return "weapon";
+    if (isCharSub(sub)) return "character";
+    const tab = (typeof tabOf === "function") ? tabOf(tid) : null;
+    if (tab === "characters") return "character";
+    if (tab === "tiles") return "terrain";
+  } catch (e) {}
+  return "object";   // props & decor — the common fields only
+}
+function typeTraitsOf(tid) { return tileTraits[String(tid)] || {}; }
+// One resolution order, client side too: instance > type > default.
+function traitVal(sel, key, def) {
+  try {
+    const inst = (sel.scope === "instance") ? ((objA(sel.ocell).traits) || {}) : {};
+    if (inst[key] !== undefined && inst[key] !== "") return inst[key];
+    const tt = typeTraitsOf(sel.tid);
+    if (tt[key] !== undefined && tt[key] !== "") return tt[key];
+  } catch (e) {}
+  return def;
+}
+function morphSelection() {
+  // The select tool parked on a placed object wins over the palette brush.
+  if (selectTool && inspectPos && objects[inspectPos.y] &&
+      objects[inspectPos.y][inspectPos.x] != null) {
+    const ocell = objects[inspectPos.y][inspectPos.x];
+    const tid = objTid(ocell);
+    if (tid != null)
+      return { scope: "instance", x: inspectPos.x, y: inspectPos.y,
+               ocell, tid };
+  }
+  if (selTile != null) return { scope: "type", tid: selTile };
+  return null;
+}
+function refreshTraitsMorph() {
+  const box = $("traits-morph");
+  if (!box) return;
+  let sel = morphSelection();
+  // A manual scope lock only sticks while its target is real; otherwise the
+  // panel drops back to whatever the selection actually is.
+  if (sel && _morphScopeLock && _morphScopeLock !== sel.scope) {
+    if (_morphScopeLock === "instance" && inspectPos && objects[inspectPos.y] &&
+        objects[inspectPos.y][inspectPos.x] != null &&
+        objTid(objects[inspectPos.y][inspectPos.x]) != null) {
+      const ocell = objects[inspectPos.y][inspectPos.x];
+      sel = { scope: "instance", x: inspectPos.x, y: inspectPos.y, ocell,
+              tid: objTid(ocell) };
+    } else if (_morphScopeLock === "type" && sel.tid != null) {
+      sel = { scope: "type", tid: sel.tid };
+    } else {
+      _morphScopeLock = null;
+    }
+  }
+  const eff = sel;
+  // identity key — don't clobber his half-written fields on every render
+  const key = eff ? (eff.scope + ":" + eff.tid + ":" +
+    ((eff.scope === "instance") ? eff.x + "," + eff.y : "") +
+    ":" + JSON.stringify(eff.scope === "instance" ?
+      ((objA(eff.ocell).traits) || {}) : typeTraitsOf(eff.tid))) : "none";
+  if (key === _morphKey) return;
+  _morphKey = key;
+  if (!eff) { box.hidden = true; box.innerHTML = ""; return; }
+  box.hidden = false;
+  renderMorph(box, eff);
+}
+const _TRAIT_FIELDS = {
+  weapon: [["damage", "⚔️ Damage", "num", 0, 9999],
+           ["magic", "✨ Magic effect", "text"],
+           ["magicCost", "💱 Magic cost / tradeoff", "text"],
+           ["combos", "🔗 Combos", "text"],
+           ["attack", "🗡️ Attack behavior", "text"],
+           ["sneak", "🥷 Sneak behavior", "text"]],
+  character: [["health", "❤️ Health", "num", 0, 9999],
+              ["history", "📜 History / backstory", "text"],
+              ["carry", "🎒 Carry capacity", "num", 0, 9999],
+              ["inventory", "🎒 Inventory", "text"]],
+  terrain: [["elevation", "⛰️ Exact elevation", "num", -9, 9, 1]],
+};
+const _TRAIT_COMMON = [["environment", "🌿 Environment exceptions", "text"],
+                       ["customRule", "✍️ Your own rule", "text"]];
+function _morphField(fkind, key, label, val, min, max, step) {
+  const v = (val === undefined || val === null) ? "" : val;
+  if (fkind === "num")
+    return '<label class="field"><span class="lbl">' + esc(label) + '</span>' +
+      '<input type="number" data-tk="' + key + '" value="' + esc(String(v)) +
+      '" min="' + min + '" max="' + max + '"' +
+      (step ? ' step="' + step + '"' : "") + '></label>';
+  return '<label class="field"><span class="lbl">' + esc(label) + '</span>' +
+    '<textarea data-tk="' + key + '" rows="2">' + esc(String(v)) +
+    '</textarea></label>';
+}
+function _morphCollision(val, sel) {
+  // collision meanings: solid closes a tile, walkable opens one (a hidden
+  // door is a wall typed walkable), ethereal lets a walker pass through
+  // walls (a ghost's patrol legs path through). Stored per type AND per
+  // instance; walkers resolve instance > type.
+  const opts = [["default", "— default —"],
+                ["solid", "🧱 solid — blocks movement"],
+                ["walkable", "🚪 walkable — like a hidden door"],
+                ["ethereal", "👻 ethereal — passes through walls"]];
+  const cur = val || "default";
+  let h = '<label class="field"><span class="lbl">🚧 Collision</span><select data-tk="collision">';
+  for (const [v, lbl] of opts)
+    h += '<option value="' + v + '"' + (cur === v ? " selected" : "") + ">" + lbl + "</option>";
+  h += "</select></label>";
+  return h;
+}
+function renderMorph(box, sel) {
+  const kind = tileKind(sel.tid);
+  const tname = tileLabel(sel.tid);
+  const isInst = sel.scope === "instance";
+  const fields = (_TRAIT_FIELDS[kind] || []).concat(_TRAIT_COMMON);
+  let h = '<div class="m-head">🛠️ ' + esc(isInst ? instanceName(sel.x, sel.y) || tname : tname) + "</div>";
+  h += '<div class="m-scope">';
+  if (isInst) {
+    h += 'this one <a data-scope="instance" class="on">this one</a> · ' +
+         '<a data-scope="type">every ' + esc(tname) + '</a>';
+  } else {
+    h += 'every ' + esc(tname);
+    if (selectTool && inspectPos)
+      h += ' · <a data-scope="instance">this one instead</a>';
+  }
+  h += "</div>";
+  for (const [key, label, fkind, min, max, step] of fields)
+    h += _morphField(fkind, key, label, traitVal(sel, key), min, max, step);
+  h += _morphCollision(traitVal(sel, "collision"), sel);
+  h += '<button id="morph-save" style="margin-top:8px">💾 Save traits</button>';
+  if (kind === "character" && isInst)
+    h += '<div class="m-note">rename him by tapping his name on the left card</div>';
+  h += '<div class="m-note">' +
+    (isInst ? "overrides just this one — the type keeps its own"
+            : "applies to every " + esc(tname) + " in this vault") +
+    "</div>";
+  box.innerHTML = h;
+  box.querySelectorAll("[data-scope]").forEach(a => {
+    a.onclick = () => {
+      _morphScopeLock = (a.dataset.scope === _morphScopeLock) ? null : a.dataset.scope;
+      _morphKey = null; refreshTraitsMorph();
+    };
+  });
+  $("morph-save").onclick = saveMorph;
+}
+async function saveMorph() {
+  const box = $("traits-morph");
+  if (!box || box.hidden) return;
+  // Resolve the scope the panel is actually showing (same coherent-lock
+  // logic as the renderer) — a save can never target a stale scope.
+  const sel = morphSelection();
+  let eff = sel;
+  if (sel && _morphScopeLock && _morphScopeLock !== sel.scope) {
+    if (_morphScopeLock === "instance" && inspectPos && objects[inspectPos.y] &&
+        objects[inspectPos.y][inspectPos.x] != null &&
+        objTid(objects[inspectPos.y][inspectPos.x]) != null) {
+      const ocell = objects[inspectPos.y][inspectPos.x];
+      eff = { scope: "instance", x: inspectPos.x, y: inspectPos.y, ocell,
+              tid: objTid(ocell) };
+    } else if (_morphScopeLock === "type" && sel.tid != null) {
+      eff = { scope: "type", tid: sel.tid };
+    } else {
+      _morphScopeLock = null;
+    }
+  }
+  if (!eff) return;
+  // Merge over what's already stored: a trait the panel doesn't show (set
+  // under a different kind, or a hand-edited key) survives a save; clearing
+  // a visible field deletes that key. An empty result erases server-side.
+  const base = (eff.scope === "instance")
+    ? Object.assign({}, (objA(eff.ocell).traits) || {})
+    : Object.assign({}, typeTraitsOf(eff.tid));
+  box.querySelectorAll("[data-tk]").forEach(el => {
+    const k = el.dataset.tk;
+    const v = el.value;
+    if (el.type === "number") {
+      if (v === "" || v == null || !isFinite(+v)) { delete base[k]; return; }
+      base[k] = +v;
+    } else {
+      const t = String(v).trim();
+      if (!t || t === "default") { delete base[k]; return; }
+      base[k] = t;
+    }
+  });
+  const traits = base;
+  if (eff.scope === "instance") {
+    const r = await api("/api/object-attrs",
+      { x: eff.x, y: eff.y, attrs: { traits } });
+    if (!r.ok) { toast(r.error || "couldn't save"); return; }
+    await refresh();
+    _morphKey = null;
+    renderInspect(); renderSelCard(); refreshTraitsMorph(); render();
+    toast(r.noop ? "nothing changed" : "saved for this one ✍️");
+  } else {
+    const r = await api("/api/tile-traits",
+      { tile_id: eff.tid, traits });
+    if (!r.ok) { toast(r.error || "couldn't save"); return; }
+    tileTraits[String(eff.tid)] = r.traits || {};
+    _morphKey = null;
+    refreshTraitsMorph(); render();
+    toast("saved for every " + tileLabel(eff.tid) + " ✍️");
+  }
+}
 let worldWeather = "clear";   // v4.1: what the sky is doing
 async function loadWorld() {
   try {
@@ -4194,6 +4447,22 @@ async function removePatrol(id) {
 // v5.0: a patrol is ASSIGNED to a placed character — the walker IS the
 // character standing at the patrol's anchor, not a separately spawned NPC.
 // Patrols from before v5.0 have no anchor and keep the old spawn behavior.
+// v5.35: Phase 2 — true when this patrol leg's walker is ethereal: the
+// anchor instance's own collision trait wins, else the tile type's, else
+// solid-walls-block (a ghost passes through walls).
+function effWalkerCollision(l) {
+  try {
+    let inst = null, tid = l.tile_id;
+    if (l.ax != null && objects[l.ay] && objects[l.ay][l.ax] != null) {
+      const oc = objects[l.ay][l.ax];
+      inst = objA(oc).traits || null;
+      const t2 = objTid(oc);
+      if (t2 != null) tid = t2;
+    }
+    const c = (inst && inst.collision) || typeTraitsOf(tid).collision;
+    return c === "ethereal";
+  } catch (e) { return false; }
+}
 async function buildNpcs() {
   npcs = [];
   walkingAnchors = new Set();
@@ -4214,9 +4483,15 @@ async function buildNpcs() {
       // v5.29: anchored walkers keep the anchor instance's size
       size: (p.x != null) ? objSize(objects[p.y] && objects[p.y][p.x]) : 1.0 };
     for (let i = 0; i < way.length; i++)
-      legs.push({ pi, from: way[i], to: way[(i + 1) % way.length] });
+      legs.push({ pi, from: way[i], to: way[(i + 1) % way.length],
+        // v5.35: Phase 2 — the anchor feeds the ethereal check below
+        ax: (p.x != null) ? p.x : null, ay: (p.y != null) ? p.y : null,
+        tile_id: p.tile_id });
   });
-  const r = await api("/api/patrol-paths", { legs: legs.map(l => [l.from, l.to]) });
+  // v5.35: Phase 2 — an ethereal anchor's legs path straight through walls,
+  // like the builder noclip rule. Collision resolves instance > type.
+  const r = await api("/api/patrol-paths", { legs: legs.map(l =>
+    [l.from, l.to, effWalkerCollision(l) ? 1 : 0]) });
   const paths = (r && r.paths) || [];
   patrols.forEach((p, pi) => {
     if (!starts[pi]) return;
@@ -4309,6 +4584,7 @@ function selectTile(id) {
   selTile = id; selByLayer[layer] = id;
   erasing = false; $("btn-eraser").classList.remove("on");
   buildPalette();
+  refreshTraitsMorph();   // v5.35: Phase 2 — the tools tray morphs
 }
 function defaultBrush(l) {
   // v5.23.3: never silently select an object/hero brush.
@@ -4349,16 +4625,18 @@ function updatePaletteProbe() {
 // so chips, labels and tab routing can never drift apart again.
 let SUBCAT_ORDER = {
   tiles: ["walls", "floors", "doors", "roofs", "materials", "natural"],
-  objects: ["furniture", "containers", "props", "lighting"],
+  objects: ["weapons", "furniture", "containers", "props", "lighting"],  // v5.35: weapons leads
   characters: ["characters", "animals", "creatures"],
 };
 let SUBCAT_TABS = { walls: "tiles", floors: "tiles", doors: "tiles",
   roofs: "tiles", materials: "tiles", natural: "tiles",
+  weapons: "objects",  // v5.35: Phase 2
   furniture: "objects", containers: "objects", props: "objects",
   lighting: "objects", other: "objects",
   characters: "characters", animals: "characters", creatures: "characters" };
 let SUBCAT_LABEL = { walls: "Walls", floors: "Floors", doors: "Doors",
   roofs: "Roofs", materials: "Materials", natural: "Natural",
+  weapons: "Weapons",  // v5.35: Phase 2
   furniture: "Furniture", containers: "Containers", props: "Props",
   lighting: "Lighting", characters: "Characters", animals: "Animals",
   creatures: "Creatures", other: "Other" };
@@ -7205,6 +7483,7 @@ async function melodyDemo() {
     $("portal-biome").value = "dungeon";
     splashStep(28, "Loading recipes\u2026");
     await loadTaxonomy();   // v5.29: the server's one routing table (Law 15)
+    loadTileTraits();       // v5.35: Phase 2 — per-tile-type traits (async, no block)
     const p = await api("/api/palette");
     palette = p.tiles;
     splashStep(42, "Loading tiles\u2026");

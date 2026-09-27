@@ -5,6 +5,26 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.35.0 — 2026-09-27
+
+**Phase 2: the morphing selection-aware Tools panel.**
+- The right Tools tray now morphs into a traits editor for the current
+  selection — palette brush or a placed instance the select tool parked on.
+  Nothing selected: the tray shows exactly its old contents, unchanged.
+- Per-tile-type traits, server-side and vault-wide (`tile_traits.json` at
+  the vault root, Law 18 intact): weapons get damage, magic effect,
+  magic cost/tradeoff, combos, attack and sneak behavior; characters get
+  health, history/backstory, carry capacity and inventory; terrain gets
+  exact elevation; every kind gets collision/environment exceptions and a
+  "write your own rule" field.
+- Per-instance overrides ride on the object cell (`traits` key, merge-patched
+  through `/api/object-attrs`); resolution is instance > type > global.
+- The rules are real, not cosmetic: a wall typed "walkable" opens for
+  pathing (hidden doors), an "ethereal" walker patrols straight through
+  walls (ghosts) via ghost legs on `/api/patrol-paths`.
+- New **Weapons** chip leading the Objects group — seeded from the Gear
+  sheet's weapon-kind items and import name hints, never hardcoded ids.
+
 ## v5.31.0 — 2026-09-26
 
 Hardened Melody (both servers):

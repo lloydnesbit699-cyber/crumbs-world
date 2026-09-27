@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.34.0"
+APP_VERSION = "5.35.0"
 # v5.24: unique per process boot. After an update the server re-execs into
 # the new files; the page waits for a DIFFERENT instance id (plus the new
 # version) instead of mistaking the old process — still answering during
@@ -819,6 +819,7 @@ _VAULT_SCOPED = (
     "_patrols", "_patrol_seq",
     "_missions", "_mission_seq", "mission_run",
     "_items", "_item_seq", "_item_cells",
+    "_tile_traits",  # v5.35: Phase 2 — per-tile-type traits (vault-wide)
     "_npcs", "_npc_seq",
     "_hero_inv", "_gold", "_equipped", "_npc_near",
     "rules", "game_rules", "_game_seq",
@@ -912,6 +913,7 @@ def _vault_fresh_state(vault_id):
     g["_items"] = []
     g["_item_seq"] = {"next": 1}
     g["_item_cells"] = {}
+    g["_tile_traits"] = {}  # v5.35: Phase 2 — per-tile-type traits
     g["_npcs"] = []
     g["_npc_seq"] = {"next": 1}
     g["_hero_inv"] = []
@@ -963,6 +965,8 @@ def _vault_fresh_state(vault_id):
     _load_names(DEFAULT_SAVE)
     _load_missions(DEFAULT_SAVE)
     _load_items(DEFAULT_SAVE)
+    _load_tile_traits()       # v5.35: Phase 2 — per-tile-type traits
+    _seed_weapon_subcategory()  # v5.35: Phase 2 — Weapons chip from gear
     _load_npcs(DEFAULT_SAVE)
     _load_gear(DEFAULT_SAVE)
     _load_portals(DEFAULT_SAVE)  # v5.29: this map's pocket links (or none)
@@ -2276,6 +2280,87 @@ _npc_seq = {"next": 1}
 _hero_inv = []       # [{item, qty}] — this run's pack, stacking
 _gold = 25           # this run's coin
 
+# ---- v5.35: Phase 2 — per-tile-type traits ---------------------------------
+# Vault-wide (a sword is a sword on every map): str(tile_id) -> sanitized
+# traits dict. Lives in tile_traits.json at the vault root. Resolution
+# order everywhere: per-instance override > this > global default.
+_tile_traits = {}
+
+
+def _tile_traits_path():
+    return _vpath("tile_traits.json")
+
+
+def _load_tile_traits():
+    global _tile_traits
+    _tile_traits = {}
+    try:
+        p = _tile_traits_path()
+        if os.path.exists(p):
+            with open(p, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            if isinstance(d, dict):
+                for k, v in d.items():
+                    try:
+                        tid = int(k)
+                    except (TypeError, ValueError):
+                        continue
+                    clean = core.sanitize_traits(v)
+                    if clean:
+                        _tile_traits[str(tid)] = clean
+    except Exception as e:
+        print(f"[hud] tile traits load skipped: {e}")
+
+
+def _save_tile_traits():
+    try:
+        with open(_tile_traits_path(), "w", encoding="utf-8") as f:
+            json.dump(_tile_traits, f, ensure_ascii=False, indent=1)
+    except Exception as e:
+        print(f"[hud] tile traits save skipped: {e}")
+
+
+def _seed_weapon_subcategory():
+    """v5.35: Phase 2 — seed the Weapons chip from the Gear sheet. Every
+    weapon-kind item stamps its tile's subcategory to 'weapons', local
+    shelf only (never the shared library) and machine-assigned tiles only
+    (an explicit hand always wins). Idempotent. Never raises."""
+    try:
+        weapon_tids = set()
+        for it in _items:
+            if not isinstance(it, dict) or it.get("kind") != "weapon":
+                continue
+            try:
+                weapon_tids.add(int(it["tile_id"]))
+            except (TypeError, ValueError):
+                continue
+        if not weapon_tids:
+            return
+        changed = False
+        for entry in _custom_tiles:  # local shelf only
+            try:
+                tid = int(entry["id"])
+            except (TypeError, ValueError):
+                continue
+            if tid not in weapon_tids:
+                continue
+            if entry.get("subcategory") == "weapons":
+                continue
+            if entry.get("subcategory") and not entry.get("subcategory_auto"):
+                continue  # explicit hand wins
+            entry["subcategory"] = "weapons"
+            entry["subcategory_auto"] = True
+            t = assets.tiles.get(tid)
+            if t is not None:
+                t["subcategory"] = "weapons"
+            changed = True
+            print(f"[hud] weapons: '{entry.get('name')}' -> Weapons")
+        if changed:
+            _save_custom_registry("local")
+    except Exception as e:
+        print(f"[hud] weapon seed skipped: {e}")
+
+
 # ---- v5.29: pocket-map portals ---------------------------------------------
 # "x,y" -> {target, seed, biome, preset, width, height, label, return_xy}.
 # A portal links one cell to a pocket map (generated or hand-picked); the
@@ -3588,8 +3673,19 @@ SWIM_UNLOCKED = False
 
 
 def _tile_solid(tx, ty):
-    tile = assets.tiles.get(world.data[ty][tx])
-    return bool(tile and tile.get("properties", {}).get("solid"))
+    tid = world.data[ty][tx]
+    tile = assets.tiles.get(tid)
+    base = bool(tile and tile.get("properties", {}).get("solid"))
+    # v5.35: Phase 2 — per-tile-type collision trait. "walkable" opens the
+    # tile (a hidden door in a wall); "solid" closes it. "default"/missing
+    # keeps the tile's own preset flag. Resolution: type trait > global.
+    # (Per-instance overrides ride on walkers — see patrol ghost legs.)
+    c = _tile_traits.get(str(tid), {}).get("collision")
+    if c == "walkable":
+        return False
+    if c == "solid":
+        return True
+    return base
 
 
 def _walkable(tx, ty):
@@ -4969,6 +5065,11 @@ class Handler(BaseHTTPRequestHandler):
             # and refreshes its local copy, so tabs/chips/labels can never
             # drift apart again.
             self._send_json({"ok": True, "taxonomy": core.taxonomy_table()})
+        elif path == "/api/tile-traits":
+            # v5.35: Phase 2 — per-tile-type traits (vault-wide). The client
+            # caches this at boot; the morphing Tools panel edits through
+            # POST below. Law 18: the file lives at this vault's root.
+            self._send_json({"ok": True, "traits": _tile_traits})
         elif path == "/api/custom-tiles":
             # v3.0: imported tiles with animation metadata
             # v3.8: both shelves — shared first, then this device's
@@ -6643,15 +6744,22 @@ class Handler(BaseHTTPRequestHandler):
             # v3.4: {legs: [[[x1,y1],[x2,y2]], ...]} -> {paths: [[[x,y],...]]}.
             # NPC legs ride the same Dijkstra the hero uses (walls avoided,
             # water swimmable).
+            # v5.35: Phase 2 — a leg may carry a ghost flag as a third
+            # element ([from, to, 1]): an ethereal walker's legs path straight
+            # through walls, like the builder noclip rule. The client sets it
+            # from the anchor's resolved collision trait (instance > type).
             legs = body.get("legs", [])
             if not isinstance(legs, list) or len(legs) > 64:
                 return self._send_json({"ok": False, "error": "bad legs"}, 400)
             paths = []
             for leg in legs:
                 try:
-                    (x1, y1), (x2, y2) = leg
-                    cells, _swim, _deep = _find_path(int(x1), int(y1), int(x2), int(y2))
-                except (TypeError, ValueError):
+                    (x1, y1), (x2, y2) = leg[0], leg[1]
+                    ghost = len(leg) > 2 and bool(leg[2])
+                    cells, _swim, _deep = _find_path(int(x1), int(y1),
+                                                    int(x2), int(y2),
+                                                    ghost=ghost)
+                except (TypeError, ValueError, IndexError):
                     cells = []
                 paths.append([list(c) for c in cells])
             return self._send_json({"ok": True, "paths": paths})
@@ -6738,6 +6846,24 @@ class Handler(BaseHTTPRequestHandler):
             if note:  # v5.29: guardrail correction — the client toasts this
                 resp["note"] = note
             return self._send_json(resp)
+
+        if path == "/api/tile-traits":
+            # v5.35: Phase 2 — {tile_id, traits} writes this vault's
+            # per-tile-type traits. Sanitized through core.sanitize_traits;
+            # an empty result erases the entry (back to global defaults).
+            # Works for sprite tiles and custom tiles alike.
+            try:
+                tid = int(body.get("tile_id"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "bad tile_id"}, 400)
+            clean = core.sanitize_traits(body.get("traits"))
+            if clean:
+                _tile_traits[str(tid)] = clean
+            else:
+                _tile_traits.pop(str(tid), None)
+            _save_tile_traits()
+            return self._send_json({"ok": True,
+                                    "traits": _tile_traits.get(str(tid), {})})
 
         if path == "/api/custom/share":
             # v3.8: move an imported tile between shelves — {id, scope}.
@@ -7629,8 +7755,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/object-attrs":
             # v5.29: merge-patch per-instance attributes on one placed
             # object — {x, y, attrs: {size?, hero?, flavor?, interactive?,
-            # role?}}. Unknown keys are dropped, values validated; the cell
-            # is REPLACED (never mutated) so undo snapshots stay exact.
+            # role?, traits?}}. Unknown keys are dropped, values validated;
+            # the cell is REPLACED (never mutated) so undo snapshots stay
+            # exact. v5.35: Phase 2 — traits carry the per-instance overrides.
             if play["active"]:
                 return self._send_json({"ok": False,
                                         "error": "leave play mode first"}, 400)

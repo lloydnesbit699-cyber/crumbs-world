@@ -409,6 +409,11 @@ SUBCATEGORY_HINTS = [
                     "shelf", "throne", "bench", "cabinet", "dresser"]),
     ("containers", ["chest", "barrel", "crate", "box", "sack", "pot", "urn",
                     "coffer", "basket"]),
+    # v5.35: Phase 2 — dedicated weapons category, seeded from the Gear
+    # sheet's weapon-kind items and from name hints on import.
+    ("weapons",    ["sword", "axe", "bow", "dagger", "spear", "blade",
+                    "mace", "staff", "wand", "knife", "shield",
+                    "crossbow", "sling", "hammer"]),
     ("walls",      ["wall"]),
     ("floors",     ["floor"]),
     ("doors",      ["door", "gate", "portal"]),
@@ -443,7 +448,8 @@ CREATURE_HINTS = ["goblin", "orc", "imp", "skeleton", "zombie", "dragon",
 # Law 11: no dead buttons, so empty groups never render a chip).
 SUBCATEGORY_ORDER = {
     "tiles": ["walls", "floors", "doors", "roofs", "materials", "natural"],
-    "objects": ["furniture", "containers", "props", "lighting"],
+    # v5.35: Phase 2 — dedicated weapons category, first in Objects.
+    "objects": ["weapons", "furniture", "containers", "props", "lighting"],
     # v5.29: animals get their own chip — characters / animals / creatures
     # are distinct (Lloyd's feedback item 4).
     "characters": ["characters", "animals", "creatures"],
@@ -500,6 +506,7 @@ SUBCATEGORY_TABS = {
     "roofs": "tiles", "materials": "tiles", "natural": "tiles",
     "furniture": "objects", "containers": "objects", "props": "objects",
     "lighting": "objects", "other": "objects",
+    "weapons": "objects",  # v5.35: Phase 2 — the weapons category
     # v5.29: animals share the characters tab (characters / animals /
     # creatures are chips, not tabs — Lloyd's feedback item 4).
     "characters": "characters", "animals": "characters",
@@ -513,6 +520,7 @@ SUBCATEGORY_LABELS = {
     "furniture": "Furniture", "containers": "Containers", "props": "Props",
     "lighting": "Lighting", "characters": "Characters", "animals": "Animals",
     "creatures": "Creatures", "other": "Other",
+    "weapons": "Weapons",  # v5.35: Phase 2
 }
 def tab_for_subcategory(sub):
     """v5.26: which palette tab a subcategory belongs to. Never raises,
@@ -594,7 +602,11 @@ OBJ_ROLES = ("none", "enemy", "mentor")   # "insert" roles: the defined,
                                           # non-hack way an object acts
 OBJ_FLAVORS = ("world", "decor")          # world = natural, decor = made
 OBJ_DEFAULTS = {"size": 1.0, "hero": False, "flavor": None,
-                "interactive": True, "role": "none"}
+                "interactive": True, "role": "none",
+                # v5.35: Phase 2 — per-instance trait overrides
+                # ({damage?, magic?, collision?, customRule?, ...}). Empty
+                # means "no overrides"; sanitized by sanitize_traits().
+                "traits": {}}
 
 
 def obj_tid(cell):
@@ -662,10 +674,81 @@ def obj_size(cell):
     return 1.0
 
 
+# v5.35: Phase 2 — the morphing Tools panel's trait vocabulary. One shared
+# list on both sides of the wire (the client mirrors these keys):
+#   weapon:    damage, magic, magicCost, combos, attack, sneak
+#   character: health, history, carry, inventory (+ name via /api/object-name)
+#   terrain:   elevation
+#   every kind: collision, environment, customRule
+# Resolution order everywhere: per-instance override > per-tile-type trait >
+# global default (the tile's own preset behavior).
+TRAIT_TEXT_KEYS = ("magic", "magicCost", "combos", "attack", "sneak",
+                   "history", "inventory", "environment", "customRule")
+TRAIT_NUM_KEYS = ("damage", "health", "carry", "elevation")
+TRAIT_COLLISION = ("default", "solid", "walkable", "ethereal")
+# collision semantics: tile types honor solid/walkable (a hidden door is a
+# wall typed walkable); walkers honor ethereal (a ghost passes through
+# walls). "default" is never stored — it means "no override".
+TRAIT_TEXT_MAX = 500
+
+
+def sanitize_traits(raw):
+    """Whitelist + validate a traits dict from the client. Unknown keys are
+    dropped, texts are trimmed + capped, numbers are clamped, collision must
+    be a known value ("default" counts as no override and isn't stored).
+    Returns a clean dict, possibly empty. Never raises."""
+    out = {}
+    try:
+        if not isinstance(raw, dict):
+            return out
+        for k in TRAIT_TEXT_KEYS:
+            v = raw.get(k)
+            if isinstance(v, str):
+                v = v.strip()
+                if v:
+                    out[k] = v[:TRAIT_TEXT_MAX]
+        for k in TRAIT_NUM_KEYS:
+            v = raw.get(k)
+            if isinstance(v, bool):
+                continue
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                continue
+            if k == "elevation":
+                f = max(-9, min(9, round(f)))
+            else:
+                f = max(0, min(9999, round(f)))
+            # whole numbers stay ints — cleaner in saves and on the wire
+            out[k] = int(f) if float(f).is_integer() else f
+        c = raw.get("collision")
+        if isinstance(c, str):
+            c = c.strip().lower()
+            if c in TRAIT_COLLISION and c != "default":
+                out["collision"] = c
+    except Exception:
+        pass
+    return out
+
+
+def resolve_trait(inst_traits, type_traits, key, default=None):
+    """v5.35: Phase 2 — one resolution order: per-instance override >
+    per-tile-type trait > global default. Blanks don't count as values."""
+    try:
+        for src in (inst_traits, type_traits):
+            if isinstance(src, dict):
+                v = src.get(key)
+                if v is not None and v != "":
+                    return v
+    except Exception:
+        pass
+    return default
+
+
 def make_obj_cell(tid, attrs=None):
     """Build the cell to stamp: bare int when everything is default, dict
-    otherwise. attrs may carry any of size/hero/flavor/interactive/role.
-    Unknown keys are dropped; values are validated. Never raises."""
+    otherwise. attrs may carry any of size/hero/flavor/interactive/role/
+    traits. Unknown keys are dropped; values are validated. Never raises."""
     tid = tid if isinstance(tid, int) else None
     if tid is None:
         return None
@@ -683,6 +766,10 @@ def make_obj_cell(tid, attrs=None):
             cell["interactive"] = False
         if a.get("role") in OBJ_ROLES and a["role"] != "none":
             cell["role"] = a["role"]
+        # v5.35: Phase 2 — per-instance trait overrides, sanitized.
+        tr = sanitize_traits(a.get("traits"))
+        if tr:
+            cell["traits"] = tr
     except Exception:
         pass
     if len(cell) == 1:

@@ -5,6 +5,30 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.47.2 — 2026-09-27
+
+**Boot black-map fix + last map per player.** v5.47.1 shipped a boot-killing
+`ReferenceError`: the new `peekInfo()` (bottom-sheet peek line) read
+`semLayer`, a variable that was never declared anywhere. Every launch died
+inside `initHudSheet()` → `renderSheet()` → `peekInfo()`, so `refresh()`
+never ran — the map canvas stayed blank over the near-black `#stage` and the
+budget strip kept its placeholders. The peek line now reads the dock's real
+layer, `logicalLayer`. Also at boot: the budget strip (always visible since
+v5.47) is populated via `refreshBudget()` instead of showing dashes until the
+first undo/paint.
+
+Lloyd's other ask: **the map you were on comes back on login/reload.** The
+current map file is remembered per player in localStorage
+(`crumbs.lastMap.<username>`, `"local"` in single-user mode — Repair Law 18:
+one player's key never steers another's vault), updated on every map switch,
+portal enter/warp, save, and Save As. At boot — after auth, before the first
+refresh — the stored map is reloaded; a stored name that no longer exists is
+forgotten and the default `hud_map.json` keeps the previous behavior. New
+regression tests: `lastmap_test.js` (23 checks: the `semLayer`
+ReferenceError, per-user key isolation, stale-map fallback, boot wiring).
+Full boot verified end-to-end against the live server (map paints, canvas
+sized, zero console errors).
+
 ## v5.47.1 — 2026-09-27
 
 **Melody's animation suggestions.** The ghost-suggestion system grows a third

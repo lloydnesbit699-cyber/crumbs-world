@@ -9705,15 +9705,43 @@ function setFile(name) {
 }
 async function doSave() {
   const r = await api("/api/save", { filename: currentFile });
-  if (r.ok) { setFile(r.file); toast("saved " + r.file); pollStatus(); Sfx.save(); }
+  if (r.ok) { setFile(r.file); rememberLastMap(r.file); toast("saved " + r.file); pollStatus(); Sfx.save(); }
   else { toast("save failed"); Sfx.error(); }
 }
 async function doSaveAs() {
   const name = prompt("Save map as\u2026", currentFile);
   if (name === null) return;   // cancelled
   const r = await api("/api/save", { filename: name.trim() || currentFile });
-  if (r.ok) { setFile(r.file); toast("saved " + r.file); pollStatus(); }
+  if (r.ok) { setFile(r.file); rememberLastMap(r.file); toast("saved " + r.file); pollStatus(); }
   else toast("save failed");
+}
+// ---- v5.47.2: last map per player ------------------------------------------
+// Lloyd's call: the map he was on comes back on login / reload. Stored in
+// localStorage keyed by username (Repair Law 18 — one player's key never
+// steers another player's vault); "local" for single-user local mode. A
+// stored name that no longer loads is forgotten and the default wins.
+function lastMapKey() {
+  const u = (typeof ME !== "undefined" && ME && ME.username) ? ME.username : "local";
+  return "crumbs.lastMap." + u;
+}
+function rememberLastMap(file) {
+  if (!file) return;
+  try { localStorage.setItem(lastMapKey(), file); } catch (e) {}
+}
+function forgetLastMap() {
+  try { localStorage.removeItem(lastMapKey()); } catch (e) {}
+}
+async function restoreLastMap() {
+  // after authGate (ME known), before the first refresh: switch the server
+  // to the stored map so refresh() paints it. Miss → forget, keep default.
+  let file = null;
+  try { file = localStorage.getItem(lastMapKey()); } catch (e) {}
+  if (!file || file === currentFile) return;
+  try {
+    const r = await api("/api/load", { filename: file });
+    if (r && r.ok) currentFile = file;
+    else forgetLastMap();
+  } catch (e) { forgetLastMap(); }
 }
 // v5.29: map loading is atomic — one veil, cache invalidation up front, one
 // refresh. The old "warp" was render() running between /api/load and the
@@ -9758,6 +9786,7 @@ async function loadMapFile(file) {
     const r = await api("/api/load", { filename: file });
     if (!r.ok) throw new Error(r.error || "load failed");
     await reloadMapView(file);
+    rememberLastMap(file);
     toast("loaded " + file);
   } catch (e) { toast("load failed: " + (e.message || e)); Sfx.error(); }
   endMapSwitch();
@@ -9773,6 +9802,7 @@ async function enterPortal(file, x, y) {
     const r = await api("/api/portals/enter", { x, y });
     if (!r.ok) throw new Error(r.error || "enter failed");
     await reloadMapView(r.file);
+    rememberLastMap(r.file);
     toast("entered " + r.file);
   } catch (e) { toast("enter failed: " + (e.message || e)); Sfx.error(); }
   endMapSwitch();
@@ -9784,6 +9814,7 @@ async function warpRefresh(r) {
   showVeil("Entering " + friendlyName(r.warp.file) + "…");
   try {
     await reloadMapView(r.warp.file);
+    rememberLastMap(r.warp.file);
     hero = { x: r.x, y: r.y };
     heroSwimming = false; heroInDeep = false;
     npcs = []; await buildNpcs();   // the pocket has its own cast
@@ -11551,7 +11582,9 @@ function driveSheetView(over) {
 }
 function peekInfo() {
   if (sheetView === "paint")
-    return ((SEM_LAYER_DEFS[semLayer] || {}).name || "ground") + " · " + (brushTool || "brush");
+    // v5.47.2: was `semLayer` — never declared, so every boot died here
+    // with a ReferenceError (black map). The dock's layer is `logicalLayer`.
+    return ((SEM_LAYER_DEFS[logicalLayer] || {}).name || logicalLayer || "ground") + " · " + (brushTool || "brush");
   if (sheetView === "tiles")
     return selTile != null ? tileLabel(selTile) : "pick a tile";
   if (sheetView === "inspect")
@@ -12147,8 +12180,10 @@ async function placeRoomPreset(kind) {
     };
     selTile = defaultBrush(layer); selByLayer[layer] = selTile;   // v3.1: first dungeon color, not tile #0
     buildPalette();
+    await restoreLastMap();   // v5.47.2: this player's last map comes back (miss → default)
     setFile(currentFile);
     await refresh();
+    refreshBudget();          // v5.47.2: the strip is always visible — fill it at boot
     await refreshRules();   // v4.3: RULES.touch known before first D-pad sync
     applyUiClean(); syncMenuDpad();
     loadUiPrefs(); applyUiClean(); applyPanelPrefs();   // v5.29: per-player UI prefs (ME known now)

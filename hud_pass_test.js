@@ -199,8 +199,8 @@ check("room preset buttons exist", html.includes('id="btn-room"') &&
   html.includes('id="btn-arena"'));
 check("batch stroke endpoint used", hud.includes('"/api/semantic/stroke"') &&
   hud.includes('"strokes"'));
-check("server version bumped", hud.includes('APP_VERSION = "5.47.1"'));
-check("changelog has 5.47.1", changelog.includes("5.47.1"));
+check("server version bumped", hud.includes('APP_VERSION = "5.47.2"'));
+check("changelog has 5.47.2", changelog.includes("5.47.2"));
 
 console.log("== animation ghost (v5.47.1) ==");
 // stubs for the ghost lifecycle: the merge is real, the plumbing is fake

@@ -617,7 +617,6 @@
   #import-speed { font-size: 12px; color: #999; margin-bottom: 8px; }
   #import-speed input { width: 70px; }
   /* v3.3: one-button animation + custom tile manager */
-  #import-animate { background: #3a2b5c; border-color: #8a6dd7; margin-top: 8px; }
   /* v5.39: background-removal status — one row per import needing attention */
   #import-bgstatus { margin: 6px 0; font-size: 12px; }
   #import-bgstatus[hidden] { display: none; }
@@ -976,7 +975,6 @@
       <button data-v="shared" title="Published to the shared library — everyone gets it">Shared with everyone</button>
     </div>
     <div id="import-speed" hidden>frame <input id="import-ms" type="number" value="400" min="80" max="2000" step="40"> ms</div>
-    <button id="import-animate" class="widebtn" hidden>✨ Bring to life</button>
     <div class="row2">
       <button id="import-add">Add tile</button>
       <button id="import-cancel" class="ghost">Cancel</button>
@@ -6005,7 +6003,6 @@ $("import-files").onchange = async e => {
   refreshImportPreviews();
   renderBgStatus();
   $("import-speed").hidden = !importFiles.length;
-  $("import-animate").hidden = importFiles.length !== 1;   // v3.3: one-button animation
   buildImportPresets();
 };
 $("import-cancel").onclick = () => { $("import-form").hidden = true; importFiles = []; renderBgStatus(); };
@@ -6039,7 +6036,8 @@ async function bringToLife() {
     ? "Found " + r.frames + " poses — he's alive! Tap the map to place him"
     : "One picture, no problem — I made him walk! Tap the map to place him");
 }
-$("import-animate").onclick = bringToLife;
+// v5.40.1: the import-block duplicate is gone — the Animation menu's
+// beginner button is the one home for Bring to life.
 $("menu-animate-life").onclick = () => { closeOverlays(); bringToLife(); };
 // v5.37: the animator's one home — beginner/advanced toggle in the Animation
 // menu, and the live tray preview up top of the Tiles tray.

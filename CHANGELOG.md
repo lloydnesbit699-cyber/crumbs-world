@@ -5,6 +5,23 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.40.1 — 2026-09-27
+
+**Removed the duplicate Bring-to-life button from the import block.**
+The v5.37.0 redesign made the top Animation menu the animator's one home,
+but a leftover `#import-animate` button (same handler) stayed behind in the
+import block. It's gone now — CSS rule, element, and both JS references
+removed; the Animation menu's beginner button is the only path and still
+shares the same `bringToLife()` handler. Import block keeps: file picker,
+previews, background-removal row, frame-timing row, name, presets, scope,
+Add/Cancel. No behavior change.
+
+**Map size verification (no change):** the enforced maximum is **64×64
+tiles** — client resize dialog (`max="64"`), `/api/resize` server clamp,
+and the generate/pocket-map endpoint all agree. Resize dialog defaults to
+25×15; the generate endpoint defaults to 16×16. No "148" exists anywhere
+in the code; changing the limit is Lloyd's call.
+
 ## v5.40.0 — 2026-09-27
 
 **Patrol stop pauses with user-settable timers (stand/sleep) + pause-to-interact.**

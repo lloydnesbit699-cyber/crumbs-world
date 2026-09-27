@@ -36,6 +36,11 @@
 #                                  Shows the local commits, asks for REPAIR,
 #                                  then resets hard to origin/main and
 #                                  restarts. The "un-wedge" for a bad pull.
+#   ./ops.sh advise              — git status in plain English: shows what's
+#                                  changed, ahead/behind, stashed, and how the
+#                                  server looks, then offers a numbered menu
+#                                  of the right next actions (stash, update,
+#                                  commit, repair…).
 #
 set -u
 
@@ -108,6 +113,12 @@ do_start() {
   fi
 }
 
+live_version() {
+  # Extracted from do_status so advise can reuse the same check.
+  curl -s -m 5 "http://127.0.0.1:${PORT}/api/melody/health" \
+    2>/dev/null | grep -o '"version": *"[^"]*"' | head -1 | cut -d'"' -f4 || true
+}
+
 do_status() {
   local pids health
   pids="$(server_pids)"
@@ -115,8 +126,7 @@ do_status() {
     echo "server: STOPPED   code version: $(code_version)"
     return 0
   fi
-  health="$(curl -s -m 5 "http://127.0.0.1:${PORT}/api/melody/health" \
-    2>/dev/null | grep -o '"version": *"[^"]*"' | head -1 | cut -d'"' -f4 || true)"
+  health="$(live_version)"
   echo "server: RUNNING (PID $pids) port $PORT  code $(code_version)${health:+  live $health}"
 }
 
@@ -129,7 +139,7 @@ unstage_secrets() {
   # Never let secret files sit staged: a later commit would publish them
   # to GitHub. (A stuck rebase once staged .crumbs_secret — this is the
   # guardrail so it can never ride along again.)
-  local f staged
+  local f staged bad
   staged="$(git diff --cached --name-only 2>/dev/null || true)"
   for f in .crumbs_secret users.json; do
     if printf '%s\n' "$staged" | grep -qx "$f"; then
@@ -137,6 +147,14 @@ unstage_secrets() {
       git reset -q HEAD -- "$f" 2>/dev/null || true
     fi
   done
+  # Same for the data dirs (vaults/, backups/): they're gitignored, but a
+  # forced add or a stale index entry could still stage them, so sweep
+  # any staged path under them too.
+  bad="$(printf '%s\n' "$staged" | grep -E '^(vaults|backups)/' || true)"
+  if [ -n "$bad" ]; then
+    say "!! data files were staged — unstaging them (they must never be committed)"
+    printf '%s\n' "$bad" | xargs git reset -q HEAD -- 2>/dev/null || true
+  fi
 }
 
 check_divergence() {
@@ -146,7 +164,7 @@ check_divergence() {
   ahead="$(local_ahead)"
   if [ "$ahead" = 0 ]; then return 0; fi
   echo "!! branch has diverged: $ahead local commit(s) not on origin/$BRANCH:"
-  git log --oneline "origin/$BRANCH..HEAD" 2>/dev/null || true
+  git --no-pager log --oneline "origin/$BRANCH..HEAD" 2>/dev/null || true
   echo "!! These are Replit's publish checkpoints fighting GitHub's main."
   echo "!! Your real work is safe — it lives in the commits Wren pushed."
   printf "Type REPAIR to drop them and continue the update: "
@@ -251,7 +269,7 @@ do_repair() {
   fi
   behind="$(git rev-list --count "HEAD..origin/$BRANCH" 2>/dev/null || echo 0)"
   echo "!! $ahead local commit(s) to drop, $behind commit(s) behind origin/$BRANCH:"
-  git log --oneline "origin/$BRANCH..HEAD" 2>/dev/null || true
+  git --no-pager log --oneline "origin/$BRANCH..HEAD" 2>/dev/null || true
   echo "!! These are Replit's publish checkpoints fighting GitHub's main."
   echo "!! Your real work is safe — it lives in the commits Wren pushed."
   printf "Type REPAIR to drop the local commits and sync: "
@@ -342,6 +360,188 @@ do_rollback() {
 }
 # ---- end backup protocol ---------------------------------------------------
 
+# ---- advise: git status in plain English + a numbered menu ----------------
+do_push() {
+  say "pushing to origin/$BRANCH"
+  git push "origin" "$BRANCH" || die "push failed — check network/access"
+  say "pushed"
+}
+
+do_commit() {
+  local msg=""
+  printf "commit message (one line): "
+  read -r msg || true
+  [ -n "$msg" ] || die "cancelled — nothing changed"
+  git add -A
+  unstage_secrets  # secrets + data dirs can never ride along
+  if [ -z "$(git diff --cached --name-only 2>/dev/null)" ]; then
+    say "nothing to commit — only secrets/data changed, and those never commit"
+    return 0
+  fi
+  git commit -q -m "$msg" || die "commit failed"
+  say "committed: $(git log --oneline -1)"
+}
+
+do_discard() {
+  local ans=""
+  echo "!! This THROWS AWAY every local change — edited files AND new (untracked) files."
+  printf "Type DISCARD to continue: "
+  read -r ans || true
+  [ "$ans" = "DISCARD" ] || die "cancelled — nothing changed"
+  git reset -q --hard HEAD
+  git clean -fdq
+  unstage_secrets
+  say "local changes discarded"
+}
+
+do_drop_stash() {
+  local top ans=""
+  top="$(git stash list | head -1)"
+  [ -n "$top" ] || { say "no stashes"; return 0; }
+  echo "!! This PERMANENTLY deletes the newest stash: $top"
+  printf "Type DROP to continue: "
+  read -r ans || true
+  [ "$ans" = "DROP" ] || die "cancelled — nothing changed"
+  git stash drop -q || die "drop failed"
+  say "stash dropped"
+}
+
+do_advise() {
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+    || die "not a git repo — run this from the repo root"
+  local fetched=1
+  say "advise: checking..."
+  git fetch origin >/dev/null 2>&1 \
+    || { fetched=0; say "!! fetch failed (offline?) — advising from local info only"; }
+
+  while true; do
+    # ---- diagnose (read-only) ----
+    local porcelain n_modified n_untracked n_deleted names line
+    porcelain="$(git status --porcelain 2>/dev/null || true)"
+    n_modified=0; n_untracked=0; n_deleted=0
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      case "$line" in
+        '??'*) n_untracked=$((n_untracked + 1)) ;;
+        ?D*|D?*) n_deleted=$((n_deleted + 1)) ;;
+        *)     n_modified=$((n_modified + 1)) ;;
+      esac
+    done <<< "$porcelain"
+    names="$(printf '%s\n' "$porcelain" | cut -c4- | head -6 | tr '\n' ' ')"
+
+    local ahead=0 behind=0 counts
+    if [ "$fetched" = 1 ] \
+       && git rev-parse --verify "origin/$BRANCH" >/dev/null 2>&1; then
+      counts="$(git rev-list --left-right --count "HEAD...origin/$BRANCH" 2>/dev/null || printf '0\t0')"
+      ahead="${counts%%$'\t'*}"; behind="${counts##*$'\t'}"
+    fi
+
+    local n_stash pids code live dirty
+    n_stash="$(git stash list 2>/dev/null | wc -l | tr -d ' ')"
+    pids="$(server_pids)"
+    code="$(code_version)"
+    live=""
+    [ -n "$pids" ] && live="$(live_version)"
+    dirty=0
+    [ "$((n_modified + n_untracked + n_deleted))" != 0 ] && dirty=1
+
+    # ---- summarize ----
+    echo "---"
+    if [ "$dirty" = 1 ]; then
+      echo "worktree: $n_modified modified, $n_untracked untracked, $n_deleted deleted"
+      [ -n "$names" ] && echo "  $names"
+    else
+      echo "worktree: clean"
+    fi
+    if [ "$fetched" = 0 ]; then
+      echo "branch: unknown (fetch failed)"
+    elif [ "$ahead" != 0 ] && [ "$behind" != 0 ]; then
+      echo "branch: DIVERGED — ahead $ahead, behind $behind"
+    elif [ "$ahead" != 0 ]; then
+      echo "branch: ahead of origin/$BRANCH by $ahead"
+    elif [ "$behind" != 0 ]; then
+      echo "branch: behind origin/$BRANCH by $behind"
+    else
+      echo "branch: in sync with origin/$BRANCH"
+    fi
+    if [ "$n_stash" = 0 ]; then echo "stash: none"; else echo "stash: $n_stash saved"; fi
+    if [ -z "$pids" ]; then
+      echo "server: STOPPED (code $code)"
+    elif [ -n "$live" ] && [ "$code" != "$live" ]; then
+      echo "server: RUNNING, but code $code != live $live"
+    else
+      echo "server: RUNNING, code $code${live:+, live $live}"
+    fi
+    echo "---"
+
+    # ---- numbered menu: only what fits the current state ----
+    local labels=() actions=()
+    if [ "$dirty" = 1 ]; then
+      labels+=("stash my changes");              actions+=(stash)
+      labels+=("update: stash + pull + restart"); actions+=(update)
+      labels+=("commit my changes");             actions+=(commit)
+      labels+=("DISCARD all local changes");     actions+=(discard)
+    fi
+    if [ "$ahead" != 0 ] && [ "$behind" != 0 ]; then
+      labels+=("repair diverged branch");        actions+=(repair)
+    elif [ "$ahead" != 0 ]; then
+      labels+=("push to origin/$BRANCH");        actions+=(push)
+    elif [ "$behind" != 0 ]; then
+      labels+=("update: pull + restart");        actions+=(update)
+    fi
+    if [ "$n_stash" != 0 ]; then
+      labels+=("pop the newest stash");          actions+=(pop)
+      labels+=("list stashes");                 actions+=(list)
+      labels+=("DROP the newest stash");        actions+=(drop)
+    fi
+    if [ -z "$pids" ]; then
+      labels+=("start the server");              actions+=(start)
+    elif [ -n "$live" ] && [ "$code" != "$live" ]; then
+      labels+=("restart (code $code, live $live)"); actions+=(restart)
+    fi
+    if [ "${#labels[@]}" = 0 ]; then
+      echo "all good — nothing needs doing."
+      labels+=("show server log");               actions+=(logs)
+    fi
+
+    local i pick=""
+    for i in "${!labels[@]}"; do
+      printf "  %d) %s\n" "$((i + 1))" "${labels[$i]}"
+    done
+    printf "  0) nothing — quit\n"
+    if [ ! -t 0 ]; then
+      say "not a terminal — run ./ops.sh advise on the shell to pick an action"
+      return 0
+    fi
+    printf "pick a number: "
+    if ! read -r pick; then echo; say "bye"; return 0; fi
+    case "$pick" in
+      0) say "nothing changed"; return 0 ;;
+      ''|*[!0-9]*) echo "not a number — try again"; continue ;;
+    esac
+    if [ "$pick" -lt 1 ] || [ "$pick" -gt "${#labels[@]}" ]; then
+      echo "pick 0–${#labels[@]}"; continue
+    fi
+    case "${actions[$((pick - 1))]}" in
+      stash)   do_stash ;;
+      update)  do_update ;;
+      commit)  do_commit ;;
+      discard) do_discard ;;
+      push)    do_push ;;
+      repair)  do_repair ;;
+      pop)     do_stash_pop ;;
+      list)    do_stash_list ;;
+      drop)    do_drop_stash ;;
+      start)   do_start ;;
+      restart) do_stop; do_start ;;
+      logs)    do_logs ;;
+    esac
+    echo ""
+    # loop: re-diagnose so the menu always matches the new state
+  done
+}
+# ---- end advise ------------------------------------------------------------
+
 do_stash_pop() { git stash pop; }
 do_stash_list() { git stash list; }
 do_logs() {
@@ -364,6 +564,7 @@ case "$cmd" in
   backup)     do_backup ;;
   rollback)   do_rollback ;;
   repair)     do_repair ;;
-  help|--help|-h) sed -n '2,24p' "$0" ;;
+  advise)     do_advise ;;
+  help|--help|-h) sed -n '2,44p' "$0" ;;
   *) die "unknown command: $cmd  (try: ./ops.sh help)" ;;
 esac

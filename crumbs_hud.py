@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.38.1"
+APP_VERSION = "5.39.0"
 # v5.24: unique per process boot. After an update the server re-execs into
 # the new files; the page waits for a DIFFERENT instance id (plus the new
 # version) instead of mistaking the old process — still answering during
@@ -1549,6 +1549,40 @@ def _register_custom_tile(entry, tile_dir):
     else:
         assets.tiles[tid]["properties"]["deep"] = False
     return True
+
+
+# -- v5.39: Melody background-removal hook -------------------------------------
+# melody_agent's remove_background tool is disk-only (her endpoints skip the
+# vault lock, v5.28 — the agent never touches game globals). After she
+# rewrites a tile's PNGs, this refreshes the game's in-memory art under the
+# lock, so the map shows the cut immediately instead of after a vault
+# switch or restart. Switching the active vault here is safe: every /api/*
+# request re-activates its own vault under the same lock before touching
+# globals, and this hook holds the lock while it works.
+def _melody_bg_refresh(username, tid):
+    """Re-register one custom tile's art from disk. Best-effort."""
+    try:
+        tid = int(tid)
+    except (TypeError, ValueError):
+        return
+    try:
+        with _vault_lock:
+            if PUBLIC_MODE:
+                vid = _vault_id_for(username)
+                if not vid:
+                    return
+                _vault_activate(vid)
+            # local mode: the single vault's globals are already live
+            entry, scope = _find_custom(tid)
+            if entry is None or scope != "local":
+                return
+            _register_custom_tile(entry, _custom_dir())
+    except Exception as e:
+        print(f"[melody] bg refresh failed: {e}")
+
+
+if _melody_agent is not None:
+    _melody_agent._BG_APPLIED_HOOK = _melody_bg_refresh
 
 
 _shared_shelf_done = False  # v5.27: the shipped shelf registers once per process

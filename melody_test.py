@@ -309,5 +309,99 @@ if _saved_groq_key is None:
 else:
     os.environ["GROQ_API_KEY"] = _saved_groq_key
 
+print("== v5.39 background removal (Melody-gated) ==")
+from PIL import Image as _TImage
+import random as _trandom
+
+
+def _timg(w, h, fn):
+    im = _TImage.new("RGBA", (w, h))
+    px = im.load()
+    for _y in range(h):
+        for _x in range(w):
+            px[_x, _y] = fn(_x, _y)
+    return im
+
+
+_TW = (255, 255, 255, 255)
+_TR = (200, 30, 30, 255)
+r = ma.bg_analyze(_timg(64, 64,
+    lambda x, y: _TR if (22 <= x < 42 and 22 <= y < 42) else _TW))
+check("bg: solid bg -> confident auto-apply", r["confident"], r["reason"])
+check("bg: fill fraction sane", 0.85 < r["fill_frac"] < 0.95,
+      f'{r["fill_frac"]:.3f}')
+out = ma.bg_apply(_timg(64, 64,
+    lambda x, y: _TR if (22 <= x < 42 and 22 <= y < 42) else _TW), r["mask"])
+check("bg: subject kept, bg cleared",
+      out.load()[30, 30][3] == 255 and out.load()[0, 0][3] == 0)
+_trandom.seed(7)
+r = ma.bg_analyze(_timg(64, 64, lambda x, y: (
+    _trandom.randrange(256), _trandom.randrange(256),
+    _trandom.randrange(256), 255)))
+check("bg: noise -> skip, never guess", not r["confident"], r["reason"])
+r = ma.bg_analyze(_timg(32, 32, lambda x, y: _TW))
+check("bg: all-background -> skip (no-subject)",
+      not r["confident"] and r["reason"] == "no-subject", r["reason"])
+_TG = (30, 180, 60, 255)
+r = ma.bg_analyze(_timg(64, 64, lambda x, y: _TG if (
+    (8 <= x < 18 and 8 <= y < 18) or
+    (46 <= x < 56 and 46 <= y < 56)) else _TW))
+check("bg: small sprites on big canvas still auto-apply",
+      r["confident"], f'{r["reason"]} fill={r["fill_frac"]:.3f}')
+r = ma.bg_analyze(_timg(64, 64, lambda x, y: (x * 4, y * 4, 128, 255)))
+check("bg: gradient -> skip", not r["confident"], r["reason"])
+check("bg: tool registered", "remove_background" in ma._KNOWN_TOOLS)
+names = [t["function"]["name"] for t in ma.TOOLS]
+check("bg: tool in TOOLS schema", "remove_background" in names)
+
+# the tool itself, against a scratch local-mode shelf
+tmp6 = fresh_dir()
+os.makedirs(os.path.join(tmp6, "custom_tiles"))
+art = _timg(64, 64,
+            lambda x, y: _TR if (22 <= x < 42 and 22 <= y < 42) else _TW)
+art.save(os.path.join(tmp6, "custom_tiles", "t1.png"))
+busy = _timg(64, 64, lambda x, y: (_trandom.randrange(256),
+                                  _trandom.randrange(256),
+                                  _trandom.randrange(256), 255))
+busy.save(os.path.join(tmp6, "custom_tiles", "t2.png"))
+with open(os.path.join(tmp6, "custom_tiles.json"), "w") as f:
+    json.dump([{"id": 101, "name": "pig", "files": ["t1.png"]},
+               {"id": 102, "name": "busy", "files": ["t2.png"]}], f)
+res = ma.tool_remove_background(tmp6, "local", "101")
+check("bg tool: applies on confident tile", "Done" in res and "pig" in res,
+      res[:80])
+px = _TImage.open(os.path.join(tmp6, "custom_tiles", "t1.png")).load()
+check("bg tool: PNG on disk actually cut",
+      px[0, 0][3] == 0 and px[30, 30][3] == 255)
+res = ma.tool_remove_background(tmp6, "local", "102")
+check("bg tool: declines ambiguous tile, art untouched",
+      "leaving it exactly as it is" in res, res[:80])
+px = _TImage.open(os.path.join(tmp6, "custom_tiles", "t2.png")).load()
+check("bg tool: declined tile's bytes unchanged", px[0, 0][3] == 255)
+res = ma.tool_remove_background(tmp6, "local", "999")
+check("bg tool: unknown tile id -> clear miss", "don't see" in res,
+      res[:80])
+res = ma.tool_remove_background(tmp6, "local", "abc")
+check("bg tool: bad tile id rejected", "need a tile id" in res, res[:60])
+res = ma.tool_remove_background(tmp6, "alice", "101")
+check("bg tool: other vault sees nothing (Law 18)",
+      "couldn't find your tile shelf" in res or "don't see" in res,
+      res[:80])
+res = ma.run_tool(tmp6, "local", "remove_background", {"tile_id": "101"})
+check("bg tool: second run declines cleanly (idempotent, nothing left)",
+      "leaving it exactly as it is" in res or "no background left" in res,
+      res[:80])
+# fresh tile for the dispatcher path
+art.save(os.path.join(tmp6, "custom_tiles", "t3.png"))
+with open(os.path.join(tmp6, "custom_tiles.json")) as f:
+    entries = json.load(f)
+entries.append({"id": 103, "name": "pig2", "files": ["t3.png"]})
+with open(os.path.join(tmp6, "custom_tiles.json"), "w") as f:
+    json.dump(entries, f)
+res = ma.run_tool(tmp6, "local", "remove_background", {"tile_id": "103"})
+check("bg tool: reachable via run_tool dispatcher", "Done" in res,
+      res[:60])
+shutil.rmtree(tmp6, ignore_errors=True)
+
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

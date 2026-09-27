@@ -5,6 +5,21 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.39.0 — 2026-09-27
+
+**Automatic background removal on import (Melody-gated).** Lloyd's rule in
+code: automatic when the subject is clear, never a guess when it isn't.
+Every imported picture now runs a corner/edge flood-fill with a conservative
+tolerance (4-connected, pixel-art-safe). Confident cuts apply themselves and
+offer an **Undo** that restores the exact original bytes; ambiguous pictures
+(noisy corners, dirty edges, all-background) are left untouched with a
+**Remove background** button instead. The same algorithm lives server-side
+in `melody_agent.py` as the `remove_background` tool, so Melody can cut the
+background of any of the player's own tiles on request — it declines on its
+own when it can't tell the subject from the background, and never touches
+the shared library. A refresh hook re-registers the tile's in-memory art
+under the vault lock so the cut shows immediately.
+
 ## v5.38.1 — 2026-09-27
 
 **Thumbnail privacy hardened.** The v5.27.3 lock-skipping race was fixed in

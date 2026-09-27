@@ -378,6 +378,237 @@ def tool_charter():
         return "The Charter isn't in this build."
 
 
+# -- v5.39: background removal -------------------------------------------------
+# The server-side twin of the import-time background remover in editor.html.
+# Same algorithm, same BG_* constants — the JS copy is the contract; keep
+# them in sync. Melody reaches it through the remove_background tool, and
+# the confidence rule is Lloyd's rule in code: automatic when the subject
+# is clear, never a guess when it isn't.
+BG_TOL = 32          # per-channel distance that still counts as "background"
+BG_ALPHA_MIN = 128   # below this a pixel is already transparent (skip it)
+BG_BORDER_MIN = 0.55  # auto-apply needs this much bg-colored border
+BG_FILL_MIN = 0.05    # below this there's nothing worth removing
+BG_KEEP_MIN = 0.005   # auto-apply needs this much opaque subject left
+# (deliberately no raw fill-fraction ceiling: a small sprite on a big
+# canvas legitimately clears 95%+ of its pixels.)
+
+try:
+    from PIL import Image as _PILImage
+    _PIL_OK = True
+except ImportError:  # pragma: no cover
+    _PILImage = None
+    _PIL_OK = False
+
+
+def _bg_ch_dist(a, b):
+    return max(abs(a[0] - b[0]), abs(a[1] - b[1]), abs(a[2] - b[2]))
+
+
+def bg_analyze(img):
+    """Flood-fill background analysis on a PIL RGBA image.
+
+    Returns dict(bg, border_frac, fill_frac, kept_frac, corners_agree,
+    confident, reason, mask) where mask[y][x] is 1 for "remove".
+    Pure function — no I/O, fully unit-testable.
+    """
+    img = img.convert("RGBA")
+    w, h = img.size
+    px = img.load()
+    n = w * h
+
+    def opa(x, y):
+        return px[x, y][3] >= BG_ALPHA_MIN
+
+    def rgb(x, y):
+        p = px[x, y]
+        return (p[0], p[1], p[2])
+
+    # 1. corner samples — opaque only; fewer than 2 means no bg to key on.
+    corners = [rgb(x, y) for x, y in
+               ((0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)) if opa(x, y)]
+    mask = [[0] * w for _ in range(h)]
+    if len(corners) < 2:
+        return {"confident": False, "reason": "no-clear-corners",
+                "mask": mask}
+    bg = tuple(round(sum(c[k] for c in corners) / len(corners))
+               for k in range(3))
+    corners_agree = all(_bg_ch_dist(c, bg) <= BG_TOL for c in corners)
+
+    # 2. border scan — how much of the edge looks like the background?
+    b_match = b_opq = 0
+    border = ([(x, 0) for x in range(w)] + [(x, h - 1) for x in range(w)] +
+              [(0, y) for y in range(1, h - 1)] +
+              [(w - 1, y) for y in range(1, h - 1)])
+    for x, y in border:
+        if not opa(x, y):
+            continue
+        b_opq += 1
+        if _bg_ch_dist(rgb(x, y), bg) <= BG_TOL:
+            b_match += 1
+    border_frac = (b_match / b_opq) if b_opq else 0.0
+
+    # 3. flood fill from every bg-colored border pixel, 4-connected
+    # (diagonals don't leak — pixel-art-safe).
+    def is_bg(x, y):
+        return opa(x, y) and _bg_ch_dist(rgb(x, y), bg) <= BG_TOL
+
+    stack = []
+    for x, y in border:
+        if not mask[y][x] and is_bg(x, y):
+            mask[y][x] = 1
+            stack.append((x, y))
+    filled = 0
+    while stack:
+        x, y = stack.pop()
+        filled += 1
+        if x > 0 and not mask[y][x - 1] and is_bg(x - 1, y):
+            mask[y][x - 1] = 1
+            stack.append((x - 1, y))
+        if x < w - 1 and not mask[y][x + 1] and is_bg(x + 1, y):
+            mask[y][x + 1] = 1
+            stack.append((x + 1, y))
+        if y > 0 and not mask[y - 1][x] and is_bg(x, y - 1):
+            mask[y - 1][x] = 1
+            stack.append((x, y - 1))
+        if y < h - 1 and not mask[y + 1][x] and is_bg(x, y + 1):
+            mask[y + 1][x] = 1
+            stack.append((x, y + 1))
+    fill_frac = filled / n
+    kept = sum(1 for y in range(h) for x in range(w)
+               if not mask[y][x] and opa(x, y))
+    kept_frac = kept / n
+
+    reason = "ok"
+    if not corners_agree:
+        reason = "corners-disagree"
+    elif border_frac < BG_BORDER_MIN:
+        reason = "border-dirty"
+    elif fill_frac < BG_FILL_MIN:
+        reason = "nothing-to-remove"
+    elif kept_frac < BG_KEEP_MIN:
+        reason = "no-subject"
+    return {"bg": bg, "border_frac": border_frac, "fill_frac": fill_frac,
+            "kept_frac": kept_frac, "corners_agree": corners_agree,
+            "confident": reason == "ok", "reason": reason, "mask": mask}
+
+
+def bg_apply(img, mask):
+    """Return a new PIL image with masked pixels made transparent."""
+    img = img.convert("RGBA")
+    out = img.copy()
+    opx = out.load()
+    for y in range(out.size[1]):
+        row = mask[y]
+        for x in range(out.size[0]):
+            if row[x]:
+                p = opx[x, y]
+                opx[x, y] = (p[0], p[1], p[2], 0)
+    return out
+
+
+# Hook crumbs_hud.py registers so the game refreshes a tile's in-memory art
+# after this tool rewrites its PNGs. Melody's endpoints skip the vault lock
+# (v5.28), so the hook — not the tool — owns locking and vault activation.
+_BG_APPLIED_HOOK = None
+
+
+def _bg_registry_paths(script_dir, username):
+    vdir = _player_vault_dir(script_dir, username)
+    return (os.path.join(vdir, "custom_tiles.json"),
+            os.path.join(vdir, "custom_tiles"))
+
+
+def tool_remove_background(script_dir, username, tile_id):
+    """Remove the background of one of the player's own custom tiles.
+
+    Disk-only and vault-scoped (Law 18): the tile id is the player's own
+    shelf only — never the shared library, never another vault. The
+    confidence rule mirrors the import flow: high confidence applies the
+    cut to every frame; low confidence declines without touching the art.
+    """
+    if not _PIL_OK:
+        return "I can't work with images in this build (no Pillow)."
+    try:
+        tid = int(str(tile_id).strip())
+    except (TypeError, ValueError):
+        return "I need a tile id number to work with."
+    try:
+        reg_path, tile_dir = _bg_registry_paths(script_dir, username)
+    except ValueError:
+        return "Bad session."
+    try:
+        with open(reg_path, encoding="utf-8") as f:
+            entries = json.load(f)
+    except (OSError, ValueError):
+        return "I couldn't find your tile shelf."
+    entry = None
+    for e in entries:
+        try:
+            if int(e.get("id")) == tid:
+                entry = e
+                break
+        except (TypeError, ValueError):
+            continue
+    if entry is None:
+        return (f"I don't see a tile with id {tid} on your shelf. "
+                "Shared-library tiles are everyone's — I won't alter those; "
+                "import your own copy first.")
+    files = entry.get("files") or []
+    if not files:
+        return f"Tile '{entry.get('name', tid)}' has no art files."
+    name = str(entry.get("name") or tid)[:24]
+    try:
+        first = _PILImage.open(os.path.join(tile_dir, files[0])).convert("RGBA")
+    except OSError:
+        return f"I couldn't read the art for '{name}'."
+    info = bg_analyze(first)
+    if not info["confident"]:
+        why = {
+            "no-clear-corners": "its corners don't agree on a background color",
+            "corners-disagree": "its corners don't agree on a background color",
+            "border-dirty": "too much of its edge isn't background",
+            "nothing-to-remove": "there's no background left to remove",
+            "no-subject": "it looks like it's all background — nothing to keep",
+        }.get(info["reason"], "I can't tell the subject from the background")
+        return (f"I'm not confident about '{name}' — {why} — so I'm leaving "
+                f"it exactly as it is rather than guessing. You can cut it "
+                f"by hand from the import area.")
+    # confident: cut every frame, atomic-replace each PNG.
+    cleared = 0
+    for fn in files:
+        p = os.path.join(tile_dir, fn)
+        try:
+            img = _PILImage.open(p).convert("RGBA")
+        except OSError:
+            continue
+        if (img.size[0], img.size[1]) == (first.size[0], first.size[1]):
+            m = info["mask"]
+        else:
+            m = bg_analyze(img)["mask"]
+        new = bg_apply(img, m)
+        cleared += sum(sum(row) for row in m)
+        tmp = p + ".bgnew"
+        try:
+            new.save(tmp, "PNG")
+            os.replace(tmp, p)
+        except OSError:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+    hook = _BG_APPLIED_HOOK
+    if callable(hook):
+        try:
+            hook(username, tid)
+        except Exception:
+            pass  # disk is already right; memory refresh is best-effort
+    pct = 100.0 * info["fill_frac"]
+    return (f"Done — background removed from '{name}' "
+            f"({cleared} pixels cleared, about {pct:.0f}% of the art). "
+            f"The original background is gone, so this one's permanent; "
+            f"re-import the picture if you ever want it back.")
+
+
 TOOLS = [
     {"type": "function", "function": {
         "name": "law_lookup",
@@ -405,11 +636,18 @@ TOOLS = [
         "name": "charter",
         "description": "Read the Charter — the moral foundation Melody lives by. Use it when the player asks what you believe or what your rules are.",
         "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {
+        "name": "remove_background",
+        "description": "Remove the background from one of the player's own custom tiles (by tile id). Only use when the player asks for it. It declines on its own when it can't confidently tell the subject from the background.",
+        "parameters": {"type": "object", "properties": {
+            "tile_id": {"type": "string",
+                       "description": "The custom tile's id number."}},
+         "required": ["tile_id"]}}},
 ]
 
 
 _KNOWN_TOOLS = {"law_lookup", "knowledge_search", "vault_stats",
-                "map_validate", "charter"}
+                "map_validate", "charter", "remove_background"}
 
 # Max characters the model may pass into any single tool argument. Tool args
 # are search topics and queries — anything longer is either a bug or a
@@ -449,6 +687,8 @@ def run_tool(script_dir, username, name, args):
         return tool_map_validate(script_dir, username)
     if name == "charter":
         return tool_charter()
+    if name == "remove_background":
+        return tool_remove_background(script_dir, username, _arg("tile_id"))
     return f"I don't have a tool called '{name[:40]}."
 
 

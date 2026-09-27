@@ -618,6 +618,13 @@
   #import-speed input { width: 70px; }
   /* v3.3: one-button animation + custom tile manager */
   #import-animate { background: #3a2b5c; border-color: #8a6dd7; margin-top: 8px; }
+  /* v5.39: background-removal status — one row per import needing attention */
+  #import-bgstatus { margin: 6px 0; font-size: 12px; }
+  #import-bgstatus[hidden] { display: none; }
+  .bg-row { display: flex; align-items: center; gap: 8px; background: #1c1c1c;
+    border: 1px solid #444; border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; }
+  .bg-row span { flex: 1; min-width: 0; color: #ccc; }
+  .bg-row button { font-size: 12px; padding: 4px 10px; white-space: nowrap; }
   #btn-custom-edit { font-size: 11px; padding: 2px 10px; margin: 0 0 0 8px; }
   #tile-edit-form { background: #1c1c1c; border: 1px solid #444; border-radius: 10px;
     padding: 10px; margin-top: 8px; }
@@ -954,6 +961,9 @@
   <input type="file" id="import-files" accept="image/*" multiple hidden>
   <div id="import-form" hidden>
     <div id="import-previews" class="swatches"></div>
+    <!-- v5.39: background-removal status — auto-cuts offer Undo, ambiguous
+         ones offer the manual button instead of a guess -->
+    <div id="import-bgstatus" hidden></div>
     <input id="import-name" maxlength="24" placeholder="tile name">
     <div id="import-presets"></div>
     <div id="import-scope">
@@ -5623,6 +5633,183 @@ function normalizeImage(dataUrl) {
     img.src = dataUrl;
   });
 }
+// ---- v5.39: automatic background removal on import --------------------------
+// Lloyd's rule, in code: automatic when the subject is clear, never a guess
+// when it isn't. Corner/edge flood-fill with a conservative tolerance —
+// pixel-art-safe (4-connected, so diagonal gaps don't leak). The same
+// algorithm and BG_* constants live server-side in melody_agent.py (her
+// remove_background tool); keep the three copies in sync.
+const BG_TOL = 32;          // per-channel distance still counted as "background"
+const BG_ALPHA_MIN = 128;   // below this a pixel is already transparent
+const BG_BORDER_MIN = 0.55; // auto needs this much bg-colored border
+const BG_FILL_MIN = 0.05;   // below this there's nothing worth removing
+const BG_KEEP_MIN = 0.005;  // auto needs this much opaque subject left
+// (no raw fill-fraction ceiling on purpose: a small sprite on a big canvas
+// legitimately clears 95%+ of its pixels — the guard is the surviving subject)
+function bgChDist(a, b) {
+  return Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]), Math.abs(a[2] - b[2]));
+}
+// px: RGBA bytes (ImageData.data), length w*h*4. Canvas-free — testable in node.
+function bgAnalyze(px, w, h) {
+  const n = w * h, at = (x, y) => (y * w + x) * 4;
+  const corners = [];
+  for (const [x, y] of [[0, 0], [w - 1, 0], [0, h - 1], [w - 1, h - 1]]) {
+    const i = at(x, y);
+    if (px[i + 3] >= BG_ALPHA_MIN) corners.push([px[i], px[i + 1], px[i + 2]]);
+  }
+  const mask = new Uint8Array(n);
+  if (corners.length < 2)
+    return { confident: false, reason: "no-clear-corners", mask, keptFrac: 0 };
+  const bg = [0, 1, 2].map(k =>
+    Math.round(corners.reduce((s, c) => s + c[k], 0) / corners.length));
+  const cornersAgree = corners.every(c => bgChDist(c, bg) <= BG_TOL);
+  let bMatch = 0, bOpq = 0;
+  const scan = (x, y) => {
+    const i = at(x, y);
+    if (px[i + 3] < BG_ALPHA_MIN) return;
+    bOpq++;
+    if (bgChDist([px[i], px[i + 1], px[i + 2]], bg) <= BG_TOL) bMatch++;
+  };
+  for (let x = 0; x < w; x++) { scan(x, 0); scan(x, h - 1); }
+  for (let y = 1; y < h - 1; y++) { scan(0, y); scan(w - 1, y); }
+  const borderFrac = bOpq ? bMatch / bOpq : 0;
+  const stack = [];
+  const seed = (x, y) => {
+    const idx = y * w + x;
+    if (mask[idx]) return;
+    const i = idx * 4;
+    if (px[i + 3] >= BG_ALPHA_MIN &&
+        bgChDist([px[i], px[i + 1], px[i + 2]], bg) <= BG_TOL) {
+      mask[idx] = 1; stack.push(idx);
+    }
+  };
+  for (let x = 0; x < w; x++) { seed(x, 0); seed(x, h - 1); }
+  for (let y = 1; y < h - 1; y++) { seed(0, y); seed(w - 1, y); }
+  let filled = 0;
+  while (stack.length) {
+    const idx = stack.pop(); filled++;
+    const x = idx % w, y = (idx / w) | 0;
+    if (x > 0) seed(x - 1, y);
+    if (x < w - 1) seed(x + 1, y);
+    if (y > 0) seed(x, y - 1);
+    if (y < h - 1) seed(x, y + 1);
+  }
+  const fillFrac = filled / n;
+  let kept = 0;
+  for (let i = 0; i < n; i++)
+    if (!mask[i] && px[i * 4 + 3] >= BG_ALPHA_MIN) kept++;
+  const keptFrac = kept / n;
+  let reason = "ok";
+  if (!cornersAgree) reason = "corners-disagree";
+  else if (borderFrac < BG_BORDER_MIN) reason = "border-dirty";
+  else if (fillFrac < BG_FILL_MIN) reason = "nothing-to-remove";
+  else if (keptFrac < BG_KEEP_MIN) reason = "no-subject";
+  return { bg, borderFrac, fillFrac, keptFrac, cornersAgree,
+           confident: reason === "ok", reason, mask };
+}
+function bgApply(px, mask) {
+  const out = new Uint8ClampedArray(px);
+  for (let i = 0; i < mask.length; i++) if (mask[i]) out[i * 4 + 3] = 0;
+  return out;
+}
+function bgDecode(dataUrl) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const cv = document.createElement("canvas");
+        cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+        const cx = cv.getContext("2d", { willReadFrequently: true });
+        cx.drawImage(img, 0, 0);
+        resolve(cx.getImageData(0, 0, cv.width, cv.height));
+      } catch (_) { resolve(null); }
+    };
+    img.onerror = () => resolve(null);
+    img.src = dataUrl;
+  });
+}
+function bgEncode(px, w, h) {
+  const cv = document.createElement("canvas");
+  cv.width = w; cv.height = h;
+  cv.getContext("2d").putImageData(new ImageData(px, w, h), 0, 0);
+  return cv.toDataURL("image/png");
+}
+// The auto pass: confident cuts apply, everything else is left alone.
+async function bgAutoCut(dataUrl) {
+  const id = await bgDecode(dataUrl);
+  if (!id) return { dataUrl, removed: false, reason: "unreadable" };
+  const r = bgAnalyze(id.data, id.width, id.height);
+  if (!r.confident) return { dataUrl, removed: false, reason: r.reason };
+  return { dataUrl: bgEncode(bgApply(id.data, r.mask), id.width, id.height),
+           removed: true, reason: "ok", fillFrac: r.fillFrac };
+}
+const BG_WHY = {
+  "no-clear-corners": "couldn't spot a clean background",
+  "corners-disagree": "couldn't spot a clean background",
+  "border-dirty": "couldn't spot a clean background",
+  "no-subject": "looks like it's all background",
+  "unreadable": "couldn't read it",
+};
+function refreshImportPreviews() {
+  const pv = $("import-previews");
+  pv.innerHTML = "";
+  importFiles.forEach(f => {
+    const im = document.createElement("img");
+    im.src = f.dataUrl; im.title = f.name;
+    pv.appendChild(im);
+  });
+}
+function renderBgStatus() {
+  const box = $("import-bgstatus");
+  box.innerHTML = "";
+  importFiles.forEach((f, i) => {
+    if (!f.bgState || f.bgState === "clean") return;
+    const row = document.createElement("div");
+    row.className = "bg-row";
+    const label = document.createElement("span");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    if (f.bgState === "auto") {
+      label.textContent = "✓ " + f.name + ": background removed";
+      btn.textContent = "Undo";
+      btn.onclick = () => bgUndo(i);
+    } else {  // "manual" — the ambiguous case: offer the cut, never guess
+      label.textContent = f.name + ": " +
+        (f.bgNote || (BG_WHY[f.bgReason] || "left as-is") + " — left untouched");
+      btn.textContent = "Remove background";
+      btn.onclick = () => bgManual(i);
+    }
+    row.appendChild(label); row.appendChild(btn);
+    box.appendChild(row);
+  });
+  box.hidden = !box.children.length;
+}
+function bgUndo(i) {
+  const f = importFiles[i];
+  if (!f || !f.origDataUrl) return;
+  f.dataUrl = f.origDataUrl;   // the exact original bytes back
+  f.origDataUrl = null;
+  f.bgState = "manual"; f.bgReason = "ok";
+  f.bgNote = "background restored — cut it again any time";
+  refreshImportPreviews(); renderBgStatus();
+}
+async function bgManual(i) {
+  const f = importFiles[i];
+  if (!f) return;
+  const id = await bgDecode(f.dataUrl);
+  if (!id) { toast("couldn't read that picture"); return; }
+  const r = bgAnalyze(id.data, id.width, id.height);
+  // the hand asked for it, so confidence is waived — but never nuke the art
+  if (r.keptFrac < BG_KEEP_MIN) {
+    toast("that would erase the whole picture — leaving it");
+    return;
+  }
+  if (!f.origDataUrl) f.origDataUrl = f.dataUrl;
+  f.dataUrl = bgEncode(bgApply(id.data, r.mask), id.width, id.height);
+  f.bgState = "auto"; f.bgReason = "ok"; f.bgNote = null;
+  refreshImportPreviews(); renderBgStatus();
+  toast("background removed — Undo is there if it ate too much");
+}
 async function buildImportPresets() {
   if (!presets.length) {
     const r = await api("/api/presets");
@@ -5646,23 +5833,33 @@ $("import-files").onchange = async e => {
     if (f.size > 8000000) { toast(f.name + " too big — skipped"); continue; }
     const norm = await normalizeImage(await readFile(f));   // v3.1: HEIC → PNG
     if (!norm) { toast("couldn't read " + f.name + " — try PNG or JPEG"); continue; }
-    importFiles.push({ name: f.name.replace(/\.[^.]+$/, ""), dataUrl: norm });
+    // v5.39: automatic background removal — confident cuts apply themselves
+    // and offer Undo; ambiguous pictures are left alone with a manual button.
+    const entry = { name: f.name.replace(/\.[^.]+$/, ""), dataUrl: norm,
+                    origDataUrl: null, bgState: null, bgReason: null };
+    const bg = await bgAutoCut(norm);
+    if (bg.removed) {
+      entry.origDataUrl = norm;
+      entry.dataUrl = bg.dataUrl;
+      entry.bgState = "auto"; entry.bgReason = "ok";
+    } else if (bg.reason !== "nothing-to-remove" && bg.reason !== "unreadable") {
+      entry.bgState = "manual"; entry.bgReason = bg.reason;
+    } else {
+      entry.bgState = "clean";   // already transparent / nothing to cut: no row
+    }
+    importFiles.push(entry);
   }
   e.target.value = "";
   if (!importFiles.length) return;
   $("import-form").hidden = false;
   $("import-name").value = importFiles[0].name.slice(0, 24);
-  const pv = $("import-previews"); pv.innerHTML = "";
-  importFiles.forEach(f => {
-    const im = document.createElement("img");
-    im.src = f.dataUrl; im.title = f.name;
-    pv.appendChild(im);
-  });
+  refreshImportPreviews();
+  renderBgStatus();
   $("import-speed").hidden = !importFiles.length;
   $("import-animate").hidden = importFiles.length !== 1;   // v3.3: one-button animation
   buildImportPresets();
 };
-$("import-cancel").onclick = () => { $("import-form").hidden = true; importFiles = []; };
+$("import-cancel").onclick = () => { $("import-form").hidden = true; importFiles = []; renderBgStatus(); };
 // v3.3: one button = animation. The server finds the poses in the picture —
 // no slicing talk, no grid talk.
 // v3.4: "Bring to life" — a sheet gets sliced, a single pose gets a walk
@@ -5682,7 +5879,7 @@ async function bringToLife() {
     image: importFiles[0].dataUrl,
   });
   if (!r.ok) { toast("couldn't bring it to life: " + (r.error || "unknown")); return; }
-  $("import-form").hidden = true; importFiles = [];
+  $("import-form").hidden = true; importFiles = []; renderBgStatus();
   await loadCustomTiles();
   selTile = r.tile.id;
   buildPalette();
@@ -5833,7 +6030,7 @@ $("import-add").onclick = async () => {
   // (Bring-to-life still animates a single picture into a walking character.)
   const files = importFiles.slice();
   const base = $("import-name").value.trim().slice(0, 24) || "custom";
-  $("import-form").hidden = true; importFiles = [];
+  $("import-form").hidden = true; importFiles = []; renderBgStatus();
   let made = 0, lastId = null, fail = 0, note = null;
   for (const f of files) {
     const r = await api("/api/custom-tiles", {

@@ -184,6 +184,16 @@
   .maprow .curbadge { display: inline-block; font-size: 10px; color: #0a0a0a;
     background: #4da3ff; border-radius: 8px; padding: 1px 7px; margin-left: 6px;
     font-weight: 700; vertical-align: 1px; }
+  /* v5.42: pocket/interior kind badge + neighbor editor */
+  .maprow .kindbadge { display: inline-block; font-size: 10px; color: #e8d5ff;
+    background: #5b3a8c; border-radius: 8px; padding: 1px 7px; margin-left: 6px;
+    font-weight: 700; vertical-align: 1px; }
+  #neighbor-editor { padding: 2px 10px 8px; }
+  #neighbor-editor .field { margin-bottom: 8px; }
+  #neighbor-editor .lbl { display: block; font-size: 12px; color: #9db3ff;
+    margin-bottom: 3px; }
+  #neighbor-editor select { width: 100%; box-sizing: border-box;
+    font-size: 15px; padding: 8px; }
   .maprow .mdate { font-size: 11px; color: #777; }
   .maprow .thumb-fallback { width: 72px; height: 48px; background: #101018;
     border-radius: 6px; flex: none; display: flex; align-items: center;
@@ -1073,7 +1083,9 @@
 </div>
 
 <!-- v5.29: pocket-map portal editor — link a door/cave tile to its own
-     seeded pocket map. Blank target = generate a fresh one. -->
+     seeded pocket map. Blank target = generate a fresh one.
+     v5.42: portals can also link any existing map, with an explicit
+     landing spot on the target. -->
 <div id="sheet-portal" class="sheet">
   <div class="grab"></div>
   <div class="tray-head">Portal <span id="portal-xy" class="tray-hint"></span></div>
@@ -1084,8 +1096,15 @@
   </div>
   <div class="field"><span class="lbl">Label</span>
     <input id="portal-label" maxlength="60" placeholder="e.g. Dark cave"></div>
-  <div class="field"><span class="lbl">Pocket map (blank = generate new)</span>
-    <input id="portal-target" placeholder="existing-map.json or blank"></div>
+  <div class="field"><span class="lbl">Target map (blank = generate new pocket)</span>
+    <select id="portal-target-pick"><option value="">— generate new pocket —</option></select>
+    <input id="portal-target" placeholder="or type a map filename" style="margin-top:6px"></div>
+  <div class="row2">
+    <div class="field"><span class="lbl">Land at X (blank = auto)</span>
+      <input id="portal-sx" type="number" min="0" placeholder="auto"></div>
+    <div class="field"><span class="lbl">Land at Y (blank = auto)</span>
+      <input id="portal-sy" type="number" min="0" placeholder="auto"></div>
+  </div>
   <div class="row2">
     <div class="field"><span class="lbl">Seed</span>
       <input id="portal-seed" type="number" placeholder="blank = random"></div>
@@ -1103,9 +1122,11 @@
     <button id="portal-regen" class="ghost" hidden>Regenerate</button>
     <button id="portal-unlink" class="ghost danger" hidden>Unlink</button>
   </div>
-  <div class="opt-row"><small style="color:#888">The pocket map is generated from
-    this seed — regenerating rebuilds it identically. A return portal is
-    created inside the pocket so the hero can come back.</small></div>
+  <div class="opt-row"><small style="color:#888">Blank target = a new pocket map
+    is generated from this seed (regenerating rebuilds it identically, and a
+    return portal is created inside so the hero can come back). Picking an
+    existing map links straight to it — set Land at X/Y to choose where the
+    hero arrives, or leave blank for an automatic walkable spot.</small></div>
 </div>
 
 <div id="sheet-setup" class="sheet">
@@ -1149,6 +1170,7 @@
   <div class="grab"></div>
   <div class="tray-head">Load map</div>
   <div class="row2">
+    <button id="btn-new-map" title="Create a brand-new blank map">+ New</button>
     <button id="btn-import-map" title="Load a map JSON someone sent you">Import&hellip;</button>
     <input type="file" id="file-import-map" accept=".json,application/json" hidden>
     <button id="btn-export-tiled" title="Tiled JSON + tileset PNG for other engines">Tiled&hellip;</button>
@@ -1156,6 +1178,9 @@
     <button id="btn-import-bundle" title="Install a .crumbs.zip someone shared">Bundle&hellip;</button>
     <input type="file" id="file-import-bundle" accept=".zip,application/zip" hidden>
   </div>
+  <!-- v5.42: this map's edge neighbors — N/S/E/W links to other maps -->
+  <div class="tray-head">Neighbors <span class="tray-hint">walk off a linked edge to cross over</span></div>
+  <div id="neighbor-editor"></div>
   <div id="load-list"></div>
   <div class="tray-head">Backups <span class="tray-hint">one per save &middot; restore is one tap</span> <button id="btn-backups-refresh" class="ghost">Refresh</button></div>
   <div id="backups-list"></div>
@@ -3417,7 +3442,9 @@ async function playTap(cell) {
   }
   const r = await api("/api/play/move", { x: cell.x, y: cell.y });
   if (!r.ok) { toast("play failed"); return; }
+  if (r.edge_warp && !r.warp) r.warp = r.edge_warp;  // v5.42: edge crossing
   if (r.warp) { await warpRefresh(r); return; }   // v5.29: stepped through a portal
+  if (r.notice) toast(r.notice);   // v5.42: broken portal link
   syncNature(r);   // v4.0: the walk may change meters / inventory
   const path = r.path || [];
   if (!path.length) { toast("can't reach that tile"); return; }
@@ -4294,6 +4321,27 @@ async function portalTap(cell) {
     ("\u2192 " + p.target + (p.seed != null ? " \u00b7 seed " + p.seed : "")) : "";
   $("portal-label").value = p ? (p.label || "") : "";
   $("portal-target").value = "";
+  // v5.42: pick an existing map from the list, or type/generate below
+  const pick = $("portal-target-pick");
+  pick.innerHTML = '<option value="">— generate new pocket —</option>';
+  try {
+    const m = await api("/api/maps");
+    for (const mp of (m.maps || [])) {
+      const o = document.createElement("option");
+      o.value = mp.file; o.textContent = friendlyName(mp.file) +
+        (mp.width && mp.height ? " (" + mp.width + "×" + mp.height + ")" : "");
+      pick.appendChild(o);
+    }
+    if (p && p.target) {
+      const match = [...pick.options].find(o => o.value === p.target);
+      if (match) { pick.value = p.target; $("portal-target").value = ""; }
+      else $("portal-target").value = p.target;
+    }
+  } catch (e) { /* the typed input still works */ }
+  pick.onchange = () => { $("portal-target").value = pick.value; };
+  const spawn = p && p.spawn;
+  $("portal-sx").value = spawn ? spawn[0] : "";
+  $("portal-sy").value = spawn ? spawn[1] : "";
   $("portal-seed").value = p && p.seed != null ? p.seed : "";
   $("portal-biome").value = p ? p.biome : "dungeon";
   $("portal-preset").value = p ? (p.preset || "") : "";
@@ -4308,18 +4356,22 @@ async function portalTap(cell) {
 $("portal-save").onclick = async () => {
   if (!portalPos) return;
   const seedRaw = $("portal-seed").value.trim();
+  const sxRaw = $("portal-sx").value.trim();   // v5.42: landing spot
+  const syRaw = $("portal-sy").value.trim();
   const btn = $("portal-save"); btn.disabled = true;
   try {
     const r = await api("/api/portals/set", {
       x: portalPos.x, y: portalPos.y,
       label: $("portal-label").value.trim(),
-      target: $("portal-target").value.trim(),
+      target: ($("portal-target").value.trim() || $("portal-target-pick").value),
+      spawn_x: sxRaw === "" ? null : parseInt(sxRaw, 10),
+      spawn_y: syRaw === "" ? null : parseInt(syRaw, 10),
       seed: seedRaw === "" ? null : parseInt(seedRaw, 10),
       biome: $("portal-biome").value, preset: $("portal-preset").value || null,
       width: parseInt($("portal-w").value, 10) || 24,
       height: parseInt($("portal-h").value, 10) || 24 });
     if (r.ok) {
-      toast("portal linked \u2192 " + r.target + " (seed " + r.seed + ")");
+      toast("portal linked \u2192 " + r.target + (r.note ? " — " + r.note : ""));
       Sfx.save();
       await refreshPortals();
       renderLoadList();  // a fresh pocket map appears in the picker
@@ -4915,7 +4967,9 @@ async function doStep(dx, dy, repeat) {
   try { r = await api("/api/play/step", { dx, dy }); }
   catch (e) { return; }
   if (!r.ok) return;
+  if (r.edge_warp && !r.warp) r.warp = r.edge_warp;  // v5.42: edge crossing
   if (r.warp) { await warpRefresh(r); return; }   // v5.29: stepped through a portal
+  if (r.notice) toast(r.notice);   // v5.42: broken link / broken edge
   hero = { x: r.x, y: r.y };
   heroSwimming = !!r.swim; heroInDeep = !!r.deep;
   syncNature(r);   // v4.0: meters move on every step
@@ -6883,19 +6937,36 @@ async function warpRefresh(r) {
   hideVeil();
   render();
 }
+// v5.42: map kinds — worlds first, then pockets & interiors, the current
+// map top of its group. Pure function (portal_client_test.js exercises it).
+function groupMaps(maps) {
+  const worlds = [], pockets = [];
+  for (const m of (maps || []))
+    (((m.kind === "pocket") || (m.kind === "interior")) ? pockets : worlds).push(m);
+  const sortFn = (a, b) =>
+    ((b.file === currentFile) - (a.file === currentFile)) ||
+    ((b.modified || 0) - (a.modified || 0));
+  worlds.sort(sortFn); pockets.sort(sortFn);
+  return [{ title: "Worlds", maps: worlds },
+          { title: "Pockets & interiors", maps: pockets }];
+}
 async function renderLoadList() {
   const list = $("load-list");
   list.innerHTML = "";
   renderBackups();  // v5.16: backups live under the maps
+  renderNeighborEditor();  // v5.42: this map's edge links
   try {
     const m = await api("/api/maps");
     if (!m.maps.length) { list.innerHTML = "<small>no saved maps yet</small>"; return; }
-    // v5.29: current map first, then newest-modified — the map you were just
-    // editing is always at the top.
-    const maps = m.maps.slice().sort((a, b) =>
-      ((b.file === currentFile) - (a.file === currentFile)) ||
-      ((b.modified || 0) - (a.modified || 0)));
-    maps.forEach(mp => {
+    // v5.42: worlds first, then pockets & interiors — the map you were
+    // just editing stays at the top of its group.
+    for (const group of groupMaps(m.maps)) {
+      if (!group.maps.length) continue;
+      const head = document.createElement("div");
+      head.className = "tray-head";
+      head.textContent = group.title;
+      list.appendChild(head);
+      group.maps.forEach(mp => {
       const row = document.createElement("div");
       const isCur = mp.file === currentFile;
       row.className = "maprow" + (isCur ? " cur" : "");
@@ -6918,6 +6989,11 @@ async function renderLoadList() {
         const badge = document.createElement("span");
         badge.className = "curbadge"; badge.textContent = "current";
         nameEl.appendChild(badge);
+      }
+      if (mp.kind && mp.kind !== "overworld") {   // v5.42: kind badge
+        const kb = document.createElement("span");
+        kb.className = "kindbadge"; kb.textContent = mp.kind;
+        nameEl.appendChild(kb);
       }
       const meta = document.createElement("div");
       meta.className = "mmeta"; meta.textContent = dims;
@@ -6959,6 +7035,13 @@ async function renderLoadList() {
         if (r.ok) { renderLoadList(); toast("saved"); }
         else toast("info failed");
       });
+      mk("Kind", async () => {   // v5.42: cycle overworld → pocket → interior
+        const kinds = ["overworld", "pocket", "interior"];
+        const next = kinds[(kinds.indexOf(mp.kind || "overworld") + 1) % kinds.length];
+        const r = await api("/api/maps/meta", { file: mp.file, kind: next });
+        if (r.ok) { renderLoadList(); toast(friendlyName(mp.file) + " → " + next); }
+        else toast("kind failed");
+      });
       const del = document.createElement("button");
       del.textContent = "Del"; del.className = "ghost";
       del.onclick = async e => {
@@ -6973,9 +7056,74 @@ async function renderLoadList() {
       // v5.29: the whole row is the load button — one unambiguous target.
       row.onclick = () => { if (!loadingMap) loadMapFile(mp.file); };
       list.appendChild(row);
-    });
+      });
+    }
   } catch (e) { list.innerHTML = "<small>couldn't reach server</small>"; }
 }
+// v5.42: this map's edge neighbors — four fat-finger-friendly dropdowns.
+// Walking off a linked edge crosses into that map on the opposite edge.
+async function renderNeighborEditor() {
+  const box = $("neighbor-editor");
+  if (!box) return;
+  box.innerHTML = "<small>loading…</small>";
+  let maps = [], cur = {};
+  try {
+    const m = await api("/api/maps");
+    maps = m.maps || [];
+    const n = await api("/api/neighbors");
+    cur = (n && n.ok && n.neighbors) || {};
+  } catch (e) { box.innerHTML = "<small>couldn't reach server</small>"; return; }
+  box.innerHTML = "";
+  const edges = [["N", "North \u2191"], ["S", "South \u2193"],
+                 ["E", "East \u2192"], ["W", "West \u2190"]];
+  for (const [edge, label] of edges) {
+    const row = document.createElement("div");
+    row.className = "field";
+    const lab = document.createElement("span");
+    lab.className = "lbl"; lab.textContent = label;
+    const sel = document.createElement("select");
+    const none = document.createElement("option");
+    none.value = ""; none.textContent = "— wall —";
+    sel.appendChild(none);
+    for (const mp of maps) {
+      if (mp.file === currentFile) continue;  // a map can't neighbor itself
+      const o = document.createElement("option");
+      o.value = mp.file; o.textContent = friendlyName(mp.file);
+      sel.appendChild(o);
+    }
+    sel.value = cur[edge] || "";
+    if (sel.value && ![...sel.options].some(o => o.value === sel.value)) {
+      // the linked map is gone — show it as broken, not silently dropped
+      const o = document.createElement("option");
+      o.value = sel.value;
+      o.textContent = "\u26a0 " + sel.value + " (gone)";
+      sel.appendChild(o);
+    }
+    sel.onchange = async () => {
+      const r = await api("/api/neighbors/set",
+                          { edge, target: sel.value || null });
+      if (r.ok) toast(sel.value ? (label + " \u2192 " + friendlyName(sel.value))
+                                : (label + " is a wall again"));
+      else { toast("neighbor failed: " + (r.error || "")); renderNeighborEditor(); }
+    };
+    row.appendChild(lab); row.appendChild(sel);
+    box.appendChild(row);
+  }
+}
+$("btn-new-map").onclick = async () => {   // v5.42: brand-new blank map
+  const name = prompt("New map name:");
+  if (!name || !name.trim()) return;
+  const dims = prompt("Size (W×H):", "25×15");
+  let w = 25, h = 15;
+  if (dims) {
+    const mm = dims.match(/(\d+)\s*[x×, ]\s*(\d+)/);
+    if (mm) { w = parseInt(mm[1], 10); h = parseInt(mm[2], 10); }
+  }
+  const r = await api("/api/maps/create",
+                      { name: name.trim(), width: w, height: h });
+  if (r.ok) { renderLoadList(); toast("created " + r.file); }
+  else toast("create failed: " + (r.error || ""));
+};
 function escHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }

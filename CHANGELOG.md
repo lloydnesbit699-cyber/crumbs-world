@@ -5,6 +5,49 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.42.0 — 2026-09-27
+
+**Portals link to any map, with a landing spot (Lloyd's call).** The
+portal editor now offers every existing map in a picker (or a typed
+filename), plus optional Land-at X/Y coordinates — the hero arrives
+exactly where you say, or on an automatic walkable spot when blank.
+Blank target still generates a seeded pocket map with a return portal,
+as before. Legacy `return_xy` portals migrate to `spawn` on load and
+are written back in both forms, so old saves keep working.
+
+**N/S/E/W neighbor maps.** Each map can link one neighbor per edge
+(North, South, East, West) in the new Neighbors section of the Load
+sheet. Walking off a linked edge (D-pad) crosses into that map on the
+opposite edge, keeping your along-edge position (clamped when the maps
+are different sizes). An unlinked edge is a wall; a link to a deleted
+map toasts a clear "broken link" message instead of moving.
+
+**Pocket/interior map flags + grouped map picker.** Maps carry a kind
+(overworld / pocket / interior), changeable from the Load sheet's Kind
+button; the picker lists Worlds first, then Pockets & interiors.
+Generated pocket maps are flagged automatically.
+
+**Phone-first map manager.** The Load sheet grew a + New button
+(name + W×H prompt, creates a blank map without touching the live one),
+kind badges, and the neighbor editor — all fat-finger friendly.
+
+**Robustness.** Neighbors live in a `.neighbors.json` sidecar that
+rides rename/copy/delete-to-trash with the map; portals and neighbors
+are now vault-scoped (no cross-vault leaks) and undoable; `/api/maps`
+entries carry `kind`; `/api/maps/import` accepts up to `MAP_MAX`
+(500, was 256).
+
+**Tests.** New `portal_test.py` (32) and `portal_client_test.js` (25)
+cover spawn sanitize/legacy migration, neighbor sanitize, edge-arrival
+math, nearest-walkable, broken-link notices, pocket kind flags, sidecar
+round-trips, and client wiring. Existing suites still green
+(auth 96, melody 84, hardening 48, patrol 23, scale 23, scale-client
+20; core smoke 9/10 — the one failure is the pre-existing
+sprite-library round-trip on the pristine tree).
+
+Not phone-verified: iPhone behavior is unverified until Lloyd updates
+and tests on-device.
+
 ## v5.41.0 — 2026-09-27
 
 **Map cap raised to 500×500 (Lloyd's call) with full scale hardening.**

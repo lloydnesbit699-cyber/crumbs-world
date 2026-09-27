@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.41.0"
+APP_VERSION = "5.42.0"
 # v5.41: single source of truth for the map-size cap (was 64, hardcoded in
 # four places). 500x500 = 250k cells. The client additionally caps tilePx so
 # the full-map backing canvas never exceeds 4096px per side (see editor.html).
@@ -896,6 +896,8 @@ _VAULT_SCOPED = (
     "_current_map",
     "_recovery_store", "_recovery",
     "_thumb_cache",
+    "_neighbors",  # v5.42: per-map edge links follow the vault
+    "_portals",    # v5.42: per-map portal links follow the vault too
 )
 # NOTE: `history` is deliberately NOT vault-scoped — undo stacks are per
 # (username, world), so one player's undo in the Commons can never revert
@@ -1031,6 +1033,7 @@ def _vault_fresh_state(vault_id):
     _load_npcs(DEFAULT_SAVE)
     _load_gear(DEFAULT_SAVE)
     _load_portals(DEFAULT_SAVE)  # v5.29: this map's pocket links (or none)
+    _load_neighbors(DEFAULT_SAVE)  # v5.42: this map's edge links (or none)
     _vault_stash_current()
 
 
@@ -1080,7 +1083,8 @@ _MIGRATE_FILES = ("hud_map.json", "custom_tiles.json", "hud_patrols.json",
 _SIDECAR_SUFFIXES = (".rules.json", ".traits.json", ".names.json",
                      ".missions.json", ".items.json", ".npcs.json",
                      ".gear.json", ".slots.json",
-                     ".portals.json")  # v5.29: pocket-map links ride along
+                     ".portals.json",  # v5.29: pocket-map links ride along
+                     ".neighbors.json")  # v5.42: edge links ride along
 
 
 def _git_tracked(fname):
@@ -3154,14 +3158,20 @@ def _sanitize_portal(p):
     if preset not in (core.GENERATION_PRESETS or {}):
         preset = None
     label = str(p.get("label", "") or "")[:40]
-    rxy = p.get("return_xy")
-    return_xy = None
-    if (isinstance(rxy, (list, tuple)) and len(rxy) == 2
-            and all(isinstance(v, int) for v in rxy)):
-        return_xy = [rxy[0], rxy[1]]
+    # v5.42: explicit landing coords on the target map. "spawn" is the new
+    # field; legacy "return_xy" (v5.29 pockets) migrates to it. Bounds are
+    # checked at warp time against the *target* map, not here.
+    spawn = None
+    for key in ("spawn", "return_xy"):
+        cand = p.get(key)
+        if (isinstance(cand, (list, tuple)) and len(cand) == 2
+                and all(isinstance(v, int) for v in cand)):
+            spawn = [cand[0], cand[1]]
+            break
     return {"x": x, "y": y, "target": target, "seed": seed, "biome": biome,
             "preset": preset, "width": w, "height": h, "label": label,
-            "return_xy": return_xy}
+            "spawn": spawn,
+            "return_xy": spawn}  # v5.42: legacy mirror of spawn
 
 
 def _load_portals(name):
@@ -3226,6 +3236,7 @@ def _switch_map(name, path):
     _load_items(name)
     _load_npcs(name)
     _load_portals(name)  # v5.29
+    _load_neighbors(name)  # v5.42: edge links ride the map switch
     _mission_reconcile_patrols()
     _log_event(f"loaded {name}")
     return True, {"width": world.width, "height": world.height,
@@ -3269,7 +3280,7 @@ def _generate_map_file(name, seed, biome, preset_id, w, h):
             noise_over = preset["noise"] or None
     pocket = core.WorldMap(w, h, assets)
     pocket.generate_biome(biome, seed, noise_over)
-    meta = {"biome": biome, "seed": seed}
+    meta = {"biome": biome, "seed": seed, "kind": "pocket"}  # v5.42: kind flag
     if preset_id:
         meta["preset"] = preset_id
     if not pocket.save(_vpath(name), schema=SCHEMA_VERSION):
@@ -3291,39 +3302,94 @@ def _pocket_target_meta(portal):
             portal.get("preset"), portal.get("width"), portal.get("height"))
 
 
+def _nearest_walkable(sx, sy):
+    """v5.42: walkable cell nearest (sx, sy) — expanding diamond search,
+    capped at 60 rings, then the map-wide fallback. Used for portal
+    landings and edge-crossing arrivals."""
+    w, h = world.width, world.height
+    if w <= 0 or h <= 0:
+        return 0, 0
+    sx = max(0, min(w - 1, sx))
+    sy = max(0, min(h - 1, sy))
+    if _walkable(sx, sy):
+        return sx, sy
+    for d in range(1, 60):
+        for dx in range(-d, d + 1):
+            dy = d - abs(dx)
+            for yy in (sy + dy,) if dy == 0 else (sy + dy, sy - dy):
+                x, y = sx + dx, yy
+                if 0 <= x < w and 0 <= y < h and _walkable(x, y):
+                    return x, y
+    return _pocket_spawn()
+
+
 def _warp_to(portal):
     """v5.29: switch the live map to a portal's target. Returns (ok, payload);
     payload is the warp descriptor the client needs to rebuild its view.
-    The hero lands on the portal's return cell (or the target's spawn), and
-    _warp_guard is set so the landing cell doesn't bounce straight back."""
+    The hero lands on the portal's spawn cell (or the target's own spawn),
+    and _warp_guard is set so the landing cell doesn't bounce straight back.
+    v5.42: failures return (False, {"error": ...}) with a human message —
+    the play endpoints surface it as a toast instead of failing silently."""
     global _warp_guard
     target = _safe_name(portal.get("target") or "")
     if not target:
-        return False, None
+        return False, {"error": "that portal leads nowhere"}
     tp = _vpath(target)
     if not os.path.isfile(tp):
-        # the pocket file is gone — rebuild it from the portal's own recipe
-        seed, biome = portal.get("seed"), portal.get("biome")
-        if seed is None or not biome:
-            return False, None
-        if not _generate_map_file(target, seed, biome, portal.get("preset"),
-                                  portal.get("width"), portal.get("height")):
-            return False, None
+        # v5.27: shipped starter templates stay global
+        if target.startswith("template-"):
+            tp = os.path.join(SCRIPT_DIR, target)
+        if not os.path.isfile(tp):
+            # the pocket file is gone — rebuild it from the portal's recipe
+            seed, biome = portal.get("seed"), portal.get("biome")
+            if seed is None or not biome:
+                return False, {"error":
+                               f"portal fizzles — '{target}' is gone"}
+            if not _generate_map_file(target, seed, biome,
+                                      portal.get("preset"),
+                                      portal.get("width"),
+                                      portal.get("height")):
+                return False, {"error":
+                               f"couldn't rebuild '{target}'"}
+            tp = _vpath(target)
     ok, meta = _switch_map(target, tp)
     if not ok:
-        return False, None
-    rxy = portal.get("return_xy")
-    if (isinstance(rxy, (list, tuple)) and len(rxy) == 2
-            and all(isinstance(v, int) for v in rxy)):
-        lx, ly = rxy[0], rxy[1]
+        return False, {"error": f"couldn't open '{target}'"}
+    spawn = portal.get("spawn")
+    if (isinstance(spawn, (list, tuple)) and len(spawn) == 2
+            and all(isinstance(v, int) for v in spawn)
+            and 0 <= spawn[0] < world.width
+            and 0 <= spawn[1] < world.height):
+        lx, ly = _nearest_walkable(spawn[0], spawn[1])
     else:
-        lx, ly = _pocket_spawn()
-    if not (0 <= lx < world.width and 0 <= ly < world.height
-            and _walkable(lx, ly)):
         lx, ly = _pocket_spawn()
     _warp_guard = (target, lx, ly)
     return True, {"file": target, "x": lx, "y": ly,
                   "width": meta["width"], "height": meta["height"]}
+
+
+def _portal_warp_check():
+    """v5.42: after the hero arrives on a cell, step through a portal there.
+    Returns (warp_payload_or_None, notice_or_None) — a broken link comes
+    back as a human-readable notice for the client to toast."""
+    global _warp_guard
+    warp, notice = None, None
+    p = _portal_at(play["tx"], play["ty"])
+    # v5.29: the warp guard covers exactly one arrival so the hero doesn't
+    # bounce straight back through the return link.
+    if p is not None and \
+            _warp_guard != (_current_map, play["tx"], play["ty"]):
+        ok, payload = _warp_to(p)
+        if ok:
+            play["tx"], play["ty"] = payload["x"], payload["y"]
+            warp = payload
+        elif payload and payload.get("error"):
+            notice = payload["error"]
+    if warp is None:
+        # v5.29: the guard survives a warp's own arrival — it only
+        # clears once the hero actually moves on.
+        _warp_guard = None
+    return warp, notice
 
 
 def _map_sidecars(name):
@@ -3331,7 +3397,101 @@ def _map_sidecars(name):
     return [_vpath(base + ext)
             for ext in (".json", ".rules.json", ".traits.json", ".names.json",
                         ".missions.json", ".items.json",
-                        ".npcs.json", ".portals.json")]  # v5.12, v5.13, v5.29
+                        ".npcs.json", ".portals.json",
+                        ".neighbors.json")]  # v5.12, v5.13, v5.29, v5.42
+
+
+# ---- v5.42: neighboring maps ------------------------------------------------
+# Each map may link neighbors on its N/S/E/W edges: walking off a linked
+# edge crosses into that map, arriving on the opposite edge at the same
+# along-edge position. Links live in a <map>.neighbors.json sidecar (same
+# migrate/bundle/rename/trash ride as the other sidecars), so old saves
+# keep loading and untouched maps never grow neighbor keys.
+EDGES = ("N", "S", "E", "W")
+# v5.42: map kinds — pockets/interiors group separately in the map list.
+MAP_KINDS = ("overworld", "pocket", "interior")
+_neighbors = {}
+
+
+def _neighbors_path(name):
+    base = name[:-5] if name.endswith(".json") else name
+    return _vpath(base + ".neighbors.json")
+
+
+def _sanitize_neighbors(d):
+    """v5.42: coerce a neighbors dict into {edge: target-file}, or {}."""
+    clean = {}
+    if not isinstance(d, dict):
+        return clean
+    for edge, target in d.items():
+        if edge not in EDGES:
+            continue
+        target = _safe_name(str(target or ""))
+        if target:
+            clean[edge] = target
+    return clean
+
+
+def _load_neighbors(name):
+    """v5.42: read this map's edge links; missing/corrupt -> none."""
+    global _neighbors
+    _neighbors = {}
+    saved, err = _load_json_file(_neighbors_path(name), "neighbors", {})
+    if err:
+        _log_event(f"neighbors sidecar: {err['detail']}")
+        return
+    rows = (saved or {}).get("neighbors", {})
+    _neighbors = _sanitize_neighbors(rows)
+
+
+def _save_neighbors(name):
+    """v5.42: persist this map's edge links. Best-effort, like the others."""
+    try:
+        with open(_neighbors_path(name), "w") as f:
+            json.dump(_stamp({"neighbors": _neighbors}), f)
+        return True
+    except OSError as e:
+        print(f"[hud] could not save neighbors: {e}")
+        return False
+
+
+def _edge_arrival(edge, tx, ty, w, h):
+    """v5.42: pure arrival math — exiting `edge` of the old map, the hero
+    appears on the opposite edge of a w×h neighbor at the same along-edge
+    position, clamped into the neighbor's bounds."""
+    if edge == "W":
+        return w - 1, max(0, min(h - 1, ty))
+    if edge == "E":
+        return 0, max(0, min(h - 1, ty))
+    if edge == "N":
+        return max(0, min(w - 1, tx)), h - 1
+    return max(0, min(w - 1, tx)), 0  # S
+
+
+def _edge_cross(edge, tx, ty):
+    """v5.42: walk off a linked edge into the neighbor map. Returns
+    (ok, payload); payload is the warp descriptor the client needs to
+    rebuild its view, or {"error": ...} for a broken link."""
+    target = _safe_name((_neighbors or {}).get(edge) or "")
+    if not target:
+        return False, None
+    tp = _vpath(target)
+    if not os.path.isfile(tp):
+        # v5.27: shipped starter templates stay global
+        if target.startswith("template-"):
+            tp = os.path.join(SCRIPT_DIR, target)
+        if not os.path.isfile(tp):
+            edge_word = {"N": "north", "S": "south",
+                         "E": "east", "W": "west"}.get(edge, edge)
+            return False, {"error":
+                           f"the way {edge_word} is broken — '{target}' is gone"}
+    ok, meta = _switch_map(target, tp)
+    if not ok:
+        return False, {"error": f"couldn't open '{target}'"}
+    ax, ay = _edge_arrival(edge, tx, ty, world.width, world.height)
+    lx, ly = _nearest_walkable(ax, ay)
+    return True, {"file": target, "x": lx, "y": ly,
+                  "width": meta["width"], "height": meta["height"]}
 
 def _slots_path():
     base = _current_map or DEFAULT_SAVE
@@ -3380,12 +3540,14 @@ def _snapshot_state():
         "meta": copy.deepcopy(map_meta),
         "height_override": [row[:] for row in world.height_override],  # v5.29
         "portals": copy.deepcopy(_portals),  # v5.29: links undo too
+        "neighbors": copy.deepcopy(_neighbors),  # v5.42: edge links undo too
     }
 
 
 def _restore_state(s):
     global _patrols, _patrol_seq, traits_grid, rules, game_rules
     global _game_seq, map_meta, object_names, _portals  # v5.29: +_portals
+    global _neighbors  # v5.42: edge links undo too
     world.width, world.height = s["width"], s["height"]
     world.data = [row[:] for row in s["tiles"]]
     world.object_layer = [row[:] for row in s["objects"]]
@@ -3396,6 +3558,7 @@ def _restore_state(s):
                                    [[None] * s["width"]
                                     for _ in range(s["height"])])]
     _portals = copy.deepcopy(s.get("portals", {}))  # v5.29
+    _neighbors = copy.deepcopy(s.get("neighbors", {}))  # v5.42
     _patrols = copy.deepcopy(s["patrols"])
     _patrol_seq = copy.deepcopy(s["patrol_seq"])
     traits_grid = copy.deepcopy(s["traits"])
@@ -3411,6 +3574,7 @@ def _restore_state(s):
     _save_names(_current_map)  # v5.1
     _save_rules(_current_map)
     _save_portals(_current_map)  # v5.29
+    _save_neighbors(_current_map)  # v5.42
     _mark_dirty()
 
 
@@ -3670,6 +3834,7 @@ _load_missions(DEFAULT_SAVE)  # v5.12: Melody's missions (or none)
 _load_items(DEFAULT_SAVE)    # v5.13: this map's gear (or none)
 _load_npcs(DEFAULT_SAVE)     # v5.13: this map's folks (or none)
 _load_portals(DEFAULT_SAVE)  # v5.29: this map's pocket links (or none)
+_load_neighbors(DEFAULT_SAVE)  # v5.42: this map's edge links (or none)
 
 # v3.2: built-in water/ocean colors are swimmable — slow the hero, don't block
 for _tid, _t in assets.tiles.items():
@@ -5206,6 +5371,10 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/portals":
             # v5.29: read-only pocket-map links — the editor GETs this one.
             self._send_json({"ok": True, "portals": _portals})
+        elif path == "/api/neighbors":
+            # v5.42: this map's edge links — read-only; the editor GETs this.
+            self._send_json({"ok": True, "neighbors": _neighbors,
+                             "edges": list(EDGES)})
         elif path == "/api/visibility":
             # v5.10: ?x=&y= — 2D bool grid of cells visible from (x, y)
             # via line_of_sight (fog-of-war lite for play mode).
@@ -5347,9 +5516,13 @@ class Handler(BaseHTTPRequestHandler):
                     mtime = int(os.path.getmtime(p))
                 except OSError:
                     mtime = 0
+                kind = meta.get("kind") or "overworld"  # v5.42: map kind
+                if kind not in MAP_KINDS:
+                    kind = "overworld"
                 out.append({"file": f, "width": w, "height": h,
                             "modified": meta.get("modified") or mtime,
-                            "description": meta.get("description") or ""})
+                            "description": meta.get("description") or "",
+                            "kind": kind})
             self._send_json({"maps": out})
         elif path == "/api/biomes":
             self._send_json({"biomes": [{"id": k, "name": v["name"]} for k, v in core.BIOMES.items()]})
@@ -7519,6 +7692,21 @@ class Handler(BaseHTTPRequestHandler):
                                         "error": "x/y out of bounds"}, 400)
             label = str(body.get("label", "") or "")[:40]
             target = _safe_name(body.get("target") or "")
+            # v5.42: explicit landing coords on the target map (for links
+            # to existing maps). Blank = the target picks its own spawn.
+            spawn = None
+            if body.get("spawn_x") is not None or \
+                    body.get("spawn_y") is not None:
+                try:
+                    sx = int(body.get("spawn_x")); sy = int(body.get("spawn_y"))
+                except (TypeError, ValueError):
+                    return self._send_json({"ok": False,
+                                            "error": "spawn_x/spawn_y ints required"},
+                                           400)
+                if not (0 <= sx < MAP_MAX and 0 <= sy < MAP_MAX):
+                    return self._send_json({"ok": False,
+                                            "error": "spawn out of range"}, 400)
+                spawn = [sx, sy]
             seed = body.get("seed")
             try:
                 seed = int(seed) if seed is not None else None
@@ -7578,13 +7766,20 @@ class Handler(BaseHTTPRequestHandler):
                     ret = {"target": _current_map or DEFAULT_SAVE,
                            "seed": None, "biome": biome, "preset": None,
                            "width": world.width, "height": world.height,
-                           "label": "Back", "return_xy": [x, y]}
+                           "label": "Back", "spawn": [x, y],
+                           "return_xy": [x, y]}
                     _write_portal_sidecar(tgt, {f"{sx},{sy}": ret})
                     rxy = [sx, sy]
+                else:
+                    # v5.42: linking a named map (on disk now, regenerated
+                    # later, or missing) — the explicit spawn (if any) is
+                    # the landing cell; without one the target picks its
+                    # own spawn at warp time.
+                    rxy = spawn
                 _portals[key] = {"x": x, "y": y, "target": tgt, "seed": s,
                                  "biome": biome, "preset": preset,
                                  "width": w, "height": h, "label": label,
-                                 "return_xy": rxy}
+                                 "spawn": rxy, "return_xy": rxy}
                 _save_portals(_current_map)
                 _mark_dirty()
             try:
@@ -7592,8 +7787,15 @@ class Handler(BaseHTTPRequestHandler):
             except RuntimeError as e:
                 return self._send_json({"ok": False, "error": str(e)}, 500)
             p = _portals.get(key, {})
-            return self._send_json({"ok": True, "target": p.get("target"),
-                                    "seed": p.get("seed"), "x": x, "y": y})
+            resp = {"ok": True, "target": p.get("target"),
+                    "seed": p.get("seed"), "x": x, "y": y,
+                    "spawn": p.get("spawn")}
+            # v5.42: linking a map that isn't on disk yet — the portal
+            # fizzles with a clear toast until the map exists.
+            if target and not os.path.isfile(_vpath(target)) and seed is None:
+                resp["note"] = (f"'{target}' isn't on disk yet — the portal "
+                                "will fizzle until it is")
+            return self._send_json(resp)
 
         if path == "/api/portals/clear":
             # v5.29: unlink the portal at x,y. The pocket map file itself
@@ -7611,6 +7813,42 @@ class Handler(BaseHTTPRequestHandler):
                 _mark_dirty()
             _undoable("unlink portal", _do)
             return self._send_json({"ok": True})
+
+        if path == "/api/neighbors/set":
+            # v5.42: link (or clear) one edge of the current map to a
+            # neighbor map. {edge: N|S|E|W, target: "map.json" | null}.
+            # A cleared edge (null/blank target) is a wall again.
+            edge = str(body.get("edge") or "").upper()
+            if edge not in EDGES:
+                return self._send_json({"ok": False,
+                                        "error": "edge must be N/S/E/W"}, 400)
+            raw_target = body.get("target")
+            target = _safe_name(str(raw_target or "")) \
+                if raw_target else None
+            if target:
+                tp = _vpath(target)
+                if not os.path.isfile(tp) and not (
+                        target.startswith("template-") and os.path.isfile(
+                            os.path.join(SCRIPT_DIR, target))):
+                    return self._send_json({"ok": False,
+                                            "error": f"map '{target}' not found"},
+                                           404)
+                if target == _current_map:
+                    return self._send_json({"ok": False,
+                                            "error": "a map can't neighbor itself"},
+                                           400)
+
+            def _do():
+                if target:
+                    _neighbors[edge] = target
+                else:
+                    _neighbors.pop(edge, None)
+                _save_neighbors(_current_map)
+                _mark_dirty()
+            _undoable("link neighbor map", _do)
+            _log_event(f"neighbor {edge} -> {target or 'none'}")
+            return self._send_json({"ok": True, "edge": edge,
+                                    "target": target})
 
         if path == "/api/portals/regenerate":
             # v5.29: rebuild the portal's pocket map from a (possibly new)
@@ -7670,8 +7908,10 @@ class Handler(BaseHTTPRequestHandler):
                                         "error": "no portal there"}, 404)
             ok, payload = _warp_to(p)
             if not ok:
+                # v5.42: broken links explain themselves — never a bare fail
                 return self._send_json({"ok": False,
-                                        "error": "warp failed"}, 500)
+                                        "error": (payload or {}).get("error")
+                                        or "warp failed"}, 500)
             return self._send_json({"ok": True, **payload})
 
         if path == "/api/validate":
@@ -7757,7 +7997,7 @@ class Handler(BaseHTTPRequestHandler):
                 name += ".json"
             try:
                 w, h = int(data["width"]), int(data["height"])
-                assert 1 <= w <= 256 and 1 <= h <= 256
+                assert 1 <= w <= MAP_MAX and 1 <= h <= MAP_MAX  # v5.42: was 256
                 for key in ("tiles", "objects", "collision"):
                     rows = data[key]
                     assert isinstance(rows, list) and len(rows) == h
@@ -7777,6 +8017,46 @@ class Handler(BaseHTTPRequestHandler):
             _log_event(f"imported {name}")
             return self._send_json({"ok": True, "file": name})
 
+        if path == "/api/maps/create":
+            # v5.42: brand-new blank map file (the live map is untouched).
+            # {name, width, height, kind} — kind groups it in the picker.
+            name = _safe_name(body.get("name") or "")
+            if not name:
+                return self._send_json({"ok": False,
+                                        "error": "name required"}, 400)
+            if not name.endswith(".json"):
+                name += ".json"
+            if os.path.exists(_vpath(name)):
+                return self._send_json({"ok": False,
+                                        "error": "name taken"}, 409)
+            try:
+                w = max(4, min(MAP_MAX, int(body.get("width", 25))))
+                h = max(4, min(MAP_MAX, int(body.get("height", 15))))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False,
+                                        "error": "width/height ints required"},
+                                       400)
+            kind = body.get("kind") or "overworld"
+            if kind not in MAP_KINDS:
+                kind = "overworld"
+            blank = core.WorldMap(w, h, assets)
+            if not blank.save(_vpath(name), schema=SCHEMA_VERSION):
+                return self._send_json({"ok": False,
+                                        "error": "cannot write"}, 500)
+            try:
+                with open(_rules_path(name), "w") as f:
+                    json.dump(_stamp({"tweaks": dict(DEFAULT_RULES),
+                                      "meta": {"kind": kind,
+                                               "created": int(time.time()),
+                                               "modified": int(time.time()),
+                                               "description": ""}}), f)
+            except OSError:
+                return self._send_json({"ok": False,
+                                        "error": "cannot write rules"}, 500)
+            _log_event(f"created map {name} ({w}x{h}, {kind})")
+            return self._send_json({"ok": True, "file": name,
+                                    "width": w, "height": h, "kind": kind})
+
         if path == "/api/maps/meta":
             # v5.6: author/description for a map (stored in its rules sidecar)
             name = _safe_name(body.get("file"))
@@ -7792,6 +8072,11 @@ class Handler(BaseHTTPRequestHandler):
                 meta["author"] = str(body["author"])[:60]
             if "description" in body:
                 meta["description"] = str(body["description"])[:280]
+            # v5.42: pocket/interior flag — groups the map separately
+            if "kind" in body:
+                kind = body.get("kind")
+                kind = kind if isinstance(kind, str) else ""
+                meta["kind"] = kind if kind in MAP_KINDS else "overworld"
             saved["meta"] = meta
             try:
                 json.dump(saved, open(rp, "w"))
@@ -7902,25 +8187,13 @@ class Handler(BaseHTTPRequestHandler):
             if cells:
                 play["tx"], play["ty"] = cells[-1]
             # v5.29: stepping onto a portal cell warps to its pocket map.
-            # The warp guard covers exactly one arrival so the hero doesn't
-            # bounce straight back through the return link.
-            warp = None
-            p = _portal_at(play["tx"], play["ty"])
-            if p is not None and \
-                    _warp_guard != (_current_map, play["tx"], play["ty"]):
-                ok, payload = _warp_to(p)
-                if ok:
-                    play["tx"], play["ty"] = payload["x"], payload["y"]
-                    warp = payload
-            if warp is None:
-                # v5.29: the guard survives a warp's own arrival — it only
-                # clears once the hero actually moves on.
-                _warp_guard = None
+            # v5.42: via helper — a broken link comes back as a toast notice.
+            warp, notice = _portal_warp_check()
             return self._send_json({"ok": True, "path": [list(c) for c in cells],
                                     "swim": swim[:kept], "deep": deep[:kept],
                                     "events": events, "nature": _nature_state(),
                                     "x": play["tx"], "y": play["ty"],
-                                    "warp": warp})
+                                    "warp": warp, "notice": notice})
 
         if path == "/api/play/step":
             # v3.7: single-step hero movement for the D-pad / controller.
@@ -7933,33 +8206,42 @@ class Handler(BaseHTTPRequestHandler):
             nx, ny = play["tx"] + dx, play["ty"] + dy
             in_bounds = 0 <= nx < world.width and 0 <= ny < world.height
             can = in_bounds and (rules["ghost"] or _walkable(nx, ny))
+            # v5.42: walking off a linked edge crosses into the neighbor
+            # map — the hero arrives on the opposite edge at the same
+            # along-edge position. A broken link toasts instead of moving.
+            edge_warp, notice = None, None
+            if not in_bounds:
+                edge = ("W" if nx < 0 else "E" if nx >= world.width
+                        else "N" if ny < 0 else "S")
+                ok, payload = _edge_cross(edge, play["tx"], play["ty"])
+                if ok:
+                    edge_warp = payload
+                    nx, ny = payload["x"], payload["y"]
+                    can = True
+                elif payload and payload.get("error"):
+                    notice = payload["error"]
             if can:
                 play["tx"], play["ty"] = nx, ny
             # v3.9: game rules fire when the hero actually arrives
             events = _check_rules(play["tx"], play["ty"]) if can else []
             warp = None  # v5.29
-            if can:
+            if can and edge_warp is None:
                 events += _apply_nature(play["tx"], play["ty"])  # v4.0
                 events += _check_mission(play["tx"], play["ty"])  # v5.12
                 events += _check_items(play["tx"], play["ty"])  # v5.13
                 events += _check_npcs(play["tx"], play["ty"])  # v5.13
                 # v5.29: stepping onto a portal cell warps to its pocket map
-                p = _portal_at(play["tx"], play["ty"])
-                if p is not None and \
-                        _warp_guard != (_current_map, play["tx"], play["ty"]):
-                    ok, payload = _warp_to(p)
-                    if ok:
-                        play["tx"], play["ty"] = payload["x"], payload["y"]
-                        warp = payload
-            if warp is None:
-                # v5.29: the guard survives a warp's own arrival — it only
-                # clears once the hero actually moves on.
-                _warp_guard = None
+                # v5.42: via helper — a broken link comes back as a notice.
+                warp, pnotice = _portal_warp_check()
+                if pnotice:
+                    notice = pnotice
             return self._send_json({"ok": True, "x": play["tx"], "y": play["ty"],
                                     "swim": _swim_at(play["tx"], play["ty"]),
                                     "deep": _deep_at(play["tx"], play["ty"]),
                                     "events": events, "nature": _nature_state(),
-                                    "blocked": not can, "warp": warp})
+                                    "blocked": not can, "warp": warp,
+                                    "edge_warp": edge_warp,
+                                    "notice": notice})
 
         if path == "/api/rules":
             # v3.7: per-build game rules. POST sets any of walk_ms

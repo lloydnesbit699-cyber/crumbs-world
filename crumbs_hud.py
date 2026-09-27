@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.46.0"
+APP_VERSION = "5.47.0"
 # v5.41: single source of truth for the map-size cap (was 64, hardcoded in
 # four places). 500x500 = 250k cells. The client additionally caps tilePx so
 # the full-map backing canvas never exceeds 4096px per side (see editor.html).
@@ -1576,6 +1576,24 @@ def _clean_pauses(raw, n_stops):
             rec["state"] = state
         clean.append(rec)
     return clean
+
+
+def _merge_pauses(keep, drop, pts):
+    """v5.47: pauses ride a patrol merge by coordinate — the merged route is
+    new, but a stop that used to wait keeps its wait. -> cleaned list
+    aligned with pts."""
+    pause_by_xy = {}
+    for src in (keep, drop):
+        sp, sz = src.get("points") or [], src.get("pauses") or []
+        for i, pt in enumerate(sp):
+            if i < len(sz) and isinstance(sz[i], dict):
+                pause_by_xy[(pt[0], pt[1])] = sz[i]
+    merged = _clean_pauses(
+        [dict(pause_by_xy.get((x, y), {"secs": 0, "mode": "stand"}))
+         for x, y in pts], len(pts))
+    if merged is None:
+        merged = [{"secs": 0, "mode": "stand"} for _ in pts]
+    return merged
 
 
 def _find_custom(tid):
@@ -4965,6 +4983,195 @@ def _walkable(tx, ty):
     return not _tile_solid(tx, ty)
 
 
+# -- v5.47: patrol validation shared by create + merge (Melody's
+# "connect these patrol stops?" suggestion). Same rules, one place.
+def _validate_patrol_points(pts_in):
+    """-> (pts, error). 2-8 in-bounds walkable stops."""
+    try:
+        pts = [[int(a), int(b)] for a, b in pts_in]
+    except (TypeError, ValueError):
+        return None, "bad points"
+    if not (2 <= len(pts) <= 8):
+        return None, "tap 2-8 stops"
+    for x, y in pts:
+        if not (0 <= x < world.width and 0 <= y < world.height):
+            return None, "stop off the map"
+        if not _walkable(x, y):
+            return None, "a stop is blocked"
+    return pts, None
+
+
+def _validate_patrol_anchor(tid, ax_in, ay_in):
+    """-> (ax, ay, error). The patrol's character must already stand there."""
+    try:
+        ax, ay = int(ax_in), int(ay_in)
+    except (TypeError, ValueError):
+        return None, None, "anchor x/y required"
+    if not (0 <= ax < world.width and 0 <= ay < world.height):
+        return None, None, "anchor off the map"
+    if core.obj_tid(world.object_layer[ay][ax]) != tid:
+        # v5.0: a patrol never creates its character — the tile must
+        # already be standing at the anchor.
+        return None, None, "no such character at the anchor — place him first"
+    return ax, ay, None
+
+
+# -- v5.47: Melody ghost-suggestion materializers -----------------------------
+# The agent proposes (kind, label, where); the server turns it into concrete
+# cells/routes from the LIVE map, because only the server knows the map.
+# All pure w.r.t. their inputs except the world/patrol globals they read.
+_SUGGEST_MAX_CELLS = 400
+
+
+def _suggest_open_cell(x, y):
+    """A cell the wall-ring may grow around / wall over: walkable, not
+    already a wall, and nobody standing on it."""
+    if not (0 <= x < world.width and 0 <= y < world.height):
+        return False
+    if world.collision_layer[y][x]:
+        return False
+    try:
+        tag = world.semantic_layer[y][x]
+    except (AttributeError, IndexError):
+        tag = None
+    if tag == "wall":
+        return False
+    if core.obj_tid(world.object_layer[y][x]) is not None:
+        return False  # never wall over a character
+    return True
+
+
+def _suggest_region(seed_xy=None):
+    """Largest open region, or the open region containing seed_xy.
+    -> set of (x, y)."""
+    w, h = world.width, world.height
+    seen = set()
+
+    def flood(sx, sy):
+        region = set()
+        stack = [(sx, sy)]
+        while stack:
+            x, y = stack.pop()
+            if (x, y) in seen or (x, y) in region:
+                continue
+            if not _suggest_open_cell(x, y):
+                continue
+            seen.add((x, y))
+            region.add((x, y))
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                stack.append((x + dx, y + dy))
+        return region
+
+    if seed_xy:
+        sx, sy = seed_xy
+        if _suggest_open_cell(sx, sy):
+            return flood(sx, sy)
+    best = set()
+    for y in range(h):
+        for x in range(w):
+            if (x, y) in seen or not _suggest_open_cell(x, y):
+                continue
+            region = flood(x, y)
+            if len(region) > len(best):
+                best = region
+    return best
+
+
+def _suggest_wall_ring(where=None):
+    """Cells for a wall ring around the floor region, with a 2-wide door
+    gap on the south side. The ring is the region's boundary: open cells
+    with at least one neighbor outside the region (off the map, blocked,
+    or already a wall). Never adjacent to a character — nobody gets
+    walled in. -> list of [x, y] or None (nothing sensible)."""
+    region = _suggest_region(where)
+    if len(region) < 9:
+        return None  # a closet needs no walls
+    w, h = world.width, world.height
+    ring = set()
+    for x, y in region:
+        edge, near_char = False, False
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = x + dx, y + dy
+            if not (0 <= nx < w and 0 <= ny < h):
+                edge = True
+                continue
+            if (nx, ny) not in region:
+                edge = True
+            try:
+                if core.obj_tid(world.object_layer[ny][nx]) is not None:
+                    near_char = True
+            except IndexError:
+                pass
+        if edge and not near_char:
+            ring.add((x, y))
+    if not ring or len(ring) > _SUGGEST_MAX_CELLS:
+        return None
+    # door gap: drop the middle two of the southmost ring row
+    south = max(y for _, y in ring)
+    row = sorted(x for x, y in ring if y == south)
+    if len(row) >= 2:
+        mid = len(row) // 2
+        for gx in row[mid - 1:mid + 1]:
+            ring.discard((gx, south))
+    return sorted([x, y] for x, y in ring)
+
+
+def _suggest_connect_patrols():
+    """The two patrols whose endpoints nearly touch.
+    -> {keep_id, drop_id, points} or None."""
+    pats = [p for p in _patrols
+            if isinstance(p.get("points"), list) and len(p["points"]) >= 2]
+    if len(pats) < 2:
+        return None
+    best = None
+    for i in range(len(pats)):
+        for j in range(i + 1, len(pats)):
+            a, b = pats[i], pats[j]
+            ends_a = (a["points"][0], a["points"][-1])
+            ends_b = (b["points"][0], b["points"][-1])
+            for ai, ea in enumerate(ends_a):
+                for bi, eb in enumerate(ends_b):
+                    d = abs(ea[0] - eb[0]) + abs(ea[1] - eb[1])
+                    if best is None or d < best[0]:
+                        best = (d, a, b, ai, bi)
+    if best is None:
+        return None
+    _, a, b, ai, bi = best
+    pa = a["points"] if ai == 1 else list(reversed(a["points"]))
+    pb = b["points"] if bi == 0 else list(reversed(b["points"]))
+    # the touching ends become consecutive stops; a truly shared cell
+    # appears once, merely-near cells both stay
+    combined = pa + (pb[1:] if pb[0] == pa[-1] else pb)
+    if len(combined) > 8:
+        return None  # patrols cap at 8 stops — no cramped merge
+    return {"keep_id": a["id"], "drop_id": b["id"],
+            "points": [[int(x), int(y)] for x, y in combined]}
+
+
+def _melody_suggestion_view(user):
+    """The pending agent suggestion for `user`, materialized against the
+    live world into ghost cells/routes. -> dict or None. Called with the
+    caller's vault active (public mode) or the ambient world (local)."""
+    sug = _melody_agent.suggestion_pending(SCRIPT_DIR, user)
+    if not sug:
+        return None
+    kind = sug.get("kind")
+    label = sug.get("label") or ""
+    if kind == "wall_ring":
+        where = sug.get("where_xy")
+        cells = _suggest_wall_ring(tuple(where) if where else None)
+        if not cells:
+            return None
+        return {"kind": kind, "label": label, "cells": cells,
+                "terrain": "wall"}
+    if kind == "connect_patrols":
+        merge = _suggest_connect_patrols()
+        if not merge:
+            return None
+        return {"kind": kind, "label": label, "merge": merge}
+    return None
+
+
 def _deep_at(tx, ty):
     """v3.6: True when this tile is deep water — needs the swim animation."""
     tile = assets.tiles.get(world.data[ty][tx])
@@ -5990,6 +6197,47 @@ class Handler(BaseHTTPRequestHandler):
         if _melody_agent is None:
             return self._send_json({"ok": False,
                                     "error": "melody unavailable"}, 500)
+        if path == "/api/melody/suggestion" and not is_post:
+            # v5.47: Melody's pending suggestion, materialized against the
+            # LIVE map into ghost cells. The agent proposes; the server
+            # resolves; the player accepts (one tap, one undo) or declines.
+            user = self._melody_user()
+            if user is None:
+                return self._send_json({"ok": False, "error": "login required"},
+                                       401)
+            if PUBLIC_MODE:
+                # materializing reads the live world — activate the
+                # caller's vault exactly like the game endpoints do.
+                _vault_lock.acquire()
+                try:
+                    if not self._auth_activate(path):
+                        return
+                    sug = _melody_suggestion_view(user)
+                finally:
+                    _vault_lock.release()
+            else:
+                sug = _melody_suggestion_view(user)
+            return self._send_json({"ok": True, "suggestion": sug})
+        if path == "/api/melody/suggestion/decline" and is_post:
+            # v5.47: the player said no (or accepted via the normal undoable
+            # endpoints and is just clearing the pending card).
+            user = self._melody_user()
+            if user is None:
+                return self._send_json({"ok": False, "error": "login required"},
+                                       401)
+            if not self._is_json_request():
+                return self._send_json({"ok": False,
+                                        "error": "Content-Type must be application/json"},
+                                       415)
+            if not self._same_origin_ok():
+                return self._send_json(
+                    {"ok": False, "error": "origin/host check failed"}, 403)
+            body = self._read_json(max_bytes=4096)
+            status = (body or {}).get("status") or "declined"
+            if status not in ("declined", "accepted"):
+                status = "declined"
+            _melody_agent.suggestion_set_status(SCRIPT_DIR, user, status)
+            return self._send_json({"ok": True})
         if path == "/api/melody/health":
             # no auth — the page checks this before showing the dock.
             st = _melody_agent.brain_status()
@@ -6597,6 +6845,13 @@ class Handler(BaseHTTPRequestHandler):
                              "play": play["active"],
                              "instance": INSTANCE_ID,
                              "version": APP_VERSION,
+                             # v5.47: the budget strip reads these — undo
+                             # state is no longer invisible. In public mode
+                             # _auth_activate already set `history` to the
+                             # caller's own stack; local mode uses the
+                             # ambient one.
+                             "undo_depth": len(history.undo_stack),
+                             "redo_depth": len(history.redo_stack),
                              # v5.25: the page reloads the tile strip when a
                              # boot-time art backfill lands.
                              "art_backfill": _ART_BACKFILL["state"],
@@ -7511,6 +7766,43 @@ class Handler(BaseHTTPRequestHandler):
             # v5.46: paint MEANING — cells get tagged floor/wall/water (or
             # None = erase meaning) and the engine resolves tiles +
             # collision + hazard + decor. One stroke, one undo step.
+            # v5.47: batch mode — {"strokes": [{cells, terrain}, ...]} plans
+            # every stroke and applies them all as ONE undo step (room
+            # presets paint wall + floor in one tap, one undo).
+            stroke_list = body.get("strokes")
+            if stroke_list is not None:
+                if not isinstance(stroke_list, list) or not stroke_list:
+                    return self._send_json({"ok": False,
+                                            "error": "strokes list required"},
+                                           400)
+                if len(stroke_list) > 8:
+                    return self._send_json({"ok": False,
+                                            "error": "too many strokes"}, 400)
+                all_changes = []
+                for st in stroke_list:
+                    if not isinstance(st, dict):
+                        return self._send_json({"ok": False,
+                                                "error": "bad stroke"}, 400)
+                    cells = st.get("cells", [])
+                    if not isinstance(cells, list):
+                        return self._send_json({"ok": False,
+                                                "error": "cells list required"},
+                                               400)
+                    pts = _validate_stroke_cells(cells, world)
+                    all_changes.extend(core.sem_plan_stroke(
+                        world, pts, st.get("terrain"), _semantic_pools(),
+                        _sem_settings_for_plan(), _natural_tile))
+                if not all_changes:
+                    return self._send_json({"ok": True, "painted": 0,
+                                            "noop": True})
+
+                def _do_sem_batch():
+                    for (sx, sy, layer, nv) in all_changes:
+                        _grid(layer)[sy][sx] = nv
+                    _mark_dirty()
+                _undoable("semantic batch stroke", _do_sem_batch)
+                return self._send_json({"ok": True, "painted": len(all_changes),
+                                        "cells": _echo_changes(all_changes)})
             cells = body.get("cells", [])
             terrain = body.get("terrain")
             if not isinstance(cells, list):
@@ -7883,31 +8175,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": False, "error": "bad tile"}, 400)
             if tid not in assets.tiles:
                 return self._send_json({"ok": False, "error": "unknown tile"}, 400)
-            pts_in = body.get("points", [])
-            try:
-                pts = [[int(a), int(b)] for a, b in pts_in]
-            except (TypeError, ValueError):
-                return self._send_json({"ok": False, "error": "bad points"}, 400)
-            if not (2 <= len(pts) <= 8):
-                return self._send_json({"ok": False, "error": "tap 2-8 stops"}, 400)
-            for x, y in pts:
-                if not (0 <= x < world.width and 0 <= y < world.height):
-                    return self._send_json({"ok": False, "error": "stop off the map"}, 400)
-                if not _walkable(x, y):
-                    return self._send_json({"ok": False, "error": "a stop is blocked"}, 400)
-            try:
-                ax, ay = int(body.get("x")), int(body.get("y"))
-            except (TypeError, ValueError):
-                return self._send_json({"ok": False, "error": "anchor x/y required"}, 400)
-            if not (0 <= ax < world.width and 0 <= ay < world.height):
-                return self._send_json({"ok": False, "error": "anchor off the map"}, 400)
-            if core.obj_tid(world.object_layer[ay][ax]) != tid:
-                # v5.0: a patrol never creates its character — the tile must
-                # already be standing at the anchor.
-                return self._send_json(
-                    {"ok": False,
-                     "error": "no such character at the anchor — place him first"},
-                    400)
+            pts, perr = _validate_patrol_points(body.get("points", []))
+            if perr:
+                return self._send_json({"ok": False, "error": perr}, 400)
+            ax, ay, aerr = _validate_patrol_anchor(
+                tid, body.get("x"), body.get("y"))
+            if aerr:
+                return self._send_json({"ok": False, "error": aerr}, 400)
             replace_id = body.get("replace_id")
             if replace_id is not None:
                 try:
@@ -7945,6 +8219,40 @@ class Handler(BaseHTTPRequestHandler):
                 _mark_dirty()
             _undoable("delete patrol", _do, grids=False)  # v5.0; v5.42.1: metadata-only
             return self._send_json({"ok": True})
+
+        if path == "/api/patrols/merge":
+            # v5.47: Melody's "connect these patrol stops?" — two routes
+            # become one. {keep_id, drop_id, points}. The kept patrol's
+            # character anchors the merged route; the dropped one goes away.
+            # Atomic: one undo step, like re-route.
+            try:
+                keep_id, drop_id = int(body.get("keep_id")), int(body.get("drop_id"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "bad ids"}, 400)
+            keep = next((p for p in _patrols if p["id"] == keep_id), None)
+            drop = next((p for p in _patrols if p["id"] == drop_id), None)
+            if not keep or not drop or keep_id == drop_id:
+                return self._send_json({"ok": False, "error": "patrol not found"},
+                                        404)
+            pts, perr = _validate_patrol_points(body.get("points", []))
+            if perr:
+                return self._send_json({"ok": False, "error": perr}, 400)
+            p = {"id": _patrol_seq["next"], "tile_id": keep["tile_id"],
+                 "x": keep.get("x"), "y": keep.get("y"), "points": pts,
+                 "pauses": _merge_pauses(keep, drop, pts)}
+            if p["x"] is None:
+                # anchorless (pre-v5.0) patrols keep their tile match
+                p.pop("x"); p.pop("y")
+
+            def _do_merge():
+                _patrols[:] = [q for q in _patrols
+                               if q["id"] not in (keep_id, drop_id)]
+                _patrol_seq["next"] += 1
+                _patrols.append(p)
+                _save_patrols()
+                _mark_dirty()
+            _undoable("merge patrols", _do_merge, grids=False)
+            return self._send_json({"ok": True, "patrol": p})
 
         if path == "/api/patrols/pauses":
             # v5.40: {id, pauses: [{secs, mode}]} — per-stop pause timers.

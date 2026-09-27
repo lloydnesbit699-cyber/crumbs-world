@@ -623,6 +623,96 @@
   #brush-scope canvas { width: 150px; height: 150px; image-rendering: pixelated; }
   /* v5.45: stamp picker + scatter mix rows at the top of the tray. */
   #stamp-row, #scatter-row { margin: 4px 2px 8px; }
+  /* ---- v5.47: the ONE bottom-sheet slot — tile tray, object inspector,
+     animation sheet, and the v5.46 conceptual-layer switcher all live here,
+     switching by selection like a Godot/Unity inspector. peek / half /
+     full heights. Non-modal: the map stays tappable underneath. ---- */
+  #hud-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+    background: #161616; border-top: 1px solid #3a3a3a;
+    border-radius: 16px 16px 0 0;
+    padding: 0 12px calc(10px + env(safe-area-inset-bottom));
+    transition: transform .22s ease-out; overscroll-behavior: contain;
+    box-shadow: 0 -6px 24px rgba(0,0,0,.5); }
+  #hud-sheet.peek { transform: translateY(calc(100% - 64px)); }
+  #hud-sheet.half { transform: translateY(calc(100% - 45dvh)); }
+  #hud-sheet.full { transform: translateY(calc(100% - 82dvh)); }
+  #hud-sheet.closed { transform: translateY(103%); }
+  #sheet-grab { padding: 6px 0 2px; cursor: grab; touch-action: pan-x;
+    display: flex; align-items: center; gap: 8px; min-height: 44px; }
+  #sheet-grab .grab { width: 40px; height: 4px; border-radius: 2px;
+    background: #555; margin: 0 auto; position: absolute; left: 0; right: 0; top: 6px; }
+  #sheet-title { font-size: 14px; font-weight: 700; color: #eee; flex: 1;
+    padding-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #sheet-peekline { font-size: 11px; color: #999; padding-top: 8px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+  #sheet-tabs { display: none; gap: 4px; padding: 6px 0; overflow-x: auto; }
+  #hud-sheet.half #sheet-tabs, #hud-sheet.full #sheet-tabs { display: flex; }
+  #sheet-tabs button { flex: none; font-size: 12px; padding: 8px 10px;
+    border-radius: 10px; min-height: 40px; }
+  #sheet-tabs button.on { border-color: #ffd75f; color: #ffd75f; }
+  #sheet-body { overflow-y: auto; -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain; }
+  #hud-sheet.half #sheet-body { max-height: calc(45dvh - 110px); }
+  #hud-sheet.full #sheet-body { max-height: calc(82dvh - 110px); }
+  #hud-sheet.peek #sheet-body { display: none; }
+  .sheet-view { padding: 2px 0 8px; }
+  /* the conceptual-layer ribbon lives in the sheet now — compact row */
+  #sheet-view-paint #sem-layers { display: flex; gap: 6px; margin: 4px 0 8px; }
+  #sheet-view-paint #sem-layers button { flex: 1; min-height: 52px; font-size: 12px;
+    display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  #sheet-view-paint #sem-layers button .slbl { font-size: 10px; }
+  #sheet-view-paint #sem-layers button.on { border-color: #ffd75f; color: #ffd75f; }
+  #sheet-view-paint #sem-palette { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  #sheet-view-paint #sem-palette button { font-size: 13px; padding: 10px 12px;
+    min-height: 48px; border-radius: 10px; }
+  #sheet-view-paint #sem-palette button.on { border-color: #ffd75f; color: #ffd75f; }
+  #sheet-view-paint .phint { font-size: 11px; color: #888; }
+  #room-presets { display: flex; gap: 8px; margin: 8px 0; }
+  #room-presets button { flex: 1; min-height: 52px; font-size: 14px; border-radius: 12px; }
+  /* v5.47: NPC event cards — plain words, never raw timers on the surface */
+  .evcard { background: #1d1a26; border: 1px solid #4a3f6e; border-radius: 12px;
+    padding: 10px 12px; margin-bottom: 8px; }
+  .evcard .evhead { font-size: 14px; font-weight: 700; color: #d9c6ff; margin-bottom: 6px; }
+  .evrow { display: flex; align-items: center; gap: 8px; padding: 8px 0;
+    border-top: 1px solid #2c2838; font-size: 14px; color: #ddd; }
+  .evrow:first-of-type { border-top: none; }
+  .evrow .pin { flex: none; width: 28px; height: 28px; border-radius: 50%;
+    background: #8a6dd7; color: #fff; font-weight: 700; font-size: 13px;
+    display: flex; align-items: center; justify-content: center; }
+  .evrow .words { flex: 1; }
+  .evrow .evbtns { display: flex; gap: 4px; }
+  .evrow .evbtns button { font-size: 16px; padding: 8px 10px; min-height: 44px;
+    border-radius: 10px; }
+  /* v5.47: Melody's ghost-suggestion card */
+  #suggest-card { background: #241d33; border: 1px solid #8a6dd7; border-radius: 14px;
+    padding: 14px; }
+  #suggest-card .sg-label { font-size: 16px; color: #eee; margin-bottom: 4px; }
+  #suggest-card .sg-sub { font-size: 12px; color: #a99ac9; margin-bottom: 10px; }
+  #suggest-card .sg-btns { display: flex; gap: 8px; }
+  #suggest-card .sg-btns button { flex: 1; min-height: 52px; font-size: 16px;
+    border-radius: 12px; font-weight: 700; }
+  #suggest-accept { background: #2f6b3a; border-color: #4caf5d; color: #fff; }
+  /* v5.47: the persistent budget strip — tiny, non-blocking, tappable */
+  #budget-strip { position: fixed; left: 8px; top: 52px; z-index: 58;
+    background: rgba(18,18,22,.82); border: 1px solid #3a3a3a; border-radius: 10px;
+    color: #bbb; font-size: 11px; padding: 6px 10px; min-height: 32px;
+    white-space: nowrap; }
+  #budget-strip b { color: #eee; font-weight: 700; }
+  #budget-strip .over { color: #ff9a9a; font-weight: 700; }
+  /* v5.47: the always-visible Play — one button, always on screen */
+  #btn-play-fab { position: fixed; left: 14px; bottom: calc(84px + env(safe-area-inset-bottom));
+    z-index: 240; width: 64px; height: 64px; border-radius: 50%;
+    background: #2f6b3a; border: 2px solid #4caf5d; color: #fff;
+    font-size: 26px; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 16px rgba(0,0,0,.55); }
+  #btn-play-fab:active { transform: scale(.93); }
+  #btn-play-fab.playing { background: #6b2f2f; border-color: #af5d5d; }
+  #btn-play-fab.ab { background: #4a3f6e; border-color: #8a6dd7; }
+  /* the old fixed docks retire into the sheet — keep the nodes, hide the shells */
+  #sem-dock { display: none !important; }
+  body.clean #btn-play-fab, body.clean #budget-strip { display: none !important; }
+  body.panels-hidden #btn-play-fab, body.panels-hidden #budget-strip { display: none !important; }
+  #btn-play-fab, #budget-strip { opacity: var(--panel-op); }
   #stamp-row .shapes, #scatter-row .mix { display: flex; gap: 8px;
       flex-wrap: wrap; align-items: center; }
   #stamp-row .shape, #scatter-row .mx { min-width: 52px; height: 52px;
@@ -1774,6 +1864,33 @@
   </div>
 </div>
 <div id="more-sheet" aria-label="More brush tools"></div>
+<!-- v5.47: the ONE bottom-sheet slot — the tile tray, object inspector,
+     animation sheet, and the v5.46 conceptual-layer switcher all live here,
+     switching by selection. peek / half / full heights; tap the grab to
+     cycle, drag to snap. Non-modal: the map stays tappable underneath. -->
+<div id="hud-sheet" class="peek" aria-label="Editor panel">
+  <div id="sheet-grab" title="tap to resize, drag to snap">
+    <div class="grab"></div>
+    <div id="sheet-title">🎨 Paint</div>
+    <div id="sheet-peekline"></div>
+  </div>
+  <div id="sheet-tabs" aria-label="Panel views"></div>
+  <div id="sheet-body">
+    <div class="sheet-view" id="sheet-view-paint"></div>
+    <div class="sheet-view" id="sheet-view-tiles" hidden></div>
+    <div class="sheet-view" id="sheet-view-inspect" hidden></div>
+    <div class="sheet-view" id="sheet-view-anim" hidden></div>
+    <div class="sheet-view" id="sheet-view-npc" hidden></div>
+    <div class="sheet-view" id="sheet-view-suggest" hidden></div>
+  </div>
+</div>
+<!-- v5.47: always-visible Play — one button, always on screen. Tap to
+     enter/exit preview (camera + selection preserved); hold for a quick
+     before/after of the current animation. -->
+<button id="btn-play-fab" title="Play — tap to walk the map, hold to compare animation">▶</button>
+<!-- v5.47: persistent budget strip — tiles placed, NPC count, FX budget,
+     undo state. Tap = undo. Never blocks: tiny, translucent, ignorable. -->
+<button id="budget-strip" title="budget — tap to undo">🧱 — · 🚶 — · ✨ — · ↩ —</button>
 <!-- v5.45: the brush scope — magnified footprint preview above the finger -->
 <div id="brush-scope"><canvas id="brush-scope-cv" width="150" height="150"></canvas></div>
 <div id="ctx-menu" aria-label="Touch actions"></div>
@@ -2932,6 +3049,7 @@ async function refreshAll() {
   await loadWorld();
   renderSelCard();     // v5.1: the tray card follows undo/redo too
   renderInspect();
+  refreshBudget();     // v5.47: the strip follows undo/redo/resize too
   render();
 }
 
@@ -3999,6 +4117,12 @@ function render() {
         ctx.fillText(String(i + 1), cx, cy);
       });
     }
+    // v5.47: patrol routes render as numbered pins joined by a route line —
+    // the pins are tappable (a pin tap opens the walker's event card).
+    drawPatrolRoutes();
+    // v5.47: Melody's pending suggestion renders as a ghost — a violet tint
+    // for wall cells, a glowing dashed route for patrol joins.
+    drawSuggestGhost();
     // v4.8: the working selection wears a gold dashed outline on the map
     const _sel = moveArmed || (selectTool && inspectPos);
     if (_sel) {
@@ -4376,6 +4500,196 @@ function setBrushTool(t, skipModal) {
   }
   if (t === "scatter" && !scatterMix.length) toast("tap + below, then palette tiles, to build the mix");
 }
+
+// ---- v5.47: the one bottom sheet — pure state machine ----------------------------
+// Heights cycle peek -> half -> full -> peek. Views switch by selection like
+// a Godot/Unity inspector. No DOM in here by construction — the node suite
+// extracts this block and drives it with fake selection states.
+// -- end v5.47 sheet state machine marker above; code below --
+const SHEET_HEIGHTS = ["peek", "half", "full"];
+const SHEET_VIEWS = ["paint", "tiles", "inspect", "anim", "npc", "suggest"];
+const SHEET_TITLES = { paint: "🎨 Paint", tiles: "🧱 Tiles", inspect: "🔍 Inspect",
+  anim: "🎞 Animate", npc: "🚶 Patrol", suggest: "💡 Melody suggests" };
+function sheetNextHeight(h) {
+  const i = SHEET_HEIGHTS.indexOf(h);
+  return SHEET_HEIGHTS[(i + 1) % SHEET_HEIGHTS.length] || "peek";
+}
+function sheetAutoView(sel) {
+  // sel: {suggestion, npc, animOpen, inspectPos, tilesOpen} — first truthy
+  // wins; nothing selected means the paint companion.
+  sel = sel || {};
+  if (sel.suggestion) return "suggest";
+  if (sel.npc) return "npc";
+  if (sel.animOpen) return "anim";
+  if (sel.inspectPos) return "inspect";
+  if (sel.tilesOpen) return "tiles";
+  return "paint";
+}
+// one-line peek summaries — what the collapsed sheet whispers
+function sheetPeekLine(view, info) {
+  info = info || {};
+  if (view === "paint") return (info.layerName || "ground") + " · " + (info.brush || "brush");
+  if (view === "tiles") return info.tileName || "pick a tile";
+  if (view === "inspect") return info.xy ? info.xy + " · " + (info.tileName || "") : "tap the map";
+  if (view === "anim") return info.targetName ? "dressing " + info.targetName : "pick a picture";
+  if (view === "npc") return info.npcName ? info.npcName + " · " + (info.stops || 0) + " stops" : "no patrol";
+  if (view === "suggest") return info.label || "ghost preview";
+  return "";
+}
+// -- end v5.47 sheet pure block --
+
+// ---- v5.47: budget strip — pure counts ------------------------------------------
+// Painted = semantic-tagged cells + placed objects (everything the creator
+// put down this map). FX = tiles-layer cells carrying animator FX. Budgets
+// are SOFT: the strip warns, never blocks — invisible walls are the enemy.
+// -- end v5.47 budget pure marker; code below --
+const FX_CELL_BUDGET = 400;   // soft: animated cells before old phones chug
+const NPC_SOFT_BUDGET = 20;   // soft: patrols before the pathfinder sweats
+function budgetCounts(st) {
+  // st: {tags: [[..]|null], objects: [[..]], patrols: [...], fxIds: Set|[...],
+  //      tiles: [[..]], undoDepth, redoDepth}
+  let painted = 0;
+  const tags = st.tags || [], objects = st.objects || [];
+  for (let y = 0; y < tags.length; y++) {
+    const row = tags[y] || [];
+    for (let x = 0; x < row.length; x++) if (row[x] != null) painted++;
+  }
+  for (let y = 0; y < objects.length; y++) {
+    const row = objects[y] || [];
+    for (let x = 0; x < row.length; x++) if (row[x] != null) painted++;
+  }
+  let fx = 0;
+  const fxIds = st.fxIds;
+  const hasFx = fxIds && typeof fxIds.has === "function" ? id => fxIds.has(id)
+    : a => (fxIds || []).indexOf(a) >= 0;
+  const tiles = st.tiles || [];
+  for (let y = 0; y < tiles.length; y++) {
+    const row = tiles[y] || [];
+    for (let x = 0; x < row.length; x++) if (hasFx(row[x])) fx++;
+  }
+  const npcs = (st.patrols || []).length;
+  return { painted, npcs, fx,
+    fxOver: fx > FX_CELL_BUDGET, npcsOver: npcs > NPC_SOFT_BUDGET,
+    undoDepth: st.undoDepth | 0, redoDepth: st.redoDepth | 0 };
+}
+// -- end v5.47 budget pure block --
+
+// ---- v5.47: play camera/selection snapshot — pure --------------------------------
+// Entering/exiting preview preserves camera AND selection. The pure core
+// copies plain objects; thin wrappers bind the real globals.
+// -- end v5.47 play-snapshot pure marker; code below --
+function snapViewState(S) {
+  return { panX: S.panX, panY: S.panY, tilePx: S.tilePx, manualZoom: !!S.manualZoom };
+}
+function restoreViewState(S, snap) {
+  if (!snap) return;
+  S.panX = snap.panX; S.panY = snap.panY;
+  S.tilePx = snap.tilePx; S.manualZoom = !!snap.manualZoom;
+}
+function snapSelState(S) {
+  return {
+    inspectPos: S.inspectPos ? { x: S.inspectPos.x, y: S.inspectPos.y } : null,
+    selectedInstance: S.selectedInstance ? { x: S.selectedInstance.x, y: S.selectedInstance.y } : null,
+    selTile: (S.selTile == null ? null : S.selTile),
+    logicalLayer: S.logicalLayer || "ground",
+  };
+}
+function restoreSelState(S, snap) {
+  if (!snap) return;
+  S.inspectPos = snap.inspectPos ? { x: snap.inspectPos.x, y: snap.inspectPos.y } : null;
+  S.selectedInstance = snap.selectedInstance ? { x: snap.selectedInstance.x, y: snap.selectedInstance.y } : null;
+  S.selTile = snap.selTile; S.logicalLayer = snap.logicalLayer || "ground";
+}
+// -- end v5.47 play-snapshot pure block --
+
+// ---- v5.47: NPC event cards — pure plain-words -----------------------------------
+// Patrol stops render as numbered pins; each stop's card line is plain
+// words from the per-stop pause/state data — no raw timers or flags on the
+// beginner surface. -- end marker below; code now --
+const NPC_STATE_WORDS = { idle: "Idle", walk: "Walk", sleep: "Sleep", talk: "Talk", hurt: "Hurt", magic: "Magic" };
+function npcSecsWords(s) {
+  s = +s || 0;
+  if (s < 60) return s + "s";
+  const m = s / 60;
+  return (m % 1 ? m.toFixed(1) : m) + "m";
+}
+function stopWords(stop, idx) {
+  // stop: {secs, mode, state} (pauseListFor shape). -> plain words.
+  const s = stop || {};
+  const secs = Math.max(0, s.secs | 0);
+  const mode = s.mode === "sleep" ? "sleep" : "stand";
+  const st = NPC_STATE_WORDS[s.state] || null;
+  const at = "at stop " + (idx + 1);
+  if (!secs) {
+    if (st) return at + " → " + st;          // passes through, doing the state
+    return "walk through";                    // plain pass-through
+  }
+  const how = mode === "sleep" ? "sleep" : "stand and look around";
+  let w = "wait here: " + how + ", " + npcSecsWords(secs);
+  if (st) w += " → " + st;
+  return w;
+}
+function npcRouteSummary(p) {
+  const n = (p.points || []).length;
+  const pauses = (p.pauses || []).filter(e => e && (e.secs | 0) > 0).length;
+  return n + " stops" + (pauses ? ", waits at " + pauses : ", no waits") + " · loops back to start";
+}
+// -- end v5.47 npc-cards pure block --
+
+// ---- v5.47: room presets — pure shape planner ------------------------------------
+// One-tap starting layouts, planned as semantic strokes (wall ring + floor
+// fill) so the engine resolves edges, shadows, and collision. Door gaps
+// included — a room with no door is a trap.
+// -- end marker below; code now --
+function roomPresetCells(kind, cx, cy, W, H) {
+  // -> {strokes: [{cells: [{x,y}], terrain}]}. Cells clipped to the map.
+  const wall = [], floor = [];
+  const put = (arr, x, y) => {
+    if (x >= 0 && y >= 0 && x < W && y < H) arr.push({ x, y });
+  };
+  const rect = (w, h, gaps) => {
+    const x0 = Math.round(cx - w / 2), y0 = Math.round(cy - h / 2);
+    for (let x = x0; x < x0 + w; x++)
+      for (let y = y0; y < y0 + h; y++) {
+        const edge = x === x0 || y === y0 || x === x0 + w - 1 || y === y0 + h - 1;
+        if (edge) {
+          if ((gaps || []).some(g => g[0] === x && g[1] === y)) { put(floor, x, y); continue; }
+          put(wall, x, y);
+        } else put(floor, x, y);
+      }
+    return { x0, y0 };
+  };
+  if (kind === "boss_arena") {
+    const { x0, y0 } = rect(15, 13, []);
+    // door gaps: 2 wide, centered, north + south
+    const gx = Math.round(cx);
+    [[gx - 1, y0], [gx, y0], [gx - 1, y0 + 12], [gx, y0 + 12]].forEach(([x, y]) => {
+      const wi = wall.findIndex(c => c.x === x && c.y === y);
+      if (wi >= 0) wall.splice(wi, 1);
+      put(floor, x, y);
+    });
+    // four pillar stubs, 2x2, at the quadrant centers
+    [[x0 + 3, y0 + 3], [x0 + 10, y0 + 3], [x0 + 3, y0 + 8], [x0 + 10, y0 + 8]]
+      .forEach(([px, py]) => {
+        for (let x = px; x < px + 2; x++) for (let y = py; y < py + 2; y++) {
+          const fi = floor.findIndex(c => c.x === x && c.y === y);
+          if (fi >= 0) floor.splice(fi, 1);
+          put(wall, x, y);
+        }
+      });
+  } else {
+    // "dungeon_room" (default): 11x9 with a 2-wide door gap, south center
+    const { x0, y0 } = rect(11, 9, []);
+    const gx = Math.round(cx);
+    [[gx - 1, y0 + 8], [gx, y0 + 8]].forEach(([x, y]) => {
+      const wi = wall.findIndex(c => c.x === x && c.y === y);
+      if (wi >= 0) wall.splice(wi, 1);
+      put(floor, x, y);
+    });
+  }
+  return { strokes: [{ cells: wall, terrain: "wall" }, { cells: floor, terrain: "floor" }] };
+}
+// -- end v5.47 room-presets pure block --
 
 // ---- v5.46: semantic painting — pure engine --------------------------------------
 // Paint MEANING (floor/wall/water); the engine resolves tiles, edges,
@@ -4898,8 +5212,8 @@ function animSwatchIds(tiles) {
 }
 function paletteAnimTick() {
   if (document.hidden) return;
-  const tray = $("tray-left");
-  if (!tray || !tray.classList.contains("open")) return;
+  if (sheetView !== "tiles") return;   // v5.47: the palette lives in the sheet now
+  const tray = $("sheet-view-tiles") || $("tray-left");
   const now = performance.now();
   const tr = tray.getBoundingClientRect();
   const cvs = document.querySelectorAll('#paint-strip canvas[data-tid]');
@@ -4941,6 +5255,13 @@ canvas.addEventListener("pointerdown", async e => {
     return;
   }
   const cell = evCell(e); if (!cell) return;
+  // v5.47: a numbered patrol pin under the finger opens the walker's event
+  // card — only when no other tool claims the tap.
+  if (!playMode && !buildBreak && !selectTool && !patrolTool && !ruleDraft && !traitTool &&
+      !melodyPick && !itemPlace && !npcPlace && !erasing && !heightTool && !portalTool) {
+    const pinHit = patrolPinAt(cell.x, cell.y);
+    if (pinHit) { selectNpcPatrol(pinHit); return; }
+  }
   if (playMode && !buildBreak) { playTap(cell); return; }
   if (buildBreak) {
     // v5.29: build-break — the sim is paused, so taps paint instead of walking.
@@ -5251,8 +5572,14 @@ async function playTap(cell) {
   };
   heroTimer = setTimeout(step, 0);
 }
-$("btn-play").onclick = async () => {
+// v5.47: the always-visible Play — the menu button and the floating FAB
+// share this one toggle. Entering snapshots camera + selection; exiting
+// hands both back exactly (restoreCameraSel).
+async function togglePlay() {
   if (!playMode) {
+    // v5.47: snapshot before the run — the camera and selection below are
+    // the creator's, and the run returns them untouched.
+    snapCameraSel();
     buildBreakUIOff();   // v5.29: a fresh run never starts mid-break
     const r = await api("/api/play/start", {});
     if (!r.ok) { toast("play failed"); return; }
@@ -5282,6 +5609,10 @@ $("btn-play").onclick = async () => {
     await syncInv();   // v5.13: pack + gold onto the HUD
     // "can't reach" confusion was play mode intercepting taps — paint tools rest now
     $("btn-play").classList.add("on");
+    // v5.47: full map for the run — the sheet hides, the FAB becomes Stop
+    $("hud-sheet").classList.add("closed");
+    const _fab = $("btn-play-fab");
+    _fab.textContent = "■"; _fab.classList.add("playing");
     await refreshRules();   // v3.7: this build's rules + touch controls
     padStart();             // v3.7: controller polling
     toast("play mode — tap a tile to walk there");
@@ -5299,14 +5630,21 @@ $("btn-play").onclick = async () => {
     $("mission-hud").hidden = true; missionDanger = new Set();  // v5.12
     updateDpad();   // v3.7: hide the touch controls (pad loop self-stops)
     $("btn-play").classList.remove("on");
+    // v5.47: the sheet comes back, the FAB becomes Play again
+    $("hud-sheet").classList.remove("closed");
+    const _fab2 = $("btn-play-fab");
+    _fab2.textContent = "▶"; _fab2.classList.remove("playing");
     playOver = false; $("end-overlay").hidden = true;   // v3.9
     await syncMap();   // v3.9: picked-up keys / opened doors come back
     $("gear-hud").hidden = true; $("pack-btn").hidden = true;   // v5.13: pack rests
     packState = null;
     toast("back to editing");
+    // v5.47: hand his camera and selection back exactly
+    restoreCameraSel();
   }
   render();
-};
+}
+$("btn-play").onclick = togglePlay;
 // v5.29: build-break — paint while play is active (Lloyd's feedback #12).
 // Chosen approach: unlock the brush with the simulation PAUSED — not save-state
 // snapshot/restore. Why: a snapshot would have to serialize the whole server
@@ -5542,7 +5880,8 @@ function renderHeroes() {
       textEdit = null; $("inspect-textedit").hidden = true;
       $("inspect-xy").textContent = "(" + h.x + ", " + h.y + ")";
       renderSelCard(); renderInspect(); render();
-      toggleOverlay("sheet-inspect");
+      npcSelectedId = null;   // v5.47: the inspector lives in the one bottom sheet
+      openSheet("inspect");
     };
     box.appendChild(row);
   });
@@ -5730,7 +6069,10 @@ function inspectTap(cell) {
   }
   renderSelCard();
   renderInspect();
-  toggleOverlay("sheet-inspect");
+  // v5.47: the inspector lives in the one bottom sheet now — a new tile
+  // selection supersedes the patrol card.
+  npcSelectedId = null;
+  openSheet("inspect");
 }
 // v4.8: the working selection walks to a new cell
 async function moveTap(cell) {
@@ -7406,7 +7748,7 @@ function buildPalette() {
   }
   requestAnimationFrame(updatePaletteProbe);
   previewTick(true);   // v5.37: the tray preview follows the brush
-  if (animMode === "advanced" && $("m-anim").classList.contains("open")) loadAnimTarget();
+  if (animMode === "advanced" && animViewOpen()) loadAnimTarget();   // v5.47: the animation panel lives in the sheet
 }
 
 // ---- v3.0: custom imported tiles + animator --------------------------------
@@ -7565,7 +7907,7 @@ function mountPackWindow(box, pk, members) {
 }
 function paintPackWindow() {
   if (!packWin) return;
-  const tray = $("tray-left");
+  const tray = $("sheet-view-tiles") || $("tray-left");   // v5.47: the palette lives in the sheet now
   const { members, el } = packWin;
   let cols = el._cols || packCols();
   const nowCols = packCols();
@@ -8139,7 +8481,7 @@ function buildAnimCards() {
 // the cards' live thumbnails — the target tile, dancing each card's motion
 function animCardsTick() {
   const m = $("m-anim");
-  if (!m || !m.classList.contains("open") || animMode !== "beginner") return;
+  if (!m || !animViewOpen() || animMode !== "beginner") return;   // v5.47: cards live in the sheet now
   const t = beginnerTargetTile();
   document.querySelectorAll("#anim-cards .anim-card").forEach(card => {
     const cv = card.querySelector("canvas");
@@ -8232,7 +8574,12 @@ async function applyBeginnerPreset(key, live) {
   document.querySelectorAll("#anim-cards .anim-card").forEach(c =>
     c.classList.toggle("picked", c.dataset.preset === key));
   // v5.44: merge — the card dresses idle+walk, Advanced edits survive
+  // v5.47: hold-Play A/B — the first non-live apply snapshots the before;
+  // every apply records the after.
+  if (!live && !animABBefore.has(t.id))
+    animABBefore.set(t.id, JSON.parse(JSON.stringify(t.anim || null)));
   t.anim = mergeBeginnerPreset(t.anim, key, amp, beginnerMagic);
+  animABAfter.set(t.id, JSON.parse(JSON.stringify(t.anim)));
   mirrorLegacyFx(t);
   appliedPreset[t.id] = key;
   rebuildFxOnMap(); queueRender(); previewTick(true);
@@ -8560,8 +8907,7 @@ function startFilmLoop() {
   if (filmRafOn) return;
   filmRafOn = true;
   const loop = () => {
-    if (animMode === "advanced" && $("m-anim") &&
-        $("m-anim").classList.contains("open")) filmDrawNow();
+    if (animMode === "advanced" && animViewOpen()) filmDrawNow();   // v5.47: the animation panel lives in the sheet
     requestAnimationFrame(loop);
   };
   requestAnimationFrame(loop);
@@ -8780,15 +9126,16 @@ $("anim-import-file").onchange = async e => {
   selTile = r.tile.id; buildPalette(); previewTick(true);
   toast("imported “" + r.tile.name + "” — tap the map to place him");
 };
-// opening the Animation menu refreshes the advanced target
+// v5.47: opening the Animation sheet refreshes the advanced target
 document.querySelector('.mtop[data-menu="m-anim"]').addEventListener("click", () => {
-  if ($("m-anim").classList.contains("open") && animMode === "advanced") loadAnimTarget();
+  if (animViewOpen() && animMode === "advanced") loadAnimTarget();
 });
 // v5.37: the tray's live preview — the selected tile, animated, with his FX.
 const pvCv = $("anim-preview-cv"), pvCtx = pvCv.getContext("2d");
 pvCtx.imageSmoothingEnabled = false;
 function previewTick(force) {
-  if (!force && (!$("tray-left").classList.contains("open") || document.hidden)) return;
+  // v5.47: the preview lives in the sheet's tiles view now
+  if (!force && (document.hidden || sheetView !== "tiles")) return;
   const t = customById[selTile];
   const W2 = pvCv.width, H2 = pvCv.height;
   pvCtx.clearRect(0, 0, W2, H2);
@@ -9704,12 +10051,15 @@ function toggleOverlay(id) {
 // v5.20: Windows-style menu bar — each top label toggles its own dropdown
 document.querySelectorAll(".mtop").forEach(b => {
   b.onclick = () => {
+    // v5.47: animation lives in the one bottom sheet now — not a dropdown
+    if (b.dataset.menu === "m-anim") { openSheet("anim"); return; }
     const wasOpen = $(b.dataset.menu).classList.contains("open");
     toggleOverlay(b.dataset.menu);
     b.classList.toggle("open", !wasOpen);
   };
 });
-$("tab-left").onclick = () => toggleOverlay("tray-left");
+// v5.47: the tile tray lives in the one bottom sheet now
+$("tab-left").onclick = () => openSheet("tiles");
 $("tab-right").onclick = () => toggleOverlay("tray-right");
 $("scrim").onclick = closeOverlays;
 $("menu-setup").onclick = () => toggleOverlay("sheet-setup");
@@ -10281,6 +10631,11 @@ async function pollStatus() {
     }
     $("save-status").textContent = s.dirty ? "● unsaved changes"
       : (s.last_save ? "saved " + s.last_save : "no changes yet");
+    // v5.47: undo/redo depths feed the budget strip; Melody's pending
+    // suggestion arrives as a ghost (polled — this HUD has no socket).
+    undoDepth = s.undo_depth | 0; redoDepth = s.redo_depth | 0;
+    refreshBudget();
+    suggestPoll();
     // v5.22.8: recovery pill — risk level at a glance, breathing while healthy.
     const rb = s.recovery;
     if (!rb || !rb.available) {
@@ -11145,6 +11500,466 @@ async function melodyDemo() {
   if (b) b.onclick = melodyDemo;
 })();
 
+// ============================================================================
+// ---- v5.47: the HUD pass -----------------------------------------------------
+// One bottom sheet (tile tray, inspector, animation, conceptual layers),
+// a persistent budget strip, an always-visible Play button, NPC event cards
+// with numbered pins, and Melody's reversible ghost suggestions.
+// ============================================================================
+let sheetView = "paint", sheetHeight = "peek";
+let npcSelectedId = null;      // the patrol whose event card is open
+let ghostSug = null;           // Melody's pending suggestion, rendered as ghost
+let sugPollBusy = false;
+let viewSnap = null, selSnap = null;   // play-mode camera/selection snapshot
+const animABBefore = new Map();  // v5.47: hold-Play A/B — tile id -> anim before the last preset
+const animABAfter = new Map();   // tile id -> anim after the last preset
+
+function animViewOpen() {
+  return sheetView === "anim" && !$("hud-sheet").classList.contains("closed");
+}
+
+// -- the sheet's height/view state -------------------------------------------
+function openSheet(view, height) {
+  if (view) sheetView = view;
+  if (height) sheetHeight = height;
+  else if (sheetHeight === "peek") sheetHeight = "half";
+  setSheetHeight(sheetHeight);
+}
+function setSheetHeight(h) {
+  sheetHeight = h;
+  const el = $("hud-sheet");
+  el.classList.remove("peek", "half", "full", "closed");
+  el.classList.add(sheetHeight);
+  renderSheet();
+}
+function setSheetView(v) { sheetView = v; renderSheet(); }
+// the auto state machine picks the view from the selection; an override
+// lets a caller force one facet (e.g. the Animation button)
+function driveSheetView(over) {
+  const sel = Object.assign({
+    suggestion: !!ghostSug,
+    npc: npcSelectedId != null,
+    animOpen: false,
+    inspectPos: !!inspectPos,
+    tilesOpen: selTile != null,
+  }, over || {});
+  const v = sheetAutoView(sel);
+  if (v !== sheetView) setSheetView(v); else renderSheet();
+}
+function peekInfo() {
+  if (sheetView === "paint")
+    return ((SEM_LAYER_DEFS[semLayer] || {}).name || "ground") + " · " + (brushTool || "brush");
+  if (sheetView === "tiles")
+    return selTile != null ? tileLabel(selTile) : "pick a tile";
+  if (sheetView === "inspect")
+    return inspectPos ? "(" + inspectPos.x + "," + inspectPos.y + ")" : "tap the map";
+  if (sheetView === "anim") {
+    const t = (typeof beginnerTargetTile === "function") ? beginnerTargetTile() : null;
+    return t ? (t.name || tileLabel(t.id)) : "pick a picture";
+  }
+  if (sheetView === "npc") {
+    const p = patrols.find(p => p.id === npcSelectedId);
+    return p ? npcCardName(p) + " · " + (p.points || []).length + " stops" : "no patrol";
+  }
+  if (sheetView === "suggest") return ghostSug ? (ghostSug.label || "ghost preview") : "ghost preview";
+  return "";
+}
+function npcCardName(p) {
+  if (p.x != null && p.y != null) {
+    const nm = (typeof instanceName === "function") ? instanceName(p.x, p.y) : null;
+    if (nm) return nm;
+  }
+  return tileLabel(p.tile_id);
+}
+function renderSheet() {
+  const el = $("hud-sheet");
+  if (!el) return;
+  $("sheet-title").textContent = SHEET_TITLES[sheetView] || "Panel";
+  const tabs = $("sheet-tabs");
+  tabs.innerHTML = "";
+  const meta = [["paint", "🎨"], ["tiles", "🧱"], ["inspect", "🔍"], ["anim", "🎞"],
+                ["npc", "🚶"], ["suggest", "💡"]];
+  for (const [v, g] of meta) {
+    if (v === "suggest" && !ghostSug) continue;   // Law 11: no dead buttons
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = g; b.title = SHEET_TITLES[v];
+    b.classList.toggle("on", v === sheetView);
+    b.onclick = () => setSheetView(v);
+    tabs.appendChild(b);
+  }
+  for (const v of SHEET_VIEWS) $("sheet-view-" + v).hidden = (v !== sheetView);
+  $("sheet-peekline").textContent = sheetPeekLine(sheetView, peekInfo());
+  if (sheetView === "npc") renderNpcCards();
+  if (sheetView === "suggest") renderSuggestCard();
+}
+// the grab: tap cycles peek -> half -> full; drag snaps up/down
+function initSheetGrab() {
+  const g = $("sheet-grab");
+  let y0 = null, moved = false;
+  g.addEventListener("pointerdown", e => { y0 = e.clientY; moved = false; });
+  g.addEventListener("pointermove", e => {
+    if (y0 == null) return;
+    if (Math.abs(e.clientY - y0) > 12) moved = true;
+  });
+  const up = e => {
+    if (y0 == null) return;
+    const dy = e.clientY - y0; y0 = null;
+    if (!moved) { setSheetHeight(sheetNextHeight(sheetHeight)); return; }
+    const order = ["peek", "half", "full"];
+    let i = order.indexOf(sheetHeight) + (dy < 0 ? 1 : -1);
+    i = Math.max(0, Math.min(2, i));
+    setSheetHeight(order[i]);
+  };
+  g.addEventListener("pointerup", up);
+  g.addEventListener("pointercancel", () => { y0 = null; });
+}
+// -- the great consolidation: every panel moves into the one sheet -----------
+function initHudSheet() {
+  // paint view: the v5.46 conceptual-layer ribbon + room presets
+  const pv = $("sheet-view-paint");
+  const dock = $("sem-dock");
+  Array.from(dock.children).forEach(ch => pv.appendChild(ch));
+  const rp = document.createElement("div");
+  rp.id = "room-presets";
+  rp.innerHTML = '<button id="btn-room" type="button">🏠 Dungeon room</button>' +
+    '<button id="btn-arena" type="button">🏰 Boss arena</button>';
+  rp.title = "one-tap starting layouts — editable after, one undo";
+  pv.appendChild(rp);
+  $("btn-room").onclick = () => placeRoomPreset("dungeon_room");
+  $("btn-arena").onclick = () => placeRoomPreset("boss_arena");
+  // tiles view: the whole old left tray (palette, selected card, preview)
+  const tv = $("sheet-view-tiles");
+  const tray = $("tray-left");
+  Array.from(tray.children).forEach(ch => tv.appendChild(ch));
+  tray.style.display = "none";
+  // inspect view: the morphing inspector
+  const iv = $("sheet-view-inspect");
+  const si = $("sheet-inspect");
+  Array.from(si.children).forEach(ch => iv.appendChild(ch));
+  si.style.display = "none";
+  // anim view: the animation panel (mode seg + beginner + advanced)
+  const av = $("sheet-view-anim");
+  ["anim-mode-seg", "anim-beginner", "anim-advanced"].forEach(id => {
+    const n = $(id); if (n) av.appendChild(n);
+  });
+  renderSheet();
+  initSheetGrab();
+  initPlayFab();
+  initBudgetStrip();
+}
+
+// -- the budget strip ---------------------------------------------------------
+let undoDepth = 0, redoDepth = 0;
+function refreshBudget() {
+  const b = $("budget-strip");
+  if (!b) return;
+  const c = budgetCounts({ tags: semGrid, objects, patrols, fxIds: fxOnMap,
+    tiles, undoDepth, redoDepth });
+  const npc = c.npcsOver ? '<span class="over">' + c.npcs + "</span>" : "<b>" + c.npcs + "</b>";
+  const fx = c.fxOver ? '<span class="over">' + c.fx + "/" + FX_CELL_BUDGET + "</span>"
+    : "<b>" + c.fx + "</b>";
+  b.innerHTML = "🧱 <b>" + c.painted + "</b> · 🚶 " + npc + " · ✨ " + fx +
+    " · ↩ " + c.undoDepth + (c.redoDepth ? " ↪ " + c.redoDepth : "");
+  b.title = "budget — tap to undo" +
+    (c.fxOver ? " · FX past the soft " + FX_CELL_BUDGET + " budget (old phones may chug)" : "") +
+    (c.npcsOver ? " · past the soft " + NPC_SOFT_BUDGET + " patrol budget" : "");
+}
+function initBudgetStrip() {
+  $("budget-strip").onclick = () => doUndo();   // one tap = undo
+}
+
+// -- the always-visible Play --------------------------------------------------
+function snapCameraSel() {
+  viewSnap = snapViewState({ panX, panY, tilePx, manualZoom });
+  selSnap = snapSelState({ inspectPos, selectedInstance, selTile, logicalLayer });
+}
+function restoreCameraSel() {
+  if (viewSnap) {
+    panX = viewSnap.panX; panY = viewSnap.panY;
+    tilePx = viewSnap.tilePx; manualZoom = viewSnap.manualZoom;
+  }
+  if (selSnap) {
+    inspectPos = selSnap.inspectPos ? { x: selSnap.inspectPos.x, y: selSnap.inspectPos.y } : null;
+    selectedInstance = selSnap.selectedInstance ? { x: selSnap.selectedInstance.x, y: selSnap.selectedInstance.y } : null;
+    selTile = selSnap.selTile; logicalLayer = selSnap.logicalLayer || "ground";
+  }
+  viewSnap = selSnap = null;
+  driveSheetView();
+  render();
+}
+// hold the Play button: a quick before/after of the current animation
+function initPlayFab() {
+  const fab = $("btn-play-fab");
+  let abTimer = null, abShown = false;
+  fab.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    abTimer = setTimeout(() => {
+      if (playMode) return;   // A/B is an edit-mode comparison
+      const t = (typeof beginnerTargetTile === "function") ? beginnerTargetTile() : null;
+      const before = t ? animABBefore.get(t.id) : undefined;
+      if (t && before !== undefined) {
+        abShown = true;
+        t.anim = JSON.parse(JSON.stringify(before));
+        rebuildFxOnMap(); markBaseDirty(); queueRender(); previewTick(true);
+        fab.classList.add("ab");
+        toast("before — lift your finger to see after");
+      }
+    }, 550);
+  });
+  const release = e => {
+    clearTimeout(abTimer); abTimer = null;
+    if (abShown) {
+      abShown = false;
+      const t = (typeof beginnerTargetTile === "function") ? beginnerTargetTile() : null;
+      if (t) {
+        const after = animABAfter.get(t.id);
+        t.anim = after !== undefined ? JSON.parse(JSON.stringify(after)) : t.anim;
+        rebuildFxOnMap(); markBaseDirty(); queueRender(); previewTick(true);
+      }
+      fab.classList.remove("ab");
+      return;   // it was a hold — not a tap
+    }
+    if (e && e.type === "pointerup") togglePlay();
+  };
+  fab.addEventListener("pointerup", release);
+  fab.addEventListener("pointercancel", () => release(null));
+  fab.addEventListener("pointerleave", () => { if (abShown) release(null); });
+}
+
+// -- NPC event cards: numbered pins + plain-words stops -----------------------
+function drawPatrolRoutes() {
+  const s = tilePx;
+  patrols.forEach(p => {
+    const pts = p.points || [];
+    if (pts.length < 2) return;
+    const sel = p.id === npcSelectedId;
+    // the route line — patrols loop back to their first stop
+    ctx.strokeStyle = sel ? "rgba(190,170,255,0.95)" : "rgba(150,140,255,0.35)";
+    ctx.lineWidth = Math.max(2, s * 0.08);
+    ctx.setLineDash(sel ? [] : [6, 5]);
+    ctx.beginPath();
+    pts.forEach((pt, i) => {
+      const X = (pt[0] + 0.5) * s, Y = (pt[1] + 0.5) * s;
+      if (i === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
+    });
+    ctx.lineTo((pts[0][0] + 0.5) * s, (pts[0][1] + 0.5) * s);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // the numbered pins — fat-finger targets, tappable
+    pts.forEach((pt, i) => {
+      const X = (pt[0] + 0.5) * s, Y = (pt[1] + 0.5) * s;
+      const r = Math.max(8, s * (sel ? 0.30 : 0.22));
+      ctx.beginPath(); ctx.arc(X, Y, r, 0, Math.PI * 2);
+      ctx.fillStyle = sel ? "#8a6dd7" : "rgba(110,100,170,0.7)";
+      ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = "#fff"; ctx.stroke();
+      ctx.fillStyle = "#fff";
+      ctx.font = "700 " + Math.max(10, Math.round(s * 0.26)) + "px system-ui";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(String(i + 1), X, Y + 1);
+    });
+  });
+}
+function patrolPinAt(tx, ty) {
+  // tile coords -> the patrol whose pin sits under the finger (or null).
+  // Mirrors drawPatrolRoutes: single-stop patrols draw no pins.
+  for (const p of patrols) {
+    const pts = p.points || [];
+    if (pts.length < 2) continue;
+    for (let i = 0; i < pts.length; i++) {
+      const dx = tx - (pts[i][0] + 0.5), dy = ty - (pts[i][1] + 0.5);
+      if (dx * dx + dy * dy < 0.55) return p;
+    }
+  }
+  return null;
+}
+function selectNpcPatrol(p) {
+  npcSelectedId = p ? p.id : null;
+  if (npcSelectedId == null) { driveSheetView(); queueRender(); return; }
+  if (sheetHeight === "peek") setSheetHeight("half");
+  setSheetView("npc");
+  queueRender();
+}
+function renderNpcCards() {
+  const v = $("sheet-view-npc");
+  if (!v) return;
+  v.innerHTML = "";
+  const p = patrols.find(p => p.id === npcSelectedId);
+  if (!p) {
+    v.innerHTML = '<div class="phint">tap a numbered pin on the map to meet your walkers — each stop gets a plain-words card right here.</div>';
+    return;
+  }
+  const card = document.createElement("div");
+  card.className = "evcard";
+  const head = document.createElement("div");
+  head.className = "evhead";
+  head.textContent = "🚶 " + npcCardName(p);
+  card.appendChild(head);
+  const sub = document.createElement("div");
+  sub.className = "phint"; sub.style.marginBottom = "4px";
+  sub.textContent = npcRouteSummary(p);
+  card.appendChild(sub);
+  const pz = pauseListFor(p);
+  (p.points || []).forEach((pt, i) => {
+    const row = document.createElement("div");
+    row.className = "evrow";
+    const pin = document.createElement("div");
+    pin.className = "pin"; pin.textContent = String(i + 1);
+    const words = document.createElement("div");
+    words.className = "words";
+    words.textContent = stopWords(pz[i], i);
+    const btns = document.createElement("div");
+    btns.className = "evbtns";
+    const b1 = document.createElement("button");
+    b1.type = "button"; b1.textContent = "⏸"; b1.title = "tap to change how long he waits here";
+    b1.onclick = async () => { await inspectAction("stoppause", { pid: p.id, i }); renderNpcCards(); };
+    const b2 = document.createElement("button");
+    b2.type = "button";
+    b2.textContent = (pz[i] && pz[i].mode === "sleep") ? "😴" : "🧍";
+    b2.title = "tap to flip between standing and sleeping while he waits";
+    b2.onclick = async () => { await inspectAction("stopmode", { pid: p.id, i }); renderNpcCards(); };
+    btns.appendChild(b1); btns.appendChild(b2);
+    row.appendChild(pin); row.appendChild(words); row.appendChild(btns);
+    card.appendChild(row);
+  });
+  const del = document.createElement("button");
+  del.type = "button"; del.className = "ghost danger";
+  del.style.cssText = "margin-top:6px;min-height:44px;width:100%";
+  del.textContent = "remove this route";
+  del.onclick = async () => {
+    await inspectAction("delpatrol", { pid: p.id });
+    if (npcSelectedId === p.id) npcSelectedId = null;
+    driveSheetView(); queueRender();
+  };
+  card.appendChild(del);
+  v.appendChild(card);
+}
+
+// -- Melody's ghost suggestions: fetch, render, accept, decline ---------------
+async function suggestPoll() {
+  if (sugPollBusy || playMode) return;
+  sugPollBusy = true;
+  try {
+    const r = await api("/api/melody/suggestion");
+    const s = (r && r.ok) ? r.suggestion : null;
+    if (s && s.status === "pending") {
+      if (!ghostSug || ghostSug.id !== s.id) {
+        ghostSug = s;
+        driveSheetView();   // the auto state machine opens the suggest view
+        if (sheetView === "suggest" && sheetHeight === "peek") setSheetHeight("half");
+        queueRender();
+      }
+    } else if (ghostSug) {
+      ghostSug = null; driveSheetView(); queueRender();
+    }
+  } catch (e) { /* her sketchpad is quiet */ }
+  finally { sugPollBusy = false; }
+}
+function drawSuggestGhost() {
+  if (!ghostSug || ghostSug.status !== "pending") return;
+  const s = tilePx;
+  if (ghostSug.kind === "wall_ring" && ghostSug.cells) {
+    for (const c of ghostSug.cells) {
+      const x = c[0], y = c[1];
+      ctx.fillStyle = "rgba(150,110,255,0.35)";
+      ctx.fillRect(x * s, y * s, s, s);
+      ctx.strokeStyle = "rgba(190,170,255,0.85)";
+      ctx.setLineDash([4, 3]);
+      ctx.strokeRect(x * s + 1, y * s + 1, s - 2, s - 2);
+      ctx.setLineDash([]);
+    }
+  } else if (ghostSug.kind === "connect_patrols" && ghostSug.points) {
+    const pts = ghostSug.points;
+    ctx.strokeStyle = "rgba(200,180,255,0.95)";
+    ctx.lineWidth = Math.max(3, s * 0.1);
+    ctx.setLineDash([8, 5]);
+    ctx.beginPath();
+    pts.forEach((pt, i) => {
+      const X = (pt[0] + 0.5) * s, Y = (pt[1] + 0.5) * s;
+      if (i === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
+    });
+    ctx.lineTo((pts[0][0] + 0.5) * s, (pts[0][1] + 0.5) * s);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+}
+function renderSuggestCard() {
+  const v = $("sheet-view-suggest");
+  if (!v) return;
+  v.innerHTML = "";
+  if (!ghostSug) {
+    v.innerHTML = '<div class="phint">no suggestions right now — ask Melody for layout ideas and she\u2019ll sketch them here as a ghost. Nothing paints until you say so.</div>';
+    return;
+  }
+  const card = document.createElement("div");
+  card.id = "suggest-card";
+  const lbl = document.createElement("div");
+  lbl.className = "sg-label"; lbl.textContent = "💡 " + (ghostSug.label || "map idea");
+  const sub = document.createElement("div");
+  sub.className = "sg-sub";
+  sub.textContent = "by Melody · a ghost preview — the map keeps its paint until you accept";
+  const btns = document.createElement("div");
+  btns.className = "sg-btns";
+  const ok = document.createElement("button");
+  ok.type = "button"; ok.id = "suggest-accept"; ok.textContent = "✅ Do it";
+  ok.onclick = acceptSuggestion;
+  const no = document.createElement("button");
+  no.type = "button"; no.id = "suggest-decline"; no.className = "ghost"; no.textContent = "Not now";
+  no.onclick = () => declineSuggestion("declined");
+  btns.appendChild(ok); btns.appendChild(no);
+  card.appendChild(lbl); card.appendChild(sub); card.appendChild(btns);
+  v.appendChild(card);
+}
+async function acceptSuggestion() {
+  const g = ghostSug;
+  if (!g) return;
+  if (g.kind === "wall_ring") {
+    // v5.47: one stroke, one undo — the ghost becomes real paint.
+    const r = await api("/api/semantic/stroke", {
+      strokes: [{ cells: g.cells.map(c => ({ x: c[0], y: c[1] })), terrain: "wall" }],
+    });
+    if (!r.ok) { toast("couldn't place it: " + (r.error || "unknown")); return; }
+    if (r.cells && r.cells.length) applyStrokeEcho(r.cells);
+    else { try { await refresh(); } catch (e) {} }
+    refreshBudget();
+  } else if (g.kind === "connect_patrols") {
+    const r = await api("/api/patrols/merge", {
+      keep_id: g.keep_id, drop_id: g.drop_id, points: g.points,
+    });
+    if (!r.ok) { toast("couldn't join them: " + (r.error || "unknown")); return; }
+    await loadPatrols(); render(); refreshBudget();
+  } else {
+    toast("that kind isn't paintable yet");
+    return;
+  }
+  await declineSuggestion("accepted");
+  toast("done — changed your mind? one tap on ↩ undoes it");
+}
+async function declineSuggestion(status) {
+  try { await api("/api/melody/suggestion/decline", { status: status || "declined" }); } catch (e) {}
+  ghostSug = null;
+  driveSheetView();
+  queueRender();
+}
+
+// -- room presets: one-tap starting layouts -----------------------------------
+async function placeRoomPreset(kind) {
+  // center on the visible map area when zoomed, else the map center
+  let cx = Math.floor(W / 2), cy = Math.floor(H / 2);
+  try {
+    const ov = visibleTiles();
+    if (ov) { cx = Math.floor((ov.x0 + ov.x1) / 2); cy = Math.floor((ov.y0 + ov.y1) / 2); }
+  } catch (e) {}
+  const plan = roomPresetCells(kind, cx, cy, W, H);
+  const r = await api("/api/semantic/stroke", { strokes: plan.strokes });
+  if (!r.ok) { toast("room didn't place: " + (r.error || "unknown")); return; }
+  if (r.cells && r.cells.length) applyStrokeEcho(r.cells);
+  else { try { await refresh(); } catch (e) {} }
+  refreshBudget();
+  toast((kind === "boss_arena" ? "boss arena" : "dungeon room") +
+        " placed — it's all editable, and ↩ undoes it in one tap");
+}
+
 (async function init() {
   try {
     // v5.27: public mode parks on the login overlay until the user logs
@@ -11181,6 +11996,7 @@ async function melodyDemo() {
     splashStep(28, "Loading recipes\u2026");
     await loadTaxonomy();   // v5.29: the server's one routing table (Law 15)
     loadTileTraits();       // v5.35: Phase 2 — per-tile-type traits (async, no block)
+    initHudSheet();         // v5.47: the one bottom sheet (moves trays/docks/panels in)
     initSemDock();          // v5.46: the meaning-painting dock (wiring only)
     try { await loadSemantic(); } catch (e) {}   // pools + rules + seed
     const p = await api("/api/palette");
@@ -11201,10 +12017,11 @@ async function melodyDemo() {
     await loadCustomTiles();      // v3.0: imported tiles before first render
     // v5.2: strip search — filters the palette as he types
     $("strip-search").addEventListener("input", e => { stripQuery = e.target.value; buildCustomTiles(); });
-    // v5.23.2: the virtualized pack window follows the tray's vertical
-    // scroll now (the palette is a grid, not a sideways strip)
+    // v5.23.2: the virtualized pack window follows the sheet's vertical
+    // scroll now (v5.47: the palette is a grid in the bottom sheet, not a
+    // sideways strip in the left tray)
     let packScrollQ = false;
-    $("tray-left").addEventListener("scroll", () => {
+    $("sheet-body").addEventListener("scroll", () => {
       if (packScrollQ || !packWin) return;
       packScrollQ = true;
       requestAnimationFrame(() => { packScrollQ = false; paintPackWindow(); });

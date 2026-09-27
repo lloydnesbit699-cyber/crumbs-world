@@ -609,6 +609,114 @@ def tool_remove_background(script_dir, username, tile_id):
             f"re-import the picture if you ever want it back.")
 
 
+# -- v5.47: map-change suggestions -------------------------------------------
+# The brain never paints. It proposes (kind, label, where); the tool records
+# the proposal as a PENDING suggestion in the player's own melody dir, and
+# the HUD renders it as a ghost preview the player accepts (one tap, one
+# undo step) or declines. Accepting/declining clears the pending file, so
+# only one suggestion is ever in flight — no suggestion pile-up.
+_SUGGEST_KINDS = {"wall_ring", "connect_patrols"}
+_SUGGEST_KIND_WORDS = {
+    "wall_ring": "a wall ring around the open floor",
+    "connect_patrols": "joining two patrol routes into one",
+}
+
+
+def _suggestion_path(script_dir, username):
+    return os.path.join(melody_dir(script_dir, username), "suggestion.json")
+
+
+def suggestion_pending(script_dir, username):
+    """The player's pending suggestion, or None. Vault-scoped (Law 18):
+    the path is built from the authenticated username alone."""
+    try:
+        p = _suggestion_path(script_dir, username)
+    except ValueError:
+        return None
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            sug = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(sug, dict) or sug.get("status") != "pending":
+        return None
+    if sug.get("kind") not in _SUGGEST_KINDS:
+        return None
+    return sug
+
+
+def suggestion_set_status(script_dir, username, status):
+    """Mark the pending suggestion accepted/declined — the HUD clears it
+    after the player taps. Unknown/absent file: silent no-op."""
+    try:
+        p = _suggestion_path(script_dir, username)
+    except ValueError:
+        return False
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            sug = json.load(f)
+    except (OSError, ValueError):
+        return False
+    if not isinstance(sug, dict) or sug.get("status") != "pending":
+        return False
+    sug["status"] = status
+    tmp = p + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(sug, f)
+        os.replace(tmp, p)
+    except OSError:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        return False
+    return True
+
+
+def _parse_where(where):
+    """'x,y' -> [x, y] | None. Anything else means 'you pick the spot'."""
+    m = re.match(r"^\s*(\d{1,4})\s*,\s*(\d{1,4})\s*$", where or "")
+    if not m:
+        return None
+    return [int(m.group(1)), int(m.group(2))]
+
+
+def tool_suggest_map_change(script_dir, username, kind, label, where=""):
+    """Record a pending ghost suggestion. Returns the brain-facing reply."""
+    kind = (kind or "").strip().lower()
+    if kind not in _SUGGEST_KINDS:
+        return ("I can only suggest " +
+                " or ".join(sorted(_SUGGEST_KINDS)) + ".")
+    label = (label or "").strip()[:200]
+    if not label:
+        label = {"wall_ring": "Add walls around this floor?",
+                 "connect_patrols": "Connect these patrol stops?"}[kind]
+    where_xy = _parse_where(where)
+    if suggestion_pending(script_dir, username):
+        return ("There's already a suggestion waiting on the map — the "
+                "player accepts or declines that one first.")
+    try:
+        d = melody_dir(script_dir, username)
+        os.makedirs(d, exist_ok=True)
+        p = _suggestion_path(script_dir, username)
+        sug = {"kind": kind, "label": label, "status": "pending",
+               "created": int(time.time())}
+        if where_xy:
+            sug["where_xy"] = where_xy
+        tmp = p + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(sug, f)
+        os.replace(tmp, p)
+    except (OSError, ValueError) as exc:
+        return f"Couldn't save the suggestion ({exc})."
+    audit(script_dir, username, "suggest",
+          f"kind={kind} label={label[:60]}")
+    return (f"Suggestion saved: {label} — the player sees it as a ghost "
+            f"preview on the map and accepts or declines it with one tap. "
+            f"Tell them it's waiting; don't paint anything yourself.")
+
+
 TOOLS = [
     {"type": "function", "function": {
         "name": "law_lookup",
@@ -643,11 +751,23 @@ TOOLS = [
             "tile_id": {"type": "string",
                        "description": "The custom tile's id number."}},
          "required": ["tile_id"]}}},
+    {"type": "function", "function": {
+        "name": "suggest_map_change",
+        "description": "Propose a map change the player sees as a ghost preview they accept or undo with one tap. Use it when the player asks for layout help — 'surround this with walls', 'connect my patrols' — never for anything destructive. The preview is reversible; you never paint directly.",
+        "parameters": {"type": "object", "properties": {
+            "kind": {"type": "string",
+                     "description": "One of: wall_ring (walls around the open floor), connect_patrols (join two patrol routes into one)."},
+            "label": {"type": "string",
+                      "description": "The plain-words question the player sees, e.g. 'Add walls around this floor?'."},
+            "where": {"type": "string",
+                       "description": "Optional 'x,y' tile near the spot; leave empty and Melody picks."}},
+         "required": ["kind"]}}},
 ]
 
 
 _KNOWN_TOOLS = {"law_lookup", "knowledge_search", "vault_stats",
-                "map_validate", "charter", "remove_background"}
+                "map_validate", "charter", "remove_background",
+                "suggest_map_change"}
 
 # Max characters the model may pass into any single tool argument. Tool args
 # are search topics and queries — anything longer is either a bug or a
@@ -689,6 +809,10 @@ def run_tool(script_dir, username, name, args):
         return tool_charter()
     if name == "remove_background":
         return tool_remove_background(script_dir, username, _arg("tile_id"))
+    if name == "suggest_map_change":
+        return tool_suggest_map_change(script_dir, username,
+                                       str(args.get("kind", ""))[:64],
+                                       _arg("label"), _arg("where"))
     return f"I don't have a tool called '{name[:40]}."
 
 
@@ -928,9 +1052,10 @@ Rules you never break:
   another player's private vault. If asked, say plainly you can't see other
   players' private stuff.
 - You can look things up and diagnose, but you cannot change the player's
-  world yourself. If they want a change, describe exactly what to tap — or,
-  when the co-build update ships, you'll be able to propose it for their
-  approval.
+  world yourself. If they want a change, describe exactly what to tap — or
+  propose it with your suggest_map_change tool, which shows them a ghost
+  preview they accept or undo with one tap. Never paint silently: every
+  suggestion stays reversible until they say yes.
 - Use your tools when the player asks about the Repair Laws, the guide, their
   vault stats, or map problems. Don't narrate tool calls; just answer with
   what you found.

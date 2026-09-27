@@ -5,6 +5,43 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.47.0 — 2026-09-27
+
+**The HUD pass: one bottom sheet, budget strip, always-visible Play.** Phase 5
+of the roadmap — everything floats into a single context-sensitive bottom
+sheet with peek / half / full heights (tap the grab to cycle, drag to snap):
+the tile tray, the object inspector, the animation panel, and the v5.46
+conceptual-layer ribbon now switch by selection like a Godot/Unity inspector,
+and the old permanent left tray + semantic dock retire. The map stays
+tappable under the sheet — it's non-modal.
+
+- **Budget strip** — a slim persistent bar: tiles placed, NPC count, FX
+  budget, undo/redo depth. Tap it to undo. Budgets are SOFT (400 animated
+  cells, 20 patrols): the strip warns, never blocks.
+- **Always-visible Play** — one floating button, bottom-left. Tap to walk
+  the map (camera AND selection are snapshotted on entry and handed back
+  exactly on exit); hold for a quick before/after of the current animation.
+- **NPC event cards** — patrol routes render as numbered pins joined by a
+  route line; tapping a pin opens a plain-words card ("wait here: sleep,
+  30s", "at stop 3 → Talk") with two fat buttons per stop (cycle the wait,
+  flip the pose). Raw timers stay off the beginner surface.
+- **Room presets** — one-tap 🏠 Dungeon room (11×9, 2-wide south door) and
+  🏰 Boss arena (15×13, four pillar stubs, north+south doors), planned as
+  semantic strokes so edges/collision resolve; editable after, one undo.
+- **Melody's ghost suggestions** — she can now propose a reversible ghost
+  preview (`suggest_map_change`: wall rings around floor regions with a
+  south door gap, or joining two near-touching patrol routes). The ghost
+  renders on the map in violet; ✅ Do it paints through the normal undoable
+  endpoints (one tap on ↩ reverses it), Not now declines. She proposes —
+  she never paints silently. One pending suggestion per vault (Law 18:
+  vault-scoped, the Agent Sees Only Its Player).
+- Server: `/api/semantic/stroke` batch mode (≤8 strokes, one undo),
+  `/api/patrols/merge` (two routes become one, pauses ride by coordinate,
+  atomic), `/api/melody/suggestion` (+ decline), undo/redo depths on
+  `/api/status`.
+
+Not phone-verified yet — desktop/server verified; Lloyd's iPhone run pending.
+
 ## v5.46.0 — 2026-09-27
 
 **Semantic painting: paint MEANING, the engine resolves the tiles.** Phase 4

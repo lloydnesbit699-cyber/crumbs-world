@@ -145,7 +145,12 @@ def t_library_roundtrip():
     am.save_sprite_library()
     with open(tmp) as f:
         saved = json.load(f)
-    assert len(saved) == 2 and {e["id"] for e in saved} == {13, 24}, (
+    # the v5.6 asset pack made 14 library entries loadable as real tiles —
+    # a save persists loaded tiles AND preserved entries (a save never
+    # silently erases), so the round trip covers the whole library file.
+    with open(os.path.join(HERE, "sprite_library.json")) as f:
+        expect = {e["id"] for e in json.load(f)}
+    assert {e["id"] for e in saved} == expect, (
         f"saved library wrong: {[e.get('id') for e in saved]}")
     am2 = AssetManager(sprite_library_path=tmp)
     assert len(am2._preserved_entries) == 2, "reload lost preserved entries"

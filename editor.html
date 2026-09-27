@@ -660,6 +660,11 @@
   .insp-traits button { font-size: 13px; padding: 5px 9px; min-height: 0; }
   .insp-empty { color: #888; padding: 8px 2px; font-size: 14px; }
   #btn-patrol-done { background: #2b4a2b; border-color: #6dd76d; margin-top: 6px; }
+  /* v5.40: per-stop pause controls — compact rows, phone-tappable */
+  .stoprow { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+  .stoprow .sn { color: #9db3ff; font-size: 12px; min-width: 26px; }
+  .stoprow button { font-size: 13px; padding: 5px 9px; min-height: 0; }
+  .stoprow button.on { border-color: #8a6dd7; color: #c9b8ff; }
   /* v3.5: recording indicator */
   #btn-record.on { border-color: #e5484d; color: #ff8589; animation: recpulse 1.2s infinite; }
   @keyframes recpulse { 50% { background: #4a1d1d; } }
@@ -3323,6 +3328,13 @@ $("end-again").onclick = async () => {
 };
 async function playTap(cell) {
   if (heroTimer || playOver) return;  // let the current walk finish first
+  // v5.40: tapping a paused walker while standing next to him = hello, no walk
+  if (hero) {
+    const w = npcs.find(n => n.pauseUntil &&
+      Math.round(n.x) === cell.x && Math.round(n.y) === cell.y &&
+      Math.max(Math.abs(n.x - hero.x), Math.abs(n.y - hero.y)) <= 1);
+    if (w) { fireWalkerInteract(w); return; }
+  }
   const r = await api("/api/play/move", { x: cell.x, y: cell.y });
   if (!r.ok) { toast("play failed"); return; }
   if (r.warp) { await warpRefresh(r); return; }   // v5.29: stepped through a portal
@@ -3339,6 +3351,8 @@ async function playTap(cell) {
     heroInDeep = !!deep[i];     // v3.6: lights the swim-animation hook below
     const evs = evts[i] || [];
     i++; render();
+    // v5.40: walked up to a resting walker — he notices you
+    for (const w of walkerNear(hero.x, hero.y)) fireWalkerInteract(w);
     if (await playEvents(evs)) { heroTimer = null; return; }
     if (i >= path.length) { heroTimer = null; heroSwimming = false; heroInDeep = false; refreshSight(); syncMissionHud(); return; }
     const wms = RULES.walk_ms;   // v3.7: tap-to-walk obeys this build's rules
@@ -3352,6 +3366,7 @@ $("btn-play").onclick = async () => {
     const r = await api("/api/play/start", {});
     if (!r.ok) { toast("play failed"); return; }
     playMode = true; hero = { x: r.x, y: r.y };
+    walkerShown = new Set();   // v5.40: fresh hellos for a fresh run
     // v5.29: the flagged PC leads this run — his sprite and his size.
     // No flags: the tile pick (or the gold circle, as before).
     const _fh0 = flagHeroes();
@@ -3885,6 +3900,23 @@ function renderInspect() {
                    '<button data-act="cleartext" data-rid="' + said.id + '" class="danger">Clear text</button>'
                  : '<button data-act="settext">Set text</button>';
     h += inspRow("object", v, btns);
+    if (p) {
+      // v5.40: per-stop pauses — tap ⏸ to cycle the timer, 🧍/😴 picks the
+      // pose. While he rests at a stop you can walk up and say hi.
+      const pz = p.pauses || [];
+      let sh = '<small>stop pauses — he rests here, walk up and talk</small>';
+      p.points.forEach((pt, i) => {
+        const e = pz[i] || { secs: 0, mode: "stand" };
+        sh += '<div class="stoprow"><span class="sn">#' + (i + 1) + '</span>' +
+          '<button data-act="stoppause" data-pid="' + p.id + '" data-i="' + i + '">' +
+          (e.secs > 0 ? "⏸ " + fmtPauseSecs(e.secs) : "⏸ off") + '</button>' +
+          '<button data-act="stopmode" data-pid="' + p.id + '" data-i="' + i + '"' +
+          (e.mode === "sleep" ? ' class="on"' : "") +
+          (e.secs > 0 ? "" : " disabled") + '>' +
+          (e.mode === "sleep" ? "😴 sleep" : "🧍 stand") + '</button></div>';
+      });
+      h += inspRow("pauses", sh, "");
+    }
     // v5.29: entity controls — size, kind (world/decor + interactive),
     // and the insert role. One tap each, all saved with the map.
     h += '<div class="insp-row"><div class="k">size</div><div class="v">' +
@@ -4019,6 +4051,28 @@ async function inspectAction(act, d) {
     stashBrush(); selTile = ov; buildPalette();
     closeOverlays(); render();
     toast("tap where he should walk, then Done ✓");
+    return;
+  } else if (act === "stoppause" || act === "stopmode") {
+    // v5.40: per-stop pause timers — ⏸ cycles off→3s→10s→30s→1m→2m→5m,
+    // 🧍/😴 flips the pose. One call saves the whole stop list.
+    const p = patrols.find(p => p.id === +d.pid);
+    if (!p) { toast("that patrol is gone"); return; }
+    const i = +d.i;
+    if (!(i >= 0 && i < p.points.length)) return;
+    const pz = p.points.map((_, j) => {
+      const e = (p.pauses && p.pauses[j]) || {};
+      return { secs: Math.max(0, e.secs | 0),
+               mode: e.mode === "sleep" ? "sleep" : "stand" };
+    });
+    if (act === "stoppause") {
+      const CYCLE = [0, 3, 10, 30, 60, 120, 300];
+      pz[i].secs = CYCLE[(CYCLE.indexOf(pz[i].secs) + 1) % CYCLE.length];
+    } else {
+      pz[i].mode = pz[i].mode === "sleep" ? "stand" : "sleep";
+    }
+    const r = await api("/api/patrols/pauses", { id: p.id, pauses: pz });
+    if (!r.ok) { toast("pause didn't save"); return; }
+    await loadPatrols(); renderInspect(); render();
     return;
   } else if (act === "reroute") {
     // v5.0: re-route without deleting first — the old route is replaced
@@ -4911,7 +4965,7 @@ $("btn-patrol-done").onclick = async () => {
   patrolTool = false; $("btn-patrol").classList.remove("on");
   restoreBrush();
   await refresh(); await loadPatrols(); render();
-  toast(wasReroute ? "his route is updated" : "he's on patrol — hit Play to watch him walk it");
+  toast(wasReroute ? "his route is updated" : "he's on patrol — stop pauses live on his inspect card, then Play");
 };
 async function removePatrol(id) {
   await api("/api/patrols/delete", { id });
@@ -4939,6 +4993,13 @@ function effWalkerCollision(l) {
     return c === "ethereal";
   } catch (e) { return false; }
 }
+// v5.40: which route stop (index into p.points) a patrol leg ENDS at — the
+// walker rests there if the stop has a pause timer. The anchor itself
+// (way[0] of an anchored route) is home, not a stop: null.
+function legStopIdx(wayLen, legI, anchored) {
+  const w = (legI + 1) % wayLen;
+  return anchored ? (w === 0 ? null : w - 1) : w;
+}
 async function buildNpcs() {
   npcs = [];
   walkingAnchors = new Set();
@@ -4955,11 +5016,25 @@ async function buildNpcs() {
       sx = p.x; sy = p.y;
       walkingAnchors.add(p.x + "," + p.y);
     }
+    // v5.40: the walker carries what pause-to-interact needs — his anchor
+    // cell (the server owns interactions there), his manners, and his name
+    let interactive = true, role = "none", nm = null;
+    if (p.x != null && p.y != null) {
+      const oc = objects[p.y] && objects[p.y][p.x];
+      if (oc != null) {
+        const oa = objA(oc);
+        interactive = oa.interactive !== false;
+        role = oa.role || "none";
+        nm = instanceName(p.x, p.y);
+      }
+    }
     starts[pi] = { x: sx, y: sy, tile_id: p.tile_id,
       // v5.29: anchored walkers keep the anchor instance's size
-      size: (p.x != null) ? objSize(objects[p.y] && objects[p.y][p.x]) : 1.0 };
+      size: (p.x != null) ? objSize(objects[p.y] && objects[p.y][p.x]) : 1.0,
+      interactive, role, nm };
     for (let i = 0; i < way.length; i++)
       legs.push({ pi, from: way[i], to: way[(i + 1) % way.length],
+        stopIdx: legStopIdx(way.length, i, p.x != null),  // v5.40: pause here?
         // v5.35: Phase 2 — the anchor feeds the ethereal check below
         ax: (p.x != null) ? p.x : null, ay: (p.y != null) ? p.y : null,
         tile_id: p.tile_id });
@@ -4971,19 +5046,39 @@ async function buildNpcs() {
   const paths = (r && r.paths) || [];
   patrols.forEach((p, pi) => {
     if (!starts[pi]) return;
-    const loop = [];
-    legs.forEach((l, li) => { if (l.pi === pi && paths[li] && paths[li].length) loop.push(...paths[li]); });
-    if (loop.length) npcs.push({ tile_id: starts[pi].tile_id, loop, seg: 0,
+    const loop = [], stopAt = [];
+    legs.forEach((l, li) => {
+      if (l.pi === pi && paths[li] && paths[li].length) {
+        loop.push(...paths[li]);
+        // v5.40: the leg's last cell is the stop just reached
+        if (l.stopIdx != null) stopAt[loop.length - 1] = l.stopIdx;
+      }
+    });
+    if (loop.length) npcs.push({ tile_id: starts[pi].tile_id, loop, seg: 0, stopAt,
+      pi,   // v5.40: back-reference for pause + pause-to-interact
+      pauses: Array.isArray(p.pauses) ? p.pauses : [],
+      ax: (p.x != null) ? p.x : null, ay: (p.y != null) ? p.y : null,
+      interactive: starts[pi].interactive, role: starts[pi].role, nm: starts[pi].nm,
       size: starts[pi].size || 1.0,   // v5.29: walkers keep their build size
       x: starts[pi].x, y: starts[pi].y, flip: false, away: false,
+      pauseUntil: 0, pauseMode: null, pauseStop: -1,   // v5.40: stop pauses
       hazard: !!patrols[pi].hazard });  // v5.12: Melody's hazard patrols
   });
 }
 function npcTick(dt) {
   const SPEED = 2.4;   // tiles per second
-  let moved = false;
+  const now = (typeof performance !== "undefined" && performance.now)
+    ? performance.now() : Date.now();
+  let moved = false, resting = false;
   npcs.forEach(n => {
     if (!n.loop.length) return;
+    // v5.40: stop pauses — the timer runs on the wall clock, so a pause
+    // survives a slept tab and he walks on when it ends. Tapping him
+    // mid-pause never touches the timer.
+    if (n.pauseUntil) {
+      if (now < n.pauseUntil) { if (n.pauseMode === "sleep") resting = true; return; }
+      n.pauseUntil = 0; n.pauseMode = null;   // timer done — walk on
+    }
     let rem = dt * SPEED, guard = 0;
     while (rem > 0 && guard++ < 10) {
       const t = n.loop[n.seg];
@@ -4995,11 +5090,24 @@ function npcTick(dt) {
       if (Math.abs(dx) > 1e-3 || Math.abs(dy) > 1e-3)
         n.away = Math.abs(dy) > Math.abs(dx) && dy < 0;
       const step = Math.min(d, rem);
+      const arrived = n.seg;
       n.x += dx / d * step; n.y += dy / d * step; rem -= step; moved = true;
-      if (step >= d - 1e-9) n.seg = (n.seg + 1) % n.loop.length;
+      if (step >= d - 1e-9) {
+        n.seg = (n.seg + 1) % n.loop.length;
+        // v5.40: just reached loop cell `arrived` — a route stop with a timer?
+        const si = n.stopAt ? n.stopAt[arrived] : null;
+        const pz = (si != null && n.pauses) ? n.pauses[si] : null;
+        if (pz && pz.secs > 0) {
+          n.pauseUntil = now + pz.secs * 1000;
+          n.pauseMode = pz.mode === "sleep" ? "sleep" : "stand";
+          n.pauseStop = si;
+          break;   // he rests here — leftover movement is dropped, no sliding
+        }
+      }
     }
   });
   if (moved) queueRender();   // v5.3: batched with the frame
+  else if (resting) queueRender();   // v5.40: the 💤 bob needs frames too
 }
 function drawNpc(n) {
   const im = n.away ? npcSilhouette(n.tile_id) : tileFrameImage(n.tile_id);
@@ -5022,6 +5130,12 @@ function drawNpc(n) {
     ctx.strokeStyle = "rgba(255,90,90,0.95)"; ctx.lineWidth = Math.max(2, tilePx / 16);
     ctx.beginPath(); ctx.arc(px + tilePx / 2, py + tilePx / 2, tilePx * 0.44, 0, Math.PI * 2); ctx.stroke();
   }
+  if (n.pauseMode === "sleep") {   // v5.40: a sleeping walker dreams out loud
+    const bob = Math.sin(Date.now() / 550) * tilePx * 0.07;
+    ctx.font = "bold " + Math.round(tilePx * 0.42) + "px sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("💤", px + tilePx / 2, py - tilePx * 0.12 + bob);
+  }
 }
 // v3.4: the "silo" trick — a back view faked from the front picture.
 // v4.4: the old near-black fill read as a roaming blob on real art — now the
@@ -5043,6 +5157,41 @@ function npcSilhouette(tile_id) {
   g.fillRect(0, 0, c.width, c.height);
   silCache[key] = c;
   return c;
+}
+// ---- v5.40: patrol stop pauses — pause-to-interact --------------------------
+// A walker resting at a stop is catchable: walk up (or tap him while
+// adjacent) and he says hello — his set-text, his mentor line, or just a
+// mumble. Per-run memory, like the server's _rule_shown: one hello per
+// stop-visit. The anchor cell stays the server's territory (its rules fire
+// on the object layer), so the client only speaks for pauses away from home.
+let walkerShown = new Set();
+function walkerNear(x, y) {
+  return npcs.filter(n => n.pauseUntil &&
+    !(n.ax != null && Math.round(n.x) === n.ax && Math.round(n.y) === n.ay) &&
+    Math.max(Math.abs(n.x - x), Math.abs(n.y - y)) <= 1);
+}
+function fireWalkerInteract(n) {
+  const key = n.pi + ":" + n.pauseStop;
+  if (walkerShown.has(key)) return;
+  walkerShown.add(key);
+  if (n.interactive === false) return;   // quiet things are scenery
+  const nm = n.nm || tileLabel(n.tile_id);
+  const said = gameRules.find(r => r.kind === "message" && r.tile === n.tile_id);
+  if (n.role === "mentor") {
+    const line = (said && said.text) || "Walk soft, and keep your torch lit.";
+    toast("🛡 " + nm + ": \u201c" + line + "\u201d");
+  } else if (said) {
+    toast("💬 " + (said.text || "He nods at you."));
+  } else {
+    Sfx.mumble();   // nothing scripted — he just says hello
+  }
+}
+// v5.40: pause timer labels — 3s, 10s, 30s, 1m, 2m, 5m
+function fmtPauseSecs(s) {
+  s = +s || 0;
+  if (s < 60) return s + "s";
+  const m = s / 60;
+  return (m % 1 ? m.toFixed(1) : m) + "m";
 }
 
 // ---- palette ---------------------------------------------------------------

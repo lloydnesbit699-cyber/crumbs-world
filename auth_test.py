@@ -256,5 +256,28 @@ finally:
     h.PUBLIC_MODE = _save_public
     h.assets.tiles.pop(_THUMB_TID, None)
 
+print("== patrol stop pauses (_clean_pauses) ==")
+check("clean list passes through",
+      h._clean_pauses([{"secs": 10, "mode": "stand"},
+                       {"secs": 300, "mode": "sleep"}], 2)
+      == [{"secs": 10, "mode": "stand"}, {"secs": 300, "mode": "sleep"}])
+check("secs clamped to 3600",
+      h._clean_pauses([{"secs": 99999, "mode": "stand"}], 1)[0]["secs"] == 3600)
+check("negative secs clamped to 0",
+      h._clean_pauses([{"secs": -5, "mode": "stand"}], 1)[0]["secs"] == 0)
+check("bad secs become 0",
+      h._clean_pauses([{"secs": "soon", "mode": "stand"}], 1)[0]["secs"] == 0)
+check("unknown mode becomes stand",
+      h._clean_pauses([{"secs": 5, "mode": "dance"}], 1)[0]["mode"] == "stand")
+check("missing mode becomes stand",
+      h._clean_pauses([{"secs": 5}], 1)[0] == {"secs": 5, "mode": "stand"})
+check("non-dict entry becomes idle stand",
+      h._clean_pauses(["nap"], 1)[0] == {"secs": 0, "mode": "stand"})
+check("length mismatch rejected",
+      h._clean_pauses([{"secs": 5, "mode": "stand"}], 2) is None)
+check("non-list rejected", h._clean_pauses("nope", 1) is None)
+check("zero stays zero (walk on)",
+      h._clean_pauses([{"secs": 0, "mode": "sleep"}], 1)[0]["secs"] == 0)
+
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

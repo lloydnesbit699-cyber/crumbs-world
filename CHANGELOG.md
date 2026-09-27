@@ -5,6 +5,21 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.40.0 — 2026-09-27
+
+**Patrol stop pauses with user-settable timers (stand/sleep) + pause-to-interact.**
+Lloyd's spec: every patrol stop gets a pause timer — tap ⏸ on the
+character's inspect card to cycle off → 3s → 10s → 30s → 1m → 2m → 5m —
+and a pose: 🧍 stand (holds the spot, idle) or 😴 sleep (long rest, with a
+bobbing 💤 overhead). The timer runs on the wall clock, applies whichever
+direction the walker arrives from, and survives slept tabs; tapping him
+mid-pause never disturbs it. While he rests he's **interactable**: walk up
+(or tap him while adjacent) and he says hello — his set-text, his mentor
+line, or a simlish mumble if nothing's scripted — once per stop-visit, then
+he walks on when the timer ends. Pauses persist with the route (new
+`/api/patrols/pauses`, undoable, survives restarts). The anchor cell stays
+the server's territory so greetings never double-fire.
+
 ## v5.39.0 — 2026-09-27
 
 **Automatic background removal on import (Melody-gated).** Lloyd's rule in

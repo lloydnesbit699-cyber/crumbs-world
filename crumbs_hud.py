@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.39.0"
+APP_VERSION = "5.40.0"
 # v5.24: unique per process boot. After an update the server re-execs into
 # the new files; the page waits for a DIFFERENT instance id (plus the new
 # version) instead of mistaking the old process — still answering during
@@ -1397,6 +1397,25 @@ def _clean_fx(raw):
               "act": "none", "magic": None}:
         return None
     return fx
+
+
+def _clean_pauses(raw, n_stops):
+    """v5.40: per-stop patrol pauses — [{secs, mode}] aligned with points.
+    secs clamps 0..3600 (0 = walk on, no pause); mode is stand|sleep.
+    Returns the cleaned list, or None when the shape is wrong."""
+    if not isinstance(raw, list) or len(raw) != n_stops:
+        return None
+    clean = []
+    for e in raw:
+        e = e if isinstance(e, dict) else {}
+        try:
+            secs = int(e.get("secs", 0))
+        except (TypeError, ValueError):
+            secs = 0
+        secs = max(0, min(3600, secs))
+        mode = "sleep" if e.get("mode") == "sleep" else "stand"
+        clean.append({"secs": secs, "mode": mode})
+    return clean
 
 
 def _find_custom(tid):
@@ -2743,6 +2762,12 @@ def _load_patrols():
                     rec["mission_id"] = int(p["mission_id"])
                 if p.get("map"):
                     rec["map"] = str(p["map"])
+                # v5.40: stop pauses survive a restart — sanitize, never trust
+                # the file; a mismatch falls back to walking every stop.
+                pz = _clean_pauses(p.get("pauses"), len(pts))
+                rec["pauses"] = (pz if pz is not None
+                                 else [{"secs": 0, "mode": "stand"}
+                                       for _ in pts])
                 _patrols.append(rec)
         except (KeyError, TypeError, ValueError):
             continue
@@ -6537,6 +6562,27 @@ class Handler(BaseHTTPRequestHandler):
                 _mark_dirty()
             _undoable("delete patrol", _do)  # v5.0
             return self._send_json({"ok": True})
+
+        if path == "/api/patrols/pauses":
+            # v5.40: {id, pauses: [{secs, mode}]} — per-stop pause timers.
+            # secs 0 = walk on; stand = idle at the stop, sleep = long rest.
+            try:
+                pid = int(body.get("id"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "bad id"}, 400)
+            p = next((q for q in _patrols if q["id"] == pid), None)
+            if p is None:
+                return self._send_json({"ok": False, "error": "not found"}, 404)
+            clean = _clean_pauses(body.get("pauses"), len(p.get("points", [])))
+            if clean is None:
+                return self._send_json(
+                    {"ok": False, "error": "pauses must match stops"}, 400)
+            def _do():
+                p["pauses"] = clean
+                _save_patrols()
+                _mark_dirty()
+            _undoable("set patrol pauses", _do)
+            return self._send_json({"ok": True, "pauses": clean})
 
         if path == "/api/missions/create":
             # v5.12: Melody designs a mission from preset + questionnaire.

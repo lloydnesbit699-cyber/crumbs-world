@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.42.0"
+APP_VERSION = "5.42.1"
 # v5.41: single source of truth for the map-size cap (was 64, hardcoded in
 # four places). 500x500 = 250k cells. The client additionally caps tilePx so
 # the full-map backing canvas never exceeds 4096px per side (see editor.html).
@@ -542,6 +542,58 @@ _vault_states = {}                # vault_id -> {global_name: object}
 _active_vault = None              # vault_id whose objects the globals point at
 _active_custom_tids = set()       # custom tile ids currently registered in assets
 _histories = {}                   # username -> HistoryManager (per-user undo)
+_histories_last = {}            # (username, vault_id) -> last-use epoch
+_HISTORY_IDLE_SECS = 30 * 60    # v5.42.1: stacks idle this long are evicted
+
+
+# ---- v5.42.1: grid revision + height-grid cache ------------------------------
+# The height grid is a pure function of (tiles, objects, height overrides,
+# tile art) — but at 500x500 it costs ~1s to recompute, and the client
+# refetches it after every undo/redo. _grid_rev identifies the grid
+# content: it bumps on every mutation (via _mark_dirty, the one choke point
+# every mutating path already calls, plus explicit bumps where grids are
+# swapped wholesale). Undo/redo restore the rev recorded on the command, so
+# stepping back to a previously-seen state is a cache HIT instead of a
+# recompute — the cache keeps a few recent revs for exactly this.
+# Same rev <=> same mutation history ==> same content: no false hits.
+# (Defined up here because _save_custom_registry runs at import.)
+_grid_rev = 0
+_height_cache = {}  # rev -> grid; bounded below
+_HEIGHT_CACHE_MAX = 4  # worst case ~4 big grids; old code kept 50 full maps
+
+
+def _bump_grid_rev():
+    """Grid content changed out from under the cache — next read recomputes."""
+    global _grid_rev
+    _grid_rev += 1
+
+
+def _set_grid_rev(rev):
+    """Restore a previously-recorded rev (undo/redo). Unknown rev: no-op."""
+    global _grid_rev
+    if isinstance(rev, int) and rev >= 0:
+        _grid_rev = rev
+
+
+def _height_grid_cached():
+    """core.height_grid(world), cached by grid rev. Mutations invalidate via
+    _bump_grid_rev; undo/redo restore the rev so they hit the cache."""
+    g = _height_cache.get(_grid_rev)
+    if g is None:
+        g = core.height_grid(world)
+        _height_cache[_grid_rev] = g
+        while len(_height_cache) > _HEIGHT_CACHE_MAX:
+            _height_cache.pop(next(iter(_height_cache)))
+    return g
+
+
+def _sync_rev_from_stack(stack, which):
+    """After undo/redo the live grids are exactly the top command's recorded
+    before/after state — adopt its rev so the height cache hits."""
+    if stack:
+        _set_grid_rev(getattr(
+            stack[-1], "_rev_before" if which == "before" else "_rev_after",
+            None))
 
 
 def _vaults_dir():
@@ -1058,6 +1110,10 @@ def _vault_activate(vault_id):
         _active_vault = vault_id  # paths route here before the restore
         _vault_restore(slot)
     _active_vault = vault_id
+    # v5.42.1: another vault's grids AND tile art are live now — the
+    # height/natural caches keyed to the old vault must not survive.
+    _bump_grid_rev()
+    _clear_natural_cache()
 
 
 def _user_history(username, vault_id):
@@ -1066,11 +1122,21 @@ def _user_history(username, vault_id):
     player's paints — and keyed by world too, so a private-vault snapshot
     can never be pasted onto the Commons world by an undo after switching.
     Call with _vault_lock held."""
+    now = time.time()
+    # v5.42.1: idle-evict stacks nobody has touched in a while — they were
+    # never evicted except on vault switch/map load.
+    for k, ts in list(_histories_last.items()):
+        if now - ts > _HISTORY_IDLE_SECS and k in _histories:
+            del _histories[k]
+            del _histories_last[k]
     key = (username, vault_id)
     h = _histories.get(key)
     if h is None:
         h = core.HistoryManager()
         _histories[key] = h
+    _histories_last[key] = now
+    # v5.42.1: wide maps keep shorter stacks — each step covers more ground.
+    h.set_max_steps(25 if world.width > 80 else 50)
     return h
 
 
@@ -1535,6 +1601,11 @@ def _save_custom_registry(scope="local"):
         _atomic_write_json(path, doc)
     except Exception as e:
         print(f"[hud] could not save {scope} tile registry: {e}")
+    # v5.42.1: the tile set changed — heights (tile art) and the natural
+    # color map may both differ now. (Safe at import: both helpers are
+    # defined before the module-level _load_custom_tiles() call.)
+    _bump_grid_rev()
+    _clear_natural_cache()
 
 
 def _register_custom_tile(entry, tile_dir):
@@ -1586,6 +1657,11 @@ def _register_custom_tile(entry, tile_dir):
         entry["deep"] = True
     else:
         assets.tiles[tid]["properties"]["deep"] = False
+    # v5.42.1: tile art changed — the height grid (tile art) and the natural
+    # color map (tile colors) must not serve stale renders. Safe at import:
+    # both helpers are defined before the module-level _load_custom_tiles().
+    _bump_grid_rev()
+    _clear_natural_cache()
     return True
 
 
@@ -3062,6 +3138,61 @@ def _map_png(scale=4, data=None, objects=None, w=None, h=None,
                     img.paste(th, (x * ts, y * ts))
     return img.convert("RGB")
 
+
+# ---- v5.42.1: disk cache for /api/map/thumb ---------------------------------
+# The picker re-fetches every map's thumbnail on open; each render walks the
+# whole grid. Cache the rendered PNG on disk keyed by map file + mtime —
+# editing a map invalidates it automatically, and the cache survives restarts.
+_THUMB_CACHE_DIR = ".map_thumb_cache"  # under _vault_base(); gitignored
+
+
+def _map_thumb_bytes(name):
+    """PNG bytes for a saved map's thumbnail, or None when unrenderable."""
+    p = _vpath(name)
+    try:
+        st = os.stat(p)
+    except OSError:
+        return None
+    cdir = os.path.join(_vault_base(), _THUMB_CACHE_DIR)
+    try:
+        os.makedirs(cdir, exist_ok=True)
+    except OSError:
+        pass
+    cpath = os.path.join(cdir, "%s-%d-%d.png"
+                         % (name, st.st_mtime_ns, st.st_size))
+    try:
+        with open(cpath, "rb") as f:
+            return f.read()
+    except OSError:
+        pass  # miss — render and store
+    try:
+        m = json.load(open(p))
+        img = _map_png(1, m["tiles"], m.get("objects"),
+                       m["width"], m["height"], max_dim=512)
+    except (OSError, ValueError, KeyError, IndexError, TypeError):
+        img = None
+    if img is None:
+        return None
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    data = buf.getvalue()
+    tmp = cpath + ".tmp"
+    try:
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, cpath)
+        # one thumb per map: sweep stale renders for this file
+        for f in os.listdir(cdir):
+            fp = os.path.join(cdir, f)
+            if f.startswith(name + "-") and fp != cpath:
+                try:
+                    os.remove(fp)
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return data
+
 def _validate_map():
     """One-tap map check: spawn exists, regions reachable, tile ids valid."""
     issues = []
@@ -3229,6 +3360,7 @@ def _switch_map(name, path):
         return False, None
     history.undo_stack.clear()
     history.redo_stack.clear()
+    _bump_grid_rev()  # v5.42.1: a different map's grids are live now
     _load_rules(name)   # also sets _current_map = name
     _load_traits(name)
     _load_names(name)
@@ -3545,9 +3677,7 @@ def _snapshot_state():
 
 
 def _restore_state(s):
-    global _patrols, _patrol_seq, traits_grid, rules, game_rules
-    global _game_seq, map_meta, object_names, _portals  # v5.29: +_portals
-    global _neighbors  # v5.42: edge links undo too
+    global traits_grid
     world.width, world.height = s["width"], s["height"]
     world.data = [row[:] for row in s["tiles"]]
     world.object_layer = [row[:] for row in s["objects"]]
@@ -3557,11 +3687,78 @@ def _restore_state(s):
                              s.get("height_override",
                                    [[None] * s["width"]
                                     for _ in range(s["height"])])]
+    traits_grid = copy.deepcopy(s["traits"])
+    _restore_small(s)
+
+
+# ---- v5.42.1: diff-based undo ------------------------------------------------
+# _snapshot_state copies every grid twice per step (before AND after) — at
+# 500x500 that's ~1GB across a 50-deep stack that was never evicted. Now
+# cell-level mutations store only the cells they touched: grid layers ride
+# as (x, y, old, new) diffs, and the small non-grid state rides as plain
+# before/after copies (it's tiny). Full snapshots are reserved for
+# generate/resize/reset (full=True); metadata-only edits pass grids=False
+# to skip the grid walk entirely.
+_SMALL_STATE_KEYS = ("patrols", "patrol_seq", "names", "rules", "game_rules",
+                     "game_seq", "world", "meta", "portals", "neighbors")
+
+
+def _grid_layers():
+    """Live grid objects, in diff order."""
+    return (
+        ("tiles", world.data),
+        ("objects", world.object_layer),
+        ("collision", world.collision_layer),
+        ("height_override", world.height_override),
+        ("traits", traits_grid),
+    )
+
+
+def _diff_layer(before_grid, after_grid):
+    """Changed cells as [(x, y, old, new)], or None when the shapes differ
+    (the caller falls back to a full snapshot). Row-level == is C-fast, so
+    only rows that actually changed are walked cell by cell."""
+    if len(before_grid) != len(after_grid):
+        return None
+    diffs = []
+    for y in range(len(before_grid)):
+        rb, ra = before_grid[y], after_grid[y]
+        if rb == ra:
+            continue
+        if len(rb) != len(ra):
+            return None
+        for x in range(len(rb)):
+            if rb[x] != ra[x]:
+                diffs.append((x, y, rb[x], ra[x]))
+    return diffs
+
+
+def _snapshot_small():
+    """The non-grid design state only — cheap; for metadata-only undo steps."""
+    return {
+        "patrols": copy.deepcopy(_patrols),
+        "patrol_seq": copy.deepcopy(_patrol_seq),
+        "names": copy.deepcopy(object_names),  # v5.1
+        "rules": copy.deepcopy(rules),
+        "game_rules": copy.deepcopy(game_rules),
+        "game_seq": copy.deepcopy(_game_seq),
+        "world": copy.deepcopy(world_profile),
+        "meta": copy.deepcopy(map_meta),
+        "portals": copy.deepcopy(_portals),  # v5.29
+        "neighbors": copy.deepcopy(_neighbors),  # v5.42
+    }
+
+
+def _restore_small(s):
+    """Restore the non-grid design state + persist sidecars. Shared by
+    _restore_state and the diff command below."""
+    global _patrols, _patrol_seq, rules, game_rules
+    global _game_seq, map_meta, object_names, _portals  # v5.29: +_portals
+    global _neighbors  # v5.42: edge links undo too
     _portals = copy.deepcopy(s.get("portals", {}))  # v5.29
     _neighbors = copy.deepcopy(s.get("neighbors", {}))  # v5.42
     _patrols = copy.deepcopy(s["patrols"])
     _patrol_seq = copy.deepcopy(s["patrol_seq"])
-    traits_grid = copy.deepcopy(s["traits"])
     object_names = copy.deepcopy(s.get("names", {}))  # v5.1 (old saves: {})
     rules = copy.deepcopy(s["rules"])
     game_rules = copy.deepcopy(s["game_rules"])
@@ -3578,12 +3775,71 @@ def _restore_state(s):
     _mark_dirty()
 
 
-def _undoable(label, fn):
-    """Run fn() as one undo step. The command snapshots before, and captures
-    after when fn finishes; a throw inside fn leaves history untouched."""
-    cmd = core.StateSnapshotCommand(_snapshot_state, _restore_state, label)
-    out = fn()
-    cmd.capture_after()
+class _StateDiffCommand:
+    """v5.42.1: one undo step as cell diffs + small-state before/after.
+    undo() applies the diffs backwards and restores the small before-state;
+    execute() (redo) applies them forwards. _rev_before/_rev_after let the
+    height-grid cache hit across undo/redo (see _sync_rev_from_stack)."""
+    def __init__(self, label, diffs, before_small, after_small):
+        self.label = label
+        self.diffs = diffs
+        self.before_small = before_small
+        self.after_small = after_small
+        self._rev_before = None
+        self._rev_after = None
+
+    def _apply(self, small, forward):
+        for key, grid in _grid_layers():
+            for (x, y, old, new) in self.diffs.get(key, ()):
+                grid[y][x] = new if forward else old
+        _restore_small(small)
+
+    def execute(self):
+        self._apply(self.after_small, True)
+
+    def undo(self):
+        self._apply(self.before_small, False)
+
+
+def _undoable(label, fn, full=False, grids=True):
+    """Run fn() as one undo step. The command captures before, and after
+    when fn finishes; a throw inside fn leaves history untouched.
+    v5.42.1: diff-based by default (see above) — full=True reserves the old
+    whole-state snapshot for generate/resize/reset, and grids=False skips
+    the grid walk for metadata-only edits (patrols, rules, portals...)."""
+    rev_before = _grid_rev
+    if full:
+        cmd = core.StateSnapshotCommand(_snapshot_state, _restore_state, label)
+        out = fn()
+        cmd.capture_after()
+    else:
+        before = _snapshot_state() if grids else _snapshot_small()
+        out = fn()
+        after = _snapshot_state() if grids else _snapshot_small()
+        diffs = {}
+        fallback = False
+        if grids:
+            for key, _ in _grid_layers():
+                d = _diff_layer(before[key], after[key])
+                if d is None:
+                    fallback = True
+                    break
+                diffs[key] = d
+        if fallback:
+            # a layer reshaped under a diff step — a corrupt diff is worse
+            # than a big snapshot, so take the full one.
+            cmd = core.StateSnapshotCommand(lambda: before, _restore_state,
+                                            label)
+            cmd.after = after
+        elif grids:
+            cmd = _StateDiffCommand(
+                label, diffs,
+                {k: before[k] for k in _SMALL_STATE_KEYS},
+                {k: after[k] for k in _SMALL_STATE_KEYS})
+        else:
+            cmd = _StateDiffCommand(label, {}, before, after)
+    cmd._rev_before = rev_before
+    cmd._rev_after = _grid_rev
     history.push(cmd)
     return out
 
@@ -3614,11 +3870,48 @@ def _common_ground():
     return max(cnt, key=cnt.get) if cnt else 0
 
 
+# ---- v5.42.1: natural-grid cache -------------------------------------------
+# The seed's own ground is a pure function of (biome, seed, w, h, noise
+# recipe) — ~1s at 500x500, refetched after every undo/redo via /api/natural.
+# Cached keyed by everything that determines it (bounded at 4 entries,
+# oldest evicted); generate/overlay/reset/resize clear it outright.
+# core.natural_grid also reads tile ART (the biome color map), so the cache
+# is cleared wherever art changes: _register_custom_tile (the choke point),
+# _save_custom_registry, and vault switches. The no-seed fallback
+# (most-common ground) depends on live map content, so it is never cached.
+# Callers must treat the returned grid as read-only.
+_natural_grid_cache = {}
+_NATURAL_CACHE_MAX = 4
+
+
+def _noise_key():
+    n = _preset_noise_over()
+    return json.dumps(n, sort_keys=True) if n else ""
+
+
+def _clear_natural_cache():
+    _natural_grid_cache.clear()
+
+
+def _cached_seed_grid():
+    """The seed-derived ground grid, or None when the map has no seed."""
+    key = (map_meta.get("biome"), map_meta.get("seed"),
+           world.width, world.height, _noise_key())
+    g = _natural_grid_cache.get(key)
+    if g is None:
+        g = core.natural_grid(assets.tiles, map_meta.get("biome"),
+                              map_meta.get("seed"), world.width, world.height,
+                              noise_over=_preset_noise_over())  # v5.29
+        if g is not None:
+            if len(_natural_grid_cache) >= _NATURAL_CACHE_MAX:
+                _natural_grid_cache.pop(next(iter(_natural_grid_cache)))
+            _natural_grid_cache[key] = g
+    return g
+
+
 def _natural_grid():
     """v5.0: the whole seed-ground grid for the eraser preview cache."""
-    g = core.natural_grid(assets.tiles, map_meta.get("biome"),
-                          map_meta.get("seed"), world.width, world.height,
-                          noise_over=_preset_noise_over())  # v5.29
+    g = _cached_seed_grid()
     if g is not None:
         return g
     base = _common_ground()
@@ -4171,6 +4464,7 @@ _save_state = {"dirty": False, "last": None}
 
 def _mark_dirty():
     _save_state["dirty"] = True
+    _bump_grid_rev()  # v5.42.1: every mutation funnels through here
 
 
 def _save_now(name=DEFAULT_SAVE):
@@ -5366,8 +5660,10 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/height-grid":
             # v5.10: per-cell numeric heights for shadows, tall faces,
             # the height overlay, and line-of-sight.
+            # v5.42.1: cached by grid rev — undo/redo hits instead of a
+            # ~1s recompute at 500x500.
             self._send_json({"w": world.width, "h": world.height,
-                             "grid": core.height_grid(world)})
+                             "grid": _height_grid_cached()})
         elif path == "/api/portals":
             # v5.29: read-only pocket-map links — the editor GETs this one.
             self._send_json({"ok": True, "portals": _portals})
@@ -5739,26 +6035,21 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
         elif path == "/api/map/thumb":
-            # v5.6: small PNG preview of any saved map, for the picker
+            # v5.6: small PNG preview of any saved map, for the picker.
+            # v5.42.1: rendered PNGs are cached on disk keyed by map file +
+            # mtime — the picker re-fetches thumbs constantly and a 500x500
+            # render is not cheap.
             q = parse_qs(urlparse(self.path).query)
             name = _safe_name((q.get("file") or [""])[0])
             if not name:
                 return self._send_json({"ok": False, "error": "file required"}, 400)
-            p = _vpath(name)
-            try:
-                m = json.load(open(p))
-                img = _map_png(1, m["tiles"], m.get("objects"),
-                               m["width"], m["height"], max_dim=512)
-            except (OSError, ValueError, KeyError, IndexError, TypeError):
-                img = None
-            if img is None:
+            data = _map_thumb_bytes(name)
+            if data is None:
                 return self._send_json({"ok": False, "error": "cannot render"}, 404)
-            buf = io.BytesIO()
-            img.save(buf, "PNG")
-            data = buf.getvalue()
             self.send_response(200)
             self.send_header("Content-Type", "image/png")
             self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "private, max-age=3600")
             self.end_headers()
             self.wfile.write(data)
         elif path == "/api/slots":
@@ -6377,9 +6668,11 @@ class Handler(BaseHTTPRequestHandler):
                 _undoable("paint object", _do)
             else:
                 cmd = core.SetTileCommand(world, x, y, grid[y][x], new_val, layer)
+                cmd._rev_before = _grid_rev  # v5.42.1: height-cache revs
                 history.push(cmd)
                 cmd.execute()
                 _mark_dirty()
+                cmd._rev_after = _grid_rev
             return self._send_json({"ok": True})
 
         if path == "/api/stroke":
@@ -6466,9 +6759,11 @@ class Handler(BaseHTTPRequestHandler):
                             world, lx, ly, world.collision_layer[ly][lx], lnv,
                             "collision"))
             multi = core.MultiCommand(cmds)
+            multi._rev_before = _grid_rev  # v5.42.1: height-cache revs
             history.push(multi)
             multi.execute()
             _mark_dirty()
+            multi._rev_after = _grid_rev
             # v5.41: echo the resolved cells (see above) — includes linked
             # collision stamps, which ride in the same undo step.
             return self._send_json({
@@ -6775,7 +7070,8 @@ class Handler(BaseHTTPRequestHandler):
                 _patrols.append(p)
                 _save_patrols()
                 _mark_dirty()
-            _undoable("re-route patrol" if replace_id is not None else "assign patrol", _do)
+            _undoable("re-route patrol" if replace_id is not None else "assign patrol", _do,
+                      grids=False)  # v5.42.1: patrols are metadata, not grids
             return self._send_json({"ok": True, "patrol": p})
 
         if path == "/api/patrols/delete":
@@ -6790,7 +7086,7 @@ class Handler(BaseHTTPRequestHandler):
                 _patrols[:] = [p for p in _patrols if p["id"] != pid]
                 _save_patrols()
                 _mark_dirty()
-            _undoable("delete patrol", _do)  # v5.0
+            _undoable("delete patrol", _do, grids=False)  # v5.0; v5.42.1: metadata-only
             return self._send_json({"ok": True})
 
         if path == "/api/patrols/pauses":
@@ -6811,7 +7107,7 @@ class Handler(BaseHTTPRequestHandler):
                 p["pauses"] = clean
                 _save_patrols()
                 _mark_dirty()
-            _undoable("set patrol pauses", _do)
+            _undoable("set patrol pauses", _do, grids=False)  # v5.42.1: metadata-only
             return self._send_json({"ok": True, "pauses": clean})
 
         if path == "/api/missions/create":
@@ -7445,12 +7741,16 @@ class Handler(BaseHTTPRequestHandler):
             ok = history.undo()
             if ok:
                 _mark_dirty()
+                # v5.42.1: the live grids are exactly the command's recorded
+                # before-state — adopt its rev so the height cache hits.
+                _sync_rev_from_stack(history.redo_stack, "before")
             return self._send_json({"ok": ok})
 
         if path == "/api/redo":
             ok = history.redo()
             if ok:
                 _mark_dirty()
+                _sync_rev_from_stack(history.undo_stack, "after")
             return self._send_json({"ok": ok})
 
         if path == "/api/generate-overlay":
@@ -7485,6 +7785,7 @@ class Handler(BaseHTTPRequestHandler):
                 map_meta["biome"]=biome; map_meta["seed"]=seed
                 if preset_id: map_meta["preset"]=preset_id
                 else: map_meta.pop("preset",None)
+                _clear_natural_cache()  # v5.42.1: new seed, new ground
                 _mark_dirty()
             _undoable("overlay " + biome, _do)
             _log_event(f"overlay {biome} (seed {seed}, {mode}, {len(changes)} tiles)")
@@ -7529,8 +7830,9 @@ class Handler(BaseHTTPRequestHandler):
                 _save_names(_current_map)
                 _save_rules(_current_map)
                 _save_traits(_current_map)
+                _clear_natural_cache()  # v5.42.1: new seed, new ground
                 _mark_dirty()
-            _undoable("generate " + biome, _do)  # v5.0: whole build, one step
+            _undoable("generate " + biome, _do, full=True)  # v5.0: whole build, one step
             _log_event(f"generated {biome} (seed {seed})")  # v5.6
             return self._send_json({"ok": True, "biome": biome, "seed": seed,
                                     "rules": rules})
@@ -7559,8 +7861,9 @@ class Handler(BaseHTTPRequestHandler):
                 _save_names(_current_map)
                 _save_rules(_current_map)
                 _save_traits(_current_map)
+                _clear_natural_cache()  # v5.42.1: blank map, no seed ground
                 _mark_dirty()
-            _undoable("reset map", _do)  # v5.0: whole reset, one step
+            _undoable("reset map", _do, full=True)  # v5.0: whole reset, one step
             _log_event("map reset to blank")  # v5.6
             return self._send_json({"ok": True})
 
@@ -7601,8 +7904,9 @@ class Handler(BaseHTTPRequestHandler):
                           if int(k.split(",")[0]) >= w or int(k.split(",")[1]) >= h]:
                     del object_names[k]
                 _save_names(_current_map)
+                _clear_natural_cache()  # v5.42.1: dims changed
                 _mark_dirty()
-            _undoable("resize", _do)  # v5.0: dims undo too now
+            _undoable("resize", _do, full=True)  # v5.0: dims undo too now
             return self._send_json({"ok": True, "width": w, "height": h})
 
         if path == "/api/save":
@@ -7783,7 +8087,7 @@ class Handler(BaseHTTPRequestHandler):
                 _save_portals(_current_map)
                 _mark_dirty()
             try:
-                _undoable("link pocket map", _do)
+                _undoable("link pocket map", _do, grids=False)  # v5.42.1: link is metadata
             except RuntimeError as e:
                 return self._send_json({"ok": False, "error": str(e)}, 500)
             p = _portals.get(key, {})
@@ -7811,7 +8115,7 @@ class Handler(BaseHTTPRequestHandler):
                 _portals.pop(key, None)
                 _save_portals(_current_map)
                 _mark_dirty()
-            _undoable("unlink portal", _do)
+            _undoable("unlink portal", _do, grids=False)  # v5.42.1: metadata-only
             return self._send_json({"ok": True})
 
         if path == "/api/neighbors/set":
@@ -7845,7 +8149,7 @@ class Handler(BaseHTTPRequestHandler):
                     _neighbors.pop(edge, None)
                 _save_neighbors(_current_map)
                 _mark_dirty()
-            _undoable("link neighbor map", _do)
+            _undoable("link neighbor map", _do, grids=False)  # v5.42.1: metadata-only
             _log_event(f"neighbor {edge} -> {target or 'none'}")
             return self._send_json({"ok": True, "edge": edge,
                                     "target": target})
@@ -7887,7 +8191,7 @@ class Handler(BaseHTTPRequestHandler):
                 _save_portals(_current_map)
                 _mark_dirty()
             try:
-                _undoable("regenerate pocket", _do)
+                _undoable("regenerate pocket", _do, grids=False)  # v5.42.1: file op, live grids untouched
             except RuntimeError as e:
                 return self._send_json({"ok": False, "error": str(e)}, 500)
             _log_event(f"regenerated pocket {target} (seed {seed})")
@@ -8269,7 +8573,7 @@ class Handler(BaseHTTPRequestHandler):
                     rules.update(new_vals)
                     _save_rules(_current_map)
                     _mark_dirty()  # autosave persists the sidecar
-                _undoable("rules", _do)  # v5.0
+                _undoable("rules", _do, grids=False)  # v5.0; v5.42.1: metadata-only
                 return self._send_json({"ok": True, "rules": rules})
             return self._send_json({"ok": True, "rules": rules, "noop": True})
 
@@ -8288,7 +8592,7 @@ class Handler(BaseHTTPRequestHandler):
                     game_rules.append(r)
                     _save_rules(_current_map)
                     _mark_dirty()
-                _undoable("add game rule", _do)  # v5.0
+                _undoable("add game rule", _do, grids=False)  # v5.0; v5.42.1: metadata-only
                 return self._send_json({"ok": True, "rule": r,
                                         "rules": game_rules})
             if action == "delete":
@@ -8302,7 +8606,7 @@ class Handler(BaseHTTPRequestHandler):
                     game_rules[:] = [r for r in game_rules if r["id"] != rid]
                     _save_rules(_current_map)
                     _mark_dirty()
-                _undoable("delete game rule", _do)  # v5.0
+                _undoable("delete game rule", _do, grids=False)  # v5.0; v5.42.1: metadata-only
                 return self._send_json({"ok": True, "rules": game_rules})
             return self._send_json({"ok": False, "error": "action?"}, 400)
 
@@ -8358,7 +8662,7 @@ class Handler(BaseHTTPRequestHandler):
                     object_names.pop(key, None)
                 _save_names(_current_map)
                 _mark_dirty()
-            _undoable("name " + (name or "unnamed"), _do)
+            _undoable("name " + (name or "unnamed"), _do, grids=False)  # v5.42.1: metadata-only
             return self._send_json({"ok": True, "name": name or None})
 
         if path == "/api/object-attrs":
@@ -8426,7 +8730,7 @@ class Handler(BaseHTTPRequestHandler):
                         world_profile["weather"] = new_weather
                     _save_rules(_current_map)
                     _mark_dirty()
-                _undoable("world profile", _do)  # v5.0
+                _undoable("world profile", _do, grids=False)  # v5.0; v5.42.1: metadata-only
             return self._send_json({"ok": True, "world": world_profile})
 
         if path == "/api/play/tick":

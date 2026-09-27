@@ -336,6 +336,13 @@ class HistoryManager:
         self.undo_stack = deque(maxlen=max_steps)
         self.redo_stack = deque(maxlen=max_steps)
 
+    def set_max_steps(self, n):
+        """v5.42.1: shrink/grow both stacks, keeping the newest entries."""
+        n = max(1, int(n))
+        if self.undo_stack.maxlen != n:
+            self.undo_stack = deque(self.undo_stack, maxlen=n)
+            self.redo_stack = deque(self.redo_stack, maxlen=n)
+
     def push(self, command):
         self.undo_stack.append(command)
         self.redo_stack.clear()
@@ -1334,7 +1341,9 @@ class WorldMap:
             # the old map or the new map, never half a JSON document.
             tmp = filepath + ".tmp"
             with open(tmp, 'w') as f:
-                json.dump(data, f, indent=2)
+                # v5.42.1: compact JSON — indent=2 doubled every save
+                # (~11.8MB at 500x500); the loader never cared.
+                json.dump(data, f)
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp, filepath)

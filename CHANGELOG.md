@@ -5,6 +5,35 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.42.1 — 2026-09-27
+
+**Scale hardening: undo, caches, and history depth.** Big maps
+(500x500) used to keep two full copies of every grid per undo step
+across a never-evicted 50-deep stack — close to a gigabyte of retained
+state. Undo steps are now cell diffs: only the cells a stroke actually
+touched are kept (plus the small design state), with full snapshots
+reserved for generate / reset / resize. Patrols, rules, portals,
+neighbors, names, and world-profile edits keep metadata-only steps with
+no grid data at all.
+
+**Cached expensive grids.** The height grid (~1s at 500x500) is cached
+by a grid revision that bumps on every mutation; undo/redo restore the
+revision, so stepping back and forth is a cache hit instead of a
+recompute. The seed's natural-color grid is cached by
+biome/seed/dimensions/noise-recipe (4 entries) and cleared on
+generate, overlay, reset, resize, tile-art changes, and vault switches.
+Map thumbnails for the picker are cached on disk (`.map_thumb_cache/`,
+gitignored) keyed by map file + mtime — editing a map invalidates its
+thumbnail automatically.
+
+**History depth follows map size, and idle stacks are evicted.** Maps
+wider than 80 tiles keep 25 undo steps instead of 50; undo stacks idle
+for 30 minutes are dropped. `WorldMap.save` also writes compact JSON
+now (no more `indent=2`).
+
+Nothing phone-verified yet — desktop/server tests only (52 new
+scale-hardening checks pass; see below). iPhone behavior unverified.
+
 ## v5.42.0 — 2026-09-27
 
 **Portals link to any map, with a landing spot (Lloyd's call).** The

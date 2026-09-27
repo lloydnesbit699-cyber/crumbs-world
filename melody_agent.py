@@ -615,7 +615,10 @@ def tool_remove_background(script_dir, username, tile_id):
 # the HUD renders it as a ghost preview the player accepts (one tap, one
 # undo step) or declines. Accepting/declining clears the pending file, so
 # only one suggestion is ever in flight — no suggestion pile-up.
-_SUGGEST_KINDS = {"wall_ring", "connect_patrols"}
+_SUGGEST_KINDS = {"wall_ring", "connect_patrols", "animation_preset"}
+
+# v5.47.1: the motions Melody may suggest. Mirrors the client's ANIM_PRESETS.
+_ANIM_PRESETS = {"alive", "bounce", "float", "pulse", "shake", "magic"}
 _SUGGEST_KIND_WORDS = {
     "wall_ring": "a wall ring around the open floor",
     "connect_patrols": "joining two patrol routes into one",
@@ -682,16 +685,23 @@ def _parse_where(where):
     return [int(m.group(1)), int(m.group(2))]
 
 
-def tool_suggest_map_change(script_dir, username, kind, label, where=""):
+def tool_suggest_map_change(script_dir, username, kind, label, where="",
+                            preset=""):
     """Record a pending ghost suggestion. Returns the brain-facing reply."""
     kind = (kind or "").strip().lower()
     if kind not in _SUGGEST_KINDS:
         return ("I can only suggest " +
                 " or ".join(sorted(_SUGGEST_KINDS)) + ".")
+    preset = (preset or "").strip().lower()
+    if kind == "animation_preset":
+        if preset not in _ANIM_PRESETS:
+            return ("For a motion suggestion, pick one of: " +
+                    ", ".join(sorted(_ANIM_PRESETS)) + ".")
     label = (label or "").strip()[:200]
     if not label:
         label = {"wall_ring": "Add walls around this floor?",
-                 "connect_patrols": "Connect these patrol stops?"}[kind]
+                 "connect_patrols": "Connect these patrol stops?",
+                 "animation_preset": "Make this one move?"}[kind]
     where_xy = _parse_where(where)
     if suggestion_pending(script_dir, username):
         return ("There's already a suggestion waiting on the map — the "
@@ -704,6 +714,8 @@ def tool_suggest_map_change(script_dir, username, kind, label, where=""):
                "created": int(time.time())}
         if where_xy:
             sug["where_xy"] = where_xy
+        if kind == "animation_preset":
+            sug["preset"] = preset
         tmp = p + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(sug, f)
@@ -753,14 +765,16 @@ TOOLS = [
          "required": ["tile_id"]}}},
     {"type": "function", "function": {
         "name": "suggest_map_change",
-        "description": "Propose a map change the player sees as a ghost preview they accept or undo with one tap. Use it when the player asks for layout help — 'surround this with walls', 'connect my patrols' — never for anything destructive. The preview is reversible; you never paint directly.",
+        "description": "Propose a change the player sees as a ghost preview they accept or undo with one tap. Use it when the player asks for layout or animation help — 'surround this with walls', 'connect my patrols', 'make the torch flicker' — never for anything destructive. The preview is reversible; you never paint directly.",
         "parameters": {"type": "object", "properties": {
             "kind": {"type": "string",
-                     "description": "One of: wall_ring (walls around the open floor), connect_patrols (join two patrol routes into one)."},
+                     "description": "One of: wall_ring (walls around the open floor), connect_patrols (join two patrol routes into one), animation_preset (suggest a motion for the tile at a spot)."},
             "label": {"type": "string",
                       "description": "The plain-words question the player sees, e.g. 'Add walls around this floor?'."},
             "where": {"type": "string",
-                       "description": "Optional 'x,y' tile near the spot; leave empty and Melody picks."}},
+                       "description": "Optional 'x,y' tile near the spot; leave empty and Melody picks."},
+            "preset": {"type": "string",
+                       "description": "For animation_preset only: one of alive, bounce, float, pulse, shake, magic."}},
          "required": ["kind"]}}},
 ]
 
@@ -812,7 +826,8 @@ def run_tool(script_dir, username, name, args):
     if name == "suggest_map_change":
         return tool_suggest_map_change(script_dir, username,
                                        str(args.get("kind", ""))[:64],
-                                       _arg("label"), _arg("where"))
+                                       _arg("label"), _arg("where"),
+                                       _arg("preset"))
     return f"I don't have a tool called '{name[:40]}."
 
 

@@ -13,6 +13,7 @@ const path = require("path");
 const html = fs.readFileSync(path.join(__dirname, "editor.html"), "utf8");
 const hud = fs.readFileSync(path.join(__dirname, "crumbs_hud.py"), "utf8");
 const changelog = fs.readFileSync(path.join(__dirname, "CHANGELOG.md"), "utf8");
+const melody = fs.readFileSync(path.join(__dirname, "melody_agent.py"), "utf8");
 
 function extract(name) {
   let start = html.indexOf("function " + name + "(");
@@ -198,8 +199,55 @@ check("room preset buttons exist", html.includes('id="btn-room"') &&
   html.includes('id="btn-arena"'));
 check("batch stroke endpoint used", hud.includes('"/api/semantic/stroke"') &&
   hud.includes('"strokes"'));
-check("server version bumped", hud.includes('APP_VERSION = "5.47.0"'));
-check("changelog has 5.47.0", changelog.includes("5.47.0"));
+check("server version bumped", hud.includes('APP_VERSION = "5.47.1"'));
+check("changelog has 5.47.1", changelog.includes("5.47.1"));
+
+console.log("== animation ghost (v5.47.1) ==");
+// stubs for the ghost lifecycle: the merge is real, the plumbing is fake
+let customById = {};
+let beginnerMagic = "#ffd75f";
+let animGhost = null;
+function mirrorLegacyFx(t) { t._mirrored = true; }
+function rebuildFxOnMap() {}
+function queueRender() {}
+const ANIM_PRESETS = eval("(" + extractConst("ANIM_PRESETS") + ")");
+const animABBefore = eval("new Map()");
+eval(extract("mergeBeginnerPreset"));
+eval(extract("applyAnimGhost"));
+eval(extract("clearAnimGhost"));
+{
+  const tile = { id: 7, name: "Torch", frames: ["f1"], anim: null };
+  customById = { 7: tile };
+  const sug = { kind: "animation_preset", preset: "pulse",
+                target: { tile_id: 7, tile_name: "Torch", x: 4, y: 4 } };
+  check("ghost applies", applyAnimGhost(sug) === true);
+  check("ghost merges the preset motion",
+    !!(tile.anim && tile.anim.states && Object.keys(tile.anim.states).length),
+    JSON.stringify(tile.anim && tile.anim.states));
+  check("before snapshot kept", animABBefore.has(7) && animABBefore.get(7) === null);
+  check("ghost tracked unaccepted",
+    !!(animGhost && animGhost.tileId === 7 && animGhost.accepted === false));
+  check("bad preset refuses",
+    applyAnimGhost({ preset: "explode", target: { tile_id: 7 } }) === false);
+  check("missing tile refuses",
+    applyAnimGhost({ preset: "pulse", target: { tile_id: 999 } }) === false);
+  clearAnimGhost(true);
+  check("decline reverts byte-identical", tile.anim === null);
+  check("ghost cleared", animGhost === null);
+  applyAnimGhost(sug);
+  animGhost.accepted = true;
+  clearAnimGhost(true);
+  check("accepted ghost is NOT reverted by clear",
+    tile.anim !== null && animGhost === null);
+  check("server knows the preset catalog",
+    hud.includes('"pulse": "Pulse"') && hud.includes('"magic": "Magic Aura"'));
+  check("melody validates the preset",
+    melody.includes('"alive", "bounce", "float", "pulse", "shake", "magic"'));
+  check("tool schema carries the preset arg", melody.includes('"preset"'));
+  check("card offers a motion revert", html.includes("revertAnimSuggestion"));
+  check("manual edits retire the revert card",
+    html.includes("animRevert = null;   // v5.47.1"));
+}
 
 console.log("\n" + PASS + " passed, " + FAIL + " failed");
 process.exit(FAIL ? 1 : 0);

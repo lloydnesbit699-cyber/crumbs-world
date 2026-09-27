@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.47.0"
+APP_VERSION = "5.47.1"
 # v5.41: single source of truth for the map-size cap (was 64, hardcoded in
 # four places). 500x500 = 250k cells. The client additionally caps tilePx so
 # the full-map backing canvas never exceeds 4096px per side (see editor.html).
@@ -5023,6 +5023,38 @@ def _validate_patrol_anchor(tid, ax_in, ay_in):
 _SUGGEST_MAX_CELLS = 400
 
 
+# v5.47.1: the animation presets Melody may suggest. Mirrors the client's
+# ANIM_PRESETS catalog (editor.html) — the ghost itself applies client-side
+# through the same merge path as a manual card tap.
+_ANIM_SUGGEST_PRESETS = {
+    "alive": "Still Alive", "bounce": "Bounce", "float": "Float",
+    "pulse": "Pulse", "shake": "Shake", "magic": "Magic Aura",
+}
+
+
+def _suggest_animation_target(where_xy):
+    """where -> the animatable custom tile under that map cell, or None.
+
+    A ghost needs something to haunt: an object instance whose tile is an
+    imported (custom) tile with frames. Anything else and the suggestion
+    stays unmaterialized, like a wall ring with no open floor."""
+    if not where_xy:
+        return None
+    try:
+        x, y = int(where_xy[0]), int(where_xy[1])
+    except (TypeError, ValueError, IndexError):
+        return None
+    if not (0 <= x < world.width and 0 <= y < world.height):
+        return None
+    tid = core.obj_tid(world.object_layer[y][x])
+    if tid is None:
+        return None
+    entry, _scope = _find_custom(int(tid))
+    if entry is None or not entry.get("frames"):
+        return None
+    return {"tile_id": int(tid), "tile_name": entry.get("name") or "tile",
+            "x": x, "y": y}
+
 def _suggest_open_cell(x, y):
     """A cell the wall-ring may grow around / wall over: walkable, not
     already a wall, and nobody standing on it."""
@@ -5169,6 +5201,16 @@ def _melody_suggestion_view(user):
         if not merge:
             return None
         return {"kind": kind, "label": label, "merge": merge}
+    if kind == "animation_preset":
+        preset = str(sug.get("preset") or "").strip().lower()
+        if preset not in _ANIM_SUGGEST_PRESETS:
+            return None
+        target = _suggest_animation_target(sug.get("where_xy"))
+        if not target:
+            return None
+        return {"kind": kind, "label": label, "preset": preset,
+                "preset_label": _ANIM_SUGGEST_PRESETS[preset],
+                "target": target}
     return None
 
 

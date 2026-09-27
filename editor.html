@@ -8591,6 +8591,7 @@ async function applyBeginnerPreset(key, live) {
   }
   if (await pushAnimState(t))
     toast(P.emoji + " " + P.name + " — flip to Advanced to tweak every knob");
+  animRevert = null;   // v5.47.1: a manual edit supersedes the suggestion revert
 }
 // v5.37: the animator's one home — beginner/advanced toggle in the Animation
 // menu, and the live tray preview up top of the Tiles tray.
@@ -11510,6 +11511,8 @@ let sheetView = "paint", sheetHeight = "peek";
 let npcSelectedId = null;      // the patrol whose event card is open
 let ghostSug = null;           // Melody's pending suggestion, rendered as ghost
 let sugPollBusy = false;
+let animGhost = null;          // v5.47.1: unaccepted animation ghost {tileId, preset, accepted}
+let animRevert = null;         // v5.47.1: accepted animation suggestion, one-tap revert {tileId}
 let viewSnap = null, selSnap = null;   // play-mode camera/selection snapshot
 const animABBefore = new Map();  // v5.47: hold-Play A/B — tile id -> anim before the last preset
 const animABAfter = new Map();   // tile id -> anim after the last preset
@@ -11537,7 +11540,7 @@ function setSheetView(v) { sheetView = v; renderSheet(); }
 // lets a caller force one facet (e.g. the Animation button)
 function driveSheetView(over) {
   const sel = Object.assign({
-    suggestion: !!ghostSug,
+    suggestion: !!ghostSug || !!animRevert,
     npc: npcSelectedId != null,
     animOpen: false,
     inspectPos: !!inspectPos,
@@ -11844,16 +11847,62 @@ async function suggestPoll() {
     const s = (r && r.ok) ? r.suggestion : null;
     if (s && s.status === "pending") {
       if (!ghostSug || ghostSug.id !== s.id) {
+        clearAnimGhost(true);   // a new sketch replaces the old ghost
+        animRevert = null;      // ...and retires any earlier revert card
         ghostSug = s;
+        if (s.kind === "animation_preset") applyAnimGhost(s);
         driveSheetView();   // the auto state machine opens the suggest view
         if (sheetView === "suggest" && sheetHeight === "peek") setSheetHeight("half");
         queueRender();
       }
     } else if (ghostSug) {
+      clearAnimGhost(true);
       ghostSug = null; driveSheetView(); queueRender();
     }
   } catch (e) { /* her sketchpad is quiet */ }
   finally { sugPollBusy = false; }
+}
+function applyAnimGhost(s) {
+  // v5.47.1: the ghost is the motion itself — merge the preset into the
+  // target tile WITHOUT pushing. Accept pushes through the normal endpoint;
+  // decline (or a vanishing suggestion) restores the before.
+  const tgt = s.target || {};
+  const t = customById[tgt.tile_id];
+  if (!t || !t.frames || !ANIM_PRESETS[s.preset]) return false;
+  if (!animABBefore.has(t.id))
+    animABBefore.set(t.id, JSON.parse(JSON.stringify(t.anim || null)));
+  t.anim = mergeBeginnerPreset(t.anim, s.preset, 70, beginnerMagic);
+  mirrorLegacyFx(t);
+  animGhost = { tileId: t.id, preset: s.preset, accepted: false };
+  rebuildFxOnMap(); queueRender();
+  return true;
+}
+function clearAnimGhost(revert) {
+  // revert=true: an unaccepted ghost evaporates back to the before-motion.
+  // An accepted ghost stays — its undo is the ↩ revert on the card.
+  if (!animGhost) return;
+  if (revert && !animGhost.accepted) {
+    const t = customById[animGhost.tileId];
+    if (t && animABBefore.has(t.id)) {
+      t.anim = JSON.parse(JSON.stringify(animABBefore.get(t.id)));
+      mirrorLegacyFx(t);
+    }
+  }
+  animGhost = null;
+  rebuildFxOnMap(); queueRender();
+}
+async function revertAnimSuggestion() {
+  // v5.47.1: one-tap undo for an accepted animation suggestion.
+  const t = animRevert && customById[animRevert.tileId];
+  if (t && animABBefore.has(t.id)) {
+    t.anim = JSON.parse(JSON.stringify(animABBefore.get(t.id)));
+    mirrorLegacyFx(t);
+    await pushAnimState(t);
+    rebuildFxOnMap(); queueRender(); refreshBudget();
+  }
+  animRevert = null;
+  driveSheetView();
+  toast("motion reverted");
 }
 function drawSuggestGhost() {
   if (!ghostSug || ghostSug.status !== "pending") return;
@@ -11881,6 +11930,14 @@ function drawSuggestGhost() {
     ctx.lineTo((pts[0][0] + 0.5) * s, (pts[0][1] + 0.5) * s);
     ctx.stroke();
     ctx.setLineDash([]);
+  } else if (ghostSug.kind === "animation_preset" && ghostSug.target) {
+    // v5.47.1: the motion plays on the tile itself; ring the stage in violet.
+    const gx = ghostSug.target.x, gy = ghostSug.target.y;
+    ctx.strokeStyle = "rgba(200,180,255,0.95)";
+    ctx.lineWidth = Math.max(2, s * 0.06);
+    ctx.setLineDash([6, 4]);
+    ctx.strokeRect(gx * s + 2, gy * s + 2, s - 4, s - 4);
+    ctx.setLineDash([]);
   }
 }
 function renderSuggestCard() {
@@ -11888,7 +11945,31 @@ function renderSuggestCard() {
   if (!v) return;
   v.innerHTML = "";
   if (!ghostSug) {
-    v.innerHTML = '<div class="phint">no suggestions right now — ask Melody for layout ideas and she\u2019ll sketch them here as a ghost. Nothing paints until you say so.</div>';
+    // v5.47.1: an accepted animation suggestion leaves a one-tap revert.
+    if (animRevert) {
+      const t = customById[animRevert.tileId];
+      const card = document.createElement("div");
+      card.id = "suggest-card";
+      const lbl = document.createElement("div");
+      lbl.className = "sg-label";
+      lbl.textContent = "🎬 motion kept" + (t ? " on " + (t.name || "tile") : "");
+      const sub = document.createElement("div");
+      sub.className = "sg-sub";
+      sub.textContent = "by Melody · changed your mind? one tap puts the old motion back";
+      const btns = document.createElement("div");
+      btns.className = "sg-btns";
+      const back = document.createElement("button");
+      back.type = "button"; back.textContent = "↩ Revert motion";
+      back.onclick = revertAnimSuggestion;
+      const done = document.createElement("button");
+      done.type = "button"; done.className = "ghost"; done.textContent = "Keep it";
+      done.onclick = () => { animRevert = null; driveSheetView(); };
+      btns.appendChild(back); btns.appendChild(done);
+      card.appendChild(lbl); card.appendChild(sub); card.appendChild(btns);
+      v.appendChild(card);
+      return;
+    }
+    v.innerHTML = '<div class="phint">no suggestions right now — ask Melody for layout or motion ideas and she\u2019ll sketch them here as a ghost. Nothing paints until you say so.</div>';
     return;
   }
   const card = document.createElement("div");
@@ -11897,7 +11978,9 @@ function renderSuggestCard() {
   lbl.className = "sg-label"; lbl.textContent = "💡 " + (ghostSug.label || "map idea");
   const sub = document.createElement("div");
   sub.className = "sg-sub";
-  sub.textContent = "by Melody · a ghost preview — the map keeps its paint until you accept";
+  sub.textContent = ghostSug.kind === "animation_preset"
+    ? "by Melody · the motion is playing on the map right now — accept to keep it, or it evaporates"
+    : "by Melody · a ghost preview — the map keeps its paint until you accept";
   const btns = document.createElement("div");
   btns.className = "sg-btns";
   const ok = document.createElement("button");
@@ -11928,16 +12011,35 @@ async function acceptSuggestion() {
     });
     if (!r.ok) { toast("couldn't join them: " + (r.error || "unknown")); return; }
     await loadPatrols(); render(); refreshBudget();
+  } else if (g.kind === "animation_preset") {
+    // v5.47.1: the ghost is already merged — accept pushes it through the
+    // normal save endpoint (the same one a manual card tap uses).
+    const t = animGhost && customById[animGhost.tileId];
+    if (!t) { toast("the tile is gone — nothing to do"); return; }
+    if (!await pushAnimState(t)) return;
+    refreshBudget();
   } else {
     toast("that kind isn't paintable yet");
     return;
   }
   await declineSuggestion("accepted");
-  toast("done — changed your mind? one tap on ↩ undoes it");
+  toast(g.kind === "animation_preset"
+    ? "done — hold ▶ to compare before/after, ↩ on the card reverts it"
+    : "done — changed your mind? one tap on ↩ undoes it");
 }
 async function declineSuggestion(status) {
+  // v5.47.1: an accepted animation ghost stays merged (its undo is the
+  // ↩ revert on the card); a declined one evaporates back to the before.
+  const g = ghostSug;
+  if (status === "accepted" && g && g.kind === "animation_preset" && animGhost) {
+    animGhost.accepted = true;
+    animRevert = { tileId: animGhost.tileId };
+  } else {
+    clearAnimGhost(true);
+    animRevert = null;
+  }
   try { await api("/api/melody/suggestion/decline", { status: status || "declined" }); } catch (e) {}
-  ghostSug = null;
+  ghostSug = null; animGhost = null;
   driveSheetView();
   queueRender();
 }

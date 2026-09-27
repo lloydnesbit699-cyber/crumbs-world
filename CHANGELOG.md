@@ -5,6 +5,25 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.47.1 — 2026-09-27
+
+**Melody's animation suggestions.** The ghost-suggestion system grows a third
+kind: `animation_preset`. She can now propose a motion for the tile under a
+spot ("make the torch flicker") — the preset merges onto the tile and PLAYS
+on the map as the ghost, ringed in violet. ✅ Do it saves through the same
+endpoint a manual card tap uses (hold ▶ still compares before/after), Not now
+evaporates the ghost back to the old motion, and an accepted suggestion leaves
+a one-tap ↩ Revert motion card until the next sketch or a manual edit. She
+suggests — she never paints silently, and animation stays outside the tile
+undo stack by design (motion has its own before/after). Server:
+`_suggest_animation_target` (topmost instance whose tile is an imported tile
+with frames, else the suggestion stays unmaterialized) + the
+`animation_preset` branch of `_melody_suggestion_view`; Melody's
+`suggest_map_change` takes a `preset` (alive/bounce/float/pulse/shake/magic),
+validated before anything is recorded.
+
+Not phone-verified yet — desktop/server verified; Lloyd's iPhone run pending.
+
 ## v5.47.0 — 2026-09-27
 
 **The HUD pass: one bottom sheet, budget strip, always-visible Play.** Phase 5

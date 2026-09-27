@@ -153,5 +153,43 @@ try:
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
+print("== animation_preset kind (v5.47.1) ==")
+tmp = fresh_dir()
+try:
+    r = ma.tool_suggest_map_change(tmp, "alice", "animation_preset",
+                                   "Make the torch flicker?",
+                                   where="5, 6", preset="pulse")
+    check("animation_preset accepted", "Suggestion saved" in r, r)
+    sug = ma.suggestion_pending(tmp, "alice")
+    check("preset recorded", sug.get("preset") == "pulse", sug)
+    check("where recorded", sug.get("where_xy") == [5, 6], sug)
+    ma.suggestion_set_status(tmp, "alice", "declined")
+    r = ma.tool_suggest_map_change(tmp, "alice", "animation_preset", "x",
+                                   preset="explode")
+    check("bad preset refused", "pick one of" in r, r)
+    check("nothing stored on bad preset",
+          ma.suggestion_pending(tmp, "alice") is None)
+    r = ma.tool_suggest_map_change(tmp, "alice", "animation_preset", "x")
+    check("missing preset refused", "pick one of" in r, r)
+    check("nothing stored on missing preset",
+          ma.suggestion_pending(tmp, "alice") is None)
+    r = ma.tool_suggest_map_change(tmp, "alice", "animation_preset", "",
+                                   preset="float")
+    check("empty label gets a default", "Suggestion saved" in r, r)
+    check("default label non-empty",
+          bool(ma.suggestion_pending(tmp, "alice")["label"]))
+    ma.suggestion_set_status(tmp, "alice", "declined")
+    r = ma.tool_suggest_map_change(tmp, "alice", "ANIMATION_PRESET", "x",
+                                   preset="FLOAT")
+    check("kind+preset case-insensitive", "Suggestion saved" in r, r)
+    check("preset normalized",
+          ma.suggestion_pending(tmp, "alice")["preset"] == "float")
+    ma.suggestion_set_status(tmp, "alice", "declined")
+    ma.tool_suggest_map_change(tmp, "alice", "wall_ring", "x", preset="pulse")
+    check("preset not stored for wall_ring",
+          "preset" not in ma.suggestion_pending(tmp, "alice"))
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

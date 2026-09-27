@@ -164,6 +164,58 @@ try:
                                                "state": "sleep"}]},
               {"points": [[9, 9]], "pauses": []},
               [[0, 0]])[0].get("state") == "sleep")
+
+    print("== animation suggestion target + view (v5.47.1) ==")
+    _real_find_custom = h._find_custom
+    _real_pending = h._melody_agent.suggestion_pending
+    try:
+        h._find_custom = lambda tid: ({"id": tid, "name": "Torch",
+                                       "frames": ["f1.png"]}, "local") \
+            if tid == 77 else (None, None)
+        h.world.object_layer[4][4] = 77
+        tgt = h._suggest_animation_target([4, 4])
+        check("animatable instance resolves",
+              tgt == {"tile_id": 77, "tile_name": "Torch", "x": 4, "y": 4}, tgt)
+        check("empty cell -> None", h._suggest_animation_target([0, 0]) is None)
+        check("no where -> None", h._suggest_animation_target(None) is None)
+        check("off-map -> None", h._suggest_animation_target([99, 99]) is None)
+        h.world.object_layer[5][5] = 78
+        check("non-custom tile -> None",
+              h._suggest_animation_target([5, 5]) is None)
+        h._find_custom = lambda tid: ({"id": tid, "name": "Statue",
+                                       "frames": []}, "local") \
+            if tid == 77 else (None, None)
+        check("frameless tile -> None",
+              h._suggest_animation_target([4, 4]) is None)
+        h._find_custom = _real_find_custom
+
+        h._melody_agent.suggestion_pending = lambda d, u: {
+            "kind": "animation_preset", "label": "Make it flicker?",
+            "status": "pending", "where_xy": [4, 4], "preset": "pulse"}
+        h._find_custom = lambda tid: ({"id": tid, "name": "Torch",
+                                       "frames": ["f1.png"]}, "local") \
+            if tid == 77 else (None, None)
+        view = h._melody_suggestion_view("alice")
+        check("animation view materializes",
+              view and view["kind"] == "animation_preset" and
+              view["preset"] == "pulse" and view["preset_label"] == "Pulse" and
+              view["target"]["tile_id"] == 77, view)
+        h._melody_agent.suggestion_pending = lambda d, u: {
+            "kind": "animation_preset", "label": "x", "status": "pending",
+            "where_xy": [4, 4], "preset": "explode"}
+        check("bad preset -> None",
+              h._melody_suggestion_view("alice") is None)
+        h._melody_agent.suggestion_pending = lambda d, u: {
+            "kind": "animation_preset", "label": "x", "status": "pending",
+            "where_xy": [0, 0], "preset": "pulse"}
+        check("no target -> None",
+              h._melody_suggestion_view("alice") is None)
+        h._melody_agent.suggestion_pending = lambda d, u: None
+        check("no suggestion -> None",
+              h._melody_suggestion_view("alice") is None)
+    finally:
+        h._find_custom = _real_find_custom
+        h._melody_agent.suggestion_pending = _real_pending
 finally:
     h.world = old_world
 

@@ -230,8 +230,12 @@
   #melody-fab { position: fixed; right: 14px; bottom: 14px; z-index: 240;
     width: 52px; height: 52px; border-radius: 50%; border: 2px solid #ffd75f;
     background: #1a1a24; color: #ffd75f; font-size: 15px; font-weight: bold;
-    cursor: pointer; box-shadow: 0 2px 12px rgba(0,0,0,.5); }
+    cursor: pointer; box-shadow: 0 2px 12px rgba(0,0,0,.5);
+    touch-action: none; user-select: none; -webkit-user-select: none; }
   #melody-fab:active { transform: scale(.94); }
+  /* v5.34: the Mel button is draggable — tap opens the dock, drag parks it */
+  #melody-fab.dragging { transform: none; opacity: .85; cursor: grabbing;
+    box-shadow: 0 2px 18px rgba(255,215,95,.45); }
   #melody-dock { position: fixed; right: 14px; bottom: 76px; z-index: 240;
     width: min(92vw, 340px); height: min(60vh, 420px); display: flex;
     flex-direction: column; background: #14141c; border: 1px solid #2a2a38;
@@ -3991,6 +3995,36 @@ $("dpad-grip").addEventListener("pointerdown", e => {
   window.addEventListener("pointerup", up);
   window.addEventListener("pointercancel", up);
 });
+// ---- Melody button: draggable, position persists --------------------------------
+// v5.34: tap still opens the dock; drag parks the Mel button anywhere (like the
+// d-pad). Saved coords live in localStorage "crumbs_melfab" and get clamped to
+// the live viewport so a stale spot (rotation, other device) can't strand it.
+function placeMelFab() {
+  const fab = $("melody-fab");
+  let p = null;
+  try { p = JSON.parse(localStorage.getItem("crumbs_melfab")); } catch (e) {}
+  if (p && typeof p.x === "number" && typeof p.y === "number") {
+    fab.style.left = p.x + "px"; fab.style.top = p.y + "px";
+    fab.style.right = "auto"; fab.style.bottom = "auto";
+  } else {
+    fab.style.left = "auto"; fab.style.top = "auto";
+    fab.style.right = "14px"; fab.style.bottom = "14px";
+  }
+  clampMelFab();
+}
+function clampMelFab() {
+  const fab = $("melody-fab");
+  if (!fab) return;
+  const w = fab.offsetWidth || 52, h = fab.offsetHeight || 52;
+  let x = parseFloat(fab.style.left), y = parseFloat(fab.style.top);
+  if (!isFinite(x)) x = window.innerWidth - w - 14;
+  if (!isFinite(y)) y = Math.max(56, window.innerHeight - h - 14);
+  x = Math.max(0, Math.min(x, window.innerWidth - w));
+  y = Math.max(48, Math.min(y, window.innerHeight - h - 8));  // below the topbar, above the bottom edge
+  fab.style.left = x + "px"; fab.style.top = y + "px";
+  fab.style.right = "auto"; fab.style.bottom = "auto";
+}
+window.addEventListener("resize", () => { try { clampMelFab(); } catch (_) {} });
 // v4.5: touch = go, release = halt, double-tap-hold the same arrow = run.
 let runMode = false, lastTap = { t: 0, btn: null }, runHintShown = false;
 dpad.querySelectorAll("button").forEach(b => {
@@ -7010,7 +7044,12 @@ async function melodyInit() {
   $("melody-mic").onclick = melodyMicTap;
   $("melody-log").innerHTML = "";
   $("melody-fab").hidden = false;
+  placeMelFab();  // v5.34: restore the parked spot (or the default corner)
+  // v5.34: the Mel button drags — a tap (no movement) opens the dock, a drag
+  // parks it. melFabMoved swallows the click that follows a drag.
+  let melFabMoved = false;
   $("melody-fab").onclick = () => {
+    if (melFabMoved) { melFabMoved = false; return; }
     const dock = $("melody-dock");
     dock.hidden = !dock.hidden;
     MELODY.open = !dock.hidden;
@@ -7020,6 +7059,38 @@ async function melodyInit() {
     if (MELODY.open && !matchMedia("(pointer: coarse)").matches)
       $("melody-input").focus();
   };
+  $("melody-fab").addEventListener("pointerdown", e => {
+    e.preventDefault();
+    const fab = $("melody-fab");
+    try { fab.setPointerCapture(e.pointerId); } catch (_) {}
+    const sx = e.clientX, sy = e.clientY;
+    const ox = e.clientX - fab.offsetLeft, oy = e.clientY - fab.offsetTop;
+    let dragging = false;
+    const mv = ev => {
+      if (!dragging && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 10) return;
+      dragging = true;
+      fab.classList.add("dragging");
+      fab.style.left = (ev.clientX - ox) + "px";
+      fab.style.top = (ev.clientY - oy) + "px";
+      fab.style.right = "auto"; fab.style.bottom = "auto";
+      clampMelFab();
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", mv);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      fab.classList.remove("dragging");
+      if (dragging) {
+        melFabMoved = true;
+        clampMelFab();   // only on-screen coords ever get saved
+        try { localStorage.setItem("crumbs_melfab",
+          JSON.stringify({ x: fab.offsetLeft, y: fab.offsetTop })); } catch (err) {}
+      }
+    };
+    window.addEventListener("pointermove", mv);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  });
   $("melody-min").onclick = () => {
     $("melody-dock").hidden = true; MELODY.open = false;
   };

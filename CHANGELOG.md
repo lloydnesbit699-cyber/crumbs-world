@@ -5,6 +5,27 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.45.1 — 2026-09-27
+
+**Touch arbitration + the long-press menu.** The gesture language is now
+one rule everywhere: one finger paints through the armed brush, two
+fingers always win (pan/zoom, any ghost dropped), a quick tap fires
+one-shot tools, and holding still ~half a second opens a contextual
+menu at the fingertip — pick the tile here, inspect here, undo. Fill,
+eyedropper, and the select inspector now commit on the quick lift
+instead of on press, so a long-press can claim the gesture for the menu
+instead of firing a fill you didn't want. The arbitration lives as pure,
+unit-tested logic (tap vs drag vs hold vs pan, fat-finger thresholds).
+
+**Animated palette tiles.** Torches, water, portals, and anything with
+FX-layer motion now dance in the left tray — with zero new animation UI.
+They repaint on the same 150ms heartbeat as the tray preview, only when
+the tray is open, only for swatches actually on screen, and only when
+their frame signature changed, so the 6k-tile lazy loading is untouched.
+
+Not phone-verified — the long-press timing and menu placement especially
+need Lloyd's on-device testing.
+
 ## v5.45.0 — 2026-09-27
 
 **The touch painting toolkit — stamp brush as the hero.** The map keeps

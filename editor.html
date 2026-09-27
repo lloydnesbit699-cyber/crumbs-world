@@ -594,6 +594,15 @@
   #scatter-row .dens { display: flex; align-items: center; gap: 8px;
       margin-top: 6px; font-size: 13px; color: #bbb; }
   #scatter-row input[type=range] { flex: 1; }
+  /* ---- v5.45.1: long-press contextual menu — thumb-sized rows, no docks ---- */
+  #ctx-menu { position: fixed; z-index: 46; display: none; flex-direction: column; gap: 6px;
+              background: rgba(24,26,34,.97); border: 1px solid #666; border-radius: 14px;
+              padding: 10px; min-width: 200px; box-shadow: 0 8px 30px rgba(0,0,0,.65); }
+  #ctx-menu.open { display: flex; }
+  #ctx-menu .crow { display: flex; align-items: center; gap: 10px; min-height: 52px;
+                    font-size: 16px; color: #eee; background: #2a2d38;
+                    border: 1px solid #4a4e5c; border-radius: 10px; padding: 6px 12px; }
+  #ctx-menu .crow .e { font-size: 22px; }
 
   #palette-old { display: none; }
   #collide-palette .grp-label { font-size: 12px; color: #999;
@@ -1695,6 +1704,7 @@
 <div id="more-sheet" aria-label="More brush tools"></div>
 <!-- v5.45: the brush scope — magnified footprint preview above the finger -->
 <div id="brush-scope"><canvas id="brush-scope-cv" width="150" height="150"></canvas></div>
+<div id="ctx-menu" aria-label="Touch actions"></div>
 
 <!-- v5.29 (item 19): always-reachable panel visibility control -->
 <button id="panel-ui-btn" title="Panels: opacity + hide">&#9688;</button>
@@ -4194,10 +4204,178 @@ function toggleMoreSheet() { const sh = $("more-sheet"); if (sh) sh.classList.to
   $("bb-stamp").classList.add("on");   // stamp is the hero default
 })();
 
+// ---- v5.45.1: touch arbitration --------------------------------------------
+// The gesture language, as pure logic (no DOM) — the node suite drives it,
+// the page implements it with its own pointer bookkeeping:
+//   one finger + brush armed  -> paint (ghost buffers, commits on release)
+//   one finger, quick tap     -> one-shot tools fire (select/fill/eyedropper)
+//   one finger, ~500ms still  -> contextual actions menu
+//   two fingers               -> pan/zoom always wins, any ghost is dropped
+function arbiterNew() {
+  return { pts: {}, order: [], mode: "idle", menu: false };
+}
+function arbiterDown(st, id, x, y, t) {
+  if (st.order.length >= 2) return null;   // third finger: ignored
+  st.pts[id] = { x0: x, y0: y, x: x, y: y, t0: t, moved: false };
+  st.order.push(id);
+  if (st.order.length === 2) { st.mode = "pan"; return "pan"; }
+  st.mode = "one"; st.menu = false;
+  return "brush";
+}
+function arbiterMove(st, id, x, y, t) {
+  const p = st.pts[id];
+  if (!p) return null;
+  p.x = x; p.y = y;
+  if (st.mode === "pan") return "pan";
+  if (st.mode !== "one") return null;
+  if (Math.hypot(x - p.x0, y - p.y0) > 12) {   // fat-finger drag threshold
+    p.moved = true; st.mode = "paint";
+    return "paint";
+  }
+  return null;
+}
+function arbiterUp(st, id, x, y, t) {
+  const p = st.pts[id];
+  if (!p) return null;
+  delete st.pts[id];
+  st.order = st.order.filter(k => k !== id);
+  let out = null;
+  if (st.mode === "one" && !p.moved && !st.menu && (t - p.t0) <= 300) out = "tap";
+  else if (st.mode === "paint") out = "paint-end";
+  else if (st.menu) out = "menu-end";
+  if (!st.order.length) { st.mode = "idle"; st.menu = false; }
+  else if (st.mode === "pan") {
+    // the pan collapsed back to one finger — it becomes a fresh touch
+    const r = st.pts[st.order[0]];
+    if (r) { r.x0 = r.x; r.y0 = r.y; r.t0 = t; r.moved = false; }
+    st.mode = "one"; st.menu = false;
+  }
+  return out;
+}
+function arbiterLongCheck(st, id, t) {
+  // the page's ~500ms timer calls this — a still finger sends no moves.
+  const p = st.pts[id];
+  if (!p || st.mode !== "one" || st.order.length !== 1 || p.moved) return null;
+  if (Math.hypot(p.x - p.x0, p.y - p.y0) > 12) return null;
+  if (t - p.t0 < 500) return null;
+  st.mode = "menu"; st.menu = true;
+  return "menu";
+}
+
+// -- page wiring: the long-press menu -----------------------------------------
+let lpTimer = null, lpId = null, lpX0 = 0, lpY0 = 0, pendingTap = null, strokeMoved = false;
+function disarmLongPress() {
+  if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
+  lpId = null; pendingTap = null;
+}
+function armLongPress(e, cell) {
+  // v5.45.1: single finger, brush or select armed. Starts the ~500ms clock:
+  // a still finger gets the contextual menu, a drag paints, a quick lift
+  // is a tap (one-shot tools fire on release, not on press).
+  disarmLongPress();
+  lpId = e.pointerId; lpX0 = e.clientX; lpY0 = e.clientY;
+  if (brushTool === "fill" || brushTool === "eyedropper" || brushTool === "select")
+    pendingTap = { tool: brushTool, cell: { x: cell.x, y: cell.y } };
+  lpTimer = setTimeout(() => {
+    lpTimer = null;
+    if (ptrs.size !== 1 || !ptrs.has(lpId)) return;          // now panning
+    const p = ptrs.get(lpId);
+    if (Math.hypot(p.x - lpX0, p.y - lpY0) > 12) return;     // it was a drag
+    if (strokeMoved) return;
+    // a stationary long-press was asking for actions, not paint — drop the
+    // ghost if the finger never dragged.
+    if (stroke) { stroke = null; hideScope(); queueRender(); }
+    pendingTap = null;
+    closeMoreSheet(); closeTray();
+    openCtxMenu(cell, p.x, p.y);
+  }, 520);
+}
+function firePendingTap(e) {
+  // v5.45.1: one-shot tools commit on the quick lift, not on press, so a
+  // long-press can claim the gesture for the contextual menu instead.
+  const pt = pendingTap;
+  pendingTap = null;
+  if (!pt) return;
+  const cell = (e && evCell(e)) || pt.cell;
+  if (!cell) return;
+  if (pt.tool === "fill") floodFillStroke(cell);
+  else if (pt.tool === "eyedropper") eyedropperTap(cell);
+  else if (pt.tool === "select") {
+    if (moveArmed) moveTap(cell); else inspectTap(cell);
+  }
+}
+function openCtxMenu(cell, cx, cy) {
+  // v5.45.1: thumb-reachable actions at the fingertip — pick, inspect, undo.
+  const m = $("ctx-menu");
+  m.innerHTML = "";
+  const rows = [
+    ["\uD83D\uDCA7", "Pick tile here", () => eyedropperTap(cell)],
+    ["\uD83D\uDD0D", "Inspect here", () => inspectTap(cell)],
+    ["\u21A9", "Undo", () => doUndo()],
+  ];
+  for (const r of rows) {
+    const b = document.createElement("button");
+    b.className = "crow";
+    b.innerHTML = '<span class="e">' + r[0] + "</span>" + r[1];
+    b.onclick = () => { closeCtxMenu(); r[2](); };
+    m.appendChild(b);
+  }
+  m.style.left = Math.max(8, Math.min(window.innerWidth - 220, cx - 100)) + "px";
+  m.style.top = Math.max(8, cy - 200) + "px";
+  m.classList.add("open");
+}
+function closeCtxMenu() { const m = $("ctx-menu"); if (m) m.classList.remove("open"); }
+
+// -- v5.45.1: animated palette tiles -------------------------------------------
+// Torches, water, portals dance in the tray with zero animation UI — the
+// same 150ms heartbeat as the tray preview, repainting only visible swatches
+// whose frame signature actually changed.
+const palAnimLast = {};
+function palAnimSig(t, now) {
+  // pure repaint signature: stable within a frame, changes when the frame
+  // does. FX-layer motion has no frame index, so it rides the 150ms clock.
+  const fi = stateFrameIdx(t, "idle", now);
+  const fx = ((t.frames || 0) <= 1) && tileHasMotion(t.id);
+  return fi + (fx ? ":" + Math.floor(now / 150) : "");
+}
+function animSwatchIds(tiles) {
+  // pure: which tile ids earn a live palette swatch. Node-testable.
+  const out = [];
+  for (const t of tiles || []) {
+    if (!t) continue;
+    if (((t.frames || 0) > 1) || tileHasMotion(t.id)) out.push(t.id);
+  }
+  return out;
+}
+function paletteAnimTick() {
+  if (document.hidden) return;
+  const tray = $("tray-left");
+  if (!tray || !tray.classList.contains("open")) return;
+  const now = performance.now();
+  const tr = tray.getBoundingClientRect();
+  const cvs = document.querySelectorAll('#paint-strip canvas[data-tid]');
+  for (let i = 0; i < cvs.length; i++) {
+    const cv = cvs[i];
+    const tid = +cv.dataset.tid;
+    const t = customById[tid];
+    if (!t) continue;
+    if (((t.frames || 0) <= 1) && !tileHasMotion(tid)) continue;
+    const r = cv.getBoundingClientRect();
+    if (r.bottom < tr.top || r.top > tr.bottom) continue;   // scrolled away
+    const sig = palAnimSig(t, now);
+    if (palAnimLast[tid] === sig) continue;
+    palAnimLast[tid] = sig;
+    drawAnimFrame(cv.getContext("2d"), t, "idle", now, { w: cv.width, h: cv.height });
+  }
+}
+
 canvas.addEventListener("pointerdown", async e => {
   e.preventDefault();
   lastTouchX = e.clientX; lastTouchY = e.clientY;   // v5.45: the scope follows
   touchDrag = true;   // v5.36.1: timers skip redraws until the finger lifts
+  closeCtxMenu();      // v5.45.1: a new touch dismisses the action menu
+  disarmLongPress();   // v5.45.1: re-armed below only for the brush path
+  strokeMoved = false; // v5.45.1: the long-press menu needs an undragged stroke
   ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
   try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
   if (ptrs.size === 2) {
@@ -4232,7 +4410,8 @@ canvas.addEventListener("pointerdown", async e => {
     return;
   }
   if (selectTool) {   // v4.3: the inspector, not paint
-    if (moveArmed) moveTap(cell); else inspectTap(cell);   // v4.8: carrying something
+    if (moveArmed) { moveTap(cell); return; }   // v4.8: carrying something — places now
+    armLongPress(e, cell);   // v5.45.1: tap inspects, long-press opens actions
     return;
   }
   if (patrolTool) { patrolTap(cell); return; }   // v3.4: patrol stops, not paint
@@ -4244,9 +4423,12 @@ canvas.addEventListener("pointerdown", async e => {
   if (erasing && await eraseGearTap(cell)) return;    // v5.13: eraser lifts gear/folks
   if (heightTool) { hstroke = { cells: new Map() }; heightStrokeAdd(cell); return; }  // v5.29
   if (portalTool) { portalTap(cell); return; }  // v5.29: link a pocket map
-  // v5.45: the touch painting toolkit
-  if (brushTool === "fill") { floodFillStroke(cell); return; }
-  if (brushTool === "eyedropper") { eyedropperTap(cell); return; }
+  // v5.45: the touch painting toolkit — one finger paints through the active
+  // brush; two fingers pan/zoom; commit happens on release.
+  // v5.45.1: one-shot tools (fill, eyedropper) wait for the quick lift, so a
+  // long-press can claim the gesture for the contextual menu instead.
+  armLongPress(e, cell);
+  if (brushTool === "fill" || brushTool === "eyedropper") return;
   if (brushTool === "line" || brushTool === "rect") {
     shapeAnchor = { x: cell.x, y: cell.y }; shapeCur = { x: cell.x, y: cell.y };
     stroke = { cells: new Map(), linkCells: new Map(), layer: paintLayer() };
@@ -4306,6 +4488,7 @@ canvas.addEventListener("pointermove", e => {
   if (!stroke) return;
   e.preventDefault();
   const cell = evCell(e); if (!cell) return;
+  strokeMoved = true;   // v5.45.1: this stroke was a drag, not a long-press
   lastTouchX = e.clientX; lastTouchY = e.clientY;   // v5.45
   if (brushTool === "line" || brushTool === "rect") shapeStrokeMove(cell);
   else if (brushTool === "stamp") stampStrokeAdd(cell);
@@ -4390,14 +4573,17 @@ function endStroke() {
   pumpPaintQueue();
 }
 canvas.addEventListener("pointerup", e => {
+  const mine = e.pointerId === lpId;   // v5.45.1: the long-press-tracked finger
   ptrs.delete(e.pointerId);
   if (ptrs.size < 2) gesture = null;
+  if (mine) { firePendingTap(e); disarmLongPress(); }   // v5.45.1: one-shot tools commit on the quick lift
   if (ptrs.size === 0) { touchDrag = false; endStroke(); endHeightStroke(); queueRender(); }  // v5.29; v5.36.1: one catch-up redraw
 });
 canvas.addEventListener("pointercancel", e => {
   ptrs.delete(e.pointerId);
   touchDrag = false;   // v5.36.1
   gesture = null; panStart = null;
+  disarmLongPress();   // v5.45.1
   hideScope();   // v5.45
   if (stroke) { stroke = null; queueRender(); }   // v5.45: ghost only — nothing to revert
   if (hstroke) { hstroke = null; refresh(); }     // height paints live — revert the old way  // v5.29
@@ -8024,7 +8210,7 @@ function previewTick(force) {
   if (ap && ANIM_PRESETS[ap]) cap += " · " + ANIM_PRESETS[ap].name;
   $("anim-preview-cap").textContent = cap;
 }
-setInterval(() => { previewTick(false); animCardsTick(); }, 150);
+setInterval(() => { previewTick(false); animCardsTick(); paletteAnimTick(); }, 150);   // v5.45.1: palette swatches dance too
 buildAnimCards();   // v5.43: beginner preset cards
 $("import-add").onclick = async () => {
   // v4.9: every picture becomes its own tile — importing three characters
@@ -10493,7 +10679,8 @@ async function melodyDemo() {
       localStorage.crumbs_tour = "1";
       const steps = [
         "Welcome to Crumbs HUD \u2014 pick a tile from the left tray.",
-        "Paint with one finger. Two fingers drag to pan, pinch to zoom.",
+        "Stamp is the hero brush: drag to stamp, lift to commit. Two fingers pan & zoom.",
+        "Hold still ~half a second for actions (pick, inspect, undo). \u2022\u2022\u2022 holds the rest.",
         "Menu \u2192 Generate builds a whole map from a seed.",
         "Hit \u25b6 Play to walk it. Rules, items & folks now live in the Tools tray."
       ];

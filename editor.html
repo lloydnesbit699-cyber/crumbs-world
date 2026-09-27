@@ -58,7 +58,7 @@
   @keyframes pill-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
   /* v5.0: undo/redo live on the top bar — thumb-sized, always in reach */
   #topbar-undo { margin-left: auto; display: flex; gap: 8px; }
-  #topbar-undo button { font-size: 22px; padding: 6px 14px; min-height: 40px;
+  #topbar-undo button { font-size: 22px; padding: 6px 14px; min-height: 44px;   /* v5.45.3: thumb-sized */
                         min-width: 52px; line-height: 1; }
 
   .menu-drop { position: fixed; top: 52px; left: 8px; z-index: 60; background: #222;
@@ -966,8 +966,8 @@
     #pills .ptxt { display: none; }
     .pill { padding: 3px 7px; }
     #topbar-undo { gap: 4px; }
-    #topbar-undo button { font-size: 18px; padding: 6px 6px; min-height: 36px;
-                          min-width: 36px; }
+    #topbar-undo button { font-size: 18px; padding: 6px 6px; min-height: 44px;   /* v5.45.3: thumb-sized */
+                          min-width: 44px; }
   }
   /* v3.1: theme selector */
   #theme-row { margin: 4px 0 6px; }
@@ -3887,18 +3887,28 @@ function rectCells(x0, y0, x1, y1, filled) {
 const BRUSH_TOOLS = ["stamp","paint","erase","scatter","fill","eyedropper","line","rect","select"];
 let brushTool = "stamp";    // the hero default — multi-tile stamps
 let lastBrush = "stamp";    // last real brush (eraser/select/eyedropper yield back here)
-let stampShape = "2x2";
+let stampShape = "b2";
+function clampDensity(v) {
+  // v5.45.3: pure — the scatter slider lives at 10–100%. A missing,
+  // garbage, or hand-edited localStorage value falls back to the 60%
+  // default instead of silently scattering nothing (0%) or everything.
+  const n = +v || 60;
+  return Math.max(10, Math.min(100, n));
+}
 let scatterMix = [], scatterDensity = 60, scatterArming = false;
 let rectFill = false;
 let shapeAnchor = null, shapeCur = null;
 let lastTouchX = 0, lastTouchY = 0;   // fingertip client coords, for the scope
 let scopeCtx = null;
-function restBrushTools() {
+function restBrushTools(skipModal) {
   // v5.45: legacy "other tools rest" sites route here — erase/select yield
   // back to the last real brush so the brush bar never lies.
-  if (brushTool === "erase" || brushTool === "select") setBrushTool(lastBrush);
+  // v5.45.3: skipModal when a modal tool is being ACTIVATED — setBrushTool
+  // would otherwise rest the very tool being switched on (height/traits/
+  // portal silently failed to arm while erase or select was the brush).
+  if (brushTool === "erase" || brushTool === "select") setBrushTool(lastBrush, skipModal);
 }
-function setBrushTool(t) {
+function setBrushTool(t, skipModal) {
   if (BRUSH_TOOLS.indexOf(t) < 0) return;
   if (t !== "erase" && t !== "select" && t !== "eyedropper") lastBrush = t;
   brushTool = t;
@@ -3908,12 +3918,15 @@ function setBrushTool(t) {
   if (be) be.classList.toggle("on", erasing);
   if (bs) bs.classList.toggle("on", selectTool);
   // one brush at a time — the modal tools rest (call-time safe: every one
-  // of these is initialized by the time a tap can reach here)
-  if (patrolTool) cancelPatrol();
-  setHeightTool(false);
-  portalTool = false;
-  const bp = $("btn-portal"); if (bp) bp.classList.remove("on");
-  if (traitTool) { traitTool = false; const bt = $("btn-traits"); if (bt) bt.classList.remove("on"); }
+  // of these is initialized by the time a tap can reach here).
+  // v5.45.3: skipped while a modal tool is being activated (see restBrushTools).
+  if (!skipModal) {
+    if (patrolTool) cancelPatrol();
+    setHeightTool(false);
+    portalTool = false;
+    const bp = $("btn-portal"); if (bp) bp.classList.remove("on");
+    if (traitTool) { traitTool = false; const bt = $("btn-traits"); if (bt) bt.classList.remove("on"); }
+  }
   melodyPick = null; itemPlace = null; npcPlace = false;
   if (ruleDraft) { grCancel(); }
   moveArmed = null;
@@ -4170,7 +4183,7 @@ function buildMoreSheet() {
       };
       b.appendChild(tg);
     }
-    b.onclick = () => { setBrushTool(key); closeMoreSheet(); };
+    b.onclick = () => { setBrushTool(key); closeMoreSheet(); buzz(10); };
     sh.appendChild(b);
   }
 }
@@ -4180,28 +4193,28 @@ function toggleMoreSheet() { const sh = $("more-sheet"); if (sh) sh.classList.to
 
 // -- init --------------------------------------------------------------------------------
 (function initTouchTools() {
-  stampShape = lsGet("cw_stampShape", "2x2");
-  if (!STAMP_SHAPES[stampShape]) stampShape = "2x2";
+  stampShape = lsGet("cw_stampShape", "b2");
+  if (!STAMP_SHAPES[stampShape]) stampShape = "b2";
   try { scatterMix = JSON.parse(lsGet("cw_scatterMix", "[]")) || []; }
   catch (e) { scatterMix = []; }
   scatterMix = scatterMix.filter(v => typeof v === "number").slice(0, 6);
-  scatterDensity = Math.max(10, Math.min(100, +lsGet("cw_scatterDensity", 60) || 60));
+  scatterDensity = clampDensity(lsGet("cw_scatterDensity", 60));
   rectFill = lsGet("cw_rectFill", "0") === "1";
   buildStampRow(); buildScatterRow(); buildMoreSheet();
   scopeCtx = $("brush-scope-cv").getContext("2d");
-  $("bb-stamp").onclick = () => { closeMoreSheet(); setBrushTool("stamp"); };
-  $("bb-paint").onclick = () => { closeMoreSheet(); setBrushTool("paint"); };
-  $("bb-erase").onclick = () => { closeMoreSheet(); setBrushTool("erase"); };
+  $("bb-stamp").onclick = () => { closeMoreSheet(); setBrushTool("stamp"); buzz(10); };
+  $("bb-paint").onclick = () => { closeMoreSheet(); setBrushTool("paint"); buzz(10); };
+  $("bb-erase").onclick = () => { closeMoreSheet(); setBrushTool("erase"); buzz(10); };
   // v5.45: the more button opens on tap (discoverable) or on long-press (spec).
   let moreLpTimer = null, moreLpFired = false;
   const bbMore = $("bb-more");
   bbMore.addEventListener("pointerdown", () => {
     moreLpFired = false;
-    moreLpTimer = setTimeout(() => { moreLpFired = true; openMoreSheet(); }, 450);
+    moreLpTimer = setTimeout(() => { moreLpFired = true; buzz(10); openMoreSheet(); }, 450);
   });
   bbMore.addEventListener("pointerup", () => clearTimeout(moreLpTimer));
   bbMore.addEventListener("pointercancel", () => clearTimeout(moreLpTimer));
-  bbMore.addEventListener("click", () => { if (!moreLpFired) toggleMoreSheet(); });
+  bbMore.addEventListener("click", () => { if (!moreLpFired) { buzz(10); toggleMoreSheet(); } });
   $("bb-stamp").classList.add("on");   // stamp is the hero default
 })();
 
@@ -4288,6 +4301,7 @@ function armLongPress(e, cell) {
     if (stroke) { stroke = null; hideScope(); queueRender(); }
     pendingTap = null;
     closeMoreSheet(); closeTray();
+    buzz(25);   // v5.45.3: the hold registered — here's your menu
     openCtxMenu(cell, p.x, p.y);
   }, 520);
 }
@@ -4326,6 +4340,11 @@ function openCtxMenu(cell, cx, cy) {
   m.classList.add("open");
 }
 function closeCtxMenu() { const m = $("ctx-menu"); if (m) m.classList.remove("open"); }
+function buzz(ms) {
+  // v5.45.3: haptic ticks for tool switches, sheets, the long-press menu,
+  // and stroke commits. Guarded — iPhone Safari simply has no vibrate.
+  try { if (navigator.vibrate) navigator.vibrate(ms || 12); } catch (e) {}
+}
 
 // -- v5.45.1: animated palette tiles -------------------------------------------
 // Torches, water, portals dance in the tray with zero animation UI — the
@@ -4495,6 +4514,7 @@ canvas.addEventListener("pointermove", e => {
   else if (brushTool === "stamp") stampStrokeAdd(cell);
   else if (brushTool === "scatter") scatterStrokeAdd(cell);
   else strokeAdd(cell);
+  updateScope(cell);   // v5.45.3: the scope tracks the fingertip live, even over visited cells
 });
 // v5.29: serialized paint queue. Strokes used to fire overlapping
 // /api/stroke requests, and an earlier stroke's trailing refresh() could
@@ -4568,6 +4588,7 @@ function endStroke() {
   hideScope();   // v5.45
   if (s.cells.size) {
     commitStrokeCells(s);   // v5.45: the buffered ghost lands on the grid now
+    buzz(15);   // v5.45.3: the stroke landed
     paintQueue.push({ layer: s.layer, cells: [...s.cells.values()],
       link_cells: [...s.linkCells.values()], file: currentFile });   // v5.7: one call, one undo step
   } else queueRender();
@@ -5468,7 +5489,7 @@ $("btn-traits").onclick = () => {
   if (traitTool) {
     // one nature tool at a time — the patrol tool rests
     cancelPatrol();
-    restBrushTools();   // v5.45
+    restBrushTools(true);   // v5.45.3: traits is being activated — don't rest it
     setHeightTool(false); portalTool = false; $("btn-portal").classList.remove("on");  // v5.29: tools rest
     toggleOverlay("sheet-traits");
   }
@@ -5489,7 +5510,7 @@ async function setHeightTool(on) {
     // one tool at a time — the other stamping tools rest
     cancelPatrol();
     traitTool = false; $("btn-traits").classList.remove("on");
-    restBrushTools();   // v5.45: erase/select yield to the last real brush
+    restBrushTools(true);   // v5.45.3: height is being activated — don't rest it
     portalTool = false; $("btn-portal").classList.remove("on");
     closeOverlays();
     if (!heightGrid) await refreshHeight();  // need current levels to sculpt
@@ -5588,7 +5609,7 @@ $("btn-portal").onclick = () => {
     // one tool at a time — the other stamping tools rest
     cancelPatrol();
     traitTool = false; $("btn-traits").classList.remove("on");
-    restBrushTools();   // v5.45: erase/select yield to the last real brush
+    restBrushTools(true);   // v5.45.3: portal is being activated — don't rest it
     setHeightTool(false);
     closeOverlays();
     refreshPortals();

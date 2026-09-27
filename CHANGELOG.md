@@ -5,6 +5,27 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.45.3 — 2026-09-27
+
+**Brush-bar polish + a real tool-state bug fix.** The stamp shape
+default was keyed `"2x2"` while the shape table uses `"b2"` — the
+picker silently fell back every boot; it now defaults to the 2×2
+footprint for real. Fixed a sneakier one: arming Height, Traits, or
+Portal while the eraser or select brush was active silently switched
+the new tool back off (the brush-resting path re-rested the tool being
+activated). Tool activation now skips the modal rest, so the tapped
+tool is the armed tool.
+
+Smaller phone touches: the magnifier now tracks the fingertip on every
+move (not just on new cells), haptic ticks confirm tool switches, the
+more sheet, the long-press menu, and stroke commits (guarded — iPhones
+simply ignore vibrate), the undo button is a full 44px thumb target,
+and the scatter density clamps a stale 0% back to the 60% default
+instead of silently painting nothing.
+
+Not phone-verified — haptics and the magnifier tracking especially
+need Lloyd's on-device testing.
+
 ## v5.45.2 — 2026-09-27
 
 **Height sculpting joins the ghost club.** The height/depth tool was the

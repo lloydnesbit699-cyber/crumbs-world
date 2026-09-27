@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.36.3"
+APP_VERSION = "5.37.0"
 # v5.24: unique per process boot. After an update the server re-execs into
 # the new files; the page waits for a DIFFERENT instance id (plus the new
 # version) instead of mistaking the old process — still answering during
@@ -1365,7 +1365,38 @@ def _custom_public(entry):
             "flavor": (entry.get("flavor")
                        or core.guess_flavor(entry["name"], entry.get("preset"))),
             "art": bool(assets.tiles.get(tid)),
-            "frames": len(entry["files"]), "frame_ms": entry["frame_ms"]}
+            "frames": len(entry["files"]), "frame_ms": entry["frame_ms"],
+            # v5.37: animator FX (color/action/magic) — absent when all-default
+            "fx": entry.get("fx")}
+
+
+# v5.37: animator FX — per-tile color/action/magic, validated server-side
+# (never trust the client alone). All-default input erases (returns None).
+FX_ACTS = ("none", "bounce", "float", "pulse", "shake")
+
+
+def _clean_fx(raw):
+    if not isinstance(raw, dict):
+        return None
+    try:
+        hue = max(-180, min(180, int(raw.get("hue", 0))))
+        sat = max(0, min(200, int(raw.get("sat", 100))))
+        bri = max(0, min(200, int(raw.get("bri", 100))))
+    except (TypeError, ValueError):
+        return None
+    act = raw.get("act", "none")
+    if act not in FX_ACTS:
+        act = "none"
+    magic = raw.get("magic")
+    if magic is not None:
+        magic = str(magic).strip()
+        if not re.fullmatch(r"#[0-9a-fA-F]{6}", magic):
+            magic = None
+    fx = {"hue": hue, "sat": sat, "bri": bri, "act": act, "magic": magic}
+    if fx == {"hue": 0, "sat": 100, "bri": 100,
+              "act": "none", "magic": None}:
+        return None
+    return fx
 
 
 def _find_custom(tid):
@@ -6963,6 +6994,20 @@ class Handler(BaseHTTPRequestHandler):
                                           min(core.HEIGHT_MAX, int(body.get("height"))))
                 except (TypeError, ValueError):
                     return self._send_json({"ok": False, "error": "bad height"}, 400)
+            # v5.37: animator — retime frames + per-tile color/action/magic FX.
+            if "frame_ms" in body:
+                try:
+                    entry["frame_ms"] = max(80, min(2000,
+                                                   int(body.get("frame_ms"))))
+                except (TypeError, ValueError):
+                    return self._send_json({"ok": False, "error": "bad frame_ms"},
+                                           400)
+            if "fx" in body:
+                clean = _clean_fx(body.get("fx"))
+                if clean:
+                    entry["fx"] = clean
+                else:
+                    entry.pop("fx", None)
             t = assets.tiles.get(tid)
             if t is not None:
                 t["name"] = entry["name"]

@@ -84,6 +84,29 @@
   .menu-drop .menu-note { display: block; padding: 6px 12px; color: #888;
                          font-size: 12px; line-height: 1.45; cursor: default; }
   .menu-drop .menu-note b { color: #b9a8ff; }
+  /* v5.37: animator — mode toggle + advanced controls live in the Animation menu */
+  #m-anim .seg { margin: 2px 0 6px; }
+  #m-anim .seg button { text-align: center; min-height: 0; padding: 8px 4px;
+                        font-size: 13px; }
+  #m-anim .menu-note { padding-top: 8px; }
+  .anim-field { display: flex; align-items: center; gap: 8px; padding: 4px 12px;
+                font-size: 12px; color: #aaa; }
+  .anim-field input[type=range] { flex: 1; min-width: 0; }
+  .anim-field .av { min-width: 52px; text-align: right; color: #eee;
+                    font-size: 12px; }
+  .anim-field .al { min-width: 64px; }
+  #anim-magic-sw { display: flex; gap: 6px; padding: 4px 12px; flex-wrap: wrap; }
+  #anim-magic-sw button { width: 34px; min-height: 34px; border-radius: 50%;
+                          border: 2px solid #444; padding: 0; flex: none; }
+  #anim-magic-sw button.on { border-color: #ffd75f; }
+  #m-anim button:disabled, #m-anim input:disabled { opacity: 0.35; }
+  /* v5.37: the tray's live animator preview — upper portion only, the tray
+     keeps its own scroll for card/import/palette below */
+  #anim-preview { margin: 0 0 12px; }
+  #anim-preview-cv { width: 100%; height: auto; display: block;
+                     border-radius: 10px; background: #0d0d12;
+                     border: 1px solid #2c2c34; image-rendering: pixelated; }
+  #anim-preview-cap { margin-top: 4px; }
   /* v5.21: gold dot on the File menu when an update is waiting */
   .upd-dot { color: #ffd75f; font-size: 9px; vertical-align: 2px; }
   .update-notes { max-height: 38dvh; overflow-y: auto; margin: 4px 10px 8px;
@@ -828,12 +851,40 @@
   <button id="btn-play" title="Walk the map">&#9654; Play</button>
 </div>
 <!-- v5.33: the old Setup menu is now Animation — one home for the animator.
-     Beginner one-button control up front; advanced settings land in Phase 2. -->
+     v5.37: beginner/advanced mode toggle; every animator control lives here. -->
 <div id="m-anim" class="menu-drop">
-  <button id="menu-animate-life" title="One-button animation: bring an imported picture to life">&#10024; Bring to life</button>
-  <div class="menu-note">Needs one imported picture — bring it in through the Tiles tray first, then tap here.</div>
-  <hr>
-  <div class="menu-note"><b>Advanced</b> (coming next): color manipulation, action effects, in-depth animator controls.</div>
+  <div class="seg" id="anim-mode-seg">
+    <button data-m="beginner" class="on">😊 Beginner</button>
+    <button data-m="advanced">🛠 Advanced</button>
+  </div>
+  <div id="anim-beginner">
+    <button id="menu-animate-life" title="One-button animation: bring an imported picture to life">&#10024; Bring to life</button>
+    <div class="menu-note">Needs one imported picture — bring it in through the Tiles tray first, then tap here.</div>
+  </div>
+  <div id="anim-advanced" hidden>
+    <div class="menu-note" id="anim-target"></div>
+    <div class="menu-note"><b>Frame timing</b> — how fast he moves</div>
+    <div class="anim-field"><span class="al">speed</span><input id="anim-ms" type="range" min="80" max="2000" step="40" value="400"><span class="av" id="anim-ms-val">400ms</span></div>
+    <div class="menu-note"><b>Color</b> — repaint him without touching the art</div>
+    <div class="anim-field"><span class="al">hue</span><input id="anim-hue" type="range" min="-180" max="180" step="5" value="0"><span class="av" id="anim-hue-val">0°</span></div>
+    <div class="anim-field"><span class="al">saturation</span><input id="anim-sat" type="range" min="0" max="200" step="5" value="100"><span class="av" id="anim-sat-val">100%</span></div>
+    <div class="anim-field"><span class="al">brightness</span><input id="anim-bri" type="range" min="0" max="200" step="5" value="100"><span class="av" id="anim-bri-val">100%</span></div>
+    <div class="menu-note"><b>Action</b> — a little stage business</div>
+    <div class="seg" id="anim-act">
+      <button data-a="none" class="on">still</button><button data-a="bounce">bounce</button><button data-a="float">float</button><button data-a="pulse">pulse</button><button data-a="shake">shake</button>
+    </div>
+    <div class="menu-note"><b>Magic</b> — a colored aura around him</div>
+    <div id="anim-magic-sw">
+      <button data-c="" class="on" title="no magic" style="background:#222">✕</button>
+      <button data-c="#ffd75f" title="gold" style="background:#ffd75f"></button>
+      <button data-c="#6db7ff" title="blue" style="background:#6db7ff"></button>
+      <button data-c="#7dff8a" title="green" style="background:#7dff8a"></button>
+      <button data-c="#c99aff" title="purple" style="background:#c99aff"></button>
+      <button data-c="#ff7d7d" title="red" style="background:#ff7d7d"></button>
+    </div>
+    <button id="anim-clear">↺ Clear all FX</button>
+    <div class="menu-note">Changes apply live to the selected tile and save themselves — watch him in the tray preview.</div>
+  </div>
 </div>
 
 <div id="stage"><canvas id="grid"></canvas></div>
@@ -856,6 +907,13 @@
 
 <aside class="tray" id="tray-left">
   <div class="tray-head">Tiles<span class="tray-hint" id="layer-hint">paint the ground</span></div>
+  <!-- v5.37: live animator preview — upper portion only; the selected card,
+       import, and palette keep their scroll below it. -->
+  <div id="anim-preview">
+    <div class="grp-label">🎞 preview</div>
+    <canvas id="anim-preview-cv" width="272" height="150"></canvas>
+    <div id="anim-preview-cap" class="tray-hint">select a tile to see him move</div>
+  </div>
   <!-- v5.1: the selected one — his card, his name, his jobs. -->
   <div id="sel-card" hidden>
     <canvas id="sel-canvas" width="48" height="48"></canvas>
@@ -1444,6 +1502,7 @@ document.querySelectorAll("#import-scope button").forEach(b => {
 let customEditMode = false;          // v3.3: tile manager edit mode
 let editingTile = null, editPreset = null;
 let animOnMap = new Set();          // custom animated tile ids currently placed
+let fxOnMap = new Set();            // v5.37: custom tile ids on the map carrying animator FX
 let heroTileIds = [];              // v5.29: designated heroes (list); [0] is the PC —
 // the designation survives mode switches, never nulled by paint mode
 function primaryHeroTile() { return heroTileIds.length ? heroTileIds[0] : null; }
@@ -2169,6 +2228,7 @@ async function refresh() {
     const t = customById[tiles[y][x]];
     if (t && t.frames > 1) animOnMap.add(tiles[y][x]);
   }
+  rebuildFxOnMap();   // v5.37: tiles carrying animator FX overdraw live too
   render();
   refreshHeight();   // v5.10: elevation grid follows every map reload
 }
@@ -2205,6 +2265,60 @@ async function refreshAll() {
 
 // v3.0: animator — which frame of a tile is showing right now
 function frameIdx(t) { return Math.floor(performance.now() / t.frame_ms) % t.frames; }
+// v5.37: animator FX — per-tile color/action/magic. Normalized view of the
+// tile's fx record; null when absent or all-default (nothing to draw).
+const FX_DEFAULT = { hue: 0, sat: 100, bri: 100, act: "none", magic: null };
+function tileFx(id) {
+  const t = customById[id];
+  const f = t && t.fx;
+  if (!f) return null;
+  const n = Object.assign({}, FX_DEFAULT, f);
+  if (n.hue === 0 && n.sat === 100 && n.bri === 100 &&
+      n.act === "none" && !n.magic) return null;
+  return n;
+}
+// v5.37: which tiles layer ids carry FX (rebuilt on map load / paint).
+function rebuildFxOnMap() {
+  fxOnMap = new Set();
+  if (!tiles.length) return;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const id = tiles[y][x];
+    if (id != null && tileFx(id)) fxOnMap.add(id);
+  }
+}
+// v5.37: draw a custom tile sprite with its animator FX — magic aura behind,
+// action transform, color filter. Map, NPCs, objects, hero, and the tray
+// preview all come through here so FX reads the same everywhere.
+function drawFxTile(g, id, im, dx, dy, dw, dh, now) {
+  const f = tileFx(id);
+  if (!f) { g.drawImage(im, dx, dy, dw, dh); return; }
+  if (now === undefined) now = performance.now();
+  let ox = 0, oy = 0, sc = 1;
+  if (f.act === "bounce") oy = -Math.abs(Math.sin(now / 180)) * dh * 0.14;
+  else if (f.act === "float") oy = -(0.5 + 0.5 * Math.sin(now / 600)) * dh * 0.16;
+  else if (f.act === "pulse") sc = 1 + 0.09 * Math.sin(now / 300);
+  else if (f.act === "shake") ox = Math.sin(now / 55) * dw * 0.035;
+  const cx = dx + dw / 2, cy = dy + dh / 2;
+  if (f.magic) {
+    g.save();
+    g.globalAlpha = 0.55;
+    const r = Math.max(dw, dh) * 0.85;
+    const gr = g.createRadialGradient(cx, cy, 0, cx, cy, r);
+    gr.addColorStop(0, f.magic);
+    gr.addColorStop(1, "rgba(0,0,0,0)");
+    g.fillStyle = gr;
+    g.fillRect(cx - r, cy - r, r * 2, r * 2);
+    g.restore();
+  }
+  g.save();
+  if (sc !== 1) { g.translate(cx, cy); g.scale(sc, sc); g.translate(-cx, -cy); }
+  if (ox || oy) g.translate(ox, oy);
+  if (f.hue || f.sat !== 100 || f.bri !== 100)
+    g.filter = "hue-rotate(" + f.hue + "deg) saturate(" + f.sat +
+               "%) brightness(" + f.bri + "%)";
+  g.drawImage(im, dx, dy, dw, dh);
+  g.restore();   // restores transform AND filter
+}
 // v5.29: object-layer cells are None | int | {tid,size,hero,flavor,
 // interactive,role}. The int is the legacy shape — a bare tile id with
 // every default. Helpers keep every reader honest.
@@ -2374,10 +2488,12 @@ function render() {
   renderBase();                 // the cached static layer (tiles, grid)
   ctx.drawImage(baseCv, 0, 0);
   // v5.3: animated tiles stay live — overdrawn with the current frame.
-  if (animOnMap.size) {
+  // v5.37: FX tiles overdraw here too, with their animator effects.
+  if (animOnMap.size || fxOnMap.size) {
+    const nowFx = performance.now();
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       const id = tiles[y][x];
-      if (!animOnMap.has(id)) continue;
+      if (!animOnMap.has(id) && !fxOnMap.has(id)) continue;
       const im = tileFrameImage(id);
       if (!im) continue;
       const px = x * tilePx, py = y * tilePx;
@@ -2385,7 +2501,7 @@ function render() {
       ctx.beginPath();
       ctx.ellipse(px + tilePx / 2, py + tilePx * 0.88, tilePx * 0.34, tilePx * 0.13, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.drawImage(im, px, py, tilePx, tilePx);
+      drawFxTile(ctx, id, im, px, py, tilePx, tilePx, nowFx);
       const th2 = tileHt(id);
       const below2 = (heightGrid && y + 1 < H) ? heightGrid[y + 1][x] : -9;
       if (th2 >= 1 && th2 >= below2) drawTallFace(ctx, im, px, py, th2);
@@ -2495,7 +2611,7 @@ function render() {
     if (him) {
       // v5.29: the PC keeps his build size — a mouse hero stays mouse-sized
       const _hw = tilePx * playHeroSize, _hh = tilePx * playHeroSize;
-      ctx.drawImage(him, hx + (tilePx - _hw) / 2, hy + tilePx - _hh, _hw, _hh);
+      drawFxTile(ctx, pcTid, him, hx + (tilePx - _hw) / 2, hy + tilePx - _hh, _hw, _hh);
     } else {
       const cx = hero.x * tilePx + tilePx / 2, cy = hero.y * tilePx + tilePx / 2, r = tilePx * 0.32;
       ctx.fillStyle = "#ffd75f"; ctx.strokeStyle = "#000"; ctx.lineWidth = 2;
@@ -2531,7 +2647,7 @@ function render() {
   });
   npcsReal.forEach(n => {
     const im = tileFrameImage(n.tile_id); if (!im) return;
-    ctx.drawImage(im, n.x * tilePx, n.y * tilePx, tilePx, tilePx);
+    drawFxTile(ctx, n.tile_id, im, n.x * tilePx, n.y * tilePx, tilePx, tilePx);
     ctx.font = `${Math.max(10, Math.round(tilePx * 0.26))}px sans-serif`;
     const w = ctx.measureText(n.name).width, nx = n.x * tilePx + tilePx / 2 - w / 2 - 3;
     ctx.fillStyle = "rgba(0,0,0,0.55)";
@@ -2608,7 +2724,7 @@ function render() {
       // v5.29: scale about the cell's bottom-center — big things grow up,
       // small things shrink to the ground
       const _w = tilePx * sz, _h = tilePx * sz;
-      ctx.drawImage(oim, x * tilePx + (tilePx - _w) / 2, y * tilePx + tilePx - _h, _w, _h);
+      drawFxTile(ctx, oid, oim, x * tilePx + (tilePx - _w) / 2, y * tilePx + tilePx - _h, _w, _h);
     } else {
       const cx = x * tilePx + tilePx / 2, cy = y * tilePx + tilePx / 2, r = tilePx * 0.28 * sz;
       ctx.fillStyle = colorOf[oid] || "#fff";
@@ -2728,6 +2844,7 @@ function strokeAdd(cell) {
   }
   const bt = customById[bv];          // v3.0: track animated placements
   if (bt && bt.frames > 1) animOnMap.add(bv);
+  if (tileFx(bv)) fxOnMap.add(bv);  // v5.37: FX tiles overdraw live
   dirtyFlag = true;   // v2.0: assume unsaved until the server says otherwise
   queueRender();      // v5.3: strokes coalesce into one render per frame
   Sfx.paint();        // v5.8: throttled brush tick while dragging
@@ -4627,9 +4744,9 @@ function drawNpc(n) {
   ctx.fill();
   if (!n.away && n.flip) {   // walking left — mirror him (no flip needed for a back view)
     ctx.save(); ctx.translate(dx + dw, dy); ctx.scale(-1, 1);
-    ctx.drawImage(im, 0, 0, dw, dh); ctx.restore();
+    drawFxTile(ctx, n.tile_id, im, 0, 0, dw, dh); ctx.restore();
   } else {
-    ctx.drawImage(im, dx, dy, dw, dh);
+    drawFxTile(ctx, n.tile_id, im, dx, dy, dw, dh);
   }
   if (n.hazard) {   // v5.12: Melody's challengers wear a red ring
     ctx.strokeStyle = "rgba(255,90,90,0.95)"; ctx.lineWidth = Math.max(2, tilePx / 16);
@@ -4866,6 +4983,8 @@ function buildPalette() {
     buildCustomTiles();   // v5.1: customs join the same strip
   }
   requestAnimationFrame(updatePaletteProbe);
+  previewTick(true);   // v5.37: the tray preview follows the brush
+  if (animMode === "advanced" && $("m-anim").classList.contains("open")) loadAnimTarget();
 }
 
 // ---- v3.0: custom imported tiles + animator --------------------------------
@@ -5206,6 +5325,10 @@ setInterval(() => {
                                               // stale lastAnimSig re-renders once after
   let sig = "";
   animOnMap.forEach(id => { const t = customById[id]; if (t) sig += frameIdx(t) + ","; });
+  // v5.37: action FX moves on the same tick — a time quantum keeps him dancing
+  let fxAct = false;
+  fxOnMap.forEach(id => { const f = tileFx(id); if (f && f.act !== "none") fxAct = true; });
+  if (fxAct) sig += "a" + Math.floor(performance.now() / 150) + ",";
   if (!playMode) patrols.forEach(p => {   // v3.4: standing NPCs animate too
     const t = customById[p.tile_id];
     if (t && t.frames > 1) sig += "p" + frameIdx(t) + ",";
@@ -5312,6 +5435,138 @@ async function bringToLife() {
 }
 $("import-animate").onclick = bringToLife;
 $("menu-animate-life").onclick = () => { closeOverlays(); bringToLife(); };
+// v5.37: the animator's one home — beginner/advanced toggle in the Animation
+// menu, and the live tray preview up top of the Tiles tray.
+let animMode = "beginner";
+try { animMode = localStorage.getItem("crumbs.animMode") || "beginner"; } catch (e) {}
+function setAnimMode(m) {
+  animMode = (m === "advanced") ? "advanced" : "beginner";
+  try { localStorage.setItem("crumbs.animMode", animMode); } catch (e) {}
+  document.querySelectorAll("#anim-mode-seg button").forEach(b =>
+    b.classList.toggle("on", b.dataset.m === animMode));
+  $("anim-beginner").hidden = animMode !== "beginner";
+  $("anim-advanced").hidden = animMode !== "advanced";
+  if (animMode === "advanced") loadAnimTarget();
+}
+document.querySelectorAll("#anim-mode-seg button").forEach(b =>
+  b.onclick = () => setAnimMode(b.dataset.m));
+// the advanced controls dress up the selected imported tile
+function animTargetTile() {
+  const t = customById[selTile];
+  return (t && t.frames) ? t : null;
+}
+function loadAnimTarget() {
+  const t = animTargetTile();
+  const ok = !!t;
+  ["anim-ms", "anim-hue", "anim-sat", "anim-bri", "anim-clear"].forEach(id => {
+    $(id).disabled = !ok;
+  });
+  document.querySelectorAll("#anim-act button, #anim-magic-sw button").forEach(b => {
+    b.disabled = !ok;
+  });
+  if (!t) {
+    $("anim-target").innerHTML = "Select an <b>imported tile</b> in the Tiles tray first — then dress him up here.";
+    return;
+  }
+  const f = Object.assign({}, FX_DEFAULT, t.fx);
+  $("anim-target").innerHTML = "<b>Target:</b> " + esc(t.name) +
+    (t.frames > 1 ? " · " + t.frames + " frames" : " · still");
+  $("anim-ms").value = t.frame_ms || 400;
+  $("anim-ms-val").textContent = (t.frame_ms || 400) + "ms";
+  $("anim-hue").value = f.hue; $("anim-hue-val").textContent = f.hue + "°";
+  $("anim-sat").value = f.sat; $("anim-sat-val").textContent = f.sat + "%";
+  $("anim-bri").value = f.bri; $("anim-bri-val").textContent = f.bri + "%";
+  document.querySelectorAll("#anim-act button").forEach(b =>
+    b.classList.toggle("on", b.dataset.a === f.act));
+  document.querySelectorAll("#anim-magic-sw button").forEach(b =>
+    b.classList.toggle("on", (b.dataset.c || null) === f.magic));
+  $("anim-ms").disabled = !(t.frames > 1);   // timing only matters when he moves
+}
+// changes hit the tile instantly (map + preview) and save themselves, debounced
+let animSaveT = null;
+function animPush() {
+  rebuildFxOnMap(); queueRender(); previewTick(true);
+  clearTimeout(animSaveT);
+  animSaveT = setTimeout(async () => {
+    const t = animTargetTile(); if (!t) return;
+    const body = { id: t.id, frame_ms: t.frame_ms };
+    body.fx = t.fx || null;   // null erases server-side
+    const r = await api("/api/custom/update", body);
+    if (!r.ok) toast("couldn't save FX: " + (r.error || "unknown"));
+  }, 700);
+}
+function animSetFx(patch) {
+  const t = animTargetTile(); if (!t) return;
+  const f = Object.assign({}, FX_DEFAULT, t.fx, patch);
+  t.fx = (f.hue === 0 && f.sat === 100 && f.bri === 100 &&
+          f.act === "none" && !f.magic) ? null : f;
+  animPush();
+}
+$("anim-ms").oninput = e => {
+  const t = animTargetTile(); if (!t) return;
+  t.frame_ms = +e.target.value;
+  $("anim-ms-val").textContent = t.frame_ms + "ms";
+  animPush();
+};
+$("anim-hue").oninput = e => {
+  $("anim-hue-val").textContent = e.target.value + "°";
+  animSetFx({ hue: +e.target.value });
+};
+$("anim-sat").oninput = e => {
+  $("anim-sat-val").textContent = e.target.value + "%";
+  animSetFx({ sat: +e.target.value });
+};
+$("anim-bri").oninput = e => {
+  $("anim-bri-val").textContent = e.target.value + "%";
+  animSetFx({ bri: +e.target.value });
+};
+document.querySelectorAll("#anim-act button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("#anim-act button").forEach(x => x.classList.remove("on"));
+  b.classList.add("on");
+  animSetFx({ act: b.dataset.a });
+});
+document.querySelectorAll("#anim-magic-sw button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("#anim-magic-sw button").forEach(x => x.classList.remove("on"));
+  b.classList.add("on");
+  animSetFx({ magic: b.dataset.c || null });
+});
+$("anim-clear").onclick = () => {
+  const t = animTargetTile(); if (!t) return;
+  t.fx = null; loadAnimTarget(); animPush(); toast("FX cleared");
+};
+// opening the Animation menu refreshes the advanced target
+document.querySelector('.mtop[data-menu="m-anim"]').addEventListener("click", () => {
+  if ($("m-anim").classList.contains("open") && animMode === "advanced") loadAnimTarget();
+});
+// v5.37: the tray's live preview — the selected tile, animated, with his FX.
+const pvCv = $("anim-preview-cv"), pvCtx = pvCv.getContext("2d");
+pvCtx.imageSmoothingEnabled = false;
+function previewTick(force) {
+  if (!force && (!$("tray-left").classList.contains("open") || document.hidden)) return;
+  const t = customById[selTile];
+  const W2 = pvCv.width, H2 = pvCv.height;
+  pvCtx.clearRect(0, 0, W2, H2);
+  if (!t) { $("anim-preview-cap").textContent = "select a tile to see him move"; return; }
+  const im = tileFrameImage(t.id);
+  if (!im) { $("anim-preview-cap").textContent = t.name + " — loading…"; return; }
+  const iw = im.naturalWidth || 48, ih = im.naturalHeight || 48;
+  const s = Math.min((W2 - 16) / iw, (H2 - 16) / ih);
+  const dw = Math.max(1, Math.round(iw * s)), dh = Math.max(1, Math.round(ih * s));
+  const dx = Math.round((W2 - dw) / 2), dy = Math.round((H2 - dh) / 2);
+  drawFxTile(pvCtx, t.id, im, dx, dy, dw, dh);
+  const f = tileFx(t.id);
+  let cap = t.name + (t.frames > 1
+    ? " · " + t.frames + " frames · " + (t.frame_ms || 400) + "ms" : " · still");
+  if (f) {
+    const bits = [];
+    if (f.act !== "none") bits.push(f.act);
+    if (f.magic) bits.push("magic");
+    if (f.hue || f.sat !== 100 || f.bri !== 100) bits.push("tinted");
+    if (bits.length) cap += " · " + bits.join(" · ");
+  }
+  $("anim-preview-cap").textContent = cap;
+}
+setInterval(() => previewTick(false), 150);
 $("import-add").onclick = async () => {
   // v4.9: every picture becomes its own tile — importing three characters
   // gives you three thumbnails, not one chip with three faces stacked in it.
@@ -7546,6 +7801,7 @@ async function melodyDemo() {
     if (!(await authGate())) return;
     melodyInit();  // v5.28: Melody dock — fire-and-forget, never blocks boot
     splashStep(6, "Waking the server\u2026");
+    setAnimMode(animMode);   // v5.37: restore the animator's last mode
     const b = await api("/api/biomes");
     b.biomes.forEach(x => {
       const o = document.createElement("option");

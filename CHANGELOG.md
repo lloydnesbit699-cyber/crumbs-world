@@ -5,6 +5,20 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.37.0 — 2026-09-27
+
+**The animator redesign.** The Animation menu is now the one home for every
+animator control, with a 😊 Beginner / 🛠 Advanced toggle (remembered between
+visits). Beginner keeps the one-button ✨ Bring to life. Advanced adds, for
+the selected imported tile: frame timing (retimes his animation), color
+(hue / saturation / brightness), action effects (bounce, float, pulse,
+shake), and colored magic auras — changes apply live and save themselves,
+so old tiles without these fields keep working untouched. The Tiles tray
+grew a large live preview in its upper portion showing the selected tile
+animated with his FX; the selected card, import, and palette still scroll
+below it. FX renders everywhere the tile does: map, NPCs, objects, hero,
+and preview, all through one drawing helper.
+
 ## v5.36.3 — 2026-09-27
 
 **Inspector sheet fits the phone again.** The trait rows' value column can now

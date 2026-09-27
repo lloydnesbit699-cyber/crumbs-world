@@ -5,6 +5,38 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.45.0 — 2026-09-27
+
+**The touch painting toolkit — stamp brush as the hero.** The map keeps
+exactly 4 tools visible now: a floating brush bar with Stamp, Paint,
+Erase, and ••• More (tap or long-press ••• for the rest). Stamp is the
+default: pick a footprint in the tray's stamp picker — Single, 2×2, 3×3,
+Corner, Ring, Plus — and it stamps whatever tile is selected, clipped
+cleanly at map edges. Drag to stamp continuously; one stroke is always
+one undo step.
+
+**Commit-on-release + the brush scope.** The fingertip occludes its
+target, so every brush now buffers into a ghost preview (65% + gold
+footprint outline) and lands on the grid only when the finger lifts.
+While you drag, a magnifier floats above the fingertip showing the
+footprint at 3× over the real map. Bonus: a two-finger pan/zoom can no
+longer catch a half-painted stroke, and cancelling one no longer costs a
+full map re-download.
+
+**Scatter brush.** Random texture without repetitive taps: build a mix
+of up to 6 palette tiles in the tray (tap ＋, then palette tiles; tap a
+chip to drop it), set the density slider (10–100%), and drag. The mix,
+density, stamp shape, and rectangle-fill choice persist on the device.
+
+**More tools, one long-press away.** Fill (bucket — flood-fills the
+matching area, one tap, capped at 100k cells), Eyedropper (picks the
+tile off the map, then hands the brush straight back), Line and
+Rectangle (press-drag-release with a live ghost; rectangle has an
+outline/filled toggle), and Select (inspect instead of painting).
+
+Not phone-verified — the gesture and magnifier work especially needs
+Lloyd's on-device testing.
+
 ## v5.44.0 — 2026-09-27
 
 **Advanced animation Phase 2: the filmstrip.** The Animation menu's

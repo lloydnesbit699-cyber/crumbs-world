@@ -540,6 +540,61 @@
   #zoom-cluster #btn-pan { font-size: 12px; border-radius: 14px; height: auto;
                           padding: 9px 0; }
 
+  /* v5.45: the brush bar — phone-first painting keeps exactly 4 tools
+     visible: Stamp (hero), Paint, Erase, and ••• More. Long-press ••• for
+     fill / eyedropper / line / rectangle / scatter. 56px fat-finger
+     targets, bottom-center above the safe area. */
+  #brush-bar { position: fixed; left: 50%; transform: translateX(-50%);
+               bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 31;
+               display: flex; gap: 10px; }
+  #brush-bar button { width: 56px; height: 56px; border-radius: 50%;
+                      padding: 0; font-size: 24px; line-height: 1;
+                      background: rgba(42,42,42,.94); color: #eee;
+                      border: 2px solid #555; }
+  #brush-bar button.on { border-color: #ffd75f; color: #ffd75f;
+                         box-shadow: 0 0 10px rgba(255,215,95,.35); }
+  #brush-bar button .blbl { display: block; font-size: 9px; margin-top: 1px;
+                            color: #bbb; }
+  #brush-bar button.on .blbl { color: #ffd75f; }
+  /* v5.45: the more-tools sheet — big rows, one tap each. */
+  #more-sheet { position: fixed; left: 50%; transform: translateX(-50%);
+                bottom: calc(80px + env(safe-area-inset-bottom)); z-index: 40;
+                display: none; flex-direction: column; gap: 8px;
+                background: rgba(24,26,34,.97); border: 1px solid #555;
+                border-radius: 16px; padding: 12px; min-width: 230px;
+                box-shadow: 0 8px 30px rgba(0,0,0,.6); }
+  #more-sheet.open { display: flex; }
+  #more-sheet .mrow { display: flex; align-items: center; gap: 12px;
+                      min-height: 52px; font-size: 17px; color: #eee;
+                      background: #2a2d38; border: 1px solid #4a4e5c;
+                      border-radius: 12px; padding: 6px 14px; text-align: left; }
+  #more-sheet .mrow.on { border-color: #ffd75f; color: #ffd75f; }
+  #more-sheet .mrow .e { font-size: 24px; }
+  #more-sheet .mrow .d { font-size: 12px; color: #999; display: block; }
+  /* v5.45: the brush scope — a magnifier floating above the fingertip.
+     The finger occludes the target, so the footprint previews here at
+     3x and the stroke commits only on release. */
+  #brush-scope { position: fixed; z-index: 45; width: 150px; height: 150px;
+                 border-radius: 50%; overflow: hidden; display: none;
+                 border: 3px solid #ffd75f; background: #111;
+                 box-shadow: 0 6px 24px rgba(0,0,0,.65);
+                 pointer-events: none; }
+  #brush-scope canvas { width: 150px; height: 150px; image-rendering: pixelated; }
+  /* v5.45: stamp picker + scatter mix rows at the top of the tray. */
+  #stamp-row, #scatter-row { margin: 4px 2px 8px; }
+  #stamp-row .shapes, #scatter-row .mix { display: flex; gap: 8px;
+      flex-wrap: wrap; align-items: center; }
+  #stamp-row .shape, #scatter-row .mx { min-width: 52px; height: 52px;
+      border-radius: 10px; border: 2px solid #555; background: #2a2d38;
+      color: #eee; font-size: 11px; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; padding: 2px 6px; }
+  #stamp-row .shape.on, #scatter-row .mx.add { border-color: #ffd75f; color: #ffd75f; }
+  #stamp-row .shape .g { font-size: 18px; line-height: 1.1; letter-spacing: -2px; }
+  #scatter-row .mx img { width: 34px; height: 34px; image-rendering: pixelated; }
+  #scatter-row .dens { display: flex; align-items: center; gap: 8px;
+      margin-top: 6px; font-size: 13px; color: #bbb; }
+  #scatter-row input[type=range] { flex: 1; }
+
   #palette-old { display: none; }
   #collide-palette .grp-label { font-size: 12px; color: #999;
       margin: 6px 2px 4px; text-transform: capitalize; }
@@ -1207,6 +1262,10 @@
   <div id="theme-row" class="tray-hint">colors: <select id="theme-sel"></select></div>
   <!-- v5.1: the elongated palette — one long strip, everything paintable. -->
   <div class="grp-label">palette<button id="btn-custom-edit" class="ghost">Edit</button></div>
+  <!-- v5.45: stamp picker — multi-tile footprints for the stamp brush, on
+       whatever tile is selected. Scatter mix below it when armed. -->
+  <div id="stamp-row"><div class="tray-hint" style="margin-bottom:4px">stamp shape</div><div class="shapes"></div></div>
+  <div id="scatter-row" hidden><div class="tray-hint" style="margin-bottom:4px">scatter mix — tap ＋ then palette tiles (tap a chip to drop it)</div><div class="mix"></div><div class="dens"><span>density</span><input id="scatter-density" type="range" min="10" max="100" step="5" value="60"><span id="scatter-density-val">60%</span></div></div>
   <!-- v5.2: search the strip — 6,038 Utumno tiles live here now -->
   <div id="strip-search-row"><input id="strip-search" placeholder="search tiles…"></div>
   <!-- v5.25: subcategory chips — Minecraft-style separation (walls/floors/…
@@ -1624,6 +1683,18 @@
   <button id="zoom-fit" title="Fit map to screen">Fit</button>
   <button id="btn-pan" title="Pan the map instead of painting">Move</button>
 </div>
+
+<!-- v5.45: the brush bar — exactly 4 tools visible. Stamp is the hero
+     (default); ••• opens the more-tools sheet (tap or long-press). -->
+<div id="brush-bar" aria-label="Brush tools">
+  <button id="bb-stamp" title="Stamp brush — multi-tile footprints"><span>🏷</span><span class="blbl">stamp</span></button>
+  <button id="bb-paint" title="Paint — single tile brush"><span>🖌</span><span class="blbl">paint</span></button>
+  <button id="bb-erase" title="Eraser — restore the seed's ground"><span>🧽</span><span class="blbl">erase</span></button>
+  <button id="bb-more" title="More tools — long-press or tap"><span>•••</span><span class="blbl">more</span></button>
+</div>
+<div id="more-sheet" aria-label="More brush tools"></div>
+<!-- v5.45: the brush scope — magnified footprint preview above the finger -->
+<div id="brush-scope"><canvas id="brush-scope-cv" width="150" height="150"></canvas></div>
 
 <!-- v5.29 (item 19): always-reachable panel visibility control -->
 <button id="panel-ui-btn" title="Panels: opacity + hide">&#9688;</button>
@@ -3429,6 +3500,7 @@ function render() {
     ctx.fillText(traitLegend[t].emoji,
                  x * tilePx + tilePx * 0.78, y * tilePx + tilePx * 0.72);
   }
+  drawGhostStroke();   // v5.45: commit-on-release preview — buffered, never half-painted
   // hero marker in play mode — v3.0: hero sprite when available
   if (playMode && hero) {
     const hx = hero.x * tilePx, hy = hero.y * tilePx;
@@ -3658,52 +3730,480 @@ function brushValue() {
 }
 function localGrid() { const pl = paintLayer(); return pl === "objects" ? objects : pl === "collision" ? coll : tiles; }
 
-function strokeAdd(cell) {
-  const key = cell.x + "," + cell.y;
-  if (stroke.cells.has(key)) return;
-  if (buildBreak && hero && cell.x === hero.x && cell.y === hero.y) return;  // v5.29: never paint over him mid-drag
-  const bv = brushValue();
+function addStrokeCell(x, y, bv) {
+  // v5.45: buffer ONE cell into the stroke — the ghost preview only. The
+  // grid is NOT touched until the finger lifts (commit-on-release), so a
+  // two-finger pan can never catch a half-painted stroke.
   // v5.0: the erase preview paints the seed's ground from the cache
   // (the server re-resolves on pointer-up, so undo stays exact).
   let pv = (bv === "natural")
-    ? ((naturalGrid[cell.y] && naturalGrid[cell.y][cell.x] != null)
-       ? naturalGrid[cell.y][cell.x] : tiles[cell.y][cell.x])
+    ? ((naturalGrid[y] && naturalGrid[y][x] != null)
+       ? naturalGrid[y][x] : tiles[y][x])
     : bv;
-  const cellOut = { x: cell.x, y: cell.y, tile_id: bv };
+  const cellOut = { x: x, y: y, tile_id: bv, pv: pv };
   // v5.29: object strokes carry placement attrs — the palette flavor goes
-  // with the tile so a placed tree is 🌿 unless the builder says otherwise.
+  // with the tile so a placed tree is green unless the builder says otherwise.
   if (layer === "objects" && !erasing && bv !== "erase") {
     const def = tileDefById(bv);
     if (def && def.flavor) {
       cellOut.attrs = { flavor: def.flavor };
-      pv = { tid: pv, flavor: def.flavor };   // optimistic preview, dict shape
+      cellOut.pv = pv = { tid: pv, flavor: def.flavor };   // ghost, dict shape
     }
   }
-  stroke.cells.set(key, cellOut);
-  localGrid()[cell.y][cell.x] = pv;   // optimistic preview
-  markBaseDirty(cell.x - 1, cell.y - 1, cell.x + 1, cell.y + 1);  // v5.41: dirty-rect
-  if (layer === "objects") invalidateHeroes();   // v5.41: hero flags may move
+  stroke.cells.set(x + "," + y, cellOut);
   // v3.1: "stamp collision" — painting a solid wall stamps its collision too
   if (linkCollision && layer !== "collision" && !erasing) {
-    coll[cell.y][cell.x] = selCollide;
-    stroke.linkCells.set(key, { x: cell.x, y: cell.y, tile_id: selCollide });
+    stroke.linkCells.set(x + "," + y, { x: x, y: y, tile_id: selCollide, pv: selCollide });
   }
-  const bt = customById[bv];          // v3.0: track animated placements
-  if (bt && bt.frames > 1) animOnMap.add(bv);
-  if (tileHasMotion(bv)) fxOnMap.add(bv);  // v5.37: FX tiles overdraw live
+}
+function strokeAdd(cell) {
+  const key = cell.x + "," + cell.y;
+  if (stroke.cells.has(key)) return;
+  if (buildBreak && hero && cell.x === hero.x && cell.y === hero.y) return;  // v5.29: never paint over him mid-drag
+  addStrokeCell(cell.x, cell.y, brushValue());
   dirtyFlag = true;   // v2.0: assume unsaved until the server says otherwise
   queueRender();      // v5.3: strokes coalesce into one render per frame
-  Sfx.paint();        // v5.8: throttled brush tick while dragging
+  updateScope(cell);  // v5.45: the magnifier follows the footprint
+  Sfx.paint();        // v5.8: throttled brush ticks while dragging
 }
+function commitStrokeCells(s) {
+  // v5.45: commit-on-release — the ghost-buffered cells land on the grid
+  // now, in one shot, so one stroke is always one undo step.
+  const pl = s.layer === "characters" ? "objects" : s.layer === "colors" ? "tiles" : s.layer;
+  const g = pl === "objects" ? objects : pl === "collision" ? coll : tiles;
+  let x0 = W, y0 = H, x1 = -1, y1 = -1;
+  for (const c of s.cells.values()) {
+    if (c.x < 0 || c.y < 0 || c.x >= W || c.y >= H) continue;
+    g[c.y][c.x] = c.pv;
+    if (c.x < x0) x0 = c.x; if (c.y < y0) y0 = c.y;
+    if (c.x > x1) x1 = c.x; if (c.y > y1) y1 = c.y;
+    const bt = customById[c.tile_id];          // v3.0: track animated placements
+    if (bt && bt.frames > 1) animOnMap.add(c.tile_id);
+    if (typeof tileHasMotion === "function" && tileHasMotion(c.tile_id)) fxOnMap.add(c.tile_id);  // v5.37
+  }
+  for (const lc of s.linkCells.values()) {
+    if (lc.x < 0 || lc.y < 0 || lc.x >= W || lc.y >= H) continue;
+    coll[lc.y][lc.x] = (lc.pv != null) ? lc.pv : lc.tile_id;
+  }
+  if (x1 >= x0) markBaseDirty(x0 - 1, y0 - 1, x1 + 1, y1 + 1);  // v5.41: dirty-rect
+  if (pl === "objects") invalidateHeroes();   // v5.41: hero flags may move
+  queueRender();
+}
+
+// ---- v5.45: the touch painting toolkit -------------------------------------
+// Phone-first: exactly 4 tools visible (stamp/paint/erase/more), stamp is the
+// hero and the default, every brush commits on release. Pure helpers
+// (stampCells, bresenham, rectCells, floodFillCells, scatterPick) carry no
+// DOM so the node suite exercises them directly.
+function lsGet(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch (e) { return d; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
+// -- stamp footprints: [dx,dy] offsets from the anchor -----------------------
+const STAMP_SHAPES = {
+  single: { name: "Single", glyph: "\u25AA", cells: [[0,0]] },
+  b2:     { name: "2x2",    glyph: "\u25A6", cells: [[0,0],[1,0],[0,1],[1,1]] },
+  b3:     { name: "3x3",    glyph: "\u25BC", cells: [[0,0],[1,0],[2,0],[0,1],[1,1],[2,1],[0,2],[1,2],[2,2]] },
+  corner: { name: "Corner", glyph: "\u25E4", cells: [[0,0],[1,0],[2,0],[0,1],[0,2]] },
+  ring:   { name: "Ring",   glyph: "\u25CB", cells: [[0,0],[1,0],[2,0],[0,1],[2,1],[0,2],[1,2],[2,2]] },
+  plus:   { name: "Plus",   glyph: "\u271A", cells: [[1,0],[0,1],[1,1],[2,1],[1,2]] },
+};
+function stampCells(shape, x, y, w, h) {
+  const sh = STAMP_SHAPES[shape] || STAMP_SHAPES.single;
+  const out = [];
+  for (const c of sh.cells) {
+    const cx = x + c[0], cy = y + c[1];
+    if (cx < 0 || cy < 0 || cx >= w || cy >= h) continue;   // clipped at edges
+    out.push([cx, cy]);
+  }
+  return out;
+}
+// -- scatter gate: rand() in [0,1); null = the density gate said no --------
+function scatterPick(mix, density, rand) {
+  if (!mix.length || density <= 0) return null;
+  if (rand() * 100 >= density) return null;
+  return mix[Math.floor(rand() * mix.length) % mix.length];
+}
+// -- flood fill over a passed grid (4-way, matching the start cell) ---------
+function fillNorm(v) {
+  if (v && typeof v === "object") return "o:" + v.tid + ":" + (v.flavor || "");
+  return "t:" + String(v);
+}
+function floodFillCells(grid, w, h, sx, sy, cap) {
+  const out = [];
+  if (sx < 0 || sy < 0 || sx >= w || sy >= h || !grid[sy]) return { cells: out, truncated: false };
+  const target = fillNorm(grid[sy][sx]);
+  const seen = new Uint8Array(w * h);
+  const stack = [[sx, sy]];
+  seen[sy * w + sx] = 1;
+  let truncated = false;
+  while (stack.length) {
+    if (out.length >= cap) { truncated = true; break; }
+    const c = stack.pop(), x = c[0], y = c[1];
+    out.push([x, y]);
+    if (x > 0     && !seen[y * w + x - 1] && fillNorm(grid[y][x - 1]) === target) { seen[y * w + x - 1] = 1; stack.push([x - 1, y]); }
+    if (x + 1 < w && !seen[y * w + x + 1] && fillNorm(grid[y][x + 1]) === target) { seen[y * w + x + 1] = 1; stack.push([x + 1, y]); }
+    if (y > 0     && !seen[(y - 1) * w + x] && fillNorm(grid[y - 1][x]) === target) { seen[(y - 1) * w + x] = 1; stack.push([x, y - 1]); }
+    if (y + 1 < h && !seen[(y + 1) * w + x] && fillNorm(grid[y + 1][x]) === target) { seen[(y + 1) * w + x] = 1; stack.push([x, y + 1]); }
+  }
+  return { cells: out, truncated: truncated };
+}
+// -- line + rectangle cells ---------------------------------------------------
+function bresenham(x0, y0, x1, y1) {
+  const out = [];
+  const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+  let err = dx + dy, x = x0, y = y0;
+  for (;;) {
+    out.push([x, y]);
+    if (x === x1 && y === y1) break;
+    const e2 = 2 * err;
+    if (e2 >= dy) { err += dy; x += sx; }
+    if (e2 <= dx) { err += dx; y += sy; }
+  }
+  return out;
+}
+function rectCells(x0, y0, x1, y1, filled) {
+  const xa = Math.min(x0, x1), xb = Math.max(x0, x1);
+  const ya = Math.min(y0, y1), yb = Math.max(y0, y1);
+  const out = [];
+  for (let y = ya; y <= yb; y++) for (let x = xa; x <= xb; x++) {
+    if (filled || x === xa || x === xb || y === ya || y === yb) out.push([x, y]);
+  }
+  return out;
+}
+
+// -- brush tool state ----------------------------------------------------------
+const BRUSH_TOOLS = ["stamp","paint","erase","scatter","fill","eyedropper","line","rect","select"];
+let brushTool = "stamp";    // the hero default — multi-tile stamps
+let lastBrush = "stamp";    // last real brush (eraser/select/eyedropper yield back here)
+let stampShape = "2x2";
+let scatterMix = [], scatterDensity = 60, scatterArming = false;
+let rectFill = false;
+let shapeAnchor = null, shapeCur = null;
+let lastTouchX = 0, lastTouchY = 0;   // fingertip client coords, for the scope
+let scopeCtx = null;
+function restBrushTools() {
+  // v5.45: legacy "other tools rest" sites route here — erase/select yield
+  // back to the last real brush so the brush bar never lies.
+  if (brushTool === "erase" || brushTool === "select") setBrushTool(lastBrush);
+}
+function setBrushTool(t) {
+  if (BRUSH_TOOLS.indexOf(t) < 0) return;
+  if (t !== "erase" && t !== "select" && t !== "eyedropper") lastBrush = t;
+  brushTool = t;
+  erasing = (t === "erase");
+  selectTool = (t === "select");
+  const be = $("btn-eraser"), bs = $("btn-select");
+  if (be) be.classList.toggle("on", erasing);
+  if (bs) bs.classList.toggle("on", selectTool);
+  // one brush at a time — the modal tools rest (call-time safe: every one
+  // of these is initialized by the time a tap can reach here)
+  if (patrolTool) cancelPatrol();
+  setHeightTool(false);
+  portalTool = false;
+  const bp = $("btn-portal"); if (bp) bp.classList.remove("on");
+  if (traitTool) { traitTool = false; const bt = $("btn-traits"); if (bt) bt.classList.remove("on"); }
+  melodyPick = null; itemPlace = null; npcPlace = false;
+  if (ruleDraft) { grCancel(); }
+  moveArmed = null;
+  // the bar + the sheet agree on what's armed
+  document.querySelectorAll("#brush-bar button").forEach(b => b.classList.remove("on"));
+  const bb = { stamp: "bb-stamp", paint: "bb-paint", erase: "bb-erase" }[t];
+  if (bb && $(bb)) $(bb).classList.add("on");
+  else if ($("bb-more")) $("bb-more").classList.add("on");
+  document.querySelectorAll("#more-sheet .mrow").forEach(b =>
+    b.classList.toggle("on", b.dataset.tool === t));
+  const sr = $("scatter-row");
+  if (sr) sr.hidden = (t !== "scatter");
+  if (t === "scatter" && !scatterMix.length && selTile != null) {
+    scatterMix = [selTile]; persistMix(); buildScatterRow();   // seed from the brush
+  }
+  if (t === "scatter" && !scatterMix.length) toast("tap + below, then palette tiles, to build the mix");
+}
+
+// -- the ghost overlay ----------------------------------------------------------
+function ghostTileId(pv) { return (pv && typeof pv === "object") ? pv.tid : pv; }
+function drawGhostCell(c2, pv, px, py, s) {
+  c2.imageSmoothingEnabled = false;
+  const im = tileFrameImage(ghostTileId(pv));
+  if (im) { c2.drawImage(im, px, py, s, s); return; }
+  c2.fillStyle = colorOf[ghostTileId(pv)] || "rgba(140,140,140,0.55)";
+  c2.fillRect(px, py, s, s);
+  if (pv == null || pv === false) {   // erasing to empty — red X ghost
+    c2.strokeStyle = "rgba(255,90,90,0.95)"; c2.lineWidth = Math.max(2, s * 0.1);
+    c2.beginPath();
+    c2.moveTo(px, py); c2.lineTo(px + s, py + s);
+    c2.moveTo(px + s, py); c2.lineTo(px, py + s);
+    c2.stroke();
+  }
+}
+function drawGhostStroke() {
+  // v5.45: the commit-on-release preview — buffered cells at 65% with a
+  // gold footprint outline. Called from render(); the grid is untouched.
+  if (!stroke || !stroke.cells.size || !tiles.length || tiles.length < H) return;
+  const gv = visibleTiles();
+  ctx.save();
+  ctx.globalAlpha = 0.65;
+  for (const c of stroke.cells.values()) {
+    if (c.x < gv.x0 || c.x > gv.x1 || c.y < gv.y0 || c.y > gv.y1) continue;
+    drawGhostCell(ctx, c.pv, c.x * tilePx, c.y * tilePx, tilePx);
+  }
+  ctx.restore();
+  ctx.strokeStyle = "rgba(255,215,95,0.85)";
+  ctx.lineWidth = Math.max(2, tilePx * 0.07);
+  for (const c of stroke.cells.values()) {
+    if (c.x < gv.x0 || c.x > gv.x1 || c.y < gv.y0 || c.y > gv.y1) continue;
+    ctx.strokeRect(c.x * tilePx + 1, c.y * tilePx + 1, tilePx - 2, tilePx - 2);
+  }
+}
+// -- the brush scope: magnified footprint above the fingertip ------------------
+function hideScope() { const b = $("brush-scope"); if (b) b.style.display = "none"; }
+function updateScope(cell) {
+  const box = $("brush-scope");
+  if (!box || !scopeCtx || !stroke || !stroke.cells.size || !cell || !baseCv || !baseCv.width) {
+    hideScope(); return;
+  }
+  box.style.display = "block";
+  const S = 150, R = 2, cs = S / (2 * R + 1);
+  box.style.left = Math.max(4, Math.min(window.innerWidth - S - 4, lastTouchX - S / 2)) + "px";
+  box.style.top = Math.max(4, lastTouchY - S - 48) + "px";
+  const c = scopeCtx;
+  c.imageSmoothingEnabled = false;
+  c.clearRect(0, 0, S, S);
+  try {
+    c.drawImage(baseCv, (cell.x - R) * tilePx, (cell.y - R) * tilePx,
+                tilePx * (2 * R + 1), tilePx * (2 * R + 1), 0, 0, S, S);
+  } catch (e) { /* base not ready yet */ }
+  c.globalAlpha = 0.7;
+  for (const gc of stroke.cells.values()) {
+    const dx = gc.x - (cell.x - R), dy = gc.y - (cell.y - R);
+    if (dx < 0 || dy < 0 || dx > 2 * R || dy > 2 * R) continue;
+    drawGhostCell(c, gc.pv, dx * cs, dy * cs, cs);
+  }
+  c.globalAlpha = 1;
+  c.strokeStyle = "#ffd75f"; c.lineWidth = 3;
+  c.strokeRect(R * cs + 2, R * cs + 2, cs - 4, cs - 4);
+}
+
+// -- brush behaviors --------------------------------------------------------------
+function stampStrokeAdd(cell) {
+  // v5.45: stamp the footprint at the anchor; dragging re-stamps as the
+  // anchor moves. First touch wins per cell (stroke dedup).
+  const bv = brushValue();
+  for (const c of stampCells(stampShape, cell.x, cell.y, W, H)) {
+    const key = c[0] + "," + c[1];
+    if (stroke.cells.has(key)) continue;
+    if (buildBreak && hero && c[0] === hero.x && c[1] === hero.y) continue;
+    addStrokeCell(c[0], c[1], bv);
+  }
+  dirtyFlag = true;
+  queueRender(); updateScope(cell); Sfx.paint();
+}
+function scatterStrokeAdd(cell) {
+  const key = cell.x + "," + cell.y;
+  if (stroke.cells.has(key)) return;
+  if (buildBreak && hero && cell.x === hero.x && cell.y === hero.y) return;
+  const pick = scatterPick(scatterMix, scatterDensity, Math.random);
+  if (pick == null) return;   // the density gate said no — cell stays untouched
+  const pl = paintLayer();
+  addStrokeCell(cell.x, cell.y, pl === "collision" ? selCollide : pick);
+  dirtyFlag = true;
+  queueRender(); updateScope(cell); Sfx.paint();
+}
+function floodFillStroke(cell) {
+  // v5.45: bucket fill — one tap, one stroke, one undo step.
+  const pl = paintLayer();
+  const g = pl === "objects" ? objects : pl === "collision" ? coll : tiles;
+  if (!g[cell.y]) return;
+  const bv = brushValue();
+  const nat = (naturalGrid[cell.y] && naturalGrid[cell.y][cell.x] != null)
+    ? naturalGrid[cell.y][cell.x] : tiles[cell.y][cell.x];
+  if (fillNorm(g[cell.y][cell.x]) === fillNorm(bv === "natural" ? nat : bv)) {
+    toast("already that tile — nothing to fill"); return;
+  }
+  const r = floodFillCells(g, W, H, cell.x, cell.y, 100000);
+  stroke = { cells: new Map(), linkCells: new Map(), layer: pl };
+  for (const c of r.cells) addStrokeCell(c[0], c[1], bv);
+  const n = stroke.cells.size;
+  endStroke();
+  toast("filled " + n + " tiles" + (r.truncated ? " (area capped at 100k)" : ""));
+}
+function eyedropperTap(cell) {
+  // v5.45: pick the tile under the tap, then hand the brush straight back.
+  const pl = paintLayer();
+  if (pl === "collision") {
+    selCollide = (coll[cell.y] && coll[cell.y][cell.x]) ? 1 : 0;
+    document.querySelectorAll("#collide-palette .sw").forEach(x =>
+      x.classList.toggle("sel", +x.dataset.cv === selCollide));
+  } else {
+    const g = pl === "objects" ? objects : tiles;
+    let v = g[cell.y] ? g[cell.y][cell.x] : null;
+    if (v && typeof v === "object") v = v.tid;
+    if (v == null || v === "natural") { toast("nothing to pick there"); return; }
+    selectTile(v);
+  }
+  setBrushTool(lastBrush);
+  toast("picked — back to the brush");
+}
+function shapeStrokeMove(cell) {
+  // v5.45: line/rect — rebuild the ghost from anchor to the finger.
+  shapeCur = { x: cell.x, y: cell.y };
+  stroke.cells.clear(); stroke.linkCells.clear();
+  const bv = brushValue();
+  const cells = brushTool === "line"
+    ? bresenham(shapeAnchor.x, shapeAnchor.y, shapeCur.x, shapeCur.y)
+    : rectCells(shapeAnchor.x, shapeAnchor.y, shapeCur.x, shapeCur.y, rectFill);
+  for (const c of cells) {
+    if (c[0] < 0 || c[1] < 0 || c[0] >= W || c[1] >= H) continue;
+    addStrokeCell(c[0], c[1], bv);
+  }
+  dirtyFlag = true;
+  queueRender(); updateScope(cell);
+}
+
+// -- tray UI: stamp picker + scatter mix -------------------------------------------
+function buildStampRow() {
+  const box = document.querySelector("#stamp-row .shapes");
+  if (!box) return;
+  box.innerHTML = "";
+  for (const key of Object.keys(STAMP_SHAPES)) {
+    const sh = STAMP_SHAPES[key];
+    const b = document.createElement("button");
+    b.className = "shape" + (key === stampShape ? " on" : "");
+    b.title = sh.name + " stamp";
+    b.innerHTML = '<span class="g">' + sh.glyph + "</span>" + sh.name;
+    b.onclick = () => {
+      stampShape = key; lsSet("cw_stampShape", key);
+      box.querySelectorAll(".shape").forEach(x => x.classList.remove("on"));
+      b.classList.add("on");
+      if (brushTool !== "stamp") setBrushTool("stamp");
+      toast("stamp: " + sh.name);
+    };
+    box.appendChild(b);
+  }
+}
+function tileLabel(id) {
+  const t = customById[id];
+  if (t) return String(t.display || t.name || ("#" + id)).slice(0, 10);
+  const p = palette.find(x => x.id === id);
+  if (p) return String(p.display || p.name || ("#" + id)).slice(0, 10);
+  return "#" + id;
+}
+function persistMix() { lsSet("cw_scatterMix", JSON.stringify(scatterMix)); }
+function buildScatterRow() {
+  const box = document.querySelector("#scatter-row .mix");
+  if (!box) return;
+  box.innerHTML = "";
+  for (const id of scatterMix) {
+    const d = document.createElement("button");
+    d.className = "mx"; d.title = tileLabel(id) + " — tap to drop";
+    d.style.background = colorOf[id] || "#3a3f4d";
+    d.innerHTML = "<span>" + esc(tileLabel(id)) + "</span>";
+    d.onclick = () => {
+      scatterMix = scatterMix.filter(v => v !== id);
+      persistMix(); buildScatterRow();
+    };
+    box.appendChild(d);
+  }
+  const add = document.createElement("button");
+  add.className = "mx add"; add.title = "add tiles to the mix";
+  add.innerHTML = "<span style='font-size:22px'>" + (scatterArming ? "x" : "+") + "</span>";
+  add.onclick = () => {
+    scatterArming = !scatterArming;
+    toast(scatterArming ? "tap palette tiles to add them — tap + again to stop"
+                        : "mix closed");
+    buildScatterRow();
+  };
+  box.appendChild(add);
+  const sd = $("scatter-density"), sv = $("scatter-density-val");
+  if (sd) { sd.value = scatterDensity; sd.oninput = () => {
+    scatterDensity = +sd.value; lsSet("cw_scatterDensity", String(scatterDensity));
+    if (sv) sv.textContent = scatterDensity + "%";
+  }; }
+  if (sv) sv.textContent = scatterDensity + "%";
+}
+function addScatterTile(id) {
+  if (scatterMix.indexOf(id) >= 0) { toast("already in the mix"); return; }
+  if (scatterMix.length >= 6) { toast("mix is full — tap a chip to drop it"); return; }
+  scatterMix.push(id); persistMix(); buildScatterRow();
+  toast("added — " + scatterMix.length + "/6");
+}
+// -- the more-tools sheet -------------------------------------------------------------
+const MORE_TOOLS = [
+  ["fill", "\uD83E\uDEA3", "Fill", "bucket-fill a matching area"],
+  ["eyedropper", "\uD83D\uDCA7", "Eyedropper", "pick a tile off the map"],
+  ["line", "\uD83D\uDCCF", "Line", "press-drag-release a straight line"],
+  ["rect", "\u25AD", "Rectangle", "press-drag-release a box"],
+  ["scatter", "\uD83C\uDFB2", "Scatter", "random texture from your mix"],
+  ["select", "\uD83D\uDD0D", "Select", "inspect instead of painting"],
+];
+function buildMoreSheet() {
+  const sh = $("more-sheet");
+  if (!sh) return;
+  sh.innerHTML = "";
+  for (const mt of MORE_TOOLS) {
+    const key = mt[0];
+    const b = document.createElement("button");
+    b.className = "mrow" + (brushTool === key ? " on" : "");
+    b.dataset.tool = key;
+    b.innerHTML = '<span class="e">' + mt[1] + "</span><span>" + mt[2] +
+                  '<span class="d">' + mt[3] + "</span></span>";
+    if (key === "rect") {
+      const tg = document.createElement("span");
+      tg.style.cssText = "margin-left:auto;font-size:13px;color:#ffd75f;border:1px solid #665f3a;border-radius:8px;padding:6px 10px";
+      tg.textContent = "fill: " + (rectFill ? "on" : "off");
+      tg.onclick = ev => {
+        ev.stopPropagation();
+        rectFill = !rectFill; lsSet("cw_rectFill", rectFill ? "1" : "0");
+        tg.textContent = "fill: " + (rectFill ? "on" : "off");
+      };
+      b.appendChild(tg);
+    }
+    b.onclick = () => { setBrushTool(key); closeMoreSheet(); };
+    sh.appendChild(b);
+  }
+}
+function openMoreSheet() { const sh = $("more-sheet"); if (sh) sh.classList.add("open"); }
+function closeMoreSheet() { const sh = $("more-sheet"); if (sh) sh.classList.remove("open"); }
+function toggleMoreSheet() { const sh = $("more-sheet"); if (sh) sh.classList.toggle("open"); }
+
+// -- init --------------------------------------------------------------------------------
+(function initTouchTools() {
+  stampShape = lsGet("cw_stampShape", "2x2");
+  if (!STAMP_SHAPES[stampShape]) stampShape = "2x2";
+  try { scatterMix = JSON.parse(lsGet("cw_scatterMix", "[]")) || []; }
+  catch (e) { scatterMix = []; }
+  scatterMix = scatterMix.filter(v => typeof v === "number").slice(0, 6);
+  scatterDensity = Math.max(10, Math.min(100, +lsGet("cw_scatterDensity", 60) || 60));
+  rectFill = lsGet("cw_rectFill", "0") === "1";
+  buildStampRow(); buildScatterRow(); buildMoreSheet();
+  scopeCtx = $("brush-scope-cv").getContext("2d");
+  $("bb-stamp").onclick = () => { closeMoreSheet(); setBrushTool("stamp"); };
+  $("bb-paint").onclick = () => { closeMoreSheet(); setBrushTool("paint"); };
+  $("bb-erase").onclick = () => { closeMoreSheet(); setBrushTool("erase"); };
+  // v5.45: the more button opens on tap (discoverable) or on long-press (spec).
+  let moreLpTimer = null, moreLpFired = false;
+  const bbMore = $("bb-more");
+  bbMore.addEventListener("pointerdown", () => {
+    moreLpFired = false;
+    moreLpTimer = setTimeout(() => { moreLpFired = true; openMoreSheet(); }, 450);
+  });
+  bbMore.addEventListener("pointerup", () => clearTimeout(moreLpTimer));
+  bbMore.addEventListener("pointercancel", () => clearTimeout(moreLpTimer));
+  bbMore.addEventListener("click", () => { if (!moreLpFired) toggleMoreSheet(); });
+  $("bb-stamp").classList.add("on");   // stamp is the hero default
+})();
+
 canvas.addEventListener("pointerdown", async e => {
   e.preventDefault();
+  lastTouchX = e.clientX; lastTouchY = e.clientY;   // v5.45: the scope follows
   touchDrag = true;   // v5.36.1: timers skip redraws until the finger lifts
   ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
   try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
   if (ptrs.size === 2) {
     // v2.1: second finger down — drop any in-progress paint, gesture takes over
     gesture = null;
-    if (stroke) { stroke = null; refresh(); }
+    if (stroke) { stroke = null; hideScope(); queueRender(); }  // v5.45: ghost-only — nothing was written
     if (hstroke) { hstroke = null; refresh(); }  // v5.29
     panStart = null;
     return;
@@ -3744,6 +4244,25 @@ canvas.addEventListener("pointerdown", async e => {
   if (erasing && await eraseGearTap(cell)) return;    // v5.13: eraser lifts gear/folks
   if (heightTool) { hstroke = { cells: new Map() }; heightStrokeAdd(cell); return; }  // v5.29
   if (portalTool) { portalTap(cell); return; }  // v5.29: link a pocket map
+  // v5.45: the touch painting toolkit
+  if (brushTool === "fill") { floodFillStroke(cell); return; }
+  if (brushTool === "eyedropper") { eyedropperTap(cell); return; }
+  if (brushTool === "line" || brushTool === "rect") {
+    shapeAnchor = { x: cell.x, y: cell.y }; shapeCur = { x: cell.x, y: cell.y };
+    stroke = { cells: new Map(), linkCells: new Map(), layer: paintLayer() };
+    shapeStrokeMove(cell);
+    return;
+  }
+  if (brushTool === "scatter") {
+    stroke = { cells: new Map(), linkCells: new Map(), layer: paintLayer() };
+    scatterStrokeAdd(cell);
+    return;
+  }
+  if (brushTool === "stamp") {
+    stroke = { cells: new Map(), linkCells: new Map(), layer: paintLayer() };
+    stampStrokeAdd(cell);
+    return;
+  }
   stroke = { cells: new Map(), linkCells: new Map(), layer: paintLayer() };
   // v5.29: the WIRE layer, not the tab name — the server only knows
   // tiles/objects/collision, and a "characters"/"colors" tab name used to
@@ -3786,7 +4305,12 @@ canvas.addEventListener("pointermove", e => {
   }
   if (!stroke) return;
   e.preventDefault();
-  const cell = evCell(e); if (cell) strokeAdd(cell);
+  const cell = evCell(e); if (!cell) return;
+  lastTouchX = e.clientX; lastTouchY = e.clientY;   // v5.45
+  if (brushTool === "line" || brushTool === "rect") shapeStrokeMove(cell);
+  else if (brushTool === "stamp") stampStrokeAdd(cell);
+  else if (brushTool === "scatter") scatterStrokeAdd(cell);
+  else strokeAdd(cell);
 });
 // v5.29: serialized paint queue. Strokes used to fire overlapping
 // /api/stroke requests, and an earlier stroke's trailing refresh() could
@@ -3857,10 +4381,12 @@ function endStroke() {
   if (panMode) { panStart = null; return; }
   if (!stroke) return;
   const s = stroke; stroke = null;
+  hideScope();   // v5.45
   if (s.cells.size) {
+    commitStrokeCells(s);   // v5.45: the buffered ghost lands on the grid now
     paintQueue.push({ layer: s.layer, cells: [...s.cells.values()],
       link_cells: [...s.linkCells.values()], file: currentFile });   // v5.7: one call, one undo step
-  }
+  } else queueRender();
   pumpPaintQueue();
 }
 canvas.addEventListener("pointerup", e => {
@@ -3871,7 +4397,10 @@ canvas.addEventListener("pointerup", e => {
 canvas.addEventListener("pointercancel", e => {
   ptrs.delete(e.pointerId);
   touchDrag = false;   // v5.36.1
-  gesture = null; stroke = null; hstroke = null; panStart = null; refresh();  // v5.29
+  gesture = null; panStart = null;
+  hideScope();   // v5.45
+  if (stroke) { stroke = null; queueRender(); }   // v5.45: ghost only — nothing to revert
+  if (hstroke) { hstroke = null; refresh(); }     // height paints live — revert the old way  // v5.29
 });
 
 // v1.7 camera: Move toggles pan mode, -/+ zoom, Fit re-fits the screen
@@ -3982,12 +4511,12 @@ $("btn-play").onclick = async () => {
     playHeroTid = _fh0.length ? _fh0[0].tid : primaryHeroTile();
     playHeroSize = _fh0.length ? _fh0[0].size : 1.0;
     refreshSight();   // v5.10: fog of war starts from the spawn
-    erasing = false; $("btn-eraser").classList.remove("on");   // v3.1: the eraser
+    restBrushTools();   // v5.45: the brush bar is the single source of truth
     // v3.4: patrol tool rests during play; NPCs start walking their routes
     cancelPatrol();
     grCancel();   // v3.9: a half-drafted rule doesn't follow you into play
     traitTool = false; $("btn-traits").classList.remove("on");  // v4.0: stamping rests
-    selectTool = false; $("btn-select").classList.remove("on");  // v4.3: inspecting rests
+    restBrushTools();   // v5.45
     setHeightTool(false); portalTool = false; $("btn-portal").classList.remove("on");  // v5.29: tools rest
     syncNature(r);   // v4.0: meters + inventory onto the HUD
     natureTimer = setInterval(natureTick, 2000);   // v4.0: ambient nature
@@ -4668,7 +5197,7 @@ async function inspectAction(act, d) {
   } else if (act === "givepatrol") {
     // v5.0: the patrol is ASSIGNED to him — he stays on the map, the route
     // is anchored to the cell he stands on. No more lifting.
-    selectTool = false; $("btn-select").classList.remove("on");
+    restBrushTools();   // v5.45
     patrolTool = true; $("btn-patrol").classList.add("on");
     patrolAnchor = { x, y }; rerouteId = null;
     draftPoints = [[x, y]]; $("btn-patrol-done").hidden = true;
@@ -4717,7 +5246,7 @@ async function inspectAction(act, d) {
     // atomically when Done is tapped, as one undo step.
     const p = patrols.find(p => p.id === +d.pid);
     if (!p) { toast("that patrol is gone"); return; }
-    selectTool = false; $("btn-select").classList.remove("on");
+    restBrushTools();   // v5.45
     patrolTool = true; $("btn-patrol").classList.add("on");
     rerouteId = p.id;
     patrolAnchor = (p.x != null && p.y != null) ? { x: p.x, y: p.y } : null;
@@ -4752,7 +5281,7 @@ $("btn-traits").onclick = () => {
   if (traitTool) {
     // one nature tool at a time — the patrol tool rests
     cancelPatrol();
-    selectTool = false; $("btn-select").classList.remove("on");   // v4.3
+    restBrushTools();   // v5.45
     setHeightTool(false); portalTool = false; $("btn-portal").classList.remove("on");  // v5.29: tools rest
     toggleOverlay("sheet-traits");
   }
@@ -4773,8 +5302,7 @@ async function setHeightTool(on) {
     // one tool at a time — the other stamping tools rest
     cancelPatrol();
     traitTool = false; $("btn-traits").classList.remove("on");
-    selectTool = false; $("btn-select").classList.remove("on");
-    erasing = false; $("btn-eraser").classList.remove("on");
+    restBrushTools();   // v5.45: erase/select yield to the last real brush
     portalTool = false; $("btn-portal").classList.remove("on");
     closeOverlays();
     if (!heightGrid) await refreshHeight();  // need current levels to sculpt
@@ -4833,8 +5361,7 @@ $("btn-portal").onclick = () => {
     // one tool at a time — the other stamping tools rest
     cancelPatrol();
     traitTool = false; $("btn-traits").classList.remove("on");
-    selectTool = false; $("btn-select").classList.remove("on");
-    erasing = false; $("btn-eraser").classList.remove("on");
+    restBrushTools();   // v5.45: erase/select yield to the last real brush
     setHeightTool(false);
     closeOverlays();
     refreshPortals();
@@ -4937,15 +5464,11 @@ let selectTool = false, inspectPos = null;
 let moveArmed = null;   // v4.8: {x, y, tile} — the working selection, waiting for a destination
 $("btn-select").onclick = () => {
   if (playMode) return;
-  selectTool = !selectTool;
-  moveArmed = null;   // v4.8: leaving Select drops whatever you were carrying
-  $("btn-select").classList.toggle("on", selectTool);
-  if (selectTool) {
-    // one inspection tool at a time — the stamping tools rest
-    cancelPatrol();
-    traitTool = false; $("btn-traits").classList.remove("on");
-    erasing = false; $("btn-eraser").classList.remove("on");
-    setHeightTool(false); portalTool = false; $("btn-portal").classList.remove("on");  // v5.29: tools rest
+  // v5.45: the tray Select button is the same tool as the more-sheet's —
+  // one source of truth (setBrushTool rests the modal tools itself).
+  setBrushTool(brushTool === "select" ? lastBrush : "select");
+  if (brushTool === "select") {
+    moveArmed = null;   // v4.8: leaving Select drops whatever you were carrying
     closeOverlays();
     toast("select — tap a tile to see everything living on it");
   }
@@ -5586,8 +6109,7 @@ $("btn-patrol").onclick = () => {
   draftPoints = []; patrolAnchor = null; rerouteId = null;  // v5.0: cancel drops the re-route too
   $("btn-patrol-done").hidden = true;
   restoreBrush();   // v5.5: toggling off mid-draft hands the brush back too
-  erasing = false; $("btn-eraser").classList.remove("on");
-  selectTool = false; $("btn-select").classList.remove("on");   // v4.3
+  restBrushTools();   // v5.45
   setHeightTool(false); portalTool = false; $("btn-portal").classList.remove("on");  // v5.29: tools rest
   toast(patrolTool ? "patrol — tap one of your placed characters first, then his stops, then Done" : "patrol off");
   render();
@@ -5891,8 +6413,9 @@ function shortName(name) {
 }
 // v3.1: one helper for picking a brush — remembers it per layer
 function selectTile(id) {
+  if (scatterArming && brushTool === "scatter") { addScatterTile(id); return; }  // v5.45: building the mix
   selTile = id; selByLayer[layer] = id;
-  erasing = false; $("btn-eraser").classList.remove("on");
+  if (brushTool === "erase") setBrushTool(lastBrush);   // v5.45: picking a tile rests the eraser
   buildPalette();
   refreshTraitsMorph();   // v5.35: Phase 2 — the tools tray morphs
 }
@@ -7786,8 +8309,7 @@ $("sheet-import").onclick = async () => {
     // not Objects) — the server's tab field is authoritative.
     layer = first.tab || (objectRole ? "objects" : "tiles");
     selByLayer[layer] = selTile;
-    erasing = false;
-    $("btn-eraser").classList.remove("on");
+    if (brushTool === "erase") setBrushTool(lastBrush);   // v5.45
     document.querySelectorAll("#layer-seg button").forEach(b =>
       b.classList.toggle("on", b.dataset.layer === layer));
     buildPalette();
@@ -7936,13 +8458,10 @@ document.querySelectorAll("#layer-seg button").forEach(b => {
   };
 });
 $("btn-eraser").onclick = () => {
-  erasing = !erasing;
-  $("btn-eraser").classList.toggle("on", erasing);
-  // v3.4: patrol tool rests when the eraser takes over
-    cancelPatrol();
-  selectTool = false; $("btn-select").classList.remove("on");   // v4.3
-  setHeightTool(false); portalTool = false; $("btn-portal").classList.remove("on");  // v5.29: tools rest
-  toast(erasing ? "eraser on" : "eraser off");
+  // v5.45: the tray Eraser button is the same tool as the brush bar's —
+  // toggling off hands the last real brush back.
+  setBrushTool(brushTool === "erase" ? lastBrush : "erase");
+  toast(brushTool === "erase" ? "eraser on" : "eraser off");
 };
 // v5.0: undo/redo are top-bar citizens now — one pair of functions drives
 // the top-bar buttons and the menu copies, and refreshAll() reloads every
@@ -8362,7 +8881,7 @@ $("btn-restart").onclick = async () => {
 };
 document.querySelectorAll("#collide-palette .sw").forEach(d => {
   d.onclick = () => {
-    selCollide = parseInt(d.dataset.cv, 10); erasing = false; $("btn-eraser").classList.remove("on");
+    selCollide = parseInt(d.dataset.cv, 10); if (brushTool === "erase") setBrushTool(lastBrush);   // v5.45
     document.querySelectorAll("#collide-palette .sw").forEach(x => x.classList.remove("sel"));
     d.classList.add("sel");
   };

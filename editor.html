@@ -3511,6 +3511,7 @@ function render() {
                  x * tilePx + tilePx * 0.78, y * tilePx + tilePx * 0.72);
   }
   drawGhostStroke();   // v5.45: commit-on-release preview — buffered, never half-painted
+  drawHeightGhost();   // v5.45.2: sculpt preview — buffered levels, grid untouched
   // hero marker in play mode — v3.0: hero sprite when available
   if (playMode && hero) {
     const hx = hero.x * tilePx, hy = hero.y * tilePx;
@@ -4382,7 +4383,7 @@ canvas.addEventListener("pointerdown", async e => {
     // v2.1: second finger down — drop any in-progress paint, gesture takes over
     gesture = null;
     if (stroke) { stroke = null; hideScope(); queueRender(); }  // v5.45: ghost-only — nothing was written
-    if (hstroke) { hstroke = null; refresh(); }  // v5.29
+    if (hstroke) { hstroke = null; queueRender(); }  // v5.45.2: ghost-only — grid untouched, no refresh needed
     panStart = null;
     return;
   }
@@ -4586,7 +4587,7 @@ canvas.addEventListener("pointercancel", e => {
   disarmLongPress();   // v5.45.1
   hideScope();   // v5.45
   if (stroke) { stroke = null; queueRender(); }   // v5.45: ghost only — nothing to revert
-  if (hstroke) { hstroke = null; refresh(); }     // height paints live — revert the old way  // v5.29
+  if (hstroke) { hstroke = null; queueRender(); }   // v5.45.2: ghost only — nothing was written
 });
 
 // v1.7 camera: Move toggles pan mode, -/+ zoom, Fit re-fits the screen
@@ -5508,22 +5509,62 @@ $("btn-height").onclick = async () => {
   }
   setHeightTool(true);
 };
+function heightCellValue(cur, dir) {
+  // v5.45.2: pure — the level a sculpt stroke writes for one cell.
+  // dir: 1 raise, -1 lower, 0 clear back to tile-driven (null).
+  // Returns null to clear, a number to set, or false when the cell is
+  // already at the cap (a no-op the stroke can skip).
+  const c = cur || 0;
+  if (dir === 0) return null;
+  const nh = Math.max(-2, Math.min(3, c + dir));
+  return nh === c ? false : nh;
+}
 function heightStrokeAdd(cell) {
+  // v5.45.2: ghost-buffered — the stroke records target levels only; the
+  // grid is untouched until release, so a two-finger pan cancels cleanly.
+  // The pending levels render as a tinted ghost (drawHeightGhost).
   const k = cell.x + "," + cell.y;
   if (hstroke.cells.has(k) || !heightGrid || !heightGrid[cell.y]) return;
-  const cur = heightGrid[cell.y][cell.x] || 0;
-  const nh = heightDir === 0 ? null : Math.max(-2, Math.min(3, cur + heightDir));
-  if (nh === cur) return;
-  hstroke.cells.set(k, [cell.x, cell.y, nh]);
-  heightGrid[cell.y][cell.x] = nh === null ? 0 : nh;  // optimistic — server reconciles
-  markBaseDirty(cell.x - 1, cell.y - 1, cell.x + 1, cell.y + 1);  // v5.41: dirty-rect
-  heightSig++;
+  const nv = heightCellValue(heightGrid[cell.y][cell.x], heightDir);
+  if (nv === false) return;
+  hstroke.cells.set(k, [cell.x, cell.y, nv]);
   queueRender();
 }
+function drawHeightGhost() {
+  // v5.45.2: the sculpt preview — buffered levels as a translucent tint
+  // with the same gold footprint outline as the brush ghost. The grid
+  // underneath is still the old terrain until the finger lifts.
+  if (!hstroke || !hstroke.cells.size) return;
+  const gv = visibleTiles();
+  ctx.save();
+  ctx.globalAlpha = 0.6;
+  for (const c of hstroke.cells.values()) {
+    if (c[0] < gv.x0 || c[0] > gv.x1 || c[1] < gv.y0 || c[1] > gv.y1) continue;
+    const px = c[0] * tilePx, py = c[1] * tilePx;
+    ctx.fillStyle = c[2] === null ? "rgba(150,150,150,0.55)" :
+      (c[2] > (heightGrid && heightGrid[c[1]] ? heightGrid[c[1]][c[0]] || 0 : 0)
+        ? "rgba(255,200,80,0.55)" : "rgba(90,160,255,0.55)");
+    ctx.fillRect(px, py, tilePx, tilePx);
+  }
+  ctx.restore();
+  ctx.strokeStyle = "rgba(255,215,95,0.85)";
+  ctx.lineWidth = Math.max(2, tilePx * 0.07);
+  for (const c of hstroke.cells.values()) {
+    if (c[0] < gv.x0 || c[0] > gv.x1 || c[1] < gv.y0 || c[1] > gv.y1) continue;
+    ctx.strokeRect(c[0] * tilePx + 1, c[1] * tilePx + 1, tilePx - 2, tilePx - 2);
+  }
+}
 async function endHeightStroke() {
-  // v5.7 pattern: one call, one undo step — the whole drag is a single edit
+  // v5.45.2: commit-on-release — the buffered levels land on the grid now;
+  // v5.7 pattern: one call, one undo step. A cancelled stroke never
+  // touched the grid, so there is nothing to revert.
   const s = hstroke; hstroke = null;
   if (!s || !s.cells.size) return;
+  for (const c of s.cells.values()) {
+    if (heightGrid && heightGrid[c[1]]) heightGrid[c[1]][c[0]] = c[2] === null ? 0 : c[2];
+    markBaseDirty(c[0] - 1, c[1] - 1, c[0] + 1, c[1] + 1);  // v5.41: dirty-rect
+  }
+  heightSig++;
   const r = await api("/api/height-set", { cells: [...s.cells.values()] });
   if (!r.ok) toast("height failed: " + (r.error || ""));
   await refreshHeight();  // server is source of truth

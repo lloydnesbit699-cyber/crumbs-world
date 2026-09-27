@@ -5,6 +5,20 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.45.2 — 2026-09-27
+
+**Height sculpting joins the ghost club.** The height/depth tool was the
+last brush still painting live into the grid mid-drag — it now
+ghost-buffers like every other brush. Drag to sculpt and the pending
+levels render as a tinted preview (warm for raise, cool for lower, gray
+for clear) with the same gold footprint outline; the terrain underneath
+stays untouched until the finger lifts, when the whole drag commits as
+one server call and one undo step. A two-finger pan mid-sculpt now drops
+the preview with no map refresh at all — there is nothing to revert.
+
+Not phone-verified — the sculpt preview especially needs Lloyd's
+on-device testing.
+
 ## v5.45.1 — 2026-09-27
 
 **Touch arbitration + the long-press menu.** The gesture language is now

@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.38.0"
+APP_VERSION = "5.38.1"
 # v5.24: unique per process boot. After an update the server re-execs into
 # the new files; the page waits for a DIFFERENT instance id (plus the new
 # version) instead of mistaking the old process — still answering during
@@ -4634,11 +4634,18 @@ class Handler(BaseHTTPRequestHandler):
         # work in the owner's vault.
         eff_user = user or _owner_username()
         vault_id = _vault_id_for(eff_user)
-        if vault_id:
-            _vault_activate(vault_id)
-            history = _user_history(eff_user, _active_vault)
-            if user:
-                self._issue_session(user)  # sliding 30-day refresh
+        if not vault_id:
+            # v5.38.1: never proceed on the ambient vault. A write-key
+            # request with no owner record used to inherit whichever vault
+            # was last active — serving (and caching) another vault's
+            # private thumbnails and data. Deny instead.
+            self._send_json({"ok": False, "error": "no vault for this identity"},
+                            403)
+            return False
+        _vault_activate(vault_id)
+        history = _user_history(eff_user, _active_vault)
+        if user:
+            self._issue_session(user)  # sliding 30-day refresh
         return True
 
     # -- v5.28: Melody ----------------------------------------------------
@@ -5024,7 +5031,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "image/png")
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "public, max-age=86400")
+        # v5.38.1: PRIVATE, not public — these bytes are vault-scoped (two
+        # users can hold different private art for the same tile id at the
+        # same URL). "public" would let a shared cache serve one vault's
+        # thumbnails to another. Browsers still cache per-user.
+        self.send_header("Cache-Control", "private, max-age=86400")
         self.end_headers()
         self.wfile.write(data)
 

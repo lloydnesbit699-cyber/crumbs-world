@@ -176,5 +176,85 @@ check("digits=6 period=30", _q.get("digits") == ["6"] and _q.get("period") == ["
 _long = h._totp_otpauth_url("a" * 24, "A" * 32)
 check("max url under QR byte-mode cap", len(_long) <= 233)
 
+print("== thumbnail vault isolation (v5.38.1) ==")
+import io as _io
+
+
+class _FakeThumbHandler:
+    def __init__(self):
+        self.headers = {}
+        self.status = None
+        self.wfile = _io.BytesIO()
+        self.json_sent = None
+
+    def send_response(self, c):
+        self.status = c
+
+    def send_header(self, k, v):
+        self.headers[k] = v
+
+    def end_headers(self):
+        pass
+
+    def _send_json(self, obj, code=200):
+        self.json_sent = (obj, code)
+
+
+_THUMB_TID = 7777
+_save_vault, _save_cache, _save_public = h._active_vault, h._thumb_cache, h.PUBLIC_MODE
+_orig_load_users = h._load_users
+h.assets.tiles.pop(_THUMB_TID, None)
+try:
+    h.PUBLIC_MODE = True  # vault namespacing only applies in public mode
+    _red = h.core.Image.new("RGBA", (32, 32), (255, 0, 0, 255))
+    _blue = h.core.Image.new("RGBA", (32, 32), (0, 0, 255, 255))
+    _cacheA, _cacheB = {}, {}
+
+    # vault A snapshots its (red) art...
+    h._active_vault, h._thumb_cache = "vaultA", _cacheA
+    h.assets.tiles[_THUMB_TID] = {"frames": [_red]}
+    _snapA = h._snapshot_tile_art(_THUMB_TID, "-")
+    check("vault A snapshot captured", _snapA is not None and _snapA[0] == "img")
+    check("snapshot holds vault A's own dict", _snapA[2] is _cacheA)
+    check("cache key namespaced by vault", _snapA[3][0] == "vaultA")
+
+    # ...then vault B activates BEFORE A's bytes are served (the interleave)
+    h._active_vault, h._thumb_cache = "vaultB", _cacheB
+    h.assets.tiles[_THUMB_TID] = {"frames": [_blue]}
+    _snapB = h._snapshot_tile_art(_THUMB_TID, "-")
+
+    _fa, _fb = _FakeThumbHandler(), _FakeThumbHandler()
+    h.Handler._serve_thumb_snapshot(_fa, _snapA)
+    h.Handler._serve_thumb_snapshot(_fb, _snapB)
+    check("both thumbnails served 200", _fa.status == 200 and _fb.status == 200)
+    _keyA, _keyB = _snapA[3], _snapB[3]
+    check("A's bytes cached under A's key in A's dict", _keyA in _cacheA)
+    check("B's bytes cached under B's key in B's dict", _keyB in _cacheB)
+    check("no cross-vault cache write",
+          _keyA not in _cacheB and _keyB not in _cacheA)
+    check("vaults got their own art, not each other's",
+          _cacheA[_keyA] != _cacheB[_keyB])
+    _cc = _fa.headers.get("Cache-Control", "")
+    check("thumbnail Cache-Control is private", "private" in _cc, _cc)
+    check("thumbnail Cache-Control is not public", "public" not in _cc, _cc)
+
+    # write-key request, no session, no owner record -> must deny, never
+    # inherit the ambient vault
+    h._load_users = lambda: {}
+    _fh = _FakeThumbHandler()
+    _fh._session_user = lambda: None
+    _fh._write_key_ok = lambda: True
+    h._active_vault = "someone_elses_vault"
+    _r = h.Handler._auth_activate(_fh, "/api/thumb/5")
+    check("no-vault identity denied", _r is False)
+    check("ambient vault untouched on deny",
+          h._active_vault == "someone_elses_vault")
+    check("deny is 403", _fh.json_sent is not None and _fh.json_sent[1] == 403)
+finally:
+    h._load_users = _orig_load_users
+    h._active_vault, h._thumb_cache = _save_vault, _save_cache
+    h.PUBLIC_MODE = _save_public
+    h.assets.tiles.pop(_THUMB_TID, None)
+
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

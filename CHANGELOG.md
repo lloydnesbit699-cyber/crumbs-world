@@ -5,6 +5,19 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.38.1 — 2026-09-27
+
+**Thumbnail privacy hardened.** The v5.27.3 lock-skipping race was fixed in
+v5.29, but two holes remained in the thumbnail path: (1) `/api/thumb`
+answered `Cache-Control: public` on vault-scoped bytes — two users can hold
+different private art for the same tile id at the same URL, so a shared
+cache could have cross-served them; now `private`. (2) A write-key request
+with no session and no owner record sailed through `_auth_activate` on
+whichever vault happened to be active — now denied with 403 instead of
+inheriting the ambient vault. 13 new tests pin the interleave (snapshot
+under vault A, serve after vault B activates — bytes still land in A's
+dict), the private header, and the deny.
+
 ## v5.38.0 — 2026-09-27
 
 **QR code for 2FA enrollment.** The signup-time "Protect with authenticator

@@ -265,6 +265,12 @@ class SetTileCommand(Command):
             return self.world.object_layer
         if self.layer == 'collision':
             return self.world.collision_layer
+        # v5.46: semantic painting's tag + hazard grids ride the same
+        # command path — one stroke, one undo step, no special cases.
+        if self.layer == 'semantic':
+            return self.world.semantic_layer
+        if self.layer == 'hazard':
+            return self.world.hazard_layer
         return self.world.data
 
     def execute(self):
@@ -778,6 +784,11 @@ def make_obj_cell(tid, attrs=None):
         tr = sanitize_traits(a.get("traits"))
         if tr:
             cell["traits"] = tr
+        # v5.46: semantic-painting decor marker — flags objects the auto
+        # decor pass sprinkled, so automap clears only its own work and
+        # never eats a user-placed chest.
+        if a.get("auto_decor"):
+            cell["auto_decor"] = True
     except Exception:
         pass
     if len(cell) == 1:
@@ -1288,6 +1299,16 @@ class WorldMap:
         # None = no override — the cell's height comes from its tiles.
         # A number (-2..3) wins over whatever the tiles say.
         self.height_override = [[None for _ in range(width)] for _ in range(height)]
+        # v5.46: semantic painting — per-cell MEANING tags ("floor"/"wall"/
+        # "water"/None). The resolver turns tags into tiles + collision +
+        # decor; the tag grid is the intent, the tile grid is the rendering.
+        self.semantic_layer = [[None for _ in range(width)] for _ in range(height)]
+        # v5.46: hazard overlay — True marks a dangerous cell. Hazard implies
+        # blocked for the walker; painted with a brush, never polygons.
+        self.hazard_layer = [[False for _ in range(width)] for _ in range(height)]
+        # v5.46: the rule controls (shadow strength, decor density, terrain
+        # styles) — per-map, saved with it, part of undo.
+        self.semantic_settings = sanitize_semantic_settings(None)
 
     def resize(self, w, h):
         # keep every tile/object/collision in the overlapping region —
@@ -1295,6 +1316,8 @@ class WorldMap:
         old_w, old_h = self.width, self.height
         old_data, old_obj, old_col = self.data, self.object_layer, self.collision_layer
         old_ho = self.height_override
+        old_sem = self.semantic_layer  # v5.46: tags survive a resize too
+        old_haz = self.hazard_layer    # v5.46: hazards survive a resize too
         self.width, self.height = w, h
         self.data = [[old_data[y][x] if y < old_h and x < old_w else 0
                       for x in range(w)] for y in range(h)]
@@ -1305,6 +1328,11 @@ class WorldMap:
         # v5.29: hand-tuned heights survive a resize too
         self.height_override = [[old_ho[y][x] if y < old_h and x < old_w else None
                                  for x in range(w)] for y in range(h)]
+        # v5.46: semantic tags + hazards survive a resize too
+        self.semantic_layer = [[old_sem[y][x] if y < old_h and x < old_w else None
+                                for x in range(w)] for y in range(h)]
+        self.hazard_layer = [[old_haz[y][x] if y < old_h and x < old_w else False
+                              for x in range(w)] for y in range(h)]
 
     def generate_biome(self, biome_name, seed=None, noise_overrides=None):
         biome = BIOMES.get(biome_name, BIOMES["grassland"])
@@ -1334,6 +1362,12 @@ class WorldMap:
                 # v5.29: per-cell height overrides (None = tile-driven).
                 # Old saves simply lack the key and load the same as before.
                 'height_override': self.height_override,
+                # v5.46: semantic tags + hazard overlay — optional keys, same
+                # as height_override: old saves load with empty grids.
+                'semantic': self.semantic_layer,
+                'hazard': self.hazard_layer,
+                # v5.46: the rule controls travel with the map.
+                'semantic_settings': self.semantic_settings,
             }
             if schema is not None:  # v5.16: data-schema stamp for migrations
                 data['schema'] = schema
@@ -1385,6 +1419,22 @@ class WorldMap:
                 [(_sanitize_height_override(v)) for v in row]
                 for row in raw_ho
             ]
+            # v5.46: semantic tags + hazard overlay — optional (pre-v5.46
+            # saves lack them) and sanitized; a hand-edited tag outside
+            # floor/wall/water falls back to None, non-bool hazard to False.
+            raw_sem = _grid('semantic', None)
+            self.semantic_layer = [
+                [(v if v in SEM_TERRAINS else None) for v in row]
+                for row in raw_sem
+            ]
+            raw_haz = _grid('hazard', False)
+            self.hazard_layer = [
+                [(True if v is True else False) for v in row]
+                for row in raw_haz
+            ]
+            # v5.46: rule controls — optional, sanitized on the way in.
+            self.semantic_settings = sanitize_semantic_settings(
+                data.get('semantic_settings'))
             return True
         except Exception as e:
             print(f"ERROR loading map: {e}")
@@ -1409,6 +1459,10 @@ class WorldMap:
             self.object_layer = [[None] * w for _ in range(h)]
             self.collision_layer = [[False] * w for _ in range(h)]
             self.height_override = [[None] * w for _ in range(h)]  # v5.29
+            # v5.46: a legacy import is a new tile layout — no stale meaning
+            self.semantic_layer = [[None] * w for _ in range(h)]
+            self.hazard_layer = [[False] * w for _ in range(h)]
+            self.semantic_settings = sanitize_semantic_settings(None)
             return True
         except Exception as e:
             print(f"ERROR loading CSV map: {e}")
@@ -1940,3 +1994,320 @@ def build_item(name, tile_id, kind="trinket", power=0, effect="none",
     price = max(0, min(9999, price))
     return {"name": name, "tile_id": tile_id, "kind": kind, "power": power,
             "effect": effect, "stack": stack, "price": price}
+
+
+# ---- v5.46: semantic painting -------------------------------------------------
+# Paint MEANING (floor / wall / water) and the engine resolves the dungeon:
+# base tile variants picked deterministically per cell, edges/corners/shadows
+# derived from the 8-neighbourhood of tags at render time (art-independent —
+# no variant tileset required), decoration sprinkled on floor interiors, and
+# collision/hazard folded in automatically. The semantic grid is stored
+# per-cell alongside tiles/collision so intent survives save/load and
+# re-resolution (settings changes, automap) is deterministic.
+SEM_TERRAINS = ("floor", "wall", "water")
+# terrain -> (collision_blocked, hazard). Water is a hazard: it blocks the
+# walker like a wall but is marked hazardous for future swim rules.
+SEM_PHYSICS = {
+    "floor": (False, False),
+    "wall": (True, False),
+    "water": (True, True),
+}
+# v5.46: auto-decor only ever uses human-named, non-solid decor tiles whose
+# name reads as a small floor trimming — never a chest, sword, or throne.
+# (Utumno's "r82 c03"-style names match nothing, so they stay out.)
+SEM_DECOR_KEYWORDS = ("pebble", "flower", "rose", "lotus", "moss", "mushroom",
+                      "tuft", "grass", "bone", "skull", "vine", "reed",
+                      "shrub", "sprout", "fern", "bush")
+# v5.46: 8-neighbourhood bitmask, clockwise from north.
+SEM_N, SEM_NE, SEM_E, SEM_SE = 1, 2, 4, 8
+SEM_S, SEM_SW, SEM_W, SEM_NW = 16, 32, 64, 128
+SEM_DIRS = ((0, -1, SEM_N, "N"), (1, -1, SEM_NE, "NE"),
+            (1, 0, SEM_E, "E"), (1, 1, SEM_SE, "SE"),
+            (0, 1, SEM_S, "S"), (-1, 1, SEM_SW, "SW"),
+            (-1, 0, SEM_W, "W"), (-1, -1, SEM_NW, "NW"))
+SEM_ORTHO = ((0, -1, SEM_N, "N"), (1, 0, SEM_E, "E"),
+             (0, 1, SEM_S, "S"), (-1, 0, SEM_W, "W"))
+
+
+def sem_hash(x, y, seed):
+    """v5.46: FNV-1a 32-bit over "seed:x,y" — the deterministic dice for
+    variant/decor picks. Mirrored EXACTLY in editor.html (semHash); the
+    client test asserts vector parity so previews match the server."""
+    h = 2166136261
+    for ch in "%s:%s,%s" % (seed, x, y):
+        h ^= ord(ch)
+        h = (h * 16777619) & 0xFFFFFFFF
+    return h
+
+
+def sem_valid_terrain(t):
+    """v5.46: a tag is valid or it is nothing."""
+    return t if t in SEM_TERRAINS else None
+
+
+def _sem_at(sem_grid, x, y, w, h):
+    if 0 <= x < w and 0 <= y < h:
+        return sem_valid_terrain(sem_grid[y][x])
+    return None  # off-map counts as "different" for every mask
+
+
+def sem_edge_mask(sem_grid, x, y, w, h):
+    """v5.46: 8-bit mask — bit set where the neighbour's tag differs from
+    this cell's tag (off-map counts as different). Drives the edge/corner
+    highlight overlay: beginners never place a corner tile by hand."""
+    me = _sem_at(sem_grid, x, y, w, h)
+    if me is None:
+        return 0
+    mask = 0
+    for dx, dy, bit, _name in SEM_DIRS:
+        if _sem_at(sem_grid, x + dx, y + dy, w, h) != me:
+            mask |= bit
+    return mask
+
+
+def sem_wall_mask(sem_grid, x, y, w, h):
+    """v5.46: 8-bit mask — bit set where the neighbour is tagged "wall".
+    For floor/water cells this drives the shadow overlay; for wall cells
+    the INVERSE (edge mask) drives the face highlight."""
+    mask = 0
+    for dx, dy, bit, _name in SEM_DIRS:
+        if _sem_at(sem_grid, x + dx, y + dy, w, h) == "wall":
+            mask |= bit
+    return mask
+
+
+def sem_shadow_sides(wall_mask):
+    """v5.46: orthogonal sides ("N"/"E"/"S"/"W") where a wall neighbour
+    throws a shadow onto this cell. Pure bit math — shared with the client."""
+    return [name for _dx, _dy, bit, name in SEM_ORTHO if wall_mask & bit]
+
+
+def sem_shadow_corners(wall_mask):
+    """v5.46: inner corners — a diagonal wall neighbour whose two adjacent
+    orthogonal neighbours are NOT wall (e.g. NE wall, N and E clear).
+    Returns "NE"/"SE"/"SW"/"NW" names."""
+    out = []
+    diag = (("NE", SEM_NE, SEM_N, SEM_E), ("SE", SEM_SE, SEM_S, SEM_E),
+            ("SW", SEM_SW, SEM_S, SEM_W), ("NW", SEM_NW, SEM_N, SEM_W))
+    for name, dbit, ob1, ob2 in diag:
+        if (wall_mask & dbit) and not (wall_mask & ob1) and not (wall_mask & ob2):
+            out.append(name)
+    return out
+
+
+def sem_base_tile(terrain, x, y, pools, style, seed):
+    """v5.46: the concrete tile id for a tagged cell — a deterministic pick
+    from the terrain's pool so a floor never looks copy-pasted. style is
+    "mixed" or a single tile id (the Advanced "which variant" control)."""
+    pool = (pools or {}).get(terrain) or []
+    if not pool:
+        return None
+    if isinstance(style, int) and style in pool:
+        return style
+    return pool[sem_hash(x, y, seed) % len(pool)]
+
+
+def sem_decor_pick(sem_grid, x, y, w, h, density, decor_pool, seed):
+    """v5.46: auto-decoration — floor INTERIOR cells only (all 8 neighbours
+    floor), sprinkled at density% via an independent hash stream so decor
+    never correlates with the base-tile variant. Returns a tile id or None."""
+    if _sem_at(sem_grid, x, y, w, h) != "floor":
+        return None
+    if not decor_pool or density <= 0:
+        return None
+    for dx, dy, _bit, _name in SEM_DIRS:
+        if _sem_at(sem_grid, x + dx, y + dy, w, h) != "floor":
+            return None
+    hh = sem_hash(x, y, "%s:decor" % (seed,))
+    if hh % 100 >= max(0, min(100, density)):
+        return None
+    return decor_pool[hh % len(decor_pool)]
+
+
+def sem_cell_physics(terrain):
+    """v5.46: (collision_blocked, hazard) for a tag. Untagged -> walkable."""
+    return SEM_PHYSICS.get(terrain, (False, False))
+
+
+SEM_SETTINGS_DEFAULT = {
+    "shadow_strength": 70,   # 0..100 — shadow overlay alpha
+    "decor_density": 35,     # 0..100 — % of floor interiors sprinkled
+    "auto_decor": True,
+    "auto_edges": True,      # edge/corner highlight overlays
+    "styles": {"floor": "mixed", "wall": "mixed", "water": "mixed"},
+    "seed": 0,
+}
+
+
+def sanitize_semantic_settings(raw):
+    """v5.46: hand-edited saves can't smuggle junk into the rule controls."""
+    s = dict(SEM_SETTINGS_DEFAULT)
+    # v5.46: the nested styles dict must be per-map — never mutate the
+    # module default's dict through a shared reference.
+    s["styles"] = dict(SEM_SETTINGS_DEFAULT["styles"])
+    if not isinstance(raw, dict):
+        return s
+    try:
+        s["shadow_strength"] = max(0, min(100, int(raw.get("shadow_strength", 70))))
+    except (TypeError, ValueError):
+        pass
+    try:
+        s["decor_density"] = max(0, min(100, int(raw.get("decor_density", 35))))
+    except (TypeError, ValueError):
+        pass
+    s["auto_decor"] = bool(raw.get("auto_decor", True))
+    s["auto_edges"] = bool(raw.get("auto_edges", True))
+    styles = raw.get("styles")
+    if isinstance(styles, dict):
+        for t in SEM_TERRAINS:
+            v = styles.get(t, "mixed")
+            s["styles"][t] = v if (v == "mixed" or isinstance(v, int)) else "mixed"
+    try:
+        s["seed"] = int(raw.get("seed", 0))
+    except (TypeError, ValueError):
+        pass
+    return s
+
+
+def obj_is_auto_decor(cell):
+    """v5.46: True when this object cell was sprinkled by the decor pass
+    (as opposed to placed by the user) — only these are ever cleared."""
+    try:
+        return isinstance(cell, dict) and cell.get("auto_decor") is True
+    except Exception:
+        return False
+
+
+def sem_plan_stroke(world, cells, terrain, pools, settings, natural_tile_fn):
+    """v5.46: plan a semantic brush stroke — pure w.r.t. the world (reads
+    grids, writes nothing). Returns [(x, y, layer, new_val)] covering tags,
+    tiles, collision, hazard, and the decor refresh over the painted cells
+    plus their 1-ring (painting a wall un-interiors its neighbours).
+    terrain=None is meaning-erase: tag cleared, seed-natural tile restored,
+    collision/hazard cleared."""
+    w, h = world.width, world.height
+    terrain = sem_valid_terrain(terrain)
+    settings = sanitize_semantic_settings(settings)
+    seed = settings.get("seed", 0)
+    styles = settings.get("styles", {})
+    decor_pool = (pools or {}).get("decor") or []
+    density = settings.get("decor_density", 0) if settings.get("auto_decor") else 0
+
+    # work on a scratch copy of the tag grid so multi-cell strokes see
+    # each other's tags (one drag, one consistent resolution)
+    tags = [row[:] for row in world.semantic_layer]
+    pts = []
+    for c in cells:
+        try:
+            x, y = int(c[0]), int(c[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if 0 <= x < w and 0 <= y < h:
+            pts.append((x, y))
+    if not pts:
+        return []
+    for x, y in pts:
+        tags[y][x] = terrain
+
+    changes = []
+    for x, y in pts:
+        if world.semantic_layer[y][x] != terrain:
+            changes.append((x, y, "semantic", terrain))
+        if terrain is None:
+            tile = natural_tile_fn(x, y)
+        else:
+            tile = sem_base_tile(terrain, x, y, pools, styles.get(terrain), seed)
+        if tile is not None and world.data[y][x] != tile:
+            changes.append((x, y, "tiles", tile))
+        blocked, hazard = sem_cell_physics(terrain)
+        if world.collision_layer[y][x] != blocked:
+            changes.append((x, y, "collision", blocked))
+        if world.hazard_layer[y][x] != hazard:
+            changes.append((x, y, "hazard", hazard))
+
+    # decor refresh over the painted cells + 1-ring
+    region = set()
+    for x, y in pts:
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < w and 0 <= ny < h:
+                    region.add((nx, ny))
+    for x, y in sorted(region):
+        cell = world.object_layer[y][x]
+        if obj_is_auto_decor(cell):
+            changes.append((x, y, "objects", None))
+    for x, y in sorted(region):
+        pick = sem_decor_pick(tags, x, y, w, h, density, decor_pool, seed)
+        cell = world.object_layer[y][x]
+        # v5.46: auto-decor cells are logically empty here — they were just
+        # cleared above, so a re-sprinkle at the same spot must re-add them.
+        if pick is not None and (cell is None or obj_is_auto_decor(cell)):
+            # never clobber a user-placed object with a pebble
+            changes.append((x, y, "objects",
+                            make_obj_cell(pick, {"auto_decor": True})))
+    return changes
+
+
+def sem_plan_automap(world, pools, settings):
+    """v5.46: whole-map re-resolution — every tagged cell re-resolves its
+    tile/collision/hazard from current pools+settings, all auto-decor is
+    cleared and re-sprinkled. Deterministic: same settings, same map.
+    Returns [(x, y, layer, new_val)]."""
+    w, h = world.width, world.height
+    settings = sanitize_semantic_settings(settings)
+    seed = settings.get("seed", 0)
+    styles = settings.get("styles", {})
+    decor_pool = (pools or {}).get("decor") or []
+    density = settings.get("decor_density", 0) if settings.get("auto_decor") else 0
+    tags = world.semantic_layer
+    changes = []
+    for y in range(h):
+        for x in range(w):
+            t = sem_valid_terrain(tags[y][x])
+            if t is None:
+                continue
+            tile = sem_base_tile(t, x, y, pools, styles.get(t), seed)
+            if tile is not None and world.data[y][x] != tile:
+                changes.append((x, y, "tiles", tile))
+            blocked, hazard = sem_cell_physics(t)
+            if world.collision_layer[y][x] != blocked:
+                changes.append((x, y, "collision", blocked))
+            if world.hazard_layer[y][x] != hazard:
+                changes.append((x, y, "hazard", hazard))
+    for y in range(h):
+        for x in range(w):
+            if obj_is_auto_decor(world.object_layer[y][x]):
+                changes.append((x, y, "objects", None))
+    for y in range(h):
+        for x in range(w):
+            pick = sem_decor_pick(tags, x, y, w, h, density, decor_pool, seed)
+            cell = world.object_layer[y][x]
+            # v5.46: auto-decor cells are logically empty here — cleared
+            # above, so the re-sprinkle must be able to re-add them.
+            if pick is not None and (cell is None or obj_is_auto_decor(cell)):
+                changes.append((x, y, "objects",
+                                make_obj_cell(pick, {"auto_decor": True})))
+    return changes
+
+
+# v5.46: the logical-layer map — the Beginner face. Each conceptual layer
+# the user sees maps onto the SAME physical grids underneath (two faces,
+# same objects — never a forked data model).
+LOGICAL_LAYERS = {
+    "ground":  {"grids": ("tiles", "semantic"),
+                "brushes": ("floor", "water", "erase-meaning"),
+                "hint": "paint the ground — floor and water"},
+    "walls":   {"grids": ("tiles", "semantic", "collision"),
+                "brushes": ("wall", "erase-meaning"),
+                "hint": "raise walls — they block walking by themselves"},
+    "objects": {"grids": ("objects",),
+                "brushes": ("object", "erase-object"),
+                "hint": "furniture, loot, things that sit on the ground"},
+    "routes":  {"grids": ("objects", "patrols"),
+                "brushes": ("character", "patrol", "hero"),
+                "hint": "who walks where — characters and their routes"},
+    "fx":      {"grids": ("hazard", "collision"),
+                "brushes": ("walk", "block", "hazard", "decor"),
+                "hint": "danger zones and dressing — never polygons"},
+}

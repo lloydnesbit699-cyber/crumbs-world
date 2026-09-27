@@ -5,6 +5,35 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.46.0 — 2026-09-27
+
+**Semantic painting: paint MEANING, the engine resolves the tiles.** Phase 4
+of the roadmap. A new conceptual-layer dock (Ground / Walls / Objects /
+Routes / FX) sits above the brush bar — five fat buttons name what you're
+painting, and the palette row under them carries only that layer's brushes:
+Floor / Water / Clear on Ground, Wall / Clear on Walls, Walkable / Blocked /
+Hazard on FX (collision as paint — big modes, never polygons), while Objects
+and Routes hand off to the existing object palette and patrol flow. Two faces,
+same grids: the logical layers map onto the tiles/objects/collision grids
+underneath, never a forked data model.
+
+Underneath, a deterministic engine (mirrored bit-for-bit in JS so ghost
+previews match what the server commits — the node suite asserts parity over
+thousands of cases): paint a wall and the engine tags the cell, picks a
+concrete wall tile from the starter pool (FNV-1a hash of seed+x,y), blocks
+collision, derives 8-neighbour edge masks into light-catching wall faces and
+gradient shadows with inner corners on neighbouring floor, and sprinkles
+auto-decor (pebbles, flowers — never chests) on floor interiors only, at a
+density control. Meaning-erase restores the seed's natural tile. Shadow
+strength, decor density, per-terrain variant selects (Mixed or one concrete
+tile), and a re-paint-details automap live in the ⚙ Advanced drawer; the
+👶/🛠 face toggle keeps plain words for beginners. One stroke is one undo
+step, including settings changes; undo/redo, resize, and save/load carry
+the tag + hazard grids and the rule controls (old saves load clean).
+
+Not phone-verified — the dock layout, ghost shadow previews, and the
+10×10-room speed target need Lloyd's on-device testing.
+
 ## v5.45.3 — 2026-09-27
 
 **Brush-bar polish + a real tool-state bug fix.** The stamp shape

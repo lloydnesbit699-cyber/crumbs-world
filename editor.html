@@ -556,6 +556,47 @@
   #brush-bar button .blbl { display: block; font-size: 9px; margin-top: 1px;
                             color: #bbb; }
   #brush-bar button.on .blbl { color: #ffd75f; }
+  /* v5.46: the semantic layer dock — the conceptual-layer ribbon. Stacked
+     above the brush bar in the thumb zone; every target >= 52px. */
+  #sem-dock { position: fixed; left: 50%; transform: translateX(-50%);
+              bottom: calc(86px + env(safe-area-inset-bottom)); z-index: 30;
+              display: flex; flex-direction: column; gap: 6px; align-items: center;
+              max-width: 96vw; }
+  #sem-layers { display: flex; gap: 6px; }
+  #sem-layers button { min-width: 60px; height: 54px; border-radius: 13px;
+                       padding: 4px 8px; font-size: 20px; line-height: 1.1;
+                       background: rgba(42,42,42,.94); color: #eee;
+                       border: 2px solid #555; }
+  #sem-layers button.on { border-color: #7fd0ff; color: #7fd0ff;
+                         box-shadow: 0 0 10px rgba(127,208,255,.35); }
+  #sem-layers button .slbl { display: block; font-size: 9px; margin-top: 2px; color: #bbb; }
+  #sem-layers button.on .slbl { color: #7fd0ff; }
+  #sem-palette { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  #sem-palette button { min-width: 84px; min-height: 54px; border-radius: 13px;
+                        padding: 6px 12px; font-size: 15px; font-weight: 600;
+                        background: rgba(42,42,42,.94); color: #eee;
+                        border: 2px solid #555; }
+  #sem-palette button.on { border-color: #ffd75f; color: #ffd75f;
+                          box-shadow: 0 0 10px rgba(255,215,95,.35); }
+  #sem-palette button .phint { display: block; font-size: 9px; font-weight: 400; color: #bbb; }
+  #sem-adv-toggle { font-size: 12px; padding: 4px 12px; border-radius: 10px;
+                    background: rgba(42,42,42,.94); color: #bbb; border: 1px solid #555; }
+  #sem-mode { font-size: 12px; padding: 4px 12px; border-radius: 10px;
+              background: rgba(42,42,42,.94); color: #bbb; border: 1px solid #555; }
+  #sem-adv { background: rgba(30,30,30,.96); border: 2px solid #555; border-radius: 14px;
+             padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;
+             max-width: 92vw; }
+  #sem-adv .arow { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #ddd; }
+  #sem-adv .arow label { min-width: 92px; }
+  #sem-adv .arow input[type=range] { flex: 1; min-height: 34px; }
+  #sem-adv .arow select { font-size: 14px; padding: 6px; border-radius: 8px;
+                          background: #222; color: #eee; border: 1px solid #666; max-width: 150px; }
+  #sem-adv .arow .aval { min-width: 40px; text-align: right; color: #ffd75f; }
+  #sem-adv .abtns { display: flex; gap: 8px; }
+  #sem-adv .abtns button { flex: 1; min-height: 48px; border-radius: 12px; font-size: 14px;
+                           font-weight: 600; background: #2a4a2a; color: #dff0d8;
+                           border: 2px solid #6dd76d; }
+  #sem-seedline { font-size: 11px; color: #888; text-align: center; }
   /* v5.45: the more-tools sheet — big rows, one tap each. */
   #more-sheet { position: fixed; left: 50%; transform: translateX(-50%);
                 bottom: calc(80px + env(safe-area-inset-bottom)); z-index: 40;
@@ -1701,6 +1742,37 @@
   <button id="bb-erase" title="Eraser — restore the seed's ground"><span>🧽</span><span class="blbl">erase</span></button>
   <button id="bb-more" title="More tools — long-press or tap"><span>•••</span><span class="blbl">more</span></button>
 </div>
+<!-- v5.46: the semantic layer dock — paint MEANING, not tiles. The ribbon
+     names the five conceptual layers; the palette row under it swaps to the
+     active layer's meaning brushes. The ⚙ drawer holds the engine knobs
+     (variants, shadow strength, decor density, automap) — no raw matrices. -->
+<div id="sem-dock" aria-label="Paint layers">
+  <div id="sem-layers">
+    <button data-ll="ground" class="on"><span>🟫</span><span class="slbl">Ground</span></button>
+    <button data-ll="walls"><span>🧱</span><span class="slbl">Walls</span></button>
+    <button data-ll="objects"><span>🪑</span><span class="slbl">Objects</span></button>
+    <button data-ll="routes"><span>🚶</span><span class="slbl">Routes</span></button>
+    <button data-ll="fx"><span>💥</span><span class="slbl">FX</span></button>
+  </div>
+  <div id="sem-palette"></div>
+  <div class="arow" style="gap:8px;justify-content:center">
+    <button id="sem-mode" title="Simple or Advanced painting face">👶 Simple</button>
+    <button id="sem-adv-toggle" hidden>⚙ Advanced</button>
+  </div>
+  <div id="sem-adv" hidden>
+    <div class="arow"><label>Floor look</label><select id="sem-style-floor"></select></div>
+    <div class="arow"><label>Wall look</label><select id="sem-style-wall"></select></div>
+    <div class="arow"><label>Water look</label><select id="sem-style-water"></select></div>
+    <div class="arow"><label for="sem-shadow">Shadows</label>
+      <input id="sem-shadow" type="range" min="0" max="100" step="5" value="70">
+      <span class="aval" id="sem-shadow-val">70%</span></div>
+    <div class="arow"><label for="sem-decor">Decor</label>
+      <input id="sem-decor" type="range" min="0" max="100" step="5" value="35">
+      <span class="aval" id="sem-decor-val">35%</span></div>
+    <div class="abtns"><button id="sem-automap">✨ Re-paint details</button></div>
+    <div id="sem-seedline"></div>
+  </div>
+</div>
 <div id="more-sheet" aria-label="More brush tools"></div>
 <!-- v5.45: the brush scope — magnified footprint preview above the finger -->
 <div id="brush-scope"><canvas id="brush-scope-cv" width="150" height="150"></canvas></div>
@@ -1783,6 +1855,20 @@ const stage = $("stage");
 
 let W = 25, H = 15;                 // map dims from server
 let tiles = [], objects = [], coll = [];
+// v5.46: semantic painting — the tag grid, the hazard overlay, tile pools,
+// rule controls, the effective seed (ghost parity), the logical layer the
+// Beginner face shows, and the armed meaning / collision brushes.
+let semGrid = [], hazGrid = [];
+let semPools = { floor: [], wall: [], water: [], decor: [] };
+let semNames = {};
+let semSettings = null, semSeed = 0;
+let logicalLayer = "ground";
+let semMode = "beginner";   // v5.46: the painting dock's face — plain words
+try { semMode = localStorage.getItem("crumbs.semMode") || "beginner"; } catch (e) {}
+if (semMode !== "advanced") semMode = "beginner";
+let semBrush = null;    // armed meaning: "floor" | "wall" | "water" | "erase"
+let collBrush = null;   // armed collision paint: "walk" | "block" | "hazard"
+const COLL_MODES = { walk: [false, false], block: [true, false], hazard: [true, true] };
 let palette = [];                   // [{id,name,color}]
 let spriteTiles = [];               // [{id,name,type,category}] image/animation tiles
 let thumbImg = {};                  // tile id -> preloaded Image thumbnail
@@ -2795,6 +2881,11 @@ async function refresh() {
   const m = await api("/api/map");
   W = m.width; H = m.height;
   tiles = m.tiles; objects = m.objects; coll = m.collision;
+  // v5.46: the meaning + hazard grids ride the same snapshot — a resize,
+  // undo, or map switch replaces all three atomically.
+  semGrid = m.semantic || []; hazGrid = m.hazard || [];
+  if (m.semantic_settings) semSettings = m.semantic_settings;
+  if (m.semantic_seed != null) semSeed = m.semantic_seed;
   markBaseDirty();   // v5.41: whole grid replaced — full base redraw
   invalidateHeroes();   // v5.41: objects grid replaced
   tilePx = Math.min(tilePx, maxTilePx());   // v5.41: huge map, smaller tiles
@@ -2829,6 +2920,8 @@ async function refreshAll() {
   moveArmed = null;
   await refresh();
   await loadNatural();
+  try { await loadSemantic(); } catch (e) {}   // v5.46: pools + seed (ghost parity)
+  renderSemDock();   // v5.46: the dock follows undo/redo/resize too
   try { await loadPatrols(); } catch (e) {}
   try { await loadItems(); } catch (e) {}    // v5.13: gear sidecars
   try { await loadNpcs(); } catch (e) {}
@@ -3395,6 +3488,297 @@ function queueRender() {
   requestAnimationFrame(() => { renderQueued = false; render(); });
 }
 
+// ---- v5.46: semantic overlays ------------------------------------------------------
+// The auto-layer pass, Tiled-AutoMapping-style but art-independent: edges,
+// corners, and wall shadows derive from the semantic tags at render time
+// (overlays, never baked tiles), so shadow strength stays a live control
+// and no variant tileset is required.
+function ghostSemView() {
+// the buffered meaning tags overlaid on the live tag grid — a fake 2D
+// array the pure mask functions can read like the real thing.
+const rowCache = {};
+return new Proxy({}, {
+  get(t, py) {
+    const y = +py;
+    if (!rowCache[y]) {
+      rowCache[y] = new Proxy({}, {
+        get(tt, px) {
+          const x = +px, k = x + "," + y;
+          if (stroke && stroke.cells.has(k)) return stroke.semTerrain;
+          const r = semGrid[y];
+          return r ? semValidTerrain(r[x]) : null;
+        }
+      });
+    }
+    return rowCache[y];
+  }
+});
+}
+function drawSemCellOverlay(sem, x, y, w, h, alphaMul) {
+// one cell's auto-layer dressing: wall faces catch light, floor/water
+// cells take shadows from wall neighbours + shoreline seams. alphaMul
+// lets the ghost preview share this painter.
+const tag = semGet(sem, x, y, w, h);
+if (tag !== "floor" && tag !== "wall" && tag !== "water") return;
+const st = semSettings || {};
+const edgesOn = st.auto_edges !== false;
+const strength = (st.shadow_strength == null ? 70
+  : Math.max(0, Math.min(100, +st.shadow_strength))) / 100;
+const px = x * tilePx, py = y * tilePx, s = tilePx, am = alphaMul || 1;
+const wm = semWallMask(sem, x, y, w, h);
+if (tag === "wall") {
+  if (!edgesOn) return;
+  const em = semEdgeMask(sem, x, y, w, h);
+  if (!em) return;
+  ctx.fillStyle = "rgba(255,240,200," + (0.20 * am).toFixed(3) + ")";
+  const t = Math.max(2, Math.round(s * 0.09));
+  if (em & SEM_N) ctx.fillRect(px, py, s, t);
+  if (em & SEM_S) ctx.fillRect(px, py + s - t, s, t);
+  if (em & SEM_W) ctx.fillRect(px, py, t, s);
+  if (em & SEM_E) ctx.fillRect(px + s - t, py, t, s);
+  return;
+}
+if (wm && strength > 0) {
+  const a = ((0.12 + 0.38 * strength) * am).toFixed(3);
+  for (const side of semShadowSides(wm)) {
+    const g = side === "N" ? ctx.createLinearGradient(0, py, 0, py + s * 0.45)
+      : side === "S" ? ctx.createLinearGradient(0, py + s, 0, py + s * 0.55)
+      : side === "W" ? ctx.createLinearGradient(px, 0, px + s * 0.45, 0)
+      : ctx.createLinearGradient(px + s, 0, px + s * 0.55, 0);
+    g.addColorStop(0, "rgba(0,0,0," + a + ")");
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(px, py, s, s);
+  }
+  ctx.fillStyle = "rgba(0,0,0," + ((0.10 + 0.30 * strength) * am).toFixed(3) + ")";
+  const q = s * 0.5;
+  for (const cn of semShadowCorners(wm)) {
+    ctx.beginPath();
+    if (cn === "NE") { ctx.moveTo(px + s, py); ctx.lineTo(px + s - q, py); ctx.lineTo(px + s, py + q); }
+    else if (cn === "SE") { ctx.moveTo(px + s, py + s); ctx.lineTo(px + s - q, py + s); ctx.lineTo(px + s, py + s - q); }
+    else if (cn === "SW") { ctx.moveTo(px, py + s); ctx.lineTo(px + q, py + s); ctx.lineTo(px, py + s - q); }
+    else { ctx.moveTo(px, py); ctx.lineTo(px + q, py); ctx.lineTo(px, py + q); }
+    ctx.closePath(); ctx.fill();
+  }
+}
+if (edgesOn) {
+  // shoreline: a different NON-wall neighbour (a floor|water seam)
+  const seam = semEdgeMask(sem, x, y, w, h) & ~wm & 0xFF;
+  if (seam) {
+    ctx.fillStyle = "rgba(0,0,0," + (0.28 * am).toFixed(3) + ")";
+    const t = Math.max(1, Math.round(s * 0.05));
+    if (seam & SEM_N) ctx.fillRect(px, py, s, t);
+    if (seam & SEM_S) ctx.fillRect(px, py + s - t, s, t);
+    if (seam & SEM_W) ctx.fillRect(px, py, t, s);
+    if (seam & SEM_E) ctx.fillRect(px + s - t, py, t, s);
+  }
+}
+}
+function drawSemOverlays() {
+if (!semGrid.length || semGrid.length < H || !semGrid[0] || semGrid[0].length < W) return;
+const av = visibleTiles();
+for (let y = av.y0; y <= av.y1; y++)
+  for (let x = av.x0; x <= av.x1; x++)
+    drawSemCellOverlay(semGrid, x, y, W, H, 1);
+// v5.46: hazard tint — always on but subtle; loud on the FX layer.
+if (hazGrid.length === H && hazGrid[0] && hazGrid[0].length === W) {
+  const loud = semMode === "beginner" && logicalLayer === "fx";
+  for (let y = av.y0; y <= av.y1; y++) {
+    const row = hazGrid[y]; if (!row) continue;
+    for (let x = av.x0; x <= av.x1; x++) {
+      if (!row[x]) continue;
+      const px = x * tilePx, py = y * tilePx;
+      ctx.fillStyle = loud ? "rgba(255,90,40,0.42)" : "rgba(255,90,40,0.22)";
+      ctx.fillRect(px, py, tilePx, tilePx);
+      if (loud) {
+        ctx.strokeStyle = "rgba(255,140,60,0.9)"; ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(px + 3, py + tilePx - 3); ctx.lineTo(px + tilePx - 3, py + 3);
+        ctx.stroke();
+      }
+    }
+  }
+}
+}
+
+// ---- v5.46: semantic dock UI ------------------------------------------------------
+// The conceptual-layer face of painting. Five fat buttons name the layer;
+// the palette row under them carries only that layer's brushes. The Advanced
+// drawer exposes the engine knobs (variant, shadows, decor, automap) —
+// never a raw neighbour matrix, never collision polygons.
+const SEM_LAYER_DEFS = {
+  ground: { brushes: [["floor", "🟫", "Floor", "walkable ground"],
+                      ["water", "🌊", "Water", "blocked + hazard"],
+                      ["erase", "🧽", "Clear", "remove meaning"]] },
+  walls:  { brushes: [["wall", "🧱", "Wall", "blocked"],
+                      ["erase", "🧽", "Clear", "remove meaning"]] },
+  objects:{ brushes: [] },
+  routes: { brushes: [] },
+  fx:     { brushes: [["walk", "🟢", "Walkable", "heroes can walk"],
+                      ["block", "🔴", "Blocked", "heroes can't pass"],
+                      ["hazard", "⚠️", "Hazard", "hurts + blocks"]] },
+};
+function setSemMode(m) {
+  semMode = (m === "advanced") ? "advanced" : "beginner";
+  try { localStorage.setItem("crumbs.semMode", semMode); } catch (e) {}
+  renderSemDock();
+}
+function semTileLabel(id) {
+  if (id === "mixed") return "Mixed (auto)";
+  const nm = (semNames && semNames[id]) || ("#" + id);
+  return String(nm).slice(0, 26);
+}
+function setLogicalLayer(name) {
+  if (!SEM_LAYER_DEFS[name]) return;
+  disarmMeaning(true);   // silent — the layer arms its own brush next
+  logicalLayer = name;
+  document.querySelectorAll("#sem-layers button")
+    .forEach(b => b.classList.toggle("on", b.dataset.ll === name));
+  if (name === "ground") { layer = "colors"; armMeaning(semBrush === "water" ? "water" : "floor"); }
+  else if (name === "walls") { layer = "colors"; armMeaning("wall"); }
+  else if (name === "fx") { layer = "colors"; armColl(collBrush || "block"); }
+  else if (name === "objects") { layer = "objects"; buildPalette(); renderSemDock(); }
+  else if (name === "routes") {
+    layer = "colors"; renderSemDock();
+    const bp = $("btn-patrol");
+    if (bp && !patrolTool) bp.click();   // hand off to the real patrol flow
+    toast("routes — tap a placed character, then his stops, then Done");
+  }
+  queueRender();
+}
+function armMeaning(t) {
+  // t: "floor" | "wall" | "water" | "erase"(=null meaning)
+  if (semPools.floor.length + semPools.wall.length + semPools.water.length === 0) {
+    toast("still loading the tile packs…"); return;
+  }
+  disarmMeaning(true);
+  semBrush = t; collBrush = null;
+  if (brushTool === "erase" || brushTool === "select" || brushTool === "eyedropper")
+    setBrushTool("stamp");   // meaning needs a shape brush, not the eraser
+  renderSemDock(); queueRender();
+  const lbl = t === "erase" ? "clear meaning" : t;
+  toast(semMode === "beginner" ? "painting " + lbl + " — drag on the map" : "meaning brush: " + lbl);
+}
+function armColl(m) {
+  if (!COLL_MODES[m]) return;
+  disarmMeaning(true);
+  collBrush = m; semBrush = null;
+  if (brushTool === "erase" || brushTool === "select" || brushTool === "eyedropper")
+    setBrushTool("stamp");
+  renderSemDock(); queueRender();
+  const lbl = m === "walk" ? "walkable" : m === "block" ? "blocked" : "hazard";
+  toast(semMode === "beginner" ? "painting " + lbl + " ground — drag on the map" : "collision brush: " + lbl);
+}
+function disarmMeaning(silent) {
+  if (!semBrush && !collBrush) return;
+  semBrush = null; collBrush = null;
+  if (!silent) { renderSemDock(); queueRender(); }
+}
+function renderSemDock() {
+  const pal = $("sem-palette"); if (!pal) return;
+  pal.innerHTML = "";
+  const def = SEM_LAYER_DEFS[logicalLayer] || { brushes: [] };
+  for (const b of def.brushes) {
+    const key = b[0], on = (key === "walk" || key === "block" || key === "hazard")
+      ? collBrush === key : semBrush === (key === "erase" ? "erase" : key);
+    const btn = document.createElement("button");
+    if (on) btn.classList.add("on");
+    btn.innerHTML = "<span>" + b[1] + "</span> " + b[2] +
+      (semMode === "beginner" ? "<span class=\"phint\">" + b[3] + "</span>" : "");
+    btn.title = b[2] + " — " + b[3];
+    btn.onclick = () => {
+      if (key === "walk" || key === "block" || key === "hazard") armColl(key);
+      else armMeaning(key);
+    };
+    pal.appendChild(btn);
+  }
+  // the Advanced drawer is the same face for both modes — beginner just
+  // gets plain words on the brushes; the knobs stay one tap away.
+  const tg = $("sem-adv-toggle");
+  if (tg) { tg.hidden = false; tg.textContent = $("sem-adv").hidden ? "⚙ Advanced" : "⚙ Hide"; }
+  if (semSettings) {
+    const sh = $("sem-shadow"), dv = $("sem-decor");
+    if (sh) { sh.value = semSettings.shadow_strength; $("sem-shadow-val").textContent = semSettings.shadow_strength + "%"; }
+    if (dv) { dv.value = semSettings.decor_density; $("sem-decor-val").textContent = semSettings.decor_density + "%"; }
+    buildSemStyleSelects();
+  }
+  const sl = $("sem-seedline");
+  if (sl) sl.textContent = "details seed " + semSeed + " — same seed, same room";
+}
+function buildSemStyleSelects() {
+  if (!semSettings) return;
+  const styles = semSettings.styles || {};
+  for (const t of ["floor", "wall", "water"]) {
+    const sel = $("sem-style-" + t); if (!sel) continue;
+    const cur = styles[t] === undefined ? "mixed" : String(styles[t]);
+    sel.innerHTML = "";
+    const o0 = document.createElement("option");
+    o0.value = "mixed"; o0.textContent = "Mixed (auto)"; sel.appendChild(o0);
+    for (const id of (semPools[t] || [])) {
+      const o = document.createElement("option");
+      o.value = String(id); o.textContent = semTileLabel(id);
+      sel.appendChild(o);
+    }
+    sel.value = cur;
+    sel.onchange = () => {
+      const v = sel.value === "mixed" ? "mixed" : +sel.value;
+      const patch = { styles: {} }; patch.styles[t] = v;
+      saveSemSettings(patch);
+    };
+  }
+}
+async function loadSemantic() {
+  // pools + rules + the effective seed — the ghost preview must hash the
+  // same seed the server commits with, or previews lie.
+  try {
+    const p = await api("/api/semantic/pools");
+    if (p.ok !== false) {
+      semPools = p.pools || semPools; semNames = p.names || {};
+      semSettings = p.settings || semSettings; semSeed = p.seed || 0;
+    }
+  } catch (e) { /* server away — boot continues, brushes refuse politely */ }
+  renderSemDock();
+}
+async function saveSemSettings(patch) {
+  const r = await api("/api/semantic/settings", patch);
+  if (!r.ok) { toast(r.error || "couldn't save"); await loadSemantic(); return; }
+  semSettings = r.settings; semSeed = r.seed || semSeed;
+  markBaseDirty(); renderSemDock(); queueRender();
+  toast("details updated");
+}
+async function semAutomap() {
+  const r = await api("/api/semantic/automap", {});
+  if (!r.ok) { toast(r.error || "automap failed"); return; }
+  if (r.changed && r.changed.length) {
+    applyStrokeEcho(r.changed);
+    markBaseDirty(); queueRender();
+  }
+  toast("details re-painted");
+}
+function initSemDock() {
+  document.querySelectorAll("#sem-layers button")
+    .forEach(b => b.onclick = () => setLogicalLayer(b.dataset.ll));
+  const tg = $("sem-adv-toggle");
+  if (tg) tg.onclick = () => {
+    const adv = $("sem-adv"); adv.hidden = !adv.hidden;
+    tg.textContent = adv.hidden ? "⚙ Advanced" : "⚙ Hide";
+  };
+  const md = $("sem-mode");
+  const syncModeBtn = () => { if (md) md.textContent = semMode === "advanced" ? "🛠 Advanced" : "👶 Simple"; };
+  if (md) md.onclick = () => { setSemMode(semMode === "advanced" ? "beginner" : "advanced"); syncModeBtn(); };
+  syncModeBtn();
+  const sh = $("sem-shadow"), dv = $("sem-decor");
+  if (sh) sh.oninput = () => { $("sem-shadow-val").textContent = sh.value + "%"; };
+  if (dv) dv.oninput = () => { $("sem-decor-val").textContent = dv.value + "%"; };
+  if (sh) sh.onchange = () => saveSemSettings({ shadow_strength: +sh.value });
+  if (dv) dv.onchange = () => saveSemSettings({ decor_density: +dv.value });
+  const am = $("sem-automap");
+  if (am) am.onclick = semAutomap;
+  // mode toggle: a small long-press-proof double-tap on the layers row? No —
+  // a real button, appended once, plain words.
+  renderSemDock();
+}
+
 function render() {
   // v1.5: thumbnails can finish loading before /api/map returns — don't
   // crash on the empty grid, just wait for refresh() to draw for real.
@@ -3427,7 +3811,8 @@ function render() {
       if (th2 >= 1 && th2 >= below2) drawTallFace(ctx, im, px, py, th2);
     }
   }
-  // collision overlay — v3.1: edit mode only. Play mode keeps the solidity
+  drawSemOverlays();   // v5.46: auto edges/corners/shadows + hazard tint
+// collision overlay — v3.1: edit mode only. Play mode keeps the solidity
   // but hides the red X (and amber diamonds for locked).
   // v5.6: showCollide paints the overlay over any layer, no layer switch.
   if (layer === "collision" || showCollide) {
@@ -3742,6 +4127,34 @@ function brushValue() {
 function localGrid() { const pl = paintLayer(); return pl === "objects" ? objects : pl === "collision" ? coll : tiles; }
 
 function addStrokeCell(x, y, bv) {
+  // v5.46: meaning brushes — paint MEANING, the engine resolves the tile.
+  // The stroke is tagged on its first buffered cell; every shape tool
+  // (stamp/paint/line/rect/scatter/fill) funnels through here, so all of
+  // them paint meaning for free.
+  if (stroke) {
+    if (semBrush && stroke.semTerrain === undefined)
+      stroke.semTerrain = semBrush === "erase" ? null : semBrush;
+    if (collBrush && stroke.collMode === undefined) stroke.collMode = collBrush;
+  }
+  if (stroke && stroke.semTerrain !== undefined) {
+    const terrain = stroke.semTerrain;
+    let pv;
+    if (terrain) {
+      const style = semSettings && semSettings.styles ? semSettings.styles[terrain] : "mixed";
+      pv = semBaseTile(terrain, x, y, semPools, style, semSeed);
+    } else {
+      // meaning-erase previews the seed's ground, like the classic eraser
+      pv = (naturalGrid[y] && naturalGrid[y][x] != null) ? naturalGrid[y][x] : tiles[y][x];
+    }
+    if (pv == null) pv = (tiles[y] && tiles[y][x] != null) ? tiles[y][x] : 0;
+    stroke.cells.set(x + "," + y, { x: x, y: y, tile_id: terrain, pv: pv });
+    return;   // the server resolves collision/hazard/decor — no linkCells
+  }
+  if (stroke && stroke.collMode) {
+    // v5.46: collision-as-paint — the ghost is a tint, not a tile.
+    stroke.cells.set(x + "," + y, { x: x, y: y, tile_id: null, pv: { coll: stroke.collMode } });
+    return;
+  }
   // v5.45: buffer ONE cell into the stroke — the ghost preview only. The
   // grid is NOT touched until the finger lifts (commit-on-release), so a
   // two-finger pan can never catch a half-painted stroke.
@@ -3778,6 +4191,21 @@ function strokeAdd(cell) {
   Sfx.paint();        // v5.8: throttled brush ticks while dragging
 }
 function commitStrokeCells(s) {
+  // v5.46: collision-as-paint commits to the overlay grids only — never tiles.
+  if (s.collMode) {
+    const bh = COLL_MODES[s.collMode] || [false, false];
+    let x0 = W, y0 = H, x1 = -1, y1 = -1;
+    for (const c of s.cells.values()) {
+      if (c.x < 0 || c.y < 0 || c.x >= W || c.y >= H) continue;
+      coll[c.y][c.x] = bh[0];
+      if (hazGrid.length === H && hazGrid[c.y]) hazGrid[c.y][c.x] = bh[1];
+      if (c.x < x0) x0 = c.x; if (c.y < y0) y0 = c.y;
+      if (c.x > x1) x1 = c.x; if (c.y > y1) y1 = c.y;
+    }
+    if (x1 >= x0) markBaseDirty(x0, y0, x1, y1);
+    queueRender();
+    return;
+  }
   // v5.45: commit-on-release — the ghost-buffered cells land on the grid
   // now, in one shot, so one stroke is always one undo step.
   const pl = s.layer === "characters" ? "objects" : s.layer === "colors" ? "tiles" : s.layer;
@@ -3786,6 +4214,10 @@ function commitStrokeCells(s) {
   for (const c of s.cells.values()) {
     if (c.x < 0 || c.y < 0 || c.x >= W || c.y >= H) continue;
     g[c.y][c.x] = c.pv;
+    // v5.46: optimistic tag grid for meaning strokes — the server echo
+    // reconciles tiles, collision, hazard, and decor right after.
+    if (s.semTerrain !== undefined && semGrid.length === H && semGrid[c.y])
+      semGrid[c.y][c.x] = s.semTerrain;
     if (c.x < x0) x0 = c.x; if (c.y < y0) y0 = c.y;
     if (c.x > x1) x1 = c.x; if (c.y > y1) y1 = c.y;
     const bt = customById[c.tile_id];          // v3.0: track animated placements
@@ -3945,10 +4377,93 @@ function setBrushTool(t, skipModal) {
   if (t === "scatter" && !scatterMix.length) toast("tap + below, then palette tiles, to build the mix");
 }
 
+// ---- v5.46: semantic painting — pure engine --------------------------------------
+// Paint MEANING (floor/wall/water); the engine resolves tiles, edges,
+// corners, shadows, and decor. Exact mirror of crumbs_core.py — the node
+// suite asserts vector parity with the Python side, so ghost previews match
+// what the server commits. No DOM in here: the tests eval() these by name.
+const SEM_TERRAINS = ["floor", "wall", "water"];
+const SEM_N = 1, SEM_NE = 2, SEM_E = 4, SEM_SE = 8;
+const SEM_S = 16, SEM_SW = 32, SEM_W = 64, SEM_NW = 128;
+const SEM_DIRS = [[0,-1,1],[1,-1,2],[1,0,4],[1,1,8],[0,1,16],[-1,1,32],[-1,0,64],[-1,-1,128]];
+const SEM_ORTHO = [[0,-1,1,"N"],[1,0,4,"E"],[0,1,16,"S"],[-1,0,64,"W"]];
+function semHash(x, y, seed) {
+  // FNV-1a 32-bit over "seed:x,y" — mirrors crumbs_core.sem_hash exactly.
+  let h = 2166136261 >>> 0;
+  const s = String(seed) + ":" + x + "," + y;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return h >>> 0;
+}
+function semValidTerrain(t) { return SEM_TERRAINS.indexOf(t) >= 0 ? t : null; }
+function semGet(sem, x, y, w, h) {
+  if (x < 0 || y < 0 || x >= w || y >= h) return null;   // off-map reads as different
+  const r = sem[y]; if (!r) return null;
+  return semValidTerrain(r[x]);
+}
+function semEdgeMask(sem, x, y, w, h) {
+  // 8-bit mask — bit set where the neighbour's tag differs from this cell's.
+  const me = semGet(sem, x, y, w, h);
+  if (me == null) return 0;
+  let mask = 0;
+  for (const d of SEM_DIRS) if (semGet(sem, x + d[0], y + d[1], w, h) !== me) mask |= d[2];
+  return mask;
+}
+function semWallMask(sem, x, y, w, h) {
+  // 8-bit mask — bit set where the neighbour is tagged "wall".
+  let mask = 0;
+  for (const d of SEM_DIRS) if (semGet(sem, x + d[0], y + d[1], w, h) === "wall") mask |= d[2];
+  return mask;
+}
+function semShadowSides(wallMask) {
+  const out = [];
+  for (const d of SEM_ORTHO) if (wallMask & d[2]) out.push(d[3]);
+  return out;
+}
+function semShadowCorners(wallMask) {
+  // inner corners: a diagonal wall neighbour whose two adjacent orthogonal
+  // neighbours are NOT wall.
+  const out = [];
+  const diag = [["NE", 2, 1, 4], ["SE", 8, 16, 4], ["SW", 32, 16, 64], ["NW", 128, 1, 64]];
+  for (const c of diag) if ((wallMask & c[1]) && !(wallMask & c[2]) && !(wallMask & c[3])) out.push(c[0]);
+  return out;
+}
+function semBaseTile(terrain, x, y, pools, style, seed) {
+  // the concrete tile id — a deterministic pool pick, or the Advanced
+  // style choice when it's a single tile from the pool.
+  const pool = (pools && pools[terrain]) || [];
+  if (!pool.length) return null;
+  if (typeof style === "number" && pool.indexOf(style) >= 0) return style;
+  return pool[semHash(x, y, seed) % pool.length];
+}
+function semDecorPick(sem, x, y, w, h, density, decorPool, seed) {
+  // floor INTERIOR cells only, sprinkled at density% on an independent hash
+  // stream so decor never correlates with the base-tile variant.
+  if (semGet(sem, x, y, w, h) !== "floor") return null;
+  if (!decorPool || !decorPool.length || !(density > 0)) return null;
+  for (const d of SEM_DIRS) if (semGet(sem, x + d[0], y + d[1], w, h) !== "floor") return null;
+  const hh = semHash(x, y, String(seed) + ":decor");
+  const dd = Math.max(0, Math.min(100, density));
+  if (hh % 100 >= dd) return null;
+  return decorPool[hh % decorPool.length];
+}
+function semCellPhysics(terrain) {
+  if (terrain === "wall") return [true, false];
+  if (terrain === "water") return [true, true];
+  return [false, false];
+}
+
 // -- the ghost overlay ----------------------------------------------------------
 function ghostTileId(pv) { return (pv && typeof pv === "object") ? pv.tid : pv; }
 function drawGhostCell(c2, pv, px, py, s) {
   c2.imageSmoothingEnabled = false;
+  // v5.46: collision-as-paint ghost — a tint, not a tile: walk green,
+  // block red, hazard amber.
+  if (pv && typeof pv === "object" && pv.coll) {
+    c2.fillStyle = pv.coll === "walk" ? "rgba(90,220,130,0.50)"
+      : pv.coll === "hazard" ? "rgba(255,150,50,0.55)" : "rgba(255,80,80,0.50)";
+    c2.fillRect(px, py, s, s);
+    return;
+  }
   const im = tileFrameImage(ghostTileId(pv));
   if (im) { c2.drawImage(im, px, py, s, s); return; }
   c2.fillStyle = colorOf[ghostTileId(pv)] || "rgba(140,140,140,0.55)";
@@ -3971,6 +4486,16 @@ function drawGhostStroke() {
   for (const c of stroke.cells.values()) {
     if (c.x < gv.x0 || c.x > gv.x1 || c.y < gv.y0 || c.y > gv.y1) continue;
     drawGhostCell(ctx, c.pv, c.x * tilePx, c.y * tilePx, tilePx);
+  }
+  // v5.46: meaning strokes preview the engine's edges/shadows too — the
+  // buffered tags overlaid on the live tag grid, rendered through the same
+  // overlay painter as the committed map.
+  if (stroke.semTerrain !== undefined && stroke.semTerrain) {
+    const view = ghostSemView();
+    for (const c of stroke.cells.values()) {
+      if (c.x < gv.x0 || c.x > gv.x1 || c.y < gv.y0 || c.y > gv.y1) continue;
+      drawSemCellOverlay(view, c.x, c.y, W, H, 1);
+    }
   }
   ctx.restore();
   ctx.strokeStyle = "rgba(255,215,95,0.85)";
@@ -4028,7 +4553,11 @@ function scatterStrokeAdd(cell) {
   if (stroke.cells.has(key)) return;
   if (buildBreak && hero && cell.x === hero.x && cell.y === hero.y) return;
   const pick = scatterPick(scatterMix, scatterDensity, Math.random);
-  if (pick == null) return;   // the density gate said no — cell stays untouched
+  // v5.46: meaning brushes ignore the tile MIX but honor the density gate —
+  // scatter + meaning = sparse meaning, not an all-or-nothing dead end.
+  if (semBrush || collBrush) {
+    if (!(scatterDensity > 0) || Math.random() * 100 >= scatterDensity) return;
+  } else if (pick == null) return;   // the density gate said no — cell stays untouched
   const pl = paintLayer();
   addStrokeCell(cell.x, cell.y, pl === "collision" ? selCollide : pick);
   dirtyFlag = true;
@@ -4546,7 +5075,10 @@ async function pumpPaintQueue() {
   }
   paintBusy = true;
   try {
-    const r = await api("/api/stroke", job);
+    // v5.46: meaning + collision strokes ride their own endpoints.
+    const r = job.semantic ? await api("/api/semantic/stroke", { cells: job.cells, terrain: job.terrain })
+      : job.collStroke ? await api("/api/collision/stroke", { cells: job.cells })
+      : await api("/api/stroke", job);
     if (!r.ok) { toast("paint failed: " + (r.error || "unknown error")); paintClean = false; }
     else if (job.file === currentFile && r.cells && r.cells.length) applyStrokeEcho(r.cells);
     else if (job.file !== currentFile) { /* map switched mid-stroke — grids already replaced */ }
@@ -4565,7 +5097,10 @@ async function pumpPaintQueue() {
 function applyStrokeEcho(cells) {
   for (const c of cells) {
     if (c.x < 0 || c.y < 0 || c.x >= W || c.y >= H) continue;
-    const g = c.layer === "objects" ? objects : c.layer === "collision" ? coll : tiles;
+    // v5.46: meaning/collision strokes echo tag + hazard cells too.
+    const g = c.layer === "objects" ? objects : c.layer === "collision" ? coll
+      : c.layer === "semantic" ? semGrid : c.layer === "hazard" ? hazGrid : tiles;
+    if (!g || !g[c.y]) continue;
     g[c.y][c.x] = c.v;
     // v5.41: the old trailing refresh() rebuilt these sets — a newly
     // painted animated/FX tile must join them now, or it sits still until
@@ -4589,8 +5124,18 @@ function endStroke() {
   if (s.cells.size) {
     commitStrokeCells(s);   // v5.45: the buffered ghost lands on the grid now
     buzz(15);   // v5.45.3: the stroke landed
-    paintQueue.push({ layer: s.layer, cells: [...s.cells.values()],
-      link_cells: [...s.linkCells.values()], file: currentFile });   // v5.7: one call, one undo step
+    // v5.46: meaning strokes and collision strokes ride their own endpoints —
+    // the server resolves tags/decor/overlays and echoes every touched cell.
+    if (s.semTerrain !== undefined)
+      paintQueue.push({ semantic: true, terrain: s.semTerrain,
+                        cells: [...s.cells.values()], file: currentFile });
+    else if (s.collMode)
+      paintQueue.push({ collStroke: true,
+                        cells: [...s.cells.values()].map(c => ({ x: c.x, y: c.y, mode: s.collMode })),
+                        file: currentFile });
+    else
+      paintQueue.push({ layer: s.layer, cells: [...s.cells.values()],
+        link_cells: [...s.linkCells.values()], file: currentFile });   // v5.7: one call, one undo step
   } else queueRender();
   pumpPaintQueue();
 }
@@ -6662,6 +7207,8 @@ function shortName(name) {
 // v3.1: one helper for picking a brush — remembers it per layer
 function selectTile(id) {
   if (scatterArming && brushTool === "scatter") { addScatterTile(id); return; }  // v5.45: building the mix
+  disarmMeaning(true);   // v5.46: a concrete tile wins over a meaning brush
+  renderSemDock();
   selTile = id; selByLayer[layer] = id;
   if (brushTool === "erase") setBrushTool(lastBrush);   // v5.45: picking a tile rests the eraser
   buildPalette();
@@ -10634,6 +11181,8 @@ async function melodyDemo() {
     splashStep(28, "Loading recipes\u2026");
     await loadTaxonomy();   // v5.29: the server's one routing table (Law 15)
     loadTileTraits();       // v5.35: Phase 2 — per-tile-type traits (async, no block)
+    initSemDock();          // v5.46: the meaning-painting dock (wiring only)
+    try { await loadSemantic(); } catch (e) {}   // pools + rules + seed
     const p = await api("/api/palette");
     palette = p.tiles;
     splashStep(42, "Loading tiles\u2026");

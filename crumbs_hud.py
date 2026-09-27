@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.45.3"
+APP_VERSION = "5.46.0"
 # v5.41: single source of truth for the map-size cap (was 64, hardcoded in
 # four places). 500x500 = 250k cells. The client additionally caps tilePx so
 # the full-map backing canvas never exceeds 4096px per side (see editor.html).
@@ -4293,6 +4293,11 @@ def _snapshot_state():
         "height_override": [row[:] for row in world.height_override],  # v5.29
         "portals": copy.deepcopy(_portals),  # v5.29: links undo too
         "neighbors": copy.deepcopy(_neighbors),  # v5.42: edge links undo too
+        # v5.46: semantic tags + hazard overlay ride undo/redo; the rule
+        # controls are small state (deep-copied — settings mutate in place).
+        "semantic": [row[:] for row in world.semantic_layer],
+        "hazard": [row[:] for row in world.hazard_layer],
+        "sem_settings": copy.deepcopy(world.semantic_settings),
     }
 
 
@@ -4307,6 +4312,17 @@ def _restore_state(s):
                              s.get("height_override",
                                    [[None] * s["width"]
                                     for _ in range(s["height"])])]
+    # v5.46: semantic tags + hazard overlay ride undo/redo (old states: blank)
+    world.semantic_layer = [row[:] for row in
+                            s.get("semantic",
+                                  [[None] * s["width"]
+                                   for _ in range(s["height"])])]
+    world.hazard_layer = [row[:] for row in
+                          s.get("hazard",
+                                [[False] * s["width"]
+                                 for _ in range(s["height"])])]
+    world.semantic_settings = copy.deepcopy(
+        s.get("sem_settings") or core.sanitize_semantic_settings(None))
     traits_grid = copy.deepcopy(s["traits"])
     _restore_small(s)
 
@@ -4320,7 +4336,8 @@ def _restore_state(s):
 # generate/resize/reset (full=True); metadata-only edits pass grids=False
 # to skip the grid walk entirely.
 _SMALL_STATE_KEYS = ("patrols", "patrol_seq", "names", "rules", "game_rules",
-                     "game_seq", "world", "meta", "portals", "neighbors")
+                     "game_seq", "world", "meta", "portals", "neighbors",
+                     "sem_settings")  # v5.46: rule controls undo too
 
 
 def _grid_layers():
@@ -4331,6 +4348,8 @@ def _grid_layers():
         ("collision", world.collision_layer),
         ("height_override", world.height_override),
         ("traits", traits_grid),
+        ("semantic", world.semantic_layer),  # v5.46
+        ("hazard", world.hazard_layer),      # v5.46
     )
 
 
@@ -4366,6 +4385,8 @@ def _snapshot_small():
         "meta": copy.deepcopy(map_meta),
         "portals": copy.deepcopy(_portals),  # v5.29
         "neighbors": copy.deepcopy(_neighbors),  # v5.42
+        # v5.46: semantic rule controls are small state
+        "sem_settings": copy.deepcopy(world.semantic_settings),
     }
 
 
@@ -4392,6 +4413,9 @@ def _restore_small(s):
     _save_rules(_current_map)
     _save_portals(_current_map)  # v5.29
     _save_neighbors(_current_map)  # v5.42
+    # v5.46: semantic rule controls restore with everything else
+    world.semantic_settings = copy.deepcopy(
+        s.get("sem_settings") or core.sanitize_semantic_settings(None))
     _mark_dirty()
 
 
@@ -5352,6 +5376,11 @@ def _grid(layer):
         return world.object_layer
     if layer == "collision":
         return world.collision_layer
+    # v5.46: semantic painting's tag + hazard grids
+    if layer == "semantic":
+        return world.semantic_layer
+    if layer == "hazard":
+        return world.hazard_layer
     return world.data
 
 
@@ -5413,7 +5442,84 @@ def _default_value(layer):
 def _map_state():
     return {"width": world.width, "height": world.height,
             "tiles": world.data, "objects": world.object_layer,
-            "collision": world.collision_layer}
+            "collision": world.collision_layer,
+            # v5.46: semantic tags + hazard overlay + rule controls
+            "semantic": world.semantic_layer,
+            "hazard": world.hazard_layer,
+            "sem_settings": world.semantic_settings,
+            "semantic_seed": _sem_effective_seed()}
+
+
+# ---- v5.46: semantic painting -------------------------------------------------
+def _validate_stroke_cells(cells, world):
+    """Shared cell validation for the stroke endpoints — dicts with int x/y
+    inside the map, deduplicated, order preserved. Garbage never reaches
+    the planners."""
+    pts, seen = [], set()
+    if not isinstance(cells, list):
+        return pts
+    for c in cells:
+        if not isinstance(c, dict):
+            continue
+        x, y = c.get("x"), c.get("y")
+        if not isinstance(x, int) or not isinstance(y, int):
+            continue
+        if not (0 <= x < world.width and 0 <= y < world.height):
+            continue
+        if (x, y) in seen:
+            continue
+        seen.add((x, y))
+        pts.append((x, y))
+    return pts
+
+
+def _semantic_pools():
+    """Terrain tile pools from the active shelf: floor/wall/water by preset;
+    decor from human-named, non-solid trimmings only (never a chest)."""
+    pools = {"floor": [], "wall": [], "water": [], "decor": []}
+    for tid in sorted(assets.tiles):
+        t = assets.tiles[tid]
+        preset = t.get("preset")
+        if preset in ("floor", "wall", "water"):
+            pools[preset].append(tid)
+        elif preset == "decor":
+            props = t.get("properties") or {}
+            if not props.get("solid"):
+                name = (t.get("name") or "").lower()
+                if any(k in name for k in core.SEM_DECOR_KEYWORDS):
+                    pools["decor"].append(tid)
+    return pools
+
+
+def _semantic_names():
+    """v5.46: tile id -> short display name, for the Advanced variant
+    selects. Covers every pooled terrain + decor id."""
+    names = {}
+    for t in ("floor", "wall", "water", "decor"):
+        for tid in _semantic_pools()[t]:
+            tile = assets.tiles.get(tid) or {}
+            names[tid] = tile.get("name") or ("tile " + str(tid))
+    return names
+
+
+def _sem_effective_seed():
+    """v5.46: the deterministic dice seed — the rule control wins, then the
+    map's own seed, then 0. The client mirrors it for ghost previews."""
+    s = world.semantic_settings or {}
+    return s.get("seed") or map_meta.get("seed") or 0
+
+
+def _sem_settings_for_plan():
+    s = dict(world.semantic_settings or {})
+    s["seed"] = _sem_effective_seed()
+    return s
+
+
+def _echo_changes(changes):
+    """v5.46: v5.41-style echo — the client applies these exact cells onto
+    its optimistic preview instead of re-downloading the whole map."""
+    return [{"x": x, "y": y, "v": nv, "layer": layer}
+            for (x, y, layer, nv) in changes]
 
 
 def _recovery_status():
@@ -6277,6 +6383,16 @@ class Handler(BaseHTTPRequestHandler):
                 for n, r in sorted(users.items())]})
         elif path == "/api/map":
             self._send_json(_map_state())
+        elif path == "/api/semantic/pools":
+            # v5.46: everything the client needs to paint meaning — tile
+            # pools per terrain, the rule controls, the effective seed for
+            # ghost-preview parity, and the logical-layer map.
+            return self._send_json({"ok": True, "pools": _semantic_pools(),
+                                    "names": _semantic_names(),
+                                    "settings": world.semantic_settings,
+                                    "seed": _sem_effective_seed(),
+                                    "terrains": list(core.SEM_TERRAINS),
+                                    "logical_layers": core.LOGICAL_LAYERS})
         elif path == "/api/height-grid":
             # v5.10: per-cell numeric heights for shadows, tall faces,
             # the height overlay, and line-of-sight.
@@ -7390,6 +7506,112 @@ class Handler(BaseHTTPRequestHandler):
                 "ok": True, "painted": len(cmds),
                 "cells": [{"x": c.x, "y": c.y, "v": c.new_val, "layer": c.layer}
                           for c in cmds]})
+
+        if path == "/api/semantic/stroke":
+            # v5.46: paint MEANING — cells get tagged floor/wall/water (or
+            # None = erase meaning) and the engine resolves tiles +
+            # collision + hazard + decor. One stroke, one undo step.
+            cells = body.get("cells", [])
+            terrain = body.get("terrain")
+            if not isinstance(cells, list):
+                return self._send_json({"ok": False,
+                                        "error": "cells list required"}, 400)
+            pts = _validate_stroke_cells(cells, world)
+            changes = core.sem_plan_stroke(
+                world, pts, terrain, _semantic_pools(),
+                _sem_settings_for_plan(), _natural_tile)
+            if not changes:
+                return self._send_json({"ok": True, "painted": 0,
+                                        "noop": True})
+
+            def _do_sem():
+                for (sx, sy, layer, nv) in changes:
+                    _grid(layer)[sy][sx] = nv
+                _mark_dirty()
+            _undoable("semantic stroke", _do_sem)
+            return self._send_json({"ok": True, "painted": len(changes),
+                                    "cells": _echo_changes(changes)})
+
+        if path == "/api/semantic/automap":
+            # v5.46: Tiled-AutoMapping-style post-pass — re-resolve every
+            # tagged cell + refresh all auto-decor from current pools and
+            # rule controls. One undo step.
+            changes = core.sem_plan_automap(
+                world, _semantic_pools(), _sem_settings_for_plan())
+            if not changes:
+                return self._send_json({"ok": True, "painted": 0,
+                                        "noop": True})
+
+            def _do_auto():
+                for (sx, sy, layer, nv) in changes:
+                    _grid(layer)[sy][sx] = nv
+                _mark_dirty()
+            _undoable("auto-map", _do_auto)
+            return self._send_json({"ok": True, "painted": len(changes),
+                                    "cells": _echo_changes(changes)})
+
+        if path == "/api/semantic/settings":
+            # v5.46: Advanced rule controls — sanitized, saved with the
+            # map, then the whole map re-resolves. One undo step.
+            patch = body.get("settings")
+            if not isinstance(patch, dict):
+                return self._send_json({"ok": False,
+                                        "error": "settings object required"},
+                                       400)
+            merged = dict(world.semantic_settings or {})
+            merged.update(patch)
+            new_settings = core.sanitize_semantic_settings(merged)
+
+            def _do_settings():
+                world.semantic_settings = new_settings
+                for (sx, sy, layer, nv) in core.sem_plan_automap(
+                        world, _semantic_pools(), _sem_settings_for_plan()):
+                    _grid(layer)[sy][sx] = nv
+                _mark_dirty()
+            _undoable("semantic settings", _do_settings)
+            return self._send_json({"ok": True,
+                                    "settings": world.semantic_settings,
+                                    "seed": _sem_effective_seed()})
+
+        if path == "/api/collision/stroke":
+            # v5.46: collision AS PAINT — walkable / blocked / hazard brushed
+            # on as an overlay. No polygons, no tiny handles. One undo step.
+            cells = body.get("cells", [])
+            if not isinstance(cells, list):
+                return self._send_json({"ok": False,
+                                        "error": "cells list required"}, 400)
+            modes = {"walk": (False, False), "block": (True, False),
+                     "hazard": (True, True)}
+            jobs, seen = [], set()
+            for c in cells:
+                if not isinstance(c, dict):
+                    continue
+                x, y, m = c.get("x"), c.get("y"), c.get("mode")
+                if not isinstance(x, int) or not isinstance(y, int):
+                    continue
+                if not (0 <= x < world.width and 0 <= y < world.height):
+                    continue
+                if (x, y) in seen or m not in modes:
+                    continue
+                seen.add((x, y))
+                jobs.append((x, y, modes[m]))
+            changes = []
+            for x, y, (blocked, hazard) in jobs:
+                if world.collision_layer[y][x] != blocked:
+                    changes.append((x, y, "collision", blocked))
+                if world.hazard_layer[y][x] != hazard:
+                    changes.append((x, y, "hazard", hazard))
+            if not changes:
+                return self._send_json({"ok": True, "painted": 0,
+                                        "noop": True})
+
+            def _do_coll():
+                for (sx, sy, layer, nv) in changes:
+                    _grid(layer)[sy][sx] = nv
+                _mark_dirty()
+            _undoable("collision stroke", _do_coll)
+            return self._send_json({"ok": True, "painted": len(changes),
+                                    "cells": _echo_changes(changes)})
 
         if path == "/api/move":
             # v5.0: slide one object tile — clear + place as ONE undo step.
@@ -8660,6 +8882,13 @@ class Handler(BaseHTTPRequestHandler):
                 # v5.29: a fresh build has no hand-set heights
                 world.height_override = [[None] * world.width
                                          for _ in range(world.height)]
+                # v5.46: a fresh build has no meaning yet — stale tags over
+                # new tiles would paint lies. Fresh rule controls too.
+                world.semantic_layer = [[None] * world.width
+                                        for _ in range(world.height)]
+                world.hazard_layer = [[False] * world.width
+                                      for _ in range(world.height)]
+                world.semantic_settings = core.sanitize_semantic_settings(None)
                 rules.clear()
                 rules.update(DEFAULT_RULES)  # v3.7: fresh build, fresh rules
                 world_profile["meters"] = dict(DEFAULT_WORLD["meters"])  # v4.0
@@ -8691,6 +8920,10 @@ class Handler(BaseHTTPRequestHandler):
                                          for _ in range(h)]
                 # v5.29: a blank map has no hand-set heights
                 world.height_override = [[None] * w for _ in range(h)]
+                # v5.46: a blank map has no meaning and no hazards either
+                world.semantic_layer = [[None] * w for _ in range(h)]
+                world.hazard_layer = [[False] * w for _ in range(h)]
+                world.semantic_settings = core.sanitize_semantic_settings(None)
                 rules.clear()
                 rules.update(DEFAULT_RULES)  # v3.7: fresh build, fresh rules
                 world_profile["meters"] = dict(DEFAULT_WORLD["meters"])  # v4.0

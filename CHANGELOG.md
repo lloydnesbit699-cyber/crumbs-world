@@ -5,6 +5,19 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.36.2 — 2026-09-27
+
+**Update/repair can no longer lose vault data.** Every destructive git move
+(`./ops.sh repair`, and the divergence repair inside `./ops.sh update`) now
+snapshots `vaults/`, `users.json`, `.crumbs_secret` to `backups/` first (Law
+of Three), and a new vault integrity check fingerprints the live data before
+the risky part and verifies it after: custom-tile file count, user count, and
+secret presence. Anything shrank or vanished prints a loud warning naming
+exactly what changed and pointing at `./ops.sh rollback` — it never
+auto-restores. The "your real work is safe" platitude is gone, replaced by
+the actual check result. The user-count check also guards the fresh-empty-
+vault scenario (accounts dissociated from their vaults).
+
 ## v5.36.1 — 2026-09-27
 
 **Smooth dragging on content-heavy maps.** The two 150ms timers (weather and

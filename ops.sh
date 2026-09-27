@@ -166,13 +166,18 @@ check_divergence() {
   echo "!! branch has diverged: $ahead local commit(s) not on origin/$BRANCH:"
   git --no-pager log --oneline "origin/$BRANCH..HEAD" 2>/dev/null || true
   echo "!! These are Replit's publish checkpoints fighting GitHub's main."
-  echo "!! Your real work is safe — it lives in the commits Wren pushed."
+  echo "!! Vault data (tiles, imports, accounts) is NOT in git — it gets"
+  echo "!! snapshotted to backups/ first, then verified intact after the reset."
   printf "Type REPAIR to drop them and continue the update: "
   read -r ans || true
   if [ "$ans" = "REPAIR" ]; then
     say "repairing: resetting to origin/$BRANCH"
+    local vsnap
+    vsnap="$(vault_snapshot)"
+    do_backup  # law of three: every destructive git move gets a backup first
     git reset --hard "origin/$BRANCH" || die "reset failed — fix git state first"
     unstage_secrets
+    vault_verify "$vsnap"
   else
     die "cancelled — nothing changed (server still running). ./ops.sh repair does this on its own."
   fi
@@ -186,6 +191,9 @@ do_update() {
   do_stop
   do_backup  # law of three: snapshot the live data BEFORE the risky part,
              # so a bad update can immediately pull the last working state
+  local vsnap
+  vsnap="$(vault_snapshot)"  # and fingerprint it, so the update must prove
+                             # the data survived on the other side
   local dirty=0
   if [ -n "$(git status --porcelain)" ]; then dirty=1; fi
   if [ "$dirty" = 1 ]; then
@@ -215,6 +223,8 @@ do_update() {
   fi
   say "now at: $(git log --oneline -1)"
   do_start
+  vault_verify "$vsnap"  # warn LOUD if the update shrank the vault data;
+                         # never auto-restores — Lloyd runs ./ops.sh rollback
   if [ "$stash_failed" = 1 ]; then
     die "update finished, server is up — BUT your stashed changes still need attention (see above)"
   fi
@@ -271,13 +281,18 @@ do_repair() {
   echo "!! $ahead local commit(s) to drop, $behind commit(s) behind origin/$BRANCH:"
   git --no-pager log --oneline "origin/$BRANCH..HEAD" 2>/dev/null || true
   echo "!! These are Replit's publish checkpoints fighting GitHub's main."
-  echo "!! Your real work is safe — it lives in the commits Wren pushed."
+  echo "!! Vault data (tiles, imports, accounts) is NOT in git — it gets"
+  echo "!! snapshotted to backups/ first, then verified intact after the reset."
   printf "Type REPAIR to drop the local commits and sync: "
   read -r ans || true
   [ "$ans" = "REPAIR" ] || die "cancelled — nothing changed"
+  local vsnap
+  vsnap="$(vault_snapshot)"
   do_stop
+  do_backup  # law of three: every destructive git move gets a backup first
   git reset --hard "origin/$BRANCH" || die "reset failed — fix git state first"
   unstage_secrets
+  vault_verify "$vsnap"
   say "now at: $(git log --oneline -1)"
   do_start
   say "repair done"
@@ -357,6 +372,69 @@ do_rollback() {
   tar -xzf "$target" || die "restore failed — your pre-restore snapshot is the newest file in $BACKUP_DIR"
   do_start
   say "rollback done — server is back on the restored data"
+}
+
+vault_snapshot() {
+  # Read-only fingerprint of the live user data. Prints three numbers:
+  #   <custom-tile files under vaults/*/custom_tiles/> <users in users.json> <secret 0/1>
+  # users = -1 when users.json is missing or unreadable. Never touches the
+  # data — only counts it. Call BEFORE any destructive git move.
+  local tiles=0 users=-1 secret=0
+  if [ -d vaults ]; then
+    tiles="$(find vaults -path '*/custom_tiles/*' -type f 2>/dev/null | wc -l | tr -d ' ')"
+    [ -z "$tiles" ] && tiles=0
+  fi
+  if [ -f users.json ]; then
+    users="$(python3 -c "import json;d=json.load(open('users.json'));print(len(d) if isinstance(d,dict) else -1)" 2>/dev/null || echo -1)"
+  fi
+  [ -f .crumbs_secret ] && secret=1
+  printf '%s %s %s' "$tiles" "$users" "$secret"
+}
+
+vault_verify() {
+  # $1 = vault_snapshot output from BEFORE the risky part. Re-snapshots now
+  # and compares. Intact -> "vault check: intact — N tile files, M users".
+  # Anything shrank or vanished -> LOUD warning naming exactly what changed
+  # plus the rollback pointer. Never auto-restores: Lloyd decides.
+  # Returns 0 intact, 1 if anything was lost.
+  local before="${1:-}" after
+  local bt bu bs at au as lost=0
+  after="$(vault_snapshot)"
+  bt="${before%% *}"; bu="${before#* }"; bu="${bu% *}"; bs="${before##* }"
+  at="${after%% *}"; au="${after#* }"; au="${au% *}"; as="${after##* }"
+  if [ -z "$bt" ]; then
+    say "vault check: skipped (no before-snapshot)"
+    return 0
+  fi
+  if [ "$at" -lt "$bt" ] 2>/dev/null; then
+    echo "!!   custom tile files: $bt -> $at  ($((bt - at)) FEWER)"
+    lost=1
+  fi
+  if [ "$bu" -ge 0 ] 2>/dev/null; then
+    if [ "$au" = "-1" ]; then
+      echo "!!   users.json is GONE (had $bu users)"
+      lost=1
+    elif [ "$au" -lt "$bu" ] 2>/dev/null; then
+      echo "!!   users in users.json: $bu -> $au  ($((bu - au)) FEWER — possible fresh-empty-vault scenario)"
+      lost=1
+    fi
+  fi
+  if [ "$bs" = "1" ] && [ "$as" = "0" ]; then
+    echo "!!   .crumbs_secret is GONE (was present)"
+    lost=1
+  fi
+  if [ "$lost" = "1" ]; then
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    echo "!! VAULT DATA SHRANK ACROSS THIS OPERATION (details above)."
+    echo "!! Your pre-operation backup is the newest file in backups/."
+    echo "!! To restore it:  ./ops.sh rollback"
+    echo "!! (rollback snapshots your current state first — it's undoable)"
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    return 1
+  fi
+  local ud="$au"; [ "$au" = "-1" ] && ud="no users.json"
+  say "vault check: intact — $at custom tile files, $ud users"
+  return 0
 }
 # ---- end backup protocol ---------------------------------------------------
 

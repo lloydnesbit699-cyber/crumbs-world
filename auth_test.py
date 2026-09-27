@@ -2,7 +2,8 @@
 """auth_test.py — v5.30 signup/signin/2FA tests. Run: python3 auth_test.py
 Covers: email validation, phone validation (v5.32), TOTP against the
 RFC 6238 vectors, the verify window, challenge issue/redeem/expiry,
-recovery-code hashing, and the _create_user uniqueness + phone rules.
+recovery-code hashing, the _create_user uniqueness + phone rules, and the
+v5.36 signup-time 2FA pending tickets + otpauth URL helper.
 Pure functions only — no server, no network.
 """
 import base64
@@ -136,6 +137,30 @@ finally:
     h._USERS_FILE = _orig_users_file
     h._vaults_dir = _orig_vaults_dir
     shutil.rmtree(_tmpu, ignore_errors=True)
+
+print("== signup-time 2FA pending tickets (v5.36) ==")
+_rec = {"username": "tfa-newbie", "password": "s3cret!!",
+        "email": "newbie@example.com", "phone": "",
+        "totp_secret": h._new_totp_secret()}
+_t = h._signup_pending_issue(_rec)
+check("ticket issued", isinstance(_t, str) and len(_t) >= 16)
+_t2 = h._signup_pending_issue(dict(_rec))
+check("tickets unique", _t != _t2)
+check("peek returns record", h._signup_pending_peek(_t) == _rec)
+check("peek doesn't consume", h._signup_pending_peek(_t) == _rec)
+check("redeem returns record", h._signup_pending_redeem(_t) == _rec)
+check("redeem consumes", h._signup_pending_peek(_t) is None)
+check("unknown ticket peek", h._signup_pending_peek("nope") is None)
+check("unknown ticket redeem", h._signup_pending_redeem("nope") is None)
+h._signup_pending[_t2] = (_rec, time.monotonic() - 1)  # force expiry
+check("expired peek rejected", h._signup_pending_peek(_t2) is None)
+check("expired redeem rejected", h._signup_pending_redeem(_t2) is None)
+
+print("== otpauth URL helper (v5.36) ==")
+_u = h._totp_otpauth_url("alice", "JBSWY3DPEHPK3PXP")
+check("url carries secret", "secret=JBSWY3DPEHPK3PXP" in _u)
+check("url carries user", "CrumbsHUD:alice" in _u)
+check("url carries issuer+period", "issuer=CrumbsHUD" in _u and "period=30" in _u)
 
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

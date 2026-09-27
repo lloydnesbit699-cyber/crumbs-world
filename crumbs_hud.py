@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.35.0"
+APP_VERSION = "5.36.0"
 # v5.24: unique per process boot. After an update the server re-execs into
 # the new files; the page waits for a DIFFERENT instance id (plus the new
 # version) instead of mistaking the old process — still answering during
@@ -690,6 +690,52 @@ def _2fa_redeem(token):
         return None
     username, exp = rec
     return username if time.monotonic() < exp else None
+
+
+# v5.36: signup-time optional 2FA enrollment. prepare validates everything
+# like /api/auth/signup but creates nothing; confirm finishes the job. The
+# password never rides a ticket — the pending record lives server-side,
+# short-lived and single-use, mirroring the 2FA challenge pattern above.
+_signup_pending = {}  # ticket -> (record dict, expiry monotonic)
+_signup_lock = threading.Lock()
+_SIGNUP_TTL = 600  # 10 minutes to scan the key and type the code
+
+
+def _signup_pending_issue(rec):
+    """Park a validated signup; returns the single-use ticket."""
+    ticket = secrets.token_urlsafe(32)
+    with _signup_lock:
+        _signup_pending[ticket] = (rec, time.monotonic() + _SIGNUP_TTL)
+    return ticket
+
+
+def _signup_pending_peek(ticket):
+    """Record for a live ticket, or None. Does not consume it — a mistyped
+    code shouldn't force the whole signup over."""
+    with _signup_lock:
+        rec = _signup_pending.get(ticket)
+    if not rec:
+        return None
+    data, exp = rec
+    return data if time.monotonic() < exp else None
+
+
+def _signup_pending_redeem(ticket):
+    """Consume a pending signup (call only when the account is about to be
+    created)."""
+    with _signup_lock:
+        rec = _signup_pending.pop(ticket, None)
+    if not rec:
+        return None
+    data, exp = rec
+    return data if time.monotonic() < exp else None
+
+
+def _totp_otpauth_url(username, secret):
+    """The otpauth:// URL authenticator apps scan (or the user types)."""
+    label = f"CrumbsHUD:{username}"
+    return (f"otpauth://totp/{label}?secret={secret}"
+            f"&issuer=CrumbsHUD&algorithm=SHA1&digits=6&period=30")
 
 
 def _load_users():
@@ -5566,6 +5612,97 @@ class Handler(BaseHTTPRequestHandler):
                                     "is_owner": False, "world": "private",
                                     "email": email, "totp_enabled": False})
 
+        # ---- v5.36: signup-time optional 2FA enrollment -------------------
+        # prepare validates everything like /api/auth/signup but creates
+        # nothing; confirm (with a valid TOTP code when 2FA was requested)
+        # creates the account. No confirmation, no account, no enrollment.
+        if path == "/api/auth/signup/prepare":
+            if os.environ.get("DISABLE_OPEN_SIGNUP") == "1":
+                return self._send_json({"ok": False, "error": "signup closed"}, 403)
+            allowed, tries_left, retry_after = _login_rate(self._client_ip())
+            if not allowed:
+                return self._send_json({"ok": False, "error": "slow down",
+                                        "retry_after": retry_after}, 429)
+            username = str(body.get("username") or "").strip().lower()
+            password = str(body.get("password") or "")
+            email = str(body.get("email") or "").strip().lower()
+            phone = str(body.get("phone") or "").strip()
+            want_2fa = bool(body.get("want_2fa"))
+            if not _valid_username(username):
+                return self._send_json({"ok": False, "error": "username must be 3-24 chars: a-z 0-9 _ -"}, 400)
+            if not _valid_email(email):
+                return self._send_json({"ok": False, "error": "enter a valid email"}, 400)
+            if len(password) < _MIN_PASSWORD_LEN:
+                return self._send_json({"ok": False, "error": "password too short"}, 400)
+            if phone and not _valid_phone(phone):
+                return self._send_json({"ok": False, "error": "enter a valid phone number"}, 400)
+            # dummy work on the taken paths so timing doesn't leak which
+            # field collided — same idea as the login handler.
+            users = _load_users()
+            if username in users or any(
+                    isinstance(r, dict) and r.get("email") == email
+                    for r in users.values()):
+                _hash_password(password, _new_salt())
+                taken_user = username in users
+                return self._send_json({
+                    "ok": False,
+                    "error": "name taken" if taken_user else "email taken"}, 409)
+            secret = _new_totp_secret() if want_2fa else None
+            ticket = _signup_pending_issue({"username": username,
+                                            "password": password,
+                                            "email": email, "phone": phone,
+                                            "totp_secret": secret})
+            out = {"ok": True, "ticket": ticket, "need_2fa": bool(secret)}
+            if secret:
+                out["secret"] = secret
+                out["otpauth_url"] = _totp_otpauth_url(username, secret)
+            _log_event(f"{username} started signup" +
+                       (" with 2FA" if secret else ""))
+            return self._send_json(out)
+
+        if path == "/api/auth/signup/confirm":
+            if os.environ.get("DISABLE_OPEN_SIGNUP") == "1":
+                return self._send_json({"ok": False, "error": "signup closed"}, 403)
+            allowed, tries_left, retry_after = _login_rate(self._client_ip())
+            if not allowed:
+                return self._send_json({"ok": False, "error": "slow down",
+                                        "retry_after": retry_after}, 429)
+            rec = _signup_pending_peek(str(body.get("ticket") or ""))
+            if not rec:
+                return self._send_json({"ok": False,
+                                        "error": "signup expired — start over"}, 400)
+            secret = rec.get("totp_secret")
+            if secret:
+                # A wrong code does NOT burn the ticket — typos happen; the
+                # rate limiter bounds guessing, same as the login challenge.
+                if not _totp_verify(secret, body.get("code")):
+                    return self._send_json({"ok": False, "error": "bad code"}, 401)
+            ticket = str(body.get("ticket") or "")
+            _signup_pending_redeem(ticket)  # single use from here on
+            ok, err = _create_user(rec["username"], rec["password"],
+                                   email=rec["email"], phone=rec["phone"])
+            if not ok:
+                return self._send_json({"ok": False, "error": err}, 409)
+            codes = None
+            if secret:
+                users = _load_users()
+                urec = users.get(rec["username"])
+                if isinstance(urec, dict):
+                    codes = _new_recovery_codes()
+                    urec["totp_secret"] = secret
+                    urec["totp_enabled"] = True
+                    urec["recovery_hashes"] = [_hash_recovery(c) for c in codes]
+                    _save_users(users)
+            _log_event(f"{rec['username']} signed up" +
+                       (" with 2FA" if secret else ""))
+            self._issue_session(rec["username"])  # signed up == logged in
+            out = {"ok": True, "username": rec["username"],
+                   "is_owner": False, "world": "private",
+                   "email": rec["email"], "totp_enabled": bool(secret)}
+            if codes:
+                out["recovery_codes"] = codes
+            return self._send_json(out)
+
         if path == "/api/auth/change-password":
             me = self._session_user()
             users = _load_users()
@@ -5601,11 +5738,8 @@ class Handler(BaseHTTPRequestHandler):
             secret = _new_totp_secret()
             rec["totp_pending"] = secret
             _save_users(users)
-            label = f"CrumbsHUD:{me}"
-            otpauth = (f"otpauth://totp/{label}?secret={secret}"
-                       f"&issuer=CrumbsHUD&algorithm=SHA1&digits=6&period=30")
             return self._send_json({"ok": True, "secret": secret,
-                                    "otpauth_url": otpauth})
+                                    "otpauth_url": _totp_otpauth_url(me, secret)})
 
         if path == "/api/auth/2fa/enable":
             me = self._session_user()

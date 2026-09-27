@@ -5,6 +5,20 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.36.0 — 2026-09-27
+
+**Phase 3: signup-time optional 2FA enrollment.**
+- The signup form has a "Protect with authenticator app" checkbox (opt-in,
+  never required, never SMS).
+- Checked: the server validates the signup and parks it (10-minute
+  single-use ticket, password never leaves the server), shows the TOTP key
+  for the authenticator app, and only creates the account after a valid
+  6-digit code — no confirmation, no account, no enrollment. The 8 one-use
+  recovery codes are shown once, same as the Setup flow.
+- Unchecked: signup works exactly as before; post-signup 2FA enrollment in
+  Setup is untouched. Login enforces TOTP for signup-enrolled accounts
+  through the existing 5-minute challenge path.
+
 ## v5.35.0 — 2026-09-27
 
 **Phase 2: the morphing selection-aware Tools panel.**

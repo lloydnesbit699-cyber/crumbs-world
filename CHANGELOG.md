@@ -5,6 +5,13 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.36.3 — 2026-09-27
+
+**Inspector sheet fits the phone again.** The trait rows' value column can now
+shrink (`min-width: 0`), so long descriptions wrap and the segmented buttons
+compress instead of pushing the sheet wider than the screen — no more text
+clipped off the right edge.
+
 ## v5.36.2 — 2026-09-27
 
 **Update/repair can no longer lose vault data.** Every destructive git move

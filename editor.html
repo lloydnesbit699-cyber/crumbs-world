@@ -613,7 +613,13 @@
               border-bottom: 1px solid #2a2a30; font-size: 14px; }
   .insp-row .k { min-width: 86px; color: #9db3ff; font-size: 12px;
                  text-transform: uppercase; letter-spacing: 0.5px; }
-  .insp-row .v { flex: 1; color: #eee; }
+  .insp-row .v { flex: 1; min-width: 0; color: #eee; }
+  /* v5.36.2: the value column must be allowed to shrink — without min-width: 0
+     flex items refuse to get narrower than their content, so long trait text
+     and segmented buttons pushed the sheet wider than the phone screen. */
+  .insp-row .v .seg { max-width: 100%; }
+  .insp-row .v .seg button { min-width: 0; overflow: hidden;
+                             text-overflow: ellipsis; white-space: nowrap; }
   .insp-row button { font-size: 13px; padding: 5px 9px; min-height: 0; }
   .insp-row button.danger { border-color: #a03a3a; color: #ffb3b3; }
   .insp-traits { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 0; }

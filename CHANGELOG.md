@@ -5,6 +5,39 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.41.0 — 2026-09-27
+
+**Map cap raised to 500×500 (Lloyd's call) with full scale hardening.**
+The old 64×64 ceiling is gone: `MAP_MAX = 500` is now the single source of
+truth (was hardcoded in four places — resize dialog, `/api/resize`,
+generate/pocket-map endpoint, portal sanitize). A 500×500 map holds 250k
+cells; measured save is ~12MB / ~0.5s, generate ~0.8s.
+
+**Renderer rebuilt for huge maps (client).** The old renderer redrew all
+250k cells and ran a full-grid checksum on every frame — unusable past
+64×64. Now: the static base layer redraws only the dirty rect a stroke
+touched (expanded 1 cell for tall faces/shadows); every per-frame overlay
+(animated tiles, collision, height, traits, fog, object markers) walks
+only the visible cells; the hero-flag scan is cached and invalidated on
+paint/undo/refresh. Zoom is capped so the full-map backing canvas never
+exceeds 4096px per side (8px tiles on a 500×500 map — the largest canvas
+safe on every iPhone); the zoom button says so when it stops.
+
+**Painting no longer re-downloads the map.** `/api/stroke` echoes the
+server's resolved cells (authoritative values, incl. linked collision
+stamps); the client applies them to its optimistic preview. The old
+"full refresh after every stroke" (~12MB at 500×500) now runs only when
+a stroke fails or comes back without an echo.
+
+**Server-side guards.** Dijkstra pathfinding is bounded (100k visited
+nodes — a walled-off target on a huge map can't hang a patrol leg);
+fog-of-war sight is radius-limited (40 tiles) on maps wider than 80
+(full-map sight was ~13s at 500×500); PNG export shrinks tile size to fit
+4096px instead of building a 64k image (~16GB RAM).
+
+Tests: scale_test.py 23/23, scale_client_test.js 20/20. iPhone
+verification pending — nothing here is proven on his phone yet.
+
 ## v5.40.1 — 2026-09-27
 
 **Removed the duplicate Bring-to-life button from the import block.**

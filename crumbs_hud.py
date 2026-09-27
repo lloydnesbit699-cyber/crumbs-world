@@ -155,7 +155,22 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.40.1"
+APP_VERSION = "5.41.0"
+# v5.41: single source of truth for the map-size cap (was 64, hardcoded in
+# four places). 500x500 = 250k cells. The client additionally caps tilePx so
+# the full-map backing canvas never exceeds 4096px per side (see editor.html).
+MAP_MAX = 500
+# v5.41: Dijkstra visited-node guard — a cross-map path on 250k cells could
+# otherwise explore the whole grid per leg (~seconds); 100k pops bounds the
+# worst case while no sane patrol leg ever needs that many.
+PATHFIND_VISIT_CAP = 100_000
+# v5.41: fog-of-war sight radius. Full-map line_of_sight is ~13s at 500x500
+# (measured); maps <=80 wide keep the old full-map behavior, larger maps
+# compute sight only within this radius (outside = dark).
+SIGHT_RADIUS = 40
+# v5.41: PNG export dimension cap — 500x500 at 128px/tile would be a 64k
+# image (16GB in RAM). Exports shrink tile size to fit inside this.
+EXPORT_MAX_DIM = 4096
 # v5.24: unique per process boot. After an update the server re-execs into
 # the new files; the page waits for a DIFFERENT instance id (plus the new
 # version) instead of mistaking the old process — still answering during
@@ -3004,8 +3019,13 @@ _events = deque(maxlen=200)
 def _log_event(msg):
     _events.append({"t": time.strftime("%H:%M:%S"), "msg": str(msg)[:160]})
 
-def _map_png(scale=4, data=None, objects=None, w=None, h=None):
-    """Composite tiles + objects layers into a PIL image. None without Pillow."""
+def _map_png(scale=4, data=None, objects=None, w=None, h=None,
+             max_dim=EXPORT_MAX_DIM):
+    """Composite tiles + objects layers into a PIL image. None without Pillow.
+    v5.41: the output is capped at max_dim px per side — 500x500 at full
+    scale would be a 64k image (16GB RAM). Tile size shrinks to fit instead
+    of OOMing the server; thumbnails are cached per (tid, size) so the
+    250k-cell loop doesn't re-resize the same art a quarter-million times."""
     if not core.PIL_AVAILABLE:
         return None
     data = world.data if data is None else data
@@ -3013,16 +3033,25 @@ def _map_png(scale=4, data=None, objects=None, w=None, h=None):
     w = world.width if w is None else w
     h = world.height if h is None else h
     ts = 32 * scale
+    if max(w, h) * ts > max_dim:
+        ts = max(1, max_dim // max(w, h))
     img = core.Image.new("RGBA", (w * ts, h * ts), (0, 0, 0, 255))
+    thumb_cache = {}
+    _MISS = object()  # cache "no art" too — don't re-fetch it per cell
     for y in range(h):
         for x in range(w):
             for tid in (data[y][x], core.obj_tid(objects[y][x])):
                 if not tid:
                     continue
-                th = assets.get_thumbnail(tid, size=32)
+                key = (tid, ts)
+                th = thumb_cache.get(key, _MISS)
+                if th is _MISS:
+                    th = assets.get_thumbnail(tid, size=32)
+                    if th is not None and ts != 32:
+                        th = th.resize((ts, ts), core.Image.NEAREST)
+                    thumb_cache[key] = th
                 if th is None:
                     continue
-                th = th.resize((ts, ts), core.Image.NEAREST)
                 if th.mode == "RGBA":
                     img.alpha_composite(th, (x * ts, y * ts))
                 else:
@@ -3112,7 +3141,7 @@ def _sanitize_portal(p):
         return None
     if not (0 <= x < world.width and 0 <= y < world.height):
         return None
-    w = max(4, min(64, w)); h = max(4, min(64, h))
+    w = max(4, min(MAP_MAX, w)); h = max(4, min(MAP_MAX, h))
     seed = p.get("seed")
     try:
         seed = int(seed) if seed is not None else None
@@ -3230,8 +3259,8 @@ def _unique_pocket_name(base):
 def _generate_map_file(name, seed, biome, preset_id, w, h):
     """v5.29: deterministically build a pocket map file on disk (plus its
     rules sidecar). The live world is untouched. Returns True on success."""
-    w = max(4, min(64, int(w or 16)))
-    h = max(4, min(64, int(h or 16)))
+    w = max(4, min(MAP_MAX, int(w or 16)))
+    h = max(4, min(MAP_MAX, int(h or 16)))
     noise_over = None
     if preset_id:
         preset = core.GENERATION_PRESETS.get(preset_id)
@@ -3898,6 +3927,20 @@ def _find_spawn():
     return 0, 0
 
 
+def _visibility_grid(wrld, vx, vy):
+    """v5.41: fog-of-war sight grid. Full-map line_of_sight is ~13s at
+    500x500 (measured), so maps wider than 80 only see within SIGHT_RADIUS
+    of the viewer — outside the radius reads as dark (honest fog).
+    Smaller maps keep the old see-everything behavior."""
+    big = max(wrld.width, wrld.height) > 80
+    r = SIGHT_RADIUS if big else max(wrld.width, wrld.height)
+    x0, x1 = max(0, vx - r), min(wrld.width, vx + r + 1)
+    y0, y1 = max(0, vy - r), min(wrld.height, vy + r + 1)
+    return [[(x0 <= x < x1 and y0 <= y < y1
+              and core.line_of_sight(wrld, vx, vy, x, y))
+             for x in range(wrld.width)] for y in range(wrld.height)]
+
+
 def _find_path(sx, sy, tx, ty, ghost=False):
     """v3.2: Dijkstra over walkable tiles — water costs 4x (swim), so the hero
     walks around it when a dry route exists and swims only when it must.
@@ -3917,8 +3960,12 @@ def _find_path(sx, sy, tx, ty, ghost=False):
     prev = {(sx, sy): None}
     pq = [(0, sx, sy)]
     hg = core.height_grid(world)  # v5.10: per-cell heights for climb costs
-    while pq:
+    visits = 0  # v5.41: bound the search — a walled-off target on a 500x500
+    while pq:   # map would otherwise explore all 250k cells per leg
         d, x, y = heapq.heappop(pq)
+        visits += 1
+        if visits > PATHFIND_VISIT_CAP:
+            return [], [], []  # too far to matter — no sane patrol walks this
         if d != dist[(x, y)]:
             continue
         if (x, y) == (tx, ty):
@@ -5167,8 +5214,7 @@ class Handler(BaseHTTPRequestHandler):
                 vx, vy = int(q.get("x", [0])[0]), int(q.get("y", [0])[0])
             except (TypeError, ValueError):
                 return self._send_json({"ok": False, "error": "bad x/y"}, 400)
-            vis = [[core.line_of_sight(world, vx, vy, x, y)
-                    for x in range(world.width)] for y in range(world.height)]
+            vis = _visibility_grid(world, vx, vy)
             self._send_json({"w": world.width, "h": world.height, "vis": vis})
         elif path == "/api/palette":
             sw = []
@@ -5529,7 +5575,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 m = json.load(open(p))
                 img = _map_png(1, m["tiles"], m.get("objects"),
-                               m["width"], m["height"])
+                               m["width"], m["height"], max_dim=512)
             except (OSError, ValueError, KeyError, IndexError, TypeError):
                 img = None
             if img is None:
@@ -6218,7 +6264,13 @@ class Handler(BaseHTTPRequestHandler):
                         _save_names(_current_map)
                     _mark_dirty()
                 _undoable("stroke objects", _do)
-                return self._send_json({"ok": True, "painted": len(paints)})
+                # v5.41: echo the resolved cells — the client applies them to
+                # its optimistic preview instead of re-downloading the whole
+                # map (a ~12MB /api/map at 500x500 after every stroke).
+                return self._send_json({
+                    "ok": True, "painted": len(paints),
+                    "cells": [{"x": x, "y": y, "v": nv, "layer": "objects"}
+                              for (x, y, nv) in paints]})
             cmds = [core.SetTileCommand(world, x, y, _grid(layer)[y][x], nv, layer)
                     for (x, y, nv) in paints]
             # v5.7: linked collision stamps ride in the SAME undo step — one
@@ -6244,7 +6296,12 @@ class Handler(BaseHTTPRequestHandler):
             history.push(multi)
             multi.execute()
             _mark_dirty()
-            return self._send_json({"ok": True, "painted": len(cmds)})
+            # v5.41: echo the resolved cells (see above) — includes linked
+            # collision stamps, which ride in the same undo step.
+            return self._send_json({
+                "ok": True, "painted": len(cmds),
+                "cells": [{"x": c.x, "y": c.y, "v": c.new_val, "layer": c.layer}
+                          for c in cmds]})
 
         if path == "/api/move":
             # v5.0: slide one object tile — clear + place as ONE undo step.
@@ -7359,7 +7416,7 @@ class Handler(BaseHTTPRequestHandler):
                 w, h = int(body.get("width", world.width)), int(body.get("height", world.height))
             except (TypeError, ValueError):
                 return self._send_json({"ok": False, "error": "width/height ints required"}, 400)
-            w, h = max(4, min(64, w)), max(4, min(64, h))
+            w, h = max(4, min(MAP_MAX, w)), max(4, min(MAP_MAX, h))
             if w == world.width and h == world.height:
                 return self._send_json({"ok": True, "noop": True})
             def _do():
@@ -7475,8 +7532,8 @@ class Handler(BaseHTTPRequestHandler):
             if preset not in (core.GENERATION_PRESETS or {}):
                 preset = None
             try:
-                w = max(4, min(64, int(body.get("width", 16))))
-                h = max(4, min(64, int(body.get("height", 16))))
+                w = max(4, min(MAP_MAX, int(body.get("width", 16))))
+                h = max(4, min(MAP_MAX, int(body.get("height", 16))))
             except (TypeError, ValueError):
                 w, h = 16, 16
             key = f"{x},{y}"

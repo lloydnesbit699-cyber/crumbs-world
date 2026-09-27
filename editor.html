@@ -1094,8 +1094,8 @@
   <div class="row2">
     <div class="field"><span class="lbl">Preset</span><select id="portal-preset"><option value="">none</option></select></div>
     <div class="field"><span class="lbl">Size</span>
-      <div class="row2"><input id="portal-w" type="number" value="24" min="4" max="64">
-      <input id="portal-h" type="number" value="24" min="4" max="64"></div></div>
+      <div class="row2"><input id="portal-w" type="number" value="24" min="4" max="500">
+      <input id="portal-h" type="number" value="24" min="4" max="500"></div></div>
   </div>
   <div class="opt-row">
     <button id="portal-save">Link portal</button>
@@ -1125,9 +1125,9 @@
       <span class="lbl">Map file:</span><b id="map-name">hud_map.json</b>
     </div>
     <div class="field">
-      <input id="rw" type="number" value="25" min="4" max="64" title="Width">
+      <input id="rw" type="number" value="25" min="4" max="500" title="Width">
       <span>&times;</span>
-      <input id="rh" type="number" value="15" min="4" max="64" title="Height">
+      <input id="rh" type="number" value="15" min="4" max="500" title="Height">
       <button id="btn-resize">Resize</button>
     </div>
   </div>
@@ -1550,8 +1550,13 @@ let manualZoom = false;   // v1.5: until the user zooms, tiles auto-fit the scre
 function fitTiles() {
   if (manualZoom || !W) return;
   const w = $("stage").clientWidth - 16;
-  if (w > 0) tilePx = Math.max(8, Math.min(40, Math.floor(w / W)));
+  if (w > 0) tilePx = Math.max(8, Math.min(40, maxTilePx(), Math.floor(w / W)));
 }
+// v5.41: canvas memory guard — the full-map backing canvas must stay ≤4096px
+// per side (67MB), the largest dimension safe on every iOS Safari. On a
+// 500×500 map that means 8px tiles max; smaller maps are unaffected.
+const MAX_CANVAS_DIM = 4096;
+function maxTilePx() { return Math.max(8, Math.min(64, Math.floor(MAX_CANVAS_DIM / Math.max(W, H, 1)))); }
 window.addEventListener("resize", () => { fitTiles(); clampPan(); clampDpad(); render(); });
 // v2.2 camera: the canvas is absolutely positioned; layout() centers it in
 // the stage and applies the pan offset. No scroll container is involved, so
@@ -1567,8 +1572,21 @@ function layout() {
   const baseY = (stage.clientHeight - H * tilePx) / 2;
   canvas.style.transform = "translate(" + (baseX + panX) + "px," + (baseY + panY) + "px)";
 }
+// v5.41: visible tile range — the canvas is full-map sized and CSS-panned,
+// so per-frame overlay loops (animated tiles, collision, height, traits)
+// only walk the on-screen cells instead of all 250k.
+function visibleTiles() {
+  const ox = (stage.clientWidth - W * tilePx) / 2 + panX;
+  const oy = (stage.clientHeight - H * tilePx) / 2 + panY;
+  return {
+    x0: Math.max(0, Math.floor(-ox / tilePx) - 1),
+    y0: Math.max(0, Math.floor(-oy / tilePx) - 1),
+    x1: Math.min(W - 1, Math.ceil((stage.clientWidth - ox) / tilePx) + 1),
+    y1: Math.min(H - 1, Math.ceil((stage.clientHeight - oy) / tilePx) + 1)
+  };
+}
 function zoomAt(clientX, clientY, newPx) {
-  newPx = Math.max(8, Math.min(64, newPx));
+  newPx = Math.max(8, Math.min(maxTilePx(), newPx));
   if (newPx === tilePx || !W) return;
   const r = stage.getBoundingClientRect();
   const ax = clientX - r.left, ay = clientY - r.top;
@@ -2492,6 +2510,9 @@ async function refresh() {
   const m = await api("/api/map");
   W = m.width; H = m.height;
   tiles = m.tiles; objects = m.objects; coll = m.collision;
+  markBaseDirty();   // v5.41: whole grid replaced — full base redraw
+  invalidateHeroes();   // v5.41: objects grid replaced
+  tilePx = Math.min(tilePx, maxTilePx());   // v5.41: huge map, smaller tiles
   $("rw").value = W; $("rh").value = H;
   fitTiles();
   // v3.0: note which animated custom tiles are on the map so the anim
@@ -2614,14 +2635,21 @@ function objSize(c) {
   const a = objA(c);
   return Math.min(3, Math.max(0.25, +a.size || 1));
 }
+let _heroesCache = null;
+function invalidateHeroes() { _heroesCache = null; }  // v5.41: call whenever the objects grid changes
 function flagHeroes() {
+  // v5.41: cached — this scanned all 250k cells on EVERY render() frame
+  // (~25ms on a 500x500 map). The objects grid only changes via paint /
+  // undo / refresh / object-attrs (all invalidate or go through refresh);
+  // play-mode walking moves hero.x/hero.y, never the grid.
+  if (_heroesCache) return _heroesCache;
   // every hero-flagged instance, scan order — the first is the PC
   const out = [];
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const c = objects[y] && objects[y][x];
     if (c && objA(c).hero) out.push({ x, y, tid: objTid(c), size: objSize(c) });
   }
-  return out;
+  return (_heroesCache = out);
 }
 function tileDefById(tid) {
   // the palette definition behind a tile id (sprites + customs)
@@ -2647,18 +2675,23 @@ function cellColor(x, y) {
 }
 
 // v5.3: the static base layer — tiles, shadows, tall faces, grid lines.
-// Rebuilt only when the tiles grid, tile size, or theme actually changes
-// (detected by checksum, so no call site can forget to invalidate it);
-// everything dynamic composites on top each frame.
-let baseCv = null, baseSig = null;
-function tilesChecksum() {
-  let h = 0;
-  for (let y = 0; y < H; y++) {
-    const row = tiles[y];
-    for (let x = 0; x < W; x++) h = ((h * 31) + (row[x] | 0)) | 0;
-  }
-  // v5.10: shadows and tall faces depend on the elevation grid too
-  return h + ":" + tilePx + ":" + currentTheme + ":" + heightSig;
+// v5.41: dirty-rect rendering — a paint stroke redraws only the cells it
+// touched (expanded by 1: tall faces and shadows spill into neighbors),
+// not all 250k cells. Structural changes (load/resize/undo/theme/height
+// reload, late-arriving tile art) invalidate the whole base via
+// markBaseDirty(). Replaces the old full-grid checksum, which cost ~30ms
+// per render on a 500x500 map.
+let baseCv = null;
+let baseDirty = { full: true };   // null = clean; {full:true} or {x0,y0,x1,y1}
+function markBaseDirty(x0, y0, x1, y1) {
+  if (x0 === undefined || (baseDirty && baseDirty.full)) { baseDirty = { full: true }; return; }
+  baseDirty = {
+    x0: Math.max(0, Math.min(baseDirty ? baseDirty.x0 : x0, x0)),
+    y0: Math.max(0, Math.min(baseDirty ? baseDirty.y0 : y0, y0)),
+    x1: Math.min(W - 1, Math.max(baseDirty ? baseDirty.x1 : x1, x1)),
+    y1: Math.min(H - 1, Math.max(baseDirty ? baseDirty.y1 : y1, y1)),
+    full: false
+  };
 }
 function drawTallFace(b, im, px, py, hgt) {
   // v3.1: fake 2.5D — the bottom of the sprite, stretched down and darkened,
@@ -2673,14 +2706,18 @@ function drawTallFace(b, im, px, py, hgt) {
   b.fillRect(px, py + tilePx - 1, tilePx, faceH);
 }
 function renderBase() {
-  const sig = tilesChecksum();
   const cw = W * tilePx, ch = H * tilePx;
-  if (baseCv && baseSig === sig && baseCv.width === cw && baseCv.height === ch) return;
   if (!baseCv) baseCv = document.createElement("canvas");
-  baseCv.width = cw; baseCv.height = ch;
+  if (baseCv.width !== cw || baseCv.height !== ch) {
+    baseCv.width = cw; baseCv.height = ch;   // resizing wipes it — full redraw
+    baseDirty = { full: true };
+  }
+  if (!baseDirty) return;
   const b = baseCv.getContext("2d");
   b.imageSmoothingEnabled = false;
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+  // v5.41: draw only the dirty rect; a full pass uses the whole map
+  const r = baseDirty.full ? { x0: 0, y0: 0, x1: W - 1, y1: H - 1 } : baseDirty;
+  for (let y = r.y0; y <= r.y1; y++) for (let x = r.x0; x <= r.x1; x++) {
     const id = tiles[y][x];
     const im = tileFrameImage(id);   // v3.0: animated custom tiles draw current frame
     const px = x * tilePx, py = y * tilePx;
@@ -2706,7 +2743,7 @@ function renderBase() {
   // v5.10: height shadows — light falls from the northwest, so a taller
   // cell throws a soft shadow onto lower neighbors south and east of it.
   if (heightGrid && heightGrid.length === H && heightGrid[0] && heightGrid[0].length === W) {
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    for (let y = r.y0; y <= r.y1; y++) for (let x = r.x0; x <= r.x1; x++) {
       const h = heightGrid[y][x], px = x * tilePx, py = y * tilePx;
       if (y + 1 < H) {
         const dh = h - heightGrid[y + 1][x];
@@ -2730,13 +2767,14 @@ function renderBase() {
       }
     }
   }
-  // grid lines — pre-rendered here instead of rebuilt every frame
+  // grid lines — pre-rendered here instead of rebuilt every frame.
+  // v5.41: on a dirty rect, only the lines crossing it.
   b.strokeStyle = "rgba(0,0,0,0.25)"; b.lineWidth = 1;
   b.beginPath();
-  for (let x = 0; x <= W; x++) { b.moveTo(x * tilePx + .5, 0); b.lineTo(x * tilePx + .5, H * tilePx); }
-  for (let y = 0; y <= H; y++) { b.moveTo(0, y * tilePx + .5); b.lineTo(W * tilePx, y * tilePx + .5); }
+  for (let x = r.x0; x <= r.x1 + 1; x++) { b.moveTo(x * tilePx + .5, r.y0 * tilePx); b.lineTo(x * tilePx + .5, (r.y1 + 1) * tilePx); }
+  for (let y = r.y0; y <= r.y1 + 1; y++) { b.moveTo(r.x0 * tilePx, y * tilePx + .5); b.lineTo((r.x1 + 1) * tilePx, y * tilePx + .5); }
   b.stroke();
-  baseSig = sig;
+  baseDirty = null;
 }
 
 // v5.3: render diet — high-frequency paths (paint strokes, NPC movement,
@@ -2764,7 +2802,8 @@ function render() {
   // v5.37: FX tiles overdraw here too, with their animator effects.
   if (animOnMap.size || fxOnMap.size) {
     const nowFx = performance.now();
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const av = visibleTiles();   // v5.41: cull off-screen cells
+    for (let y = av.y0; y <= av.y1; y++) for (let x = av.x0; x <= av.x1; x++) {
       const id = tiles[y][x];
       if (!animOnMap.has(id) && !fxOnMap.has(id)) continue;
       const im = tileFrameImage(id);
@@ -2785,7 +2824,8 @@ function render() {
   // v5.6: showCollide paints the overlay over any layer, no layer switch.
   if (layer === "collision" || showCollide) {
     ctx.lineWidth = 2;
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const colr = visibleTiles();   // v5.41: cull off-screen cells
+    for (let y = colr.y0; y <= colr.y1; y++) for (let x = colr.x0; x <= colr.x1; x++) {
       const cv = coll[y][x];
       if (!cv) continue;
       const px = x * tilePx, py = y * tilePx;
@@ -2808,7 +2848,8 @@ function render() {
   // edge; each level below 0 carves a dark water band down from the north
   // edge. Hills literally stack, pits visibly deepen.
   if (showHeight && heightGrid && heightGrid.length === H) {
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const hv = visibleTiles();   // v5.41: cull off-screen cells
+    for (let y = hv.y0; y <= hv.y1; y++) for (let x = hv.x0; x <= hv.x1; x++) {
       const h = heightGrid[y][x];
       if (!h) continue;
       const px = x * tilePx, py = y * tilePx;
@@ -2853,7 +2894,8 @@ function render() {
   // v4.0: nature traits — a small emoji in the cell corner, edit + play
   // alike (a fire you built should be visible while you warm by it).
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+  const tv = visibleTiles();   // v5.41: cull off-screen cells
+  for (let y = tv.y0; y <= tv.y1; y++) for (let x = tv.x0; x <= tv.x1; x++) {
     const t = traitGrid[y] && traitGrid[y][x];
     if (!t || !traitLegend[t]) continue;
     ctx.font = Math.round(tilePx * 0.42) + "px sans-serif";
@@ -2976,7 +3018,8 @@ function render() {
   // hero flags, insert roles, interactive + flavor badges.
   const _fh = flagHeroes();   // hero-flagged instances, scan order
   const _pcKey = (_fh.length && playMode) ? _fh[0].x + "," + _fh[0].y : null;
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+  const ov = visibleTiles();   // v5.41: cull off-screen cells
+  for (let y = ov.y0; y <= ov.y1; y++) for (let x = ov.x0; x <= ov.x1; x++) {
     const ocell = objects[y][x];
     const oid = objTid(ocell);
     if (oid == null) continue;
@@ -3062,7 +3105,8 @@ function render() {
   // (a taller cell blocks the sight line) go dark. Refreshes when he stops.
   if (playMode && showSight && visGrid && visGrid.length === H) {
     ctx.fillStyle = "rgba(2,2,10,0.62)";
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const sv = visibleTiles();   // v5.41: cull off-screen cells
+    for (let y = sv.y0; y <= sv.y1; y++) for (let x = sv.x0; x <= sv.x1; x++) {
       if (!visGrid[y][x]) ctx.fillRect(x * tilePx, y * tilePx, tilePx, tilePx);
     }
   }
@@ -3110,6 +3154,8 @@ function strokeAdd(cell) {
   }
   stroke.cells.set(key, cellOut);
   localGrid()[cell.y][cell.x] = pv;   // optimistic preview
+  markBaseDirty(cell.x - 1, cell.y - 1, cell.x + 1, cell.y + 1);  // v5.41: dirty-rect
+  if (layer === "objects") invalidateHeroes();   // v5.41: hero flags may move
   // v3.1: "stamp collision" — painting a solid wall stamps its collision too
   if (linkCollision && layer !== "collision" && !erasing) {
     coll[cell.y][cell.x] = selCollide;
@@ -3226,25 +3272,59 @@ canvas.addEventListener("pointermove", e => {
 // canvas can never lie about what stuck.
 let paintQueue = [];   // [{layer, cells, link_cells}]
 let paintBusy = false;
+let paintClean = true;   // v5.41: every pumped stroke echoed back cleanly
 async function pumpPaintQueue() {
   if (paintBusy) return;
   const job = paintQueue.shift();
   if (!job) {
-    // queue drained — re-sync only when no stroke is mid-flight, so a
-    // trailing refresh can't wipe a new stroke's optimistic preview
-    if (!stroke) { try { await refresh(); } catch (e) {} }
+    // queue drained — v5.41: echoed strokes need no re-sync (the old full
+    // refresh was a ~12MB download per stroke at 500x500). Refresh only
+    // when a stroke failed or went unechoed, and never under a live stroke,
+    // so a trailing refresh can't wipe a new stroke's optimistic preview.
+    // Skipped reconciles stay dirty (paintClean untouched) so the next
+    // drain retries them.
+    if (!paintClean && !stroke) {
+      try { await refresh(); } catch (e) {}
+      paintClean = true;
+    }
     return;
   }
   paintBusy = true;
   try {
     const r = await api("/api/stroke", job);
-    if (!r.ok) toast("paint failed: " + (r.error || "unknown error"));
+    if (!r.ok) { toast("paint failed: " + (r.error || "unknown error")); paintClean = false; }
+    else if (job.file === currentFile && r.cells && r.cells.length) applyStrokeEcho(r.cells);
+    else if (job.file !== currentFile) { /* map switched mid-stroke — grids already replaced */ }
+    else paintClean = false;   // no echo (old server?) — reconcile the old way
   } catch (e) {
     // v5.27: auth failures already surface the login overlay via api()
+    paintClean = false;
     if (!(e && e.auth)) toast("paint failed: " + ((e && e.message) || "network error"));
   }
   paintBusy = false;
   pumpPaintQueue();
+}
+// v5.41: apply the server's resolved stroke cells (authoritative values,
+// including linked collision stamps) onto the optimistic preview — the
+// preview becomes exact with no full-map re-download.
+function applyStrokeEcho(cells) {
+  for (const c of cells) {
+    if (c.x < 0 || c.y < 0 || c.x >= W || c.y >= H) continue;
+    const g = c.layer === "objects" ? objects : c.layer === "collision" ? coll : tiles;
+    g[c.y][c.x] = c.v;
+    // v5.41: the old trailing refresh() rebuilt these sets — a newly
+    // painted animated/FX tile must join them now, or it sits still until
+    // the next full reload. Removals leave stale ids behind harmlessly
+    // (one Set lookup per visible cell; no cell carries the id anymore).
+    if (c.layer === "tiles" && c.v) {
+      const t = customById[c.v];
+      if (t && t.frames > 1) animOnMap.add(c.v);
+      if (typeof tileFx === "function" && tileFx(c.v)) fxOnMap.add(c.v);
+    }
+    markBaseDirty(c.x - 1, c.y - 1, c.x + 1, c.y + 1);
+  }
+  if (cells.some(c => c.layer === "objects")) invalidateHeroes();
+  queueRender();
 }
 function endStroke() {
   if (panMode) { panStart = null; return; }
@@ -3252,7 +3332,7 @@ function endStroke() {
   const s = stroke; stroke = null;
   if (s.cells.size) {
     paintQueue.push({ layer: s.layer, cells: [...s.cells.values()],
-      link_cells: [...s.linkCells.values()] });   // v5.7: one call, one undo step
+      link_cells: [...s.linkCells.values()], file: currentFile });   // v5.7: one call, one undo step
   }
   pumpPaintQueue();
 }
@@ -3283,6 +3363,8 @@ async function syncMap() {
   try {
     const m = await api("/api/map");
     tiles = m.tiles; objects = m.objects; coll = m.collision;
+    markBaseDirty();   // v5.41: server changed the map under us — full redraw
+    invalidateHeroes();   // v5.41: objects grid may have changed
   } catch (e) {}
   await loadTraits();
 }
@@ -4162,6 +4244,7 @@ function heightStrokeAdd(cell) {
   if (nh === cur) return;
   hstroke.cells.set(k, [cell.x, cell.y, nh]);
   heightGrid[cell.y][cell.x] = nh === null ? 0 : nh;  // optimistic — server reconciles
+  markBaseDirty(cell.x - 1, cell.y - 1, cell.x + 1, cell.y + 1);  // v5.41: dirty-rect
   heightSig++;
   queueRender();
 }
@@ -5451,7 +5534,7 @@ function ensureFrames(t) {
     for (let i = 0; i < (t.frames || 0); i++) {
       const im = new Image();
       // v4.7: the tray chip is a still — frame 0 paints it once it arrives
-      im.onload = () => { baseSig = null; render(); renderSelCard();   // v5.3: a newly-arrived tile image invalidates the cached base layer
+      im.onload = () => { markBaseDirty(); render(); renderSelCard();   // v5.3: a newly-arrived tile image invalidates the cached base layer
         paintSwatch(document.querySelector('#paint-strip canvas[data-tid="' + t.id + '"]'), t.id); };
       im.onerror = () => { thumbFailed[t.id] = true;
         paintSwatch(document.querySelector('#paint-strip canvas[data-tid="' + t.id + '"]'), t.id); };
@@ -6642,6 +6725,9 @@ $("btn-clear").onclick = async () => {
 };
 function zoomCenter(d) {
   manualZoom = true;
+  // v5.41: say why zoom-in stops on huge maps instead of silently ignoring it
+  if (d > 0 && tilePx >= maxTilePx() && maxTilePx() < 64)
+    { toast("max zoom-in for a " + W + "×" + H + " map"); return; }
   const r = stage.getBoundingClientRect();
   zoomAt(r.left + r.width / 2, r.top + r.height / 2, tilePx + d);
 }
@@ -6669,7 +6755,7 @@ $("btn-gen").onclick = async () => {
     await loadNatural();  // v5.0: the seed's ground for the eraser
     splashStep(80, "Loading map data\u2026");
     // v3.1: the palette follows the generated biome
-    currentTheme = r.biome || "dungeon"; $("theme-sel").value = currentTheme;
+    currentTheme = r.biome || "dungeon"; $("theme-sel").value = currentTheme; markBaseDirty();
     if (layer === "tiles" || layer === "colors") { selTile = defaultBrush(layer); selByLayer[layer] = selTile; }
     buildPalette();
     // v3.7: fresh build — apply the user's saved rule defaults, if any
@@ -6694,7 +6780,7 @@ $("btn-biome-overlay").onclick = async () => {
     if (!r.ok) { toast("overlay failed: " + (r.error || "unknown")); Sfx.error(); return; }
     $("seed").value = r.seed;   // v5.29: keep the seed visible and reproducible
     await refresh(); await loadNatural();
-    currentTheme = r.biome || currentTheme; $("theme-sel").value = currentTheme;
+    currentTheme = r.biome || currentTheme; $("theme-sel").value = currentTheme; markBaseDirty();
     buildPalette(); render(); toast("applied " + r.biome + " (" + r.painted + " tiles)");
   } catch (e) { toast("overlay failed"); Sfx.error(); }
   finally { btn.disabled = false; btn.textContent = "Apply biome…"; }
@@ -7002,7 +7088,11 @@ $("menu-export").onclick = () => {
   closeOverlays();
   // attachment download — the page stays put
   window.location.href = "/api/export/png?scale=4";
-  toast("rendering PNG\u2026");
+  // v5.41: huge maps export at reduced resolution (4096px cap server-side)
+  // instead of a 16GB image that kills the server — say so up front.
+  toast(Math.max(W, H) * 128 > 4096
+    ? "big map — exporting at reduced size…"
+    : "rendering PNG\u2026");
 };
 // ---- v5.16: share key, engine exports, shareable bundles, backups ---------
 $("menu-key").onclick = () => {
@@ -7320,7 +7410,7 @@ async function refreshHeight() {
   // keep the elevation grid in step with the map — called from refresh()
   try {
     const g = await api("/api/height-grid");
-    if (g && g.w === W && g.h === H && g.grid) { heightGrid = g.grid; heightSig++; }
+    if (g && g.w === W && g.h === H && g.grid) { heightGrid = g.grid; heightSig++; markBaseDirty(); }
   } catch (e) { /* offline — shadows/overlay wait for the next refresh */ }
   queueRender();
 }
@@ -8441,7 +8531,7 @@ async function melodyDemo() {
     spriteTiles = s.tiles;
     spriteTiles.forEach(t => {
       const im = new Image();
-      im.onload = () => { baseSig = null; render(); renderSelCard(); };   // v5.1: card thumb too; v5.3: invalidate cached base
+      im.onload = () => { markBaseDirty(); render(); renderSelCard(); };   // v5.1: card thumb too; v5.3: invalidate cached base
       im.onerror = () => { thumbFailed[t.id] = true; };   // v5.25: honest placeholder instead of blank
       im.src = "/api/thumb/" + t.id;
       thumbImg[t.id] = im;
@@ -8473,6 +8563,7 @@ async function melodyDemo() {
     $("theme-sel").value = currentTheme;
     $("theme-sel").onchange = e => {
       currentTheme = e.target.value;
+      markBaseDirty();   // v5.41: theme recolors every tile
       if (layer === "tiles" || layer === "colors") { selTile = defaultBrush(layer); selByLayer[layer] = selTile; }
       buildPalette();
     };

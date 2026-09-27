@@ -1151,10 +1151,11 @@
       <div id="login-err"></div>
     </div>
     <div id="pane-signup" hidden>
-      <div class="login-sub">Create your vault — email required</div>
+      <div class="login-sub">Create your vault — email required, phone optional</div>
       <input id="su-user" type="text" placeholder="username (3-24 chars)" autocomplete="username" autocapitalize="none" autocorrect="off">
       <input id="su-email" type="email" placeholder="email" autocomplete="email" autocapitalize="none" autocorrect="off">
       <input id="su-pass" type="password" placeholder="password (min 4 chars)" autocomplete="new-password">
+      <input id="su-phone" type="tel" placeholder="phone (optional)" autocomplete="tel" autocapitalize="none" autocorrect="off">
       <button id="su-go">Create account</button>
       <div id="su-err"></div>
     </div>
@@ -1580,14 +1581,16 @@ async function doSignup() {
   const u = $("su-user").value.trim().toLowerCase();
   const e = $("su-email").value.trim().toLowerCase();
   const p = $("su-pass").value;
+  const ph = $("su-phone").value.trim();
   const err = m => { $("su-err").textContent = m; };
-  if (!u || !e || !p) return err("fill in all three");
+  if (!u || !e || !p) return err("fill in username, email, and password");
   if (!_USERNAME_RE.test(u)) return err("username: 3-24 chars, a-z 0-9 _ -");
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) return err("that email doesn't look right");
   if (p.length < 4) return err("password too short (min 4)");
+  if (ph && !/^[+]?[0-9().\-\s]+$/.test(ph)) return err("that phone number doesn't look right");
   err("");
   try {
-    const r = await api("/api/auth/signup", { username: u, email: e, password: p });
+    const r = await api("/api/auth/signup", { username: u, email: e, password: p, phone: ph });
     if (!r.ok) {
       if (r.retry_after) { err("slow down — try again in " + r.retry_after + "s"); return; }
       err(r.error || "signup failed");
@@ -1601,7 +1604,8 @@ async function doSignup() {
 $("su-go").onclick = doSignup;
 $("su-user").addEventListener("keydown", e => { if (e.key === "Enter") $("su-email").focus(); });
 $("su-email").addEventListener("keydown", e => { if (e.key === "Enter") $("su-pass").focus(); });
-$("su-pass").addEventListener("keydown", e => { if (e.key === "Enter") doSignup(); });
+$("su-pass").addEventListener("keydown", e => { if (e.key === "Enter") $("su-phone").focus(); });
+$("su-phone").addEventListener("keydown", e => { if (e.key === "Enter") doSignup(); });
 let _tfaChallenge = null;
 async function do2fa() {
   const c = $("tfa-code").value.trim();

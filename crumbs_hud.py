@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.31.0"
+APP_VERSION = "5.32.0"
 # v5.24: unique per process boot. After an update the server re-execs into
 # the new files; the page waits for a DIFFERENT instance id (plus the new
 # version) instead of mistaking the old process — still answering during
@@ -597,6 +597,21 @@ def _valid_email(email):
     return bool(_EMAIL_RE.match(email)) and len(email) <= 254
 
 
+# v5.32: phone is optional on signup — blank/None is fine. When given,
+# allow the usual dialing characters and cap the length. The number is
+# stored UNVERIFIED: there is no SMS provider, and 2FA is TOTP
+# (authenticator-app) based, so for now it's informational only.
+_PHONE_RE = re.compile(r"^\+?[0-9()\-.\s]+$")
+
+
+def _valid_phone(phone):
+    phone = (phone or "").strip()
+    if not phone:
+        return True
+    return (bool(_PHONE_RE.match(phone)) and len(phone) <= 32
+            and any(ch.isdigit() for ch in phone))
+
+
 def _new_totp_secret():
     return base64.b32encode(secrets.token_bytes(20)).decode("ascii")
 
@@ -693,11 +708,13 @@ def _save_users(users):
     os.replace(tmp, _USERS_FILE)
 
 
-def _create_user(username, password, email=None, is_owner=False):
+def _create_user(username, password, email=None, phone=None, is_owner=False):
     """-> (ok, error). Writes the record and makes the vault dir. No session.
 
     Email, when given, must be unique across accounts — one account per
-    email keeps password-reset and abuse handling sane later."""
+    email keeps password-reset and abuse handling sane later.
+    Phone is optional and stored unverified (no SMS provider; 2FA is TOTP).
+    """
     users = _load_users()
     if username in users:
         return False, "name taken"
@@ -706,10 +723,14 @@ def _create_user(username, password, email=None, is_owner=False):
         for rec in users.values():
             if isinstance(rec, dict) and rec.get("email") == email:
                 return False, "email taken"
+    phone = (phone or "").strip()
+    if phone and not _valid_phone(phone):
+        return False, "bad phone"
     salt = _new_salt()
     users[username] = {"salt": salt,
                        "hash": _hash_password(password, salt),
                        "email": email,
+                       "phone": phone,
                        "created": datetime.now(timezone.utc).isoformat(),
                        "is_owner": is_owner, "token_version": 0,
                        "world": "private"}
@@ -5401,8 +5422,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/auth/signup":
             # v5.30: public signup — email required, 2FA optional (later,
-            # in Setup). Same brute-force armor as login. DISABLE_OPEN_SIGNUP=1
-            # closes it; the owner can still create accounts by hand.
+            # in Setup). v5.32: phone optional (stored unverified — no SMS
+            # provider; 2FA stays TOTP). Same brute-force armor as login.
+            # DISABLE_OPEN_SIGNUP=1 closes it; the owner can still create
+            # accounts by hand.
             if os.environ.get("DISABLE_OPEN_SIGNUP") == "1":
                 return self._send_json({"ok": False, "error": "signup closed"}, 403)
             allowed, tries_left, retry_after = _login_rate(self._client_ip())
@@ -5412,12 +5435,15 @@ class Handler(BaseHTTPRequestHandler):
             username = str(body.get("username") or "").strip().lower()
             password = str(body.get("password") or "")
             email = str(body.get("email") or "").strip().lower()
+            phone = str(body.get("phone") or "").strip()
             if not _valid_username(username):
                 return self._send_json({"ok": False, "error": "username must be 3-24 chars: a-z 0-9 _ -"}, 400)
             if not _valid_email(email):
                 return self._send_json({"ok": False, "error": "enter a valid email"}, 400)
             if len(password) < _MIN_PASSWORD_LEN:
                 return self._send_json({"ok": False, "error": "password too short"}, 400)
+            if phone and not _valid_phone(phone):
+                return self._send_json({"ok": False, "error": "enter a valid phone number"}, 400)
             # dummy work on the taken paths so timing doesn't leak which
             # field collided — same idea as the login handler.
             users = _load_users()
@@ -5429,7 +5455,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({
                     "ok": False,
                     "error": "name taken" if taken_user else "email taken"}, 409)
-            ok, err = _create_user(username, password, email=email)
+            ok, err = _create_user(username, password, email=email,
+                                   phone=phone)
             if not ok:
                 return self._send_json({"ok": False, "error": err}, 409)
             self._issue_session(username)  # signed up == logged in

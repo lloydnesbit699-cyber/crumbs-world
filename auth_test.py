@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """auth_test.py — v5.30 signup/signin/2FA tests. Run: python3 auth_test.py
-Covers: email validation, TOTP against the RFC 6238 vectors, the verify
-window, challenge issue/redeem/expiry, recovery-code hashing, and the
-_create_user uniqueness rules. Pure functions only — no server, no network.
+Covers: email validation, phone validation (v5.32), TOTP against the
+RFC 6238 vectors, the verify window, challenge issue/redeem/expiry,
+recovery-code hashing, and the _create_user uniqueness + phone rules.
+Pure functions only — no server, no network.
 """
 import base64
 import os
+import shutil
 import sys
+import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -83,6 +86,56 @@ check("no look-alikes", all(all(ch in "abcdefghjkmnpqrstuvwxyz23456789-"
 c0 = codes[0]
 check("hash round-trip", h._hash_recovery(c0) == h._hash_recovery(c0))
 check("hash differs from code", h._hash_recovery(c0) != c0)
+
+print("== phone validation (v5.32) ==")
+check("empty ok (optional)", h._valid_phone(""))
+check("none ok (optional)", h._valid_phone(None))
+check("us dashes", h._valid_phone("229-582-0009"))
+check("intl plus", h._valid_phone("+1 (229) 582-0009"))
+check("dots", h._valid_phone("229.582.0009"))
+check("parens and spaces", h._valid_phone("(229) 582 0009"))
+check("leading/trailing spaces stripped", h._valid_phone("  229-582-0009  "))
+check("32 chars ok", h._valid_phone("1" * 32))
+check("letters rejected", not h._valid_phone("call-me-maybe"))
+check("garbage rejected", not h._valid_phone("not-a-number!!!"))
+check("no digits rejected", not h._valid_phone("+()- "))
+check("33 chars rejected", not h._valid_phone("1" * 33))
+
+print("== _create_user phone ==")
+# _create_user writes users.json + a vault dir; point both at a temp dir so
+# the real user database is never touched. The signup handler returns 400
+# "enter a valid phone number" exactly when _valid_phone rejects, which the
+# cases above already cover.
+_tmpu = tempfile.mkdtemp(prefix="auth-phone-")
+_orig_users_file = h._USERS_FILE
+_orig_vaults_dir = h._vaults_dir
+h._USERS_FILE = os.path.join(_tmpu, "users.json")
+h._vaults_dir = lambda: os.path.join(_tmpu, "vaults")
+try:
+    ok, err = h._create_user("phonecarl", "s3cret!!",
+                             email="carl@example.com",
+                             phone="+1 (229) 582-0009")
+    check("signup with phone succeeds", ok, err)
+    rec = h._load_users().get("phonecarl")
+    check("phone stored on record",
+          isinstance(rec, dict) and rec.get("phone") == "+1 (229) 582-0009",
+          rec.get("phone") if isinstance(rec, dict) else rec)
+    ok2, err2 = h._create_user("nophone", "s3cret!!",
+                               email="nophone@example.com")
+    check("signup without phone succeeds", ok2, err2)
+    rec2 = h._load_users().get("nophone")
+    check("phone empty when omitted",
+          isinstance(rec2, dict) and not rec2.get("phone"),
+          rec2.get("phone") if isinstance(rec2, dict) else rec2)
+    ok3, err3 = h._create_user("badphone", "s3cret!!",
+                               email="bad@example.com",
+                               phone="not-a-number!!!")
+    check("bad phone rejected", not ok3 and err3 == "bad phone", err3)
+    check("bad phone not stored", "badphone" not in h._load_users())
+finally:
+    h._USERS_FILE = _orig_users_file
+    h._vaults_dir = _orig_vaults_dir
+    shutil.rmtree(_tmpu, ignore_errors=True)
 
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

@@ -19,11 +19,12 @@ import shutil
 from collections import deque
 
 try:
-    from PIL import Image, ImageOps, ImageDraw
+    from PIL import Image, ImageOps, ImageDraw, ImageEnhance
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
     Image = None
+    ImageEnhance = None
 
 __all__ = [
     "PIL_AVAILABLE",

@@ -5,6 +5,48 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.43.0 — 2026-09-27
+
+**Beginner animation: six live preset cards, and every result stays
+editable.** The Animation menu's Beginner mode grew six big tap-target
+cards — 🌿 Still Alive (subtle breathing), 🦘 Bounce (squash & stretch),
+🎈 Float (gentle hover), 💓 Pulse (soft color throb), 📳 Shake (tiny
+tremble), ✨ Magic Aura (colored glow). Each card shows a LIVE thumbnail
+of the target tile dancing that motion, plus one feel slider (0–100)
+that retunes him in place as you drag. Tapping a card dresses the tile
+in real frames + settings — flip to Advanced and every knob it wrote is
+there to tweak. Nothing is a dead-end render.
+
+**Bring to life bakes the motion in.** The one-button flow now takes the
+picked card along: a single picture gets tweened in-between frames of
+the preset's motion generated on the server (6 real, editable frames —
+breathing, squash & stretch, drift, color throb, tremble, or a baked
+aura glow); a real multi-pose sheet keeps its sliced poses and the
+preset rides on top as editable parameters. The last-tapped card is
+remembered for the next import.
+
+**Animation as states, one model for both modes.** Underneath, every
+tile's motion is now Rive-style states — Idle / Walk / Sleep / Talk /
+Hurt / Magic — with transitions (idle↔walk blends over ~150–200ms), all
+stored in one `anim` record that Beginner and Advanced read and write
+together (Phase 2's filmstrip will build on the same record — the modes
+were not forked). The Advanced panel gained a state picker (which moment
+you're dressing up) and an intensity slider; the old per-tile color /
+action / magic controls now edit the tile's default state and stay in
+step with it, so old saves render the same. One deliberate redefinition:
+Pulse is now the conservative H/S/B throb from the spec — the old
+scale-throb lives on as the Still Alive motion (new `alive` action).
+
+**Patrol stops trigger states.** A sleeping pause now puts the walker in
+the Sleep animation state; a standing pause maps to Idle; walking
+resumes the Walk state with a blend. Each stop row also has its own
+state picker — "at stop 3 → Sleep" (or Talk, Hurt, Magic…) — saved with
+the pauses. The 💤 still bobs over sleepers.
+
+Nothing phone-verified yet — desktop/server tests only (54 new
+animation-preset checks, 32 client state-model checks, 11 new patrol
+state checks pass; see below). iPhone behavior unverified.
+
 ## v5.42.1 — 2026-09-27
 
 **Scale hardening: undo, caches, and history depth.** Big maps

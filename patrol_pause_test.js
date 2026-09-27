@@ -27,8 +27,15 @@ let renders = 0;
 global.queueRender = () => { renders++; };
 let npcs = [];   // npcTick reads the global `npcs`
 
+// v5.43: npcTick now calls setNpcState + npcAnimStateFor — extract them too
+eval(extract("npcAnimStateFor"));
+eval(extract("setNpcState"));
+const _m = html.match(/const ANIM_STATES = (\[[^\]]*\])/);
+if (!_m) throw new Error("ANIM_STATES const not found");
+eval("global.ANIM_STATES = " + _m[1]);
 eval(extract("legStopIdx"));
 eval(extract("npcTick"));
+eval(extract("pauseListFor"));
 
 let pass = 0, fail = 0;
 function check(name, cond, detail) {
@@ -107,6 +114,39 @@ fakeNow = firstUntil + 1;   // let it expire — he steps past the duplicate cel
 npcTick(0.01);   // tiny budget: clears the pause, skips the duplicate, no arrival
 check("no re-pause on the duplicate cell", d.pauseUntil === 0, String(d.pauseUntil));
 check("walker left the stop", d.seg === 0 && d.x < 2, "seg=" + d.seg + " x=" + d.x);
+
+console.log("== v5.43: stops trigger animation states ==");
+check("npcAnimStateFor: explicit state wins",
+      npcAnimStateFor({ secs: 5, mode: "stand", state: "talk" }) === "talk");
+check("npcAnimStateFor: sleep mode -> sleep",
+      npcAnimStateFor({ secs: 5, mode: "sleep" }) === "sleep");
+check("npcAnimStateFor: stand mode -> idle",
+      npcAnimStateFor({ secs: 5, mode: "stand" }) === "idle");
+check("npcAnimStateFor: bogus state falls back to mode",
+      npcAnimStateFor({ secs: 5, mode: "sleep", state: "dance" }) === "sleep");
+fakeNow = 4000000;
+npcs = [makeWalker([[0, 0], [1, 0]], [undefined, 0],
+                   [{ secs: 30, mode: "sleep", state: "sleep" }])];
+npcTick(1);
+const st = npcs[0];
+check("sleep stop enters the Sleep state", st.animState === "sleep", st.animState);
+check("state blend recorded", !!st.animBlend && st.animBlend.from === "walk");
+fakeNow = st.pauseUntil + 1;
+npcTick(0.5);
+check("expiry returns to Walk state", npcs[0].animState === "walk", npcs[0].animState);
+fakeNow = 5000000;
+npcs = [makeWalker([[0, 0], [1, 0]], [undefined, 0],
+                   [{ secs: 10, mode: "stand" }])];   // stand, no explicit state
+npcTick(1);
+check("standing pause maps to Idle", npcs[0].animState === "idle", npcs[0].animState);
+
+console.log("== v5.43: pauseListFor preserves states ==");
+const pl = pauseListFor({ points: [[0, 0], [1, 0]],
+                          pauses: [{ secs: 5, mode: "sleep", state: "sleep" },
+                                   { secs: 0, mode: "stand", state: "bogus" }] });
+check("valid state kept", pl[0].state === "sleep", JSON.stringify(pl[0]));
+check("bogus state dropped", !("state" in pl[1]), JSON.stringify(pl[1]));
+check("secs/mode intact", pl[0].secs === 5 && pl[0].mode === "sleep");
 
 console.log("\n" + pass + " passed, " + fail + " failed");
 process.exit(fail ? 1 : 0);

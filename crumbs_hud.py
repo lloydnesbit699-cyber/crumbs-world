@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.42.1"
+APP_VERSION = "5.43.0"
 # v5.41: single source of truth for the map-size cap (was 64, hardcoded in
 # four places). 500x500 = 250k cells. The client additionally caps tilePx so
 # the full-map backing canvas never exceeds 4096px per side (see editor.html).
@@ -1452,12 +1452,20 @@ def _custom_public(entry):
             "art": bool(assets.tiles.get(tid)),
             "frames": len(entry["files"]), "frame_ms": entry["frame_ms"],
             # v5.37: animator FX (color/action/magic) — absent when all-default
-            "fx": entry.get("fx")}
+            "fx": entry.get("fx"),
+            # v5.43: animation states (Rive-style) — shared by beginner and
+            # advanced; absent on tiles made before states existed.
+            "anim": entry.get("anim")}
 
 
 # v5.37: animator FX — per-tile color/action/magic, validated server-side
 # (never trust the client alone). All-default input erases (returns None).
-FX_ACTS = ("none", "bounce", "float", "pulse", "shake")
+FX_ACTS = ("none", "bounce", "float", "pulse", "shake", "alive")
+# v5.43: animation states — Rive-style states with transitions, shared by the
+# beginner presets and the advanced animator (one data model, never forked).
+ANIM_STATES = ("idle", "walk", "sleep", "talk", "hurt", "magic")
+# v5.43: beginner preset motions (the cards in the Animation menu).
+ANIM_PRESETS = ("alive", "bounce", "float", "pulse", "shake", "magic")
 
 
 def _clean_fx(raw):
@@ -1487,7 +1495,10 @@ def _clean_fx(raw):
 def _clean_pauses(raw, n_stops):
     """v5.40: per-stop patrol pauses — [{secs, mode}] aligned with points.
     secs clamps 0..3600 (0 = walk on, no pause); mode is stand|sleep.
-    Returns the cleaned list, or None when the shape is wrong."""
+    v5.43: + optional state — an animation state the stop triggers
+    (sleep stop -> Sleep state); None = mode-derived (sleep->sleep,
+    stand->idle). Returns the cleaned list, or None when the shape is
+    wrong."""
     if not isinstance(raw, list) or len(raw) != n_stops:
         return None
     clean = []
@@ -1499,7 +1510,12 @@ def _clean_pauses(raw, n_stops):
             secs = 0
         secs = max(0, min(3600, secs))
         mode = "sleep" if e.get("mode") == "sleep" else "stand"
-        clean.append({"secs": secs, "mode": mode})
+        state = e.get("state")
+        state = state if state in ANIM_STATES else None
+        rec = {"secs": secs, "mode": mode}
+        if state:
+            rec["state"] = state
+        clean.append(rec)
     return clean
 
 
@@ -2009,6 +2025,215 @@ def _walkbob_frames(img):
     return frames
 
 
+def _clean_anim_state(sd):
+    """v5.43: one animation state -> sanitized dict. Unknown/invalid fields
+    fall back to safe defaults; never raises on junk."""
+    act = sd.get("act", "none")
+    if act not in FX_ACTS:
+        act = "none"
+    try:
+        amp = int(sd.get("amp", 70))
+    except (TypeError, ValueError):
+        amp = 70
+    amp = max(0, min(100, amp))
+    try:
+        hue = int(sd.get("hue", 0))
+    except (TypeError, ValueError):
+        hue = 0
+    hue = max(-180, min(180, hue))
+    try:
+        sat = int(sd.get("sat", 100))
+    except (TypeError, ValueError):
+        sat = 100
+    sat = max(0, min(200, sat))
+    try:
+        bri = int(sd.get("bri", 100))
+    except (TypeError, ValueError):
+        bri = 100
+    bri = max(0, min(200, bri))
+    magic = sd.get("magic")
+    if magic is not None:
+        magic = str(magic).strip()
+        if not re.fullmatch(r"#[0-9a-fA-F]{6}", magic):
+            magic = None
+    try:
+        frame_ms = int(sd.get("frame_ms", 400))
+    except (TypeError, ValueError):
+        frame_ms = 400
+    frame_ms = max(80, min(2000, frame_ms))
+    frames = sd.get("frames")
+    if isinstance(frames, list):
+        frames = [f for f in frames
+                  if isinstance(f, int) and 0 <= f < 64][:32] or None
+    else:
+        frames = None
+    out = {"act": act, "amp": amp, "hue": hue, "sat": sat, "bri": bri,
+           "magic": magic, "frame_ms": frame_ms}
+    if frames:
+        out["frames"] = frames
+    return out
+
+
+def _clean_anim(raw):
+    """v5.43: the tile's animation record ->
+    {v, default, states: {idle, walk, sleep, talk, hurt, magic}, transitions}.
+    Returns None when nothing usable survives."""
+    if not isinstance(raw, dict):
+        return None
+    sraw = raw.get("states")
+    if not isinstance(sraw, dict):
+        return None
+    states = {}
+    for st, sd in sraw.items():
+        if st in ANIM_STATES and isinstance(sd, dict):
+            states[st] = _clean_anim_state(sd)
+    if not states:
+        return None
+    default = raw.get("default")
+    if default not in states:
+        default = "idle" if "idle" in states else sorted(states)[0]
+    out = {"v": 1, "default": default, "states": states}
+    trow = raw.get("transitions")
+    if isinstance(trow, dict):
+        tr = {}
+        for k, v in trow.items():
+            if not (isinstance(k, str) and "->" in k):
+                continue
+            a, b = k.split("->", 1)
+            if a in ANIM_STATES and b in ANIM_STATES and isinstance(v, dict):
+                try:
+                    bm = int(v.get("blend_ms", 150))
+                except (TypeError, ValueError):
+                    bm = 150
+                tr[k] = {"blend_ms": max(0, min(1000, bm))}
+        if tr:
+            out["transitions"] = tr
+    return out
+
+
+def _shift_hue(img, degrees):
+    """v5.43: rotate the hue of an RGBA PIL image by degrees."""
+    hsv = img.convert("HSV")
+    h, s, v = hsv.split()
+    shift = int(round(degrees / 360.0 * 255)) % 256
+    h = h.point(lambda p: (p + shift) % 256)
+    return core.Image.merge("HSV", (h, s, v)).convert("RGBA")
+
+
+def _glow_layer(w, h, color, alpha):
+    """v5.43: a radial colored glow canvas (w,h), alpha 0..1 — the baked
+    version of the Magic Aura preset for single-picture bring-to-life."""
+    try:
+        r = int(color[1:3], 16); g = int(color[3:5], 16); b = int(color[5:7], 16)
+    except (TypeError, ValueError, IndexError):
+        r, g, b = 255, 215, 95
+    mask = core.Image.radial_gradient("L").resize((w * 2, h * 2),
+                                                  core.Image.Resampling.BILINEAR)
+    mask = mask.crop((w // 2, h // 2, w // 2 + w, h // 2 + h))
+    # radial_gradient runs black-center -> white-edge; a glow wants the
+    # opposite, brightest behind the sprite
+    mask = core.ImageOps.invert(mask)
+    mask = mask.point(lambda p: int(p * max(0.0, min(1.0, alpha))))
+    glow = core.Image.new("RGBA", (w, h), (r, g, b, 0))
+    glow.putalpha(mask)
+    return glow
+
+
+def _tween_frames(img, preset, amp, magic=None, n=6):
+    """v5.43: tween-style auto in-betweening — generate n frames from one
+    picture by interpolating the preset's motion. Every frame is a real
+    editable tile frame (never a dead-end render): the Advanced animator
+    retimes / retints / re-acts them like any other frames."""
+    img = img.convert("RGBA")
+    if max(img.size) > 256:
+        img.thumbnail((256, 256), core.Image.Resampling.NEAREST)
+    w, h = img.size
+    k = max(0.0, min(1.0, (amp or 0) / 100.0))
+    frames = []
+    for i in range(n):
+        ph = 2 * math.pi * i / n
+        cell = core.Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        if preset == "pulse":
+            # conservative H/S/B throb — the old scale-throb lives on as
+            # the Still Alive ("alive") preset.
+            f = core.ImageEnhance.Brightness(img).enhance(
+                1 + 0.10 * k * math.sin(ph))
+            f = core.ImageEnhance.Color(f).enhance(1 + 0.08 * k * math.sin(ph))
+            hs = 6 * k * math.sin(ph)
+            if hs:
+                f = _shift_hue(f, hs)
+            cell.paste(f, (0, 0), f)
+        elif preset == "magic":
+            glow = _glow_layer(w, h, magic or "#ffd75f",
+                               0.35 + 0.30 * k * math.sin(ph))
+            cell.paste(glow, (0, 0), glow)
+            cell.paste(img, (0, 0), img)
+        else:
+            m = img
+            if preset == "bounce":
+                # squash & stretch, bottom-anchored so he lands on his feet
+                sq = max(0.0, math.cos(ph))
+                scx, scy = 1 + 0.07 * k * sq, 1 - 0.10 * k * sq
+                lift = int(round(abs(math.sin(ph)) * h * 0.14 * k))
+                nw, nh = max(1, round(w * scx)), max(1, round(h * scy))
+                r = m.resize((nw, nh), core.Image.Resampling.BILINEAR)
+                cell.paste(r, ((w - nw) // 2, h - nh - lift), r)
+            elif preset == "float":
+                oy = -int(round((0.5 + 0.5 * math.sin(ph)) * h * 0.07 * k))
+                cell.paste(m, (0, oy), m)
+            elif preset == "shake":
+                r = m.rotate(3 * k * math.sin(2 * ph),
+                             core.Image.Resampling.BILINEAR, expand=False)
+                ox = int(round(0.03 * w * k * math.sin(2 * ph)))
+                cell.paste(r, (ox, 0), r)
+            else:  # "alive" (default): subtle breathing scale
+                sc = 1 + 0.035 * k * math.sin(ph)
+                nw, nh = max(1, round(w * sc)), max(1, round(h * sc))
+                r = m.resize((nw, nh), core.Image.Resampling.BILINEAR)
+                cell.paste(r, ((w - nw) // 2, (h - nh) // 2), r)
+        frames.append(cell)
+    return frames
+
+
+def _preset_anim_record(preset, amp, magic, frame_ms):
+    """v5.43: the editable animation record a bring-to-life lands as —
+    Idle/Walk/Sleep states sharing the preset's parameters. The client and
+    /api/custom/update speak the same shape."""
+    if preset not in ANIM_PRESETS:
+        preset = "alive"
+    try:
+        amp = max(0, min(100, int(amp)))
+    except (TypeError, ValueError):
+        amp = 70
+    mag = str(magic or "").strip()
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}", mag or ""):
+        mag = "#ffd75f"
+    st = {"act": ("none" if preset == "magic" else preset), "amp": amp,
+          "hue": 0, "sat": 100, "bri": 100,
+          "magic": (mag if preset == "magic" else None),
+          "frame_ms": frame_ms}
+    idle = dict(st)
+    idle["frame_ms"] = max(frame_ms, 600)   # idle breathes slower
+    sleep = {"act": "none", "amp": 0, "hue": 0, "sat": 100, "bri": 100,
+             "magic": None, "frame_ms": 1200, "frames": [0]}
+    return {"v": 1, "default": "idle",
+            "states": {"idle": idle, "walk": dict(st), "sleep": sleep},
+            "transitions": {"idle->walk": {"blend_ms": 150},
+                            "walk->idle": {"blend_ms": 200}}}
+
+
+def _bring_to_life_frames(img, preset, intensity, magic):
+    """v5.43: one picture -> frames + anim record. A real multi-pose sheet
+    keeps its sliced poses (the preset rides on top as editable parameters);
+    a single picture gets tweened in-between frames of the preset's motion."""
+    if preset not in ANIM_PRESETS:
+        preset = "alive"
+    frames = _autoslice_pil(img)
+    if len(frames) == 1:
+        return _tween_frames(img, preset, intensity, magic), preset
+    return frames, "sliced"
+
+
 def _body_scope(body):
     """v3.8: import shelf — 'shared' publishes to the shared library, anything
     else stays on this device."""
@@ -2016,7 +2241,7 @@ def _body_scope(body):
 
 
 def _store_custom_tile(name, preset, frame_ms, pil_images, scope="local",
-                       flavor=None):
+                       flavor=None, anim=None):
     """Write PIL frames to the right shelf (this device / shared), register the
     tile, save that shelf's registry. Returns (entry, note) — note carries a
     category-guardrail correction for the client to toast, or None.
@@ -2066,6 +2291,9 @@ def _store_custom_tile(name, preset, frame_ms, pil_images, scope="local",
              "swim": bool(TILE_PRESETS[preset].get("swim", False)),
              "deep": bool(TILE_PRESETS[preset].get("deep", False)),
              "frame_ms": frame_ms, "files": files, "scope": scope}
+    if anim:  # v5.43: the editable animation record (states) lands with
+        # the frames — bring-to-life output is never a dead-end render.
+        entry["anim"] = anim
     store.append(entry)
     _register_custom_tile(entry, tile_dir)
     _save_custom_registry(scope)
@@ -6905,6 +7133,11 @@ class Handler(BaseHTTPRequestHandler):
             # v3.4: one picture -> living character. If it's a sheet, slice the
             # poses; if it's a single pose, fake the walk with a bob.
             # Body: {name, preset, frame_ms, image: dataURL}.
+            # v5.43: + {anim_preset, intensity, magic} — the beginner motion.
+            # A single picture gets tweened in-between frames of the preset's
+            # motion; a sliced sheet keeps its poses and the preset rides on
+            # top as editable state parameters. Either way the result lands
+            # as EDITABLE frames + an animation record — never a dead end.
             if not core.PIL_AVAILABLE:
                 return self._send_json({"ok": False, "error": "image support unavailable"}, 500)
             name = str(body.get("name", "")).strip()[:24] or "custom"
@@ -6915,6 +7148,16 @@ class Handler(BaseHTTPRequestHandler):
                 frame_ms = max(80, min(2000, int(body.get("frame_ms", 400))))
             except (TypeError, ValueError):
                 frame_ms = 400
+            anim_preset = body.get("anim_preset", "alive")
+            if anim_preset not in ANIM_PRESETS:
+                anim_preset = "alive"
+            try:
+                intensity = max(0, min(100, int(body.get("intensity", 70))))
+            except (TypeError, ValueError):
+                intensity = 70
+            magic = body.get("magic") or "#ffd75f"
+            if not re.fullmatch(r"#[0-9a-fA-F]{6}", str(magic)):
+                magic = "#ffd75f"
             durl = body.get("image", "")
             try:
                 if not isinstance(durl, str) or not durl.startswith("data:image/"):
@@ -6923,14 +7166,14 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("too large (keep under ~1MB)")
                 raw = base64.b64decode(durl.split(",", 1)[1])
                 img = self._safe_open_image(raw, "sheet")
-                frames = _autoslice_pil(img)
-                method = "sliced"
-                if len(frames) == 1:
-                    frames = _walkbob_frames(img)
-                    method = "walk"
+                frames, method = _bring_to_life_frames(img, anim_preset,
+                                                       intensity, magic)
+                anim = _preset_anim_record(anim_preset, intensity, magic,
+                                           frame_ms)
                 entry, note = _store_custom_tile(name, preset, frame_ms, frames,
                                                  _body_scope(body),
-                                                           flavor=body.get('flavor'))
+                                                           flavor=body.get('flavor'),
+                                                 anim=anim)
             except Exception as e:
                 return self._send_json({"ok": False, "error": str(e)}, 400)
             resp = {"ok": True, "tile": _custom_public(entry),
@@ -7625,6 +7868,13 @@ class Handler(BaseHTTPRequestHandler):
                     entry["fx"] = clean
                 else:
                     entry.pop("fx", None)
+            # v5.43: animation states — the record both animator modes share.
+            if "anim" in body:
+                clean_a = _clean_anim(body.get("anim"))
+                if clean_a:
+                    entry["anim"] = clean_a
+                else:
+                    entry.pop("anim", None)
             t = assets.tiles.get(tid)
             if t is not None:
                 t["name"] = entry["name"]

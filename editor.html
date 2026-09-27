@@ -100,6 +100,32 @@
                           border: 2px solid #444; padding: 0; flex: none; }
   #anim-magic-sw button.on { border-color: #ffd75f; }
   #m-anim button:disabled, #m-anim input:disabled { opacity: 0.35; }
+  /* v5.43: beginner preset cards — fat-finger tap targets, live previews */
+  #anim-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+                padding: 6px 10px 2px; }
+  .anim-card { background: #1d1d22; border: 2px solid #3a3a44; border-radius: 12px;
+               overflow: hidden; }
+  .anim-card.picked { border-color: #ffd75f; }
+  .anim-card-tap { width: 100%; min-height: 76px; display: flex; align-items: center;
+                   gap: 8px; padding: 8px 10px; background: none; border: 0;
+                   color: #eee; text-align: left; }
+  .anim-card-tap:active { background: #2a2a32; }
+  .anim-card-tap canvas { width: 52px; height: 52px; flex: none;
+                         background: #101014; border-radius: 8px; }
+  .anim-card-meta { flex: 1; min-width: 0; }
+  .anim-card-name { font-size: 13px; font-weight: 700; }
+  .anim-card-desc { font-size: 11px; color: #999; }
+  .anim-card-ctl { display: flex; align-items: center; gap: 6px;
+                   padding: 2px 10px 8px; font-size: 11px; color: #aaa; }
+  .anim-card-ctl input[type=range] { flex: 1; min-width: 0; }
+  .anim-card-ctl .av { min-width: 30px; text-align: right; color: #eee; }
+  .anim-card-sw { display: flex; gap: 6px; padding: 0 10px 8px; }
+  .anim-card-sw button { width: 30px; min-height: 30px; border-radius: 50%;
+                        border: 2px solid #444; padding: 0; flex: none; }
+  .anim-card-sw button.on { border-color: #fff; }
+  #anim-state { flex-wrap: wrap; }
+  #anim-state button { font-size: 12px; }
+  .stoprow select { font-size: 12px; max-width: 92px; }
   /* v5.37: the tray's live animator preview — upper portion only, the tray
      keeps its own scroll for card/import/palette below */
   #anim-preview { margin: 0 0 12px; }
@@ -885,18 +911,29 @@
   <div id="anim-beginner">
     <button id="menu-animate-life" title="One-button animation: bring an imported picture to life">&#10024; Bring to life</button>
     <div class="menu-note">Needs one imported picture — bring it in through the Tiles tray first, then tap here.</div>
+    <!-- v5.43: live preset cards — each writes editable frames+settings, never a dead end -->
+    <div class="menu-note"><b>Motion</b> — how he moves. Tap a card, tune the feel.</div>
+    <div id="anim-cards"></div>
+    <div class="menu-note">Cards write real frames + settings — flip to Advanced to tweak every one.</div>
   </div>
   <div id="anim-advanced" hidden>
     <div class="menu-note" id="anim-target"></div>
+    <!-- v5.43: which animation state these controls dress up -->
+    <div class="menu-note"><b>State</b> — which moment you're dressing up</div>
+    <div class="seg" id="anim-state">
+      <button data-s="idle" class="on">idle</button><button data-s="walk">walk</button><button data-s="sleep">sleep</button><button data-s="talk">talk</button><button data-s="hurt">hurt</button><button data-s="magic">magic</button>
+    </div>
     <div class="menu-note"><b>Frame timing</b> — how fast he moves</div>
     <div class="anim-field"><span class="al">speed</span><input id="anim-ms" type="range" min="80" max="2000" step="40" value="400"><span class="av" id="anim-ms-val">400ms</span></div>
     <div class="menu-note"><b>Color</b> — repaint him without touching the art</div>
     <div class="anim-field"><span class="al">hue</span><input id="anim-hue" type="range" min="-180" max="180" step="5" value="0"><span class="av" id="anim-hue-val">0°</span></div>
     <div class="anim-field"><span class="al">saturation</span><input id="anim-sat" type="range" min="0" max="200" step="5" value="100"><span class="av" id="anim-sat-val">100%</span></div>
     <div class="anim-field"><span class="al">brightness</span><input id="anim-bri" type="range" min="0" max="200" step="5" value="100"><span class="av" id="anim-bri-val">100%</span></div>
+    <div class="menu-note"><b>Feel</b> — how strong the motion reads</div>
+    <div class="anim-field"><span class="al">intensity</span><input id="anim-amp" type="range" min="0" max="100" step="1" value="70"><span class="av" id="anim-amp-val">70</span></div>
     <div class="menu-note"><b>Action</b> — a little stage business</div>
     <div class="seg" id="anim-act">
-      <button data-a="none" class="on">still</button><button data-a="bounce">bounce</button><button data-a="float">float</button><button data-a="pulse">pulse</button><button data-a="shake">shake</button>
+      <button data-a="none" class="on">still</button><button data-a="alive">alive</button><button data-a="bounce">bounce</button><button data-a="float">float</button><button data-a="pulse">pulse</button><button data-a="shake">shake</button>
     </div>
     <div class="menu-note"><b>Magic</b> — a colored aura around him</div>
     <div id="anim-magic-sw">
@@ -2602,39 +2639,153 @@ function rebuildFxOnMap() {
   if (!tiles.length) return;
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const id = tiles[y][x];
-    if (id != null && tileFx(id)) fxOnMap.add(id);
+    if (id != null && tileHasMotion(id)) fxOnMap.add(id);
   }
+}
+// v5.43: animation states — Rive-style states with transitions, ONE data
+// model shared by the beginner cards and the advanced animator. A tile's
+// anim record is {v, default, states: {idle, walk, sleep, talk, hurt,
+// magic}, transitions}. Fallback chain: states[state] -> states[default]
+// -> the legacy per-tile fx (so pre-state tiles keep their look).
+const ANIM_STATES = ["idle", "walk", "sleep", "talk", "hurt", "magic"];
+const ANIM_STATE_DEFAULTS = { act: "none", amp: 100, hue: 0, sat: 100,
+                              bri: 100, magic: null, frame_ms: 400,
+                              frames: null };
+function stateParams(t, state) {
+  const base = Object.assign({}, ANIM_STATE_DEFAULTS);
+  const A = t && t.anim, S = A && A.states;
+  const sd = S && (S[state] || S[A.default] || S.idle);
+  if (sd) {
+    base.frame_ms = (t && t.frame_ms) || 400;
+    return Object.assign(base, sd);
+  }
+  // no state record — the legacy fx is the look, for every state
+  const f = Object.assign({}, FX_DEFAULT, t && t.fx);
+  base.act = f.act; base.hue = f.hue; base.sat = f.sat; base.bri = f.bri;
+  base.magic = f.magic;
+  base.frame_ms = (t && t.frame_ms) || 400;
+  return base;
+}
+// v5.43: which frame of a state is showing — honors the state's own
+// frame list (sleep can freeze on frame 0) and its own timing.
+function stateFrameIdx(t, state, now) {
+  const p = stateParams(t, state);
+  const fr = (p.frames && p.frames.length) ? p.frames : null;
+  const n = fr ? fr.length : ((t && t.frames) || 1);
+  if (n <= 1) return 0;
+  const ms = Math.max(80, p.frame_ms || 400);
+  const k = Math.floor((now === undefined ? performance.now() : now) / ms) % n;
+  return fr ? fr[k] : k;
+}
+function stateTileImage(id, state) {
+  const ct = customById[id];
+  if (ct) {
+    const fr = ensureFrames(ct);   // v5.2: lazy — painted tiles fetch on demand
+    // v5.43: clamp — a state's frame list can outrun the art on disk
+    const idx = fr && fr.length ? Math.min(stateFrameIdx(ct, state || "idle"), fr.length - 1) : 0;
+    const im = fr && fr[idx];
+    return (im && im.complete && im.naturalWidth) ? im : null;
+  }
+  return tileFrameImage(id);
+}
+// v5.43: any visible motion on this tile — legacy fx OR a state record
+// with a non-still state. Drives the map overdraw set.
+function tileHasMotion(id) {
+  if (tileFx(id)) return true;
+  const t = customById[id];
+  const S = t && t.anim && t.anim.states;
+  if (!S) return false;
+  return Object.keys(S).some(s => {
+    const p = S[s] || {};
+    return (p.act && p.act !== "none") || !!p.magic;
+  });
+}
+// v5.43: Rive-style state blend — numeric params lerp, act/magic/frames
+// cut at the midpoint. `t` is 0..1.
+function animLerpParams(a, b, t) {
+  const o = {};
+  ["amp", "hue", "sat", "bri", "frame_ms"].forEach(k => {
+    o[k] = a[k] + (b[k] - a[k]) * t;
+  });
+  o.act = t < 0.5 ? a.act : b.act;
+  o.magic = t < 0.5 ? a.magic : b.magic;
+  o.frames = t < 0.5 ? a.frames : b.frames;
+  return o;
+}
+// v5.43: which animation state a patrol stop triggers — an explicit
+// per-stop state wins; otherwise sleep mode -> Sleep, stand -> Idle.
+function npcAnimStateFor(pz) {
+  if (pz && pz.state && ANIM_STATES.indexOf(pz.state) >= 0) return pz.state;
+  return (pz && pz.mode === "sleep") ? "sleep" : "idle";
+}
+// v5.43: flip an NPC's state with a blend from the previous one.
+function setNpcState(n, st, now) {
+  if (n.animState === st) return;
+  const prev = n.animState || "walk";
+  n.animState = st;
+  n.animBlend = { from: prev, at: (now === undefined ? performance.now() : now),
+                  ms: 150 };
 }
 // v5.37: draw a custom tile sprite with its animator FX — magic aura behind,
 // action transform, color filter. Map, NPCs, objects, hero, and the tray
 // preview all come through here so FX reads the same everywhere.
-function drawFxTile(g, id, im, dx, dy, dw, dh, now) {
-  const f = tileFx(id);
-  if (!f) { g.drawImage(im, dx, dy, dw, dh); return; }
+// v5.43: state-aware — `state` picks the animation state (default idle),
+// `blend` is an in-progress Rive-style transition {from, at, ms}. The raw
+// motion math lives in drawFxParams so the beginner card previews can share
+// it with a synthetic parameter set.
+function drawFxTile(g, id, im, dx, dy, dw, dh, now, state, blend) {
+  const t = customById[id];
+  if (!tileFx(id) && !(t && t.anim)) { g.drawImage(im, dx, dy, dw, dh); return; }
   if (now === undefined) now = performance.now();
-  let ox = 0, oy = 0, sc = 1;
-  if (f.act === "bounce") oy = -Math.abs(Math.sin(now / 180)) * dh * 0.14;
-  else if (f.act === "float") oy = -(0.5 + 0.5 * Math.sin(now / 600)) * dh * 0.16;
-  else if (f.act === "pulse") sc = 1 + 0.09 * Math.sin(now / 300);
-  else if (f.act === "shake") ox = Math.sin(now / 55) * dw * 0.035;
+  let p = stateParams(t, state || "idle");
+  if (blend && blend.from && now < blend.at + blend.ms) {
+    const bt = Math.min(1, Math.max(0, (now - blend.at) / Math.max(1, blend.ms)));
+    p = animLerpParams(stateParams(t, blend.from), p, bt);
+  }
+  drawFxParams(g, im, dx, dy, dw, dh, now, p);
+}
+function drawFxParams(g, im, dx, dy, dw, dh, now, p) {
+  const k = ((p.amp === undefined || p.amp === null) ? 100 : p.amp) / 100;
+  let ox = 0, oy = 0, sc = 1, scx = 1, scy = 1, rot = 0;
+  let hue = p.hue || 0, sat = (p.sat === undefined ? 100 : p.sat),
+      bri = (p.bri === undefined ? 100 : p.bri);
+  const act = p.act || "none";
+  if (act === "alive") sc = 1 + 0.035 * k * Math.sin(now / 700);
+  else if (act === "bounce") {
+    const sq = Math.max(0, Math.cos(now / 180));
+    oy = -Math.abs(Math.sin(now / 180)) * dh * 0.14 * k;
+    scx = 1 + 0.07 * k * sq; scy = 1 - 0.10 * k * sq;   // squash on landing
+  }
+  else if (act === "float") oy = -(0.5 + 0.5 * Math.sin(now / 900)) * dh * 0.07 * k;
+  else if (act === "pulse") {   // v5.43: conservative H/S/B throb
+    const s = Math.sin(now / 400) * k;
+    hue += 6 * s; sat += 8 * s; bri += 10 * s;
+  }
+  else if (act === "shake") {
+    ox = Math.sin(now / 55) * dw * 0.035 * k;
+    rot = 0.035 * k * Math.sin(now / 70);
+  }
   const cx = dx + dw / 2, cy = dy + dh / 2;
-  if (f.magic) {
+  if (p.magic) {
     g.save();
-    g.globalAlpha = 0.55;
-    const r = Math.max(dw, dh) * 0.85;
+    const r = Math.max(dw, dh) * 0.85 * (0.55 + 0.45 * k);
+    g.globalAlpha = 0.30 + 0.35 * k;
     const gr = g.createRadialGradient(cx, cy, 0, cx, cy, r);
-    gr.addColorStop(0, f.magic);
+    gr.addColorStop(0, p.magic);
     gr.addColorStop(1, "rgba(0,0,0,0)");
     g.fillStyle = gr;
     g.fillRect(cx - r, cy - r, r * 2, r * 2);
     g.restore();
   }
   g.save();
-  if (sc !== 1) { g.translate(cx, cy); g.scale(sc, sc); g.translate(-cx, -cy); }
+  if (rot) { g.translate(cx, cy); g.rotate(rot); g.translate(-cx, -cy); }
+  if (sc !== 1 || scx !== 1 || scy !== 1) {
+    g.translate(cx, cy); g.scale(sc * scx, sc * scy); g.translate(-cx, -cy);
+  }
   if (ox || oy) g.translate(ox, oy);
-  if (f.hue || f.sat !== 100 || f.bri !== 100)
-    g.filter = "hue-rotate(" + f.hue + "deg) saturate(" + f.sat +
-               "%) brightness(" + f.bri + "%)";
+  if (hue || sat !== 100 || bri !== 100)
+    g.filter = "hue-rotate(" + hue + "deg) saturate(" + sat +
+               "%) brightness(" + bri + "%)";
   g.drawImage(im, dx, dy, dw, dh);
   g.restore();   // restores transform AND filter
 }
@@ -2831,7 +2982,7 @@ function render() {
     for (let y = av.y0; y <= av.y1; y++) for (let x = av.x0; x <= av.x1; x++) {
       const id = tiles[y][x];
       if (!animOnMap.has(id) && !fxOnMap.has(id)) continue;
-      const im = tileFrameImage(id);
+      const im = stateTileImage(id, "idle");   // v5.43: idle state on the map
       if (!im) continue;
       const px = x * tilePx, py = y * tilePx;
       ctx.fillStyle = "rgba(0,0,0,0.30)";
@@ -3188,7 +3339,7 @@ function strokeAdd(cell) {
   }
   const bt = customById[bv];          // v3.0: track animated placements
   if (bt && bt.frames > 1) animOnMap.add(bv);
-  if (tileFx(bv)) fxOnMap.add(bv);  // v5.37: FX tiles overdraw live
+  if (tileHasMotion(bv)) fxOnMap.add(bv);  // v5.37: FX tiles overdraw live
   dirtyFlag = true;   // v2.0: assume unsaved until the server says otherwise
   queueRender();      // v5.3: strokes coalesce into one render per frame
   Sfx.paint();        // v5.8: throttled brush tick while dragging
@@ -3344,7 +3495,7 @@ function applyStrokeEcho(cells) {
     if (c.layer === "tiles" && c.v) {
       const t = customById[c.v];
       if (t && t.frames > 1) animOnMap.add(c.v);
-      if (typeof tileFx === "function" && tileFx(c.v)) fxOnMap.add(c.v);
+      if (typeof tileHasMotion === "function" && tileHasMotion(c.v)) fxOnMap.add(c.v);
     }
     markBaseDirty(c.x - 1, c.y - 1, c.x + 1, c.y + 1);
   }
@@ -4014,13 +4165,23 @@ function renderInspect() {
       let sh = '<small>stop pauses — he rests here, walk up and talk</small>';
       p.points.forEach((pt, i) => {
         const e = pz[i] || { secs: 0, mode: "stand" };
+        // v5.43: the third control picks which animation state this stop
+        // triggers (auto = sleep->Sleep, stand->Idle).
+        let stOpts = '<option value="">auto</option>';
+        ANIM_STATES.forEach(s => {
+          stOpts += '<option value="' + s + '"' +
+            ((e.state || "") === s ? " selected" : "") + '>' + s + '</option>';
+        });
         sh += '<div class="stoprow"><span class="sn">#' + (i + 1) + '</span>' +
           '<button data-act="stoppause" data-pid="' + p.id + '" data-i="' + i + '">' +
           (e.secs > 0 ? "⏸ " + fmtPauseSecs(e.secs) : "⏸ off") + '</button>' +
           '<button data-act="stopmode" data-pid="' + p.id + '" data-i="' + i + '"' +
           (e.mode === "sleep" ? ' class="on"' : "") +
           (e.secs > 0 ? "" : " disabled") + '>' +
-          (e.mode === "sleep" ? "😴 sleep" : "🧍 stand") + '</button></div>';
+          (e.mode === "sleep" ? "😴 sleep" : "🧍 stand") + '</button>' +
+          '<select data-act="stopstate" data-pid="' + p.id + '" data-i="' + i + '"' +
+          (e.secs > 0 ? "" : " disabled") + ' title="animation state at this stop">' +
+          stOpts + '</select></div>';
       });
       h += inspRow("pauses", sh, "");
     }
@@ -4068,6 +4229,11 @@ function renderInspect() {
   box.innerHTML = h;
   box.querySelectorAll("button[data-act]").forEach(b => {
     b.onclick = () => inspectAction(b.dataset.act, b.dataset);
+  });
+  // v5.43: per-stop animation-state selects ride the same action dispatcher
+  box.querySelectorAll("select[data-act]").forEach(s => {
+    s.onchange = () => inspectAction(s.dataset.act,
+      Object.assign({}, s.dataset, { v: s.value }));
   });
   // v5.29: the size slider previews live, commits on release
   const sizeInp = box.querySelector("input[data-size]");
@@ -4162,15 +4328,12 @@ async function inspectAction(act, d) {
   } else if (act === "stoppause" || act === "stopmode") {
     // v5.40: per-stop pause timers — ⏸ cycles off→3s→10s→30s→1m→2m→5m,
     // 🧍/😴 flips the pose. One call saves the whole stop list.
+    // v5.43: the list preserves each stop's animation state (see stopstate).
     const p = patrols.find(p => p.id === +d.pid);
     if (!p) { toast("that patrol is gone"); return; }
     const i = +d.i;
     if (!(i >= 0 && i < p.points.length)) return;
-    const pz = p.points.map((_, j) => {
-      const e = (p.pauses && p.pauses[j]) || {};
-      return { secs: Math.max(0, e.secs | 0),
-               mode: e.mode === "sleep" ? "sleep" : "stand" };
-    });
+    const pz = pauseListFor(p);
     if (act === "stoppause") {
       const CYCLE = [0, 3, 10, 30, 60, 120, 300];
       pz[i].secs = CYCLE[(CYCLE.indexOf(pz[i].secs) + 1) % CYCLE.length];
@@ -4180,6 +4343,23 @@ async function inspectAction(act, d) {
     const r = await api("/api/patrols/pauses", { id: p.id, pauses: pz });
     if (!r.ok) { toast("pause didn't save"); return; }
     await loadPatrols(); renderInspect(); render();
+    return;
+  } else if (act === "stopstate") {
+    // v5.43: per-stop animation state — at stop 3 he can enter the Sleep
+    // state (or any state); "auto" follows the pause mode (sleep->Sleep,
+    // stand->Idle).
+    const p = patrols.find(p => p.id === +d.pid);
+    if (!p) { toast("that patrol is gone"); return; }
+    const i = +d.i;
+    if (!(i >= 0 && i < p.points.length)) return;
+    const pz = pauseListFor(p);
+    const v = d.v || "";
+    if (ANIM_STATES.indexOf(v) >= 0) pz[i].state = v;
+    else delete pz[i].state;
+    const r = await api("/api/patrols/pauses", { id: p.id, pauses: pz });
+    if (!r.ok) { toast("pause didn't save"); return; }
+    await loadPatrols(); renderInspect(); render();
+    toast(v ? "at stop " + (i + 1) + " he enters " + v : "stop " + (i + 1) + " back to auto");
     return;
   } else if (act === "reroute") {
     // v5.0: re-route without deleting first — the old route is replaced
@@ -5195,6 +5375,7 @@ async function buildNpcs() {
       ax: (p.x != null) ? p.x : null, ay: (p.y != null) ? p.y : null,
       interactive: starts[pi].interactive, role: starts[pi].role, nm: starts[pi].nm,
       size: starts[pi].size || 1.0,   // v5.29: walkers keep their build size
+      animState: "walk", animBlend: null,   // v5.43: Rive-style states
       x: starts[pi].x, y: starts[pi].y, flip: false, away: false,
       pauseUntil: 0, pauseMode: null, pauseStop: -1,   // v5.40: stop pauses
       hazard: !!patrols[pi].hazard });  // v5.12: Melody's hazard patrols
@@ -5213,6 +5394,7 @@ function npcTick(dt) {
     if (n.pauseUntil) {
       if (now < n.pauseUntil) { if (n.pauseMode === "sleep") resting = true; return; }
       n.pauseUntil = 0; n.pauseMode = null;   // timer done — walk on
+      setNpcState(n, "walk", now);            // v5.43: back to the Walk state
     }
     let rem = dt * SPEED, guard = 0;
     while (rem > 0 && guard++ < 10) {
@@ -5236,6 +5418,9 @@ function npcTick(dt) {
           n.pauseUntil = now + pz.secs * 1000;
           n.pauseMode = pz.mode === "sleep" ? "sleep" : "stand";
           n.pauseStop = si;
+          // v5.43: the stop triggers an animation state — sleep pause ->
+          // Sleep state, standing pause -> Idle, or the stop's own pick.
+          setNpcState(n, npcAnimStateFor(pz), now);
           break;   // he rests here — leftover movement is dropped, no sliding
         }
       }
@@ -5245,7 +5430,9 @@ function npcTick(dt) {
   else if (resting) queueRender();   // v5.40: the 💤 bob needs frames too
 }
 function drawNpc(n) {
-  const im = n.away ? npcSilhouette(n.tile_id) : tileFrameImage(n.tile_id);
+  // v5.43: the walker's current animation state picks his frame + motion
+  const st = n.animState || "walk";
+  const im = n.away ? npcSilhouette(n.tile_id) : stateTileImage(n.tile_id, st);
   if (!im) return;
   const px = n.x * tilePx, py = n.y * tilePx;
   const sz = n.size || 1.0;   // v5.29: walkers keep their build size
@@ -5255,11 +5442,12 @@ function drawNpc(n) {
   ctx.beginPath();
   ctx.ellipse(px + tilePx / 2, py + tilePx * 0.88, tilePx * 0.34 * sz, tilePx * 0.13 * sz, 0, 0, Math.PI * 2);
   ctx.fill();
+  const nowD = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
   if (!n.away && n.flip) {   // walking left — mirror him (no flip needed for a back view)
     ctx.save(); ctx.translate(dx + dw, dy); ctx.scale(-1, 1);
-    drawFxTile(ctx, n.tile_id, im, 0, 0, dw, dh); ctx.restore();
+    drawFxTile(ctx, n.tile_id, im, 0, 0, dw, dh, nowD, st, n.animBlend); ctx.restore();
   } else {
-    drawFxTile(ctx, n.tile_id, im, dx, dy, dw, dh);
+    drawFxTile(ctx, n.tile_id, im, dx, dy, dw, dh, nowD, st, n.animBlend);
   }
   if (n.hazard) {   // v5.12: Melody's challengers wear a red ring
     ctx.strokeStyle = "rgba(255,90,90,0.95)"; ctx.lineWidth = Math.max(2, tilePx / 16);
@@ -5299,6 +5487,17 @@ function npcSilhouette(tile_id) {
 // mumble. Per-run memory, like the server's _rule_shown: one hello per
 // stop-visit. The anchor cell stays the server's territory (its rules fire
 // on the object layer), so the client only speaks for pauses away from home.
+// v5.43: the stop list the pause editor sends — preserves secs, mode, and
+// the per-stop animation state (extractable for tests).
+function pauseListFor(p) {
+  return p.points.map((_, j) => {
+    const e = (p.pauses && p.pauses[j]) || {};
+    const rec = { secs: Math.max(0, e.secs | 0),
+                  mode: e.mode === "sleep" ? "sleep" : "stand" };
+    if (e.state && ANIM_STATES.indexOf(e.state) >= 0) rec.state = e.state;
+    return rec;
+  });
+}
 let walkerShown = new Set();
 function walkerNear(x, y) {
   return npcs.filter(n => n.pauseUntil &&
@@ -5878,14 +6077,16 @@ setInterval(() => {
   if (document.hidden || touchDrag) return;   // v5.36.1: no redraws mid-drag; the
                                               // stale lastAnimSig re-renders once after
   let sig = "";
-  animOnMap.forEach(id => { const t = customById[id]; if (t) sig += frameIdx(t) + ","; });
+  // v5.43: idle-state frames drive the map signature now
+  animOnMap.forEach(id => { const t = customById[id]; if (t) sig += stateFrameIdx(t, "idle") + ","; });
   // v5.37: action FX moves on the same tick — a time quantum keeps him dancing
   let fxAct = false;
-  fxOnMap.forEach(id => { const f = tileFx(id); if (f && f.act !== "none") fxAct = true; });
+  fxOnMap.forEach(id => { const t = customById[id];
+    if (t && stateParams(t, "idle").act !== "none") fxAct = true; });
   if (fxAct) sig += "a" + Math.floor(performance.now() / 150) + ",";
   if (!playMode) patrols.forEach(p => {   // v3.4: standing NPCs animate too
     const t = customById[p.tile_id];
-    if (t && t.frames > 1) sig += "p" + frameIdx(t) + ",";
+    if (t && t.frames > 1) sig += "p" + stateFrameIdx(t, "idle") + ",";
   });
   if (!sig) return;
   if (sig !== lastAnimSig) { lastAnimSig = sig; queueRender(); }   // v5.3: batched
@@ -6160,22 +6361,179 @@ async function bringToLife() {
     scope: importScope,   // v3.8
     frame_ms: +$("import-ms").value || 400,
     image: importFiles[0].dataUrl,
+    // v5.43: the picked beginner motion rides along (default Still Alive)
+    anim_preset: beginnerPreset,
+    intensity: (cardAmp[beginnerPreset] == null ? 70 : cardAmp[beginnerPreset]),
+    magic: beginnerMagic,
   });
   if (!r.ok) { toast("couldn't bring it to life: " + (r.error || "unknown")); return; }
   $("import-form").hidden = true; importFiles = []; renderBgStatus();
   await loadCustomTiles();
+  const t = customById[r.tile.id];
+  if (t) { if (r.tile.anim) t.anim = r.tile.anim; t.fx = r.tile.fx || null; }
+  lastLifeTile = r.tile.id; appliedPreset[r.tile.id] = beginnerPreset;
   selTile = r.tile.id;
   buildPalette();
   // v5.29: a guardrail correction outranks the flourish — he needs to
   // know where it landed more than that it walked.
   if (r.note) { toast(r.note); return; }
+  const motionName = (ANIM_PRESETS[beginnerPreset] || ANIM_PRESETS.alive).name;
   toast(r.method === "sliced"
-    ? "Found " + r.frames + " poses — he's alive! Tap the map to place him"
-    : "One picture, no problem — I made him walk! Tap the map to place him");
+    ? "Found " + r.frames + " poses — he's alive! The motion cards below can change how he moves"
+    : "One picture, no problem — " + motionName + " frames baked in, all editable. The motion cards below can change it");
 }
 // v5.40.1: the import-block duplicate is gone — the Animation menu's
 // beginner button is the one home for Bring to life.
 $("menu-animate-life").onclick = () => { closeOverlays(); bringToLife(); };
+// v5.43: beginner preset cards — live thumbnails, one feel slider each.
+// Tapping a card dresses the target tile in that motion as EDITABLE
+// frames + an animation-state record (the same record Advanced edits) —
+// never a dead-end render. The last-tapped card also rides along on the
+// next Bring to life.
+const ANIM_PRESETS = {
+  alive:  { name: "Still Alive", emoji: "🌿", desc: "subtle breathing", act: "alive" },
+  bounce: { name: "Bounce", emoji: "🦘", desc: "squash & stretch", act: "bounce" },
+  float:  { name: "Float", emoji: "🎈", desc: "gentle hover", act: "float" },
+  pulse:  { name: "Pulse", emoji: "💓", desc: "soft color throb", act: "pulse" },
+  shake:  { name: "Shake", emoji: "📳", desc: "tiny tremble", act: "shake" },
+  magic:  { name: "Magic Aura", emoji: "✨", desc: "colored glow", act: "none", magic: true },
+};
+const ANIM_MAGIC_COLORS = ["#ffd75f", "#6db7ff", "#7dff8a", "#c99aff", "#ff7d7d", "#ffffff"];
+let beginnerPreset = "alive", beginnerMagic = "#ffd75f";
+const cardAmp = {};   // per-preset feel, 0..100
+try {
+  beginnerPreset = localStorage.getItem("crumbs.animPreset") || "alive";
+  beginnerMagic = localStorage.getItem("crumbs.animMagic") || "#ffd75f";
+  const sa = JSON.parse(localStorage.getItem("crumbs.animAmp") || "{}");
+  Object.keys(ANIM_PRESETS).forEach(k => {
+    cardAmp[k] = (sa[k] == null ? 70 : Math.max(0, Math.min(100, +sa[k] || 0)));
+  });
+} catch (e) {
+  Object.keys(ANIM_PRESETS).forEach(k => { cardAmp[k] = 70; });
+}
+if (!ANIM_PRESETS[beginnerPreset]) beginnerPreset = "alive";
+function saveCardAmp() {
+  try {
+    localStorage.setItem("crumbs.animPreset", beginnerPreset);
+    localStorage.setItem("crumbs.animMagic", beginnerMagic);
+    localStorage.setItem("crumbs.animAmp", JSON.stringify(cardAmp));
+  } catch (e) {}
+}
+let lastLifeTile = 0;       // most recent bring-to-life tile id
+const appliedPreset = {};   // tileId -> preset key currently dressing him
+function beginnerTargetTile() {
+  let t = customById[selTile];
+  if (t && t.frames) return t;
+  t = lastLifeTile && customById[lastLifeTile];
+  return (t && t.frames) ? t : null;
+}
+function buildAnimCards() {
+  const box = $("anim-cards");
+  if (!box || box.children.length) return;
+  Object.keys(ANIM_PRESETS).forEach(key => {
+    const P = ANIM_PRESETS[key];
+    const card = document.createElement("div");
+    card.className = "anim-card" + (key === beginnerPreset ? " picked" : "");
+    card.dataset.preset = key;
+    card.innerHTML =
+      '<button class="anim-card-tap" title="Dress him in ' + P.name + '">' +
+      '<canvas width="56" height="56"></canvas>' +
+      '<span class="anim-card-meta"><span class="anim-card-name">' + P.emoji + " " + P.name + '</span><br>' +
+      '<span class="anim-card-desc">' + P.desc + '</span></span></button>' +
+      '<div class="anim-card-ctl"><span>feel</span>' +
+      '<input type="range" min="0" max="100" step="1" value="' + cardAmp[key] + '" aria-label="motion intensity">' +
+      '<span class="av">' + cardAmp[key] + '</span></div>' +
+      (P.magic ? '<div class="anim-card-sw">' +
+        ANIM_MAGIC_COLORS.map(c => '<button data-c="' + c + '" title="aura color" style="background:' + c + '"' +
+          (c === beginnerMagic ? ' class="on"' : "") + '></button>').join("") + '</div>' : "");
+    card.querySelector(".anim-card-tap").onclick = () => applyBeginnerPreset(key);
+    const rng = card.querySelector("input[type=range]");
+    const val = card.querySelector(".av");
+    rng.oninput = () => {
+      cardAmp[key] = +rng.value; val.textContent = rng.value; saveCardAmp();
+      // live: if this motion is dressing him now, retune it in place
+      const t = beginnerTargetTile();
+      if (t && appliedPreset[t.id] === key) applyBeginnerPreset(key, true);
+    };
+    if (P.magic) card.querySelectorAll(".anim-card-sw button").forEach(b => {
+      b.onclick = () => {
+        beginnerMagic = b.dataset.c; saveCardAmp();
+        card.querySelectorAll(".anim-card-sw button")
+          .forEach(x => x.classList.toggle("on", x === b));
+        const t = beginnerTargetTile();
+        if (t && appliedPreset[t.id] === "magic") applyBeginnerPreset("magic", true);
+      };
+    });
+    box.appendChild(card);
+  });
+}
+// the cards' live thumbnails — the target tile, dancing each card's motion
+function animCardsTick() {
+  const m = $("m-anim");
+  if (!m || !m.classList.contains("open") || animMode !== "beginner") return;
+  const t = beginnerTargetTile();
+  document.querySelectorAll("#anim-cards .anim-card").forEach(card => {
+    const cv = card.querySelector("canvas");
+    if (!cv) return;
+    const g = cv.getContext("2d");
+    g.clearRect(0, 0, cv.width, cv.height);
+    if (!t) return;
+    const im = tileFrameImage(t.id);
+    if (!im) return;
+    const key = card.dataset.preset, P = ANIM_PRESETS[key];
+    const iw = im.naturalWidth || 48, ih = im.naturalHeight || 48;
+    const s = Math.min((cv.width - 8) / iw, (cv.height - 8) / ih);
+    const dw = Math.max(1, Math.round(iw * s)), dh = Math.max(1, Math.round(ih * s));
+    const dx = Math.round((cv.width - dw) / 2), dy = Math.round((cv.height - dh) / 2);
+    drawFxParams(g, im, dx, dy, dw, dh, performance.now(), {
+      act: P.act, amp: cardAmp[key],
+      hue: 0, sat: 100, bri: 100,
+      magic: P.magic ? beginnerMagic : null, frame_ms: 500,
+    });
+  });
+}
+let applyT = null;
+async function pushAnimState(t) {
+  const r = await api("/api/custom/update",
+                      { id: t.id, anim: t.anim, fx: t.fx || null });
+  if (!r.ok) { toast("couldn't save motion: " + (r.error || "unknown")); return false; }
+  if (r.tile) { if (r.tile.anim) t.anim = r.tile.anim; t.fx = r.tile.fx || null; }
+  return true;
+}
+async function applyBeginnerPreset(key, live) {
+  const t = beginnerTargetTile();
+  if (!t) {
+    if (!live) toast("bring a picture to life first — then pick his motion");
+    return;
+  }
+  const P = ANIM_PRESETS[key];
+  const amp = (cardAmp[key] == null ? 70 : cardAmp[key]);
+  beginnerPreset = key; saveCardAmp();
+  document.querySelectorAll("#anim-cards .anim-card").forEach(c =>
+    c.classList.toggle("picked", c.dataset.preset === key));
+  const st = ms => ({ act: P.act, amp: amp, hue: 0, sat: 100, bri: 100,
+                      magic: P.magic ? beginnerMagic : null, frame_ms: ms });
+  t.anim = { v: 1, default: "idle",
+    states: {
+      idle: st(900),
+      walk: st(420),
+      sleep: { act: "none", amp: 0, hue: 0, sat: 100, bri: 100,
+               magic: null, frame_ms: 1200, frames: [0] },
+    },
+    transitions: { "idle->walk": { blend_ms: 150 },
+                   "walk->idle": { blend_ms: 200 } } };
+  t.fx = { hue: 0, sat: 100, bri: 100, act: P.act,
+           magic: P.magic ? beginnerMagic : null };
+  appliedPreset[t.id] = key;
+  rebuildFxOnMap(); queueRender(); previewTick(true);
+  if (live) {   // slider drag — save debounced, no toast storm
+    clearTimeout(applyT);
+    applyT = setTimeout(() => pushAnimState(t), 600);
+    return;
+  }
+  if (await pushAnimState(t))
+    toast(P.emoji + " " + P.name + " — flip to Advanced to tweak every knob");
+}
 // v5.37: the animator's one home — beginner/advanced toggle in the Animation
 // menu, and the live tray preview up top of the Tiles tray.
 let animMode = "beginner";
@@ -6196,31 +6554,47 @@ function animTargetTile() {
   const t = customById[selTile];
   return (t && t.frames) ? t : null;
 }
+// v5.43: the advanced controls dress up one animation STATE of the
+// selected imported tile — the same record the beginner cards write.
+let animEditState = "idle";
+document.querySelectorAll("#anim-state button").forEach(b => b.onclick = () => {
+  animEditState = b.dataset.s;
+  document.querySelectorAll("#anim-state button")
+    .forEach(x => x.classList.toggle("on", x === b));
+  loadAnimTarget();
+});
+function ensureAnim(t) {
+  if (!t.anim || typeof t.anim !== "object" || !t.anim.states)
+    t.anim = { v: 1, default: "idle", states: {}, transitions: {} };
+  return t.anim;
+}
 function loadAnimTarget() {
   const t = animTargetTile();
   const ok = !!t;
-  ["anim-ms", "anim-hue", "anim-sat", "anim-bri", "anim-clear"].forEach(id => {
+  ["anim-ms", "anim-hue", "anim-sat", "anim-bri", "anim-amp", "anim-clear"].forEach(id => {
     $(id).disabled = !ok;
   });
-  document.querySelectorAll("#anim-act button, #anim-magic-sw button").forEach(b => {
+  document.querySelectorAll("#anim-act button, #anim-magic-sw button, #anim-state button").forEach(b => {
     b.disabled = !ok;
   });
   if (!t) {
     $("anim-target").innerHTML = "Select an <b>imported tile</b> in the Tiles tray first — then dress him up here.";
     return;
   }
-  const f = Object.assign({}, FX_DEFAULT, t.fx);
+  const p = stateParams(t, animEditState);
   $("anim-target").innerHTML = "<b>Target:</b> " + esc(t.name) +
-    (t.frames > 1 ? " · " + t.frames + " frames" : " · still");
-  $("anim-ms").value = t.frame_ms || 400;
-  $("anim-ms-val").textContent = (t.frame_ms || 400) + "ms";
-  $("anim-hue").value = f.hue; $("anim-hue-val").textContent = f.hue + "°";
-  $("anim-sat").value = f.sat; $("anim-sat-val").textContent = f.sat + "%";
-  $("anim-bri").value = f.bri; $("anim-bri-val").textContent = f.bri + "%";
+    (t.frames > 1 ? " · " + t.frames + " frames" : " · still") +
+    " · <b>" + animEditState + "</b>";
+  $("anim-ms").value = p.frame_ms;
+  $("anim-ms-val").textContent = p.frame_ms + "ms";
+  $("anim-hue").value = p.hue; $("anim-hue-val").textContent = p.hue + "°";
+  $("anim-sat").value = p.sat; $("anim-sat-val").textContent = p.sat + "%";
+  $("anim-bri").value = p.bri; $("anim-bri-val").textContent = p.bri + "%";
+  $("anim-amp").value = p.amp; $("anim-amp-val").textContent = p.amp;
   document.querySelectorAll("#anim-act button").forEach(b =>
-    b.classList.toggle("on", b.dataset.a === f.act));
+    b.classList.toggle("on", b.dataset.a === p.act));
   document.querySelectorAll("#anim-magic-sw button").forEach(b =>
-    b.classList.toggle("on", (b.dataset.c || null) === f.magic));
+    b.classList.toggle("on", (b.dataset.c || null) === p.magic));
   $("anim-ms").disabled = !(t.frames > 1);   // timing only matters when he moves
 }
 // changes hit the tile instantly (map + preview) and save themselves, debounced
@@ -6232,22 +6606,36 @@ function animPush() {
     const t = animTargetTile(); if (!t) return;
     const body = { id: t.id, frame_ms: t.frame_ms };
     body.fx = t.fx || null;   // null erases server-side
+    body.anim = t.anim || null;   // v5.43: the shared state record
     const r = await api("/api/custom/update", body);
     if (!r.ok) toast("couldn't save FX: " + (r.error || "unknown"));
+    else if (r.tile && r.tile.anim) t.anim = r.tile.anim;
   }, 700);
 }
 function animSetFx(patch) {
   const t = animTargetTile(); if (!t) return;
-  const f = Object.assign({}, FX_DEFAULT, t.fx, patch);
-  t.fx = (f.hue === 0 && f.sat === 100 && f.bri === 100 &&
-          f.act === "none" && !f.magic) ? null : f;
+  ensureAnim(t);
+  const cur = stateParams(t, animEditState);
+  const next = Object.assign({}, cur, patch);
+  const st = { act: next.act, amp: Math.max(0, Math.min(100, Math.round(next.amp))),
+               hue: next.hue, sat: next.sat, bri: next.bri, magic: next.magic,
+               frame_ms: Math.max(80, Math.min(2000, Math.round(next.frame_ms))) };
+  if (next.frames) st.frames = next.frames;
+  t.anim.states[animEditState] = st;
+  if (animEditState === (t.anim.default || "idle")) {
+    // the default state IS the legacy fx view — keep both in step so the
+    // map, tray, and old saves render the same tile the same way
+    t.fx = (st.act === "none" && st.hue === 0 && st.sat === 100 &&
+            st.bri === 100 && !st.magic)
+      ? null
+      : { hue: st.hue, sat: st.sat, bri: st.bri, act: st.act, magic: st.magic };
+    t.frame_ms = st.frame_ms;
+  }
   animPush();
 }
 $("anim-ms").oninput = e => {
-  const t = animTargetTile(); if (!t) return;
-  t.frame_ms = +e.target.value;
-  $("anim-ms-val").textContent = t.frame_ms + "ms";
-  animPush();
+  $("anim-ms-val").textContent = e.target.value + "ms";
+  animSetFx({ frame_ms: +e.target.value });
 };
 $("anim-hue").oninput = e => {
   $("anim-hue-val").textContent = e.target.value + "°";
@@ -6261,6 +6649,10 @@ $("anim-bri").oninput = e => {
   $("anim-bri-val").textContent = e.target.value + "%";
   animSetFx({ bri: +e.target.value });
 };
+$("anim-amp").oninput = e => {
+  $("anim-amp-val").textContent = e.target.value;
+  animSetFx({ amp: +e.target.value });
+};
 document.querySelectorAll("#anim-act button").forEach(b => b.onclick = () => {
   document.querySelectorAll("#anim-act button").forEach(x => x.classList.remove("on"));
   b.classList.add("on");
@@ -6273,7 +6665,8 @@ document.querySelectorAll("#anim-magic-sw button").forEach(b => b.onclick = () =
 });
 $("anim-clear").onclick = () => {
   const t = animTargetTile(); if (!t) return;
-  t.fx = null; loadAnimTarget(); animPush(); toast("FX cleared");
+  t.fx = null; t.anim = null; delete appliedPreset[t.id];
+  loadAnimTarget(); animPush(); toast("FX cleared");
 };
 // opening the Animation menu refreshes the advanced target
 document.querySelector('.mtop[data-menu="m-anim"]').addEventListener("click", () => {
@@ -6288,7 +6681,8 @@ function previewTick(force) {
   const W2 = pvCv.width, H2 = pvCv.height;
   pvCtx.clearRect(0, 0, W2, H2);
   if (!t) { $("anim-preview-cap").textContent = "select a tile to see him move"; return; }
-  const im = tileFrameImage(t.id);
+  // v5.43: the preview shows the state Advanced is currently dressing up
+  const im = stateTileImage(t.id, (typeof animEditState !== "undefined") ? animEditState : "idle");
   if (!im) { $("anim-preview-cap").textContent = t.name + " — loading…"; return; }
   const iw = im.naturalWidth || 48, ih = im.naturalHeight || 48;
   const s = Math.min((W2 - 16) / iw, (H2 - 16) / ih);
@@ -6296,18 +6690,24 @@ function previewTick(force) {
   const dx = Math.round((W2 - dw) / 2), dy = Math.round((H2 - dh) / 2);
   drawFxTile(pvCtx, t.id, im, dx, dy, dw, dh);
   const f = tileFx(t.id);
+  // v5.43: caption describes the state being edited (falls back to legacy fx)
+  const pf = stateParams(t, (typeof animEditState !== "undefined") ? animEditState : "idle");
   let cap = t.name + (t.frames > 1
-    ? " · " + t.frames + " frames · " + (t.frame_ms || 400) + "ms" : " · still");
-  if (f) {
+    ? " · " + t.frames + " frames · " + (pf.frame_ms || 400) + "ms" : " · still");
+  {
     const bits = [];
-    if (f.act !== "none") bits.push(f.act);
-    if (f.magic) bits.push("magic");
-    if (f.hue || f.sat !== 100 || f.bri !== 100) bits.push("tinted");
+    if (pf.act !== "none") bits.push(pf.act);
+    if (pf.magic) bits.push("magic");
+    if (pf.hue || pf.sat !== 100 || pf.bri !== 100) bits.push("tinted");
     if (bits.length) cap += " · " + bits.join(" · ");
   }
+  // v5.43: the beginner motion dressing him, if one is
+  const ap = appliedPreset[t.id];
+  if (ap && ANIM_PRESETS[ap]) cap += " · " + ANIM_PRESETS[ap].name;
   $("anim-preview-cap").textContent = cap;
 }
-setInterval(() => previewTick(false), 150);
+setInterval(() => { previewTick(false); animCardsTick(); }, 150);
+buildAnimCards();   // v5.43: beginner preset cards
 $("import-add").onclick = async () => {
   // v4.9: every picture becomes its own tile — importing three characters
   // gives you three thumbnails, not one chip with three faces stacked in it.

@@ -5,6 +5,23 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.47.3 — 2026-09-27
+
+**Brush bar docks above the bottom sheet.** The Phase-3 floating brush bar
+(Stamp/Paint/Erase/•••) still sat at viewport-bottom with z-31 while the
+Phase-5 sheet claimed z-60 — only the buttons' tops peeked out above the
+sheet's grabber and the tools were unreachable. The bar (and the •••
+more-tools sheet) now move inside `#hud-sheet` at boot and ride it as
+absolutely-positioned children 12px above its top edge, so they stay fully
+visible and tappable in peek/half/full and slide off-screen with the sheet
+in play mode (correct — paint tools rest while playing). The always-visible
+Play FAB steps up to 144px in peek so it never overlaps the docked bar; it
+keeps its classic 84px spot in half/full/closed. Safe-area handling is
+unchanged: the sheet keeps its `env(safe-area-inset-bottom)` padding and the
+docked tools anchor above it, never under Safari's toolbar. Touch
+arbitration is untouched (canvas gesture logic is independent of the bar's
+parent).
+
 ## v5.47.2 — 2026-09-27
 
 **Boot black-map fix + last map per player.** v5.47.1 shipped a boot-killing

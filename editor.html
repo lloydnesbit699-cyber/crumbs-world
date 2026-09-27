@@ -556,6 +556,21 @@
   #brush-bar button .blbl { display: block; font-size: 9px; margin-top: 1px;
                             color: #bbb; }
   #brush-bar button.on .blbl { color: #ffd75f; }
+  /* v5.47.3: the brush bar docks ABOVE the sheet — it used to float at
+     viewport-bottom (z-31) and slid under the sheet (z-60), leaving only
+     the button tops peeking out. As a child of #hud-sheet it rides every
+     detent (peek/half/full) and stays fully visible + tappable; in play
+     mode it slides off-screen with the sheet, which is correct (paint
+     tools rest while playing). */
+  #hud-sheet #brush-bar { position: absolute; bottom: calc(100% + 12px);
+                          left: 50%; transform: translateX(-50%);
+                          z-index: auto; }
+  /* v5.47.3: the ••• more-tools sheet rides above the docked bar, same
+     deal — it used to open at viewport-bottom:80px and would have sat
+     half under the docked bar. */
+  #hud-sheet #more-sheet { position: absolute; bottom: calc(100% + 80px);
+                           left: 50%; transform: translateX(-50%);
+                           z-index: auto; }
   /* v5.46: the semantic layer dock — the conceptual-layer ribbon. Stacked
      above the brush bar in the thumb zone; every target >= 52px. */
   #sem-dock { position: fixed; left: 50%; transform: translateX(-50%);
@@ -5611,6 +5626,7 @@ async function togglePlay() {
     $("btn-play").classList.add("on");
     // v5.47: full map for the run — the sheet hides, the FAB becomes Stop
     $("hud-sheet").classList.add("closed");
+    positionFabForSheet();   // v5.47.3: bar is off-screen with the sheet — FAB home
     const _fab = $("btn-play-fab");
     _fab.textContent = "■"; _fab.classList.add("playing");
     await refreshRules();   // v3.7: this build's rules + touch controls
@@ -5632,6 +5648,7 @@ async function togglePlay() {
     $("btn-play").classList.remove("on");
     // v5.47: the sheet comes back, the FAB becomes Play again
     $("hud-sheet").classList.remove("closed");
+    positionFabForSheet();   // v5.47.3: restore the peek clearance if needed
     const _fab2 = $("btn-play-fab");
     _fab2.textContent = "▶"; _fab2.classList.remove("playing");
     playOver = false; $("end-overlay").hidden = true;   // v3.9
@@ -11564,7 +11581,20 @@ function setSheetHeight(h) {
   const el = $("hud-sheet");
   el.classList.remove("peek", "half", "full", "closed");
   el.classList.add(sheetHeight);
+  positionFabForSheet();
   renderSheet();
+}
+// v5.47.3: the brush bar docks above the sheet, so in peek the Play FAB
+// steps up to clear it (bar top = 64 + 12 + 56 = 132 from viewport bottom;
+// FAB bottom = 144). In half/full the bar rides high above the FAB's home,
+// and in play (sheet closed) the bar is off-screen with the sheet — so the
+// FAB keeps its classic spot everywhere else.
+function positionFabForSheet() {
+  const fab = $("btn-play-fab"), sh = $("hud-sheet");
+  if (!fab || !sh) return;
+  const closed = sh.classList.contains("closed");
+  fab.style.bottom = (!closed && sheetHeight === "peek")
+    ? "calc(144px + env(safe-area-inset-bottom))" : "";
 }
 function setSheetView(v) { sheetView = v; renderSheet(); }
 // the auto state machine picks the view from the selection; an override
@@ -11655,6 +11685,12 @@ function initHudSheet() {
   const pv = $("sheet-view-paint");
   const dock = $("sem-dock");
   Array.from(dock.children).forEach(ch => pv.appendChild(ch));
+  // v5.47.3: the brush bar + ••• more-sheet dock above the sheet — they
+  // used to float at viewport-bottom (z-31/z-40) and slid under the sheet
+  // (z-60). Riding the sheet keeps every tool tappable in all detents.
+  const _sh0 = $("hud-sheet"), _bb0 = $("brush-bar"), _ms0 = $("more-sheet");
+  if (_bb0 && _bb0.parentElement !== _sh0) _sh0.prepend(_bb0);
+  if (_ms0 && _ms0.parentElement !== _sh0) _sh0.prepend(_ms0);
   const rp = document.createElement("div");
   rp.id = "room-presets";
   rp.innerHTML = '<button id="btn-room" type="button">🏠 Dungeon room</button>' +
@@ -11682,6 +11718,7 @@ function initHudSheet() {
   initSheetGrab();
   initPlayFab();
   initBudgetStrip();
+  positionFabForSheet();   // v5.47.3: boot starts in peek — FAB clears the docked bar
 }
 
 // -- the budget strip ---------------------------------------------------------

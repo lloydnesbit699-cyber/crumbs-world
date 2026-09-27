@@ -75,10 +75,15 @@
   .menu-drop #btn-stop { color: #ff8a8a; }
   .menu-drop hr { border: none; border-top: 1px solid #333; margin: 6px 0; }
   /* v5.27: non-action version header (narrow phones hide #title, so the
-     version lives one tap away at the top of Setup instead) */
+     version also lived one tap away in a menu) — v5.33: no menu uses it now,
+     kept for future use */
   .menu-drop .menu-ver { display: block; padding: 8px 12px 6px; color: #888;
                          font-size: 12px; font-weight: 600; cursor: default;
                          border-bottom: 1px solid #333; margin-bottom: 4px; }
+  /* v5.33: small explanatory lines inside menu dropdowns (Animation menu) */
+  .menu-drop .menu-note { display: block; padding: 6px 12px; color: #888;
+                         font-size: 12px; line-height: 1.45; cursor: default; }
+  .menu-drop .menu-note b { color: #b9a8ff; }
   /* v5.21: gold dot on the File menu when an update is waiting */
   .upd-dot { color: #ffd75f; font-size: 9px; vertical-align: 2px; }
   .update-notes { max-height: 38dvh; overflow-y: auto; margin: 4px 10px 8px;
@@ -111,6 +116,8 @@
   .tray-hint { font-weight: normal; color: #777; font-size: 11px; margin-left: 6px; }
   #tray-left .seg { margin-bottom: 10px; }
   #tray-right button { width: 100%; margin-bottom: 8px; }
+  /* v5.33: section divider inside the tools tray (Build-menu items live below it) */
+  #tray-right hr { border: none; border-top: 1px solid #333; margin: 10px 0; }
 
   .sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 55;
            background: #161616; border-top: 1px solid #333;
@@ -729,9 +736,8 @@
     <button class="mtop" data-menu="m-file">File</button>
     <button class="mtop" data-menu="m-edit">Edit</button>
     <button class="mtop" data-menu="m-view">View</button>
-    <button class="mtop" data-menu="m-build">Build</button>
     <button class="mtop" data-menu="m-play">Play</button>
-    <button class="mtop" data-menu="m-setup">Setup</button>
+    <button class="mtop" data-menu="m-anim">Animation</button>
   </div>
   <span id="title">Crumbs HUD <small>tile painter &middot; v%%CRUMBS_VERSION%%</small></span>
   <span id="pills">
@@ -755,6 +761,21 @@
   <button id="menu-load">Load&hellip;</button>
   <button id="menu-slots" title="Save and load play sessions">Save slots&hellip;</button>
   <button id="menu-export" title="Download this map as a PNG picture">Export PNG</button>
+  <button id="menu-recovery" title="Checkpoint slots and recent recovery events">Recovery&hellip;</button>
+  <hr>
+  <!-- v5.33: account + world controls moved here from the old Setup menu -->
+  <div id="user-section" hidden>
+    <div class="user-line"><span id="user-name"></span><span id="world-label"></span></div>
+    <button id="btn-world-switch" title="Switch between My vault and the shared Commons">&#x1F310; Switch world</button>
+    <button id="btn-change-pass" title="Change your password">&#x1F511; Change password</button>
+    <button id="btn-2fa" title="Two-factor authentication">&#x1F510; Two-factor auth</button>
+    <button id="btn-logout" title="Log out">&#x23FB; Log out</button>
+  </div>
+  <button id="menu-users" hidden title="Create accounts, reset passwords">&#x1F465; Users&hellip;</button>
+  <hr>
+  <button id="menu-setup">Setup&hellip;</button>
+  <button id="menu-key" title="Set the share key for a public HUD">Key&hellip;</button>
+  <button id="menu-log" title="Server event log (debugging)">Server log</button>
   <hr>
   <button id="menu-update" title="Pull the latest app files over this install">&#128260; Check for updates</button>
   <button id="menu-rollback" title="Restore the app files from before the last update">&#8617; Roll back update</button>
@@ -764,6 +785,10 @@
 <div id="m-edit" class="menu-drop">
   <button id="btn-undo" title="Undo">Undo</button>
   <button id="btn-redo" title="Redo">Redo</button>
+  <hr>
+  <!-- v5.33: moved here from the Play menu -->
+  <button id="btn-buildbreak" title="Pause the sim and paint the map without leaving play">&#128396;&#65039; Touch up (pause sim)</button>
+  <button id="btn-record" title="Record the screen as a video">&#9679; Record</button>
 </div>
 <div id="m-view" class="menu-drop">
   <button id="btn-light" title="Fog/lighting overlay in play mode">Lighting: on</button>
@@ -774,34 +799,16 @@
   <button id="menu-height" title="Tint the map by elevation">&#9978; Height: off</button>
   <button id="menu-sight" title="Dim what the hero can't see (play mode)">&#128065; Sight: off</button>
 </div>
-<div id="m-build" class="menu-drop">
-  <button id="menu-rules" title="Game rules for this build">Rules&hellip;</button>
-  <button id="menu-world" title="This world's nature: meters and traits">World&hellip;</button>
-  <button id="menu-melody" title="Melody's workshop: missions, goals & playtests">&#128156; Melody&hellip;</button>
-  <button id="menu-items" title="Weapons, tools and things to carry">&#127890; Items&hellip;</button>
-  <button id="menu-npcs" title="Villagers and merchants">&#129489; Folks&hellip;</button>
-  <hr>
-  <button id="menu-validate" title="Check the map: spawn, reachability, tile ids">Check map</button>
-</div>
 <div id="m-play" class="menu-drop">
   <button id="btn-play" title="Walk the map">&#9654; Play</button>
-  <button id="btn-buildbreak" title="Pause the sim and paint the map without leaving play">&#128396;&#65039; Touch up (pause sim)</button>
-  <button id="btn-record" title="Record the screen as a video">&#9679; Record</button>
 </div>
-<div id="m-setup" class="menu-drop">
-  <div class="menu-ver">Crumbs HUD <span class="ver-num">v%%CRUMBS_VERSION%%</span></div>
-  <button id="menu-setup">Setup&hellip;</button>
-  <button id="menu-key" title="Set the share key for a public HUD">Key&hellip;</button>
-  <button id="menu-log" title="Server event log (debugging)">Server log</button>
-  <button id="menu-recovery" title="Checkpoint slots and recent recovery events">Recovery&hellip;</button>
-  <div id="user-section" hidden>
-    <div class="user-line"><span id="user-name"></span><span id="world-label"></span></div>
-    <button id="btn-world-switch" title="Switch between My vault and the shared Commons">&#x1F310; Switch world</button>
-    <button id="btn-change-pass" title="Change your password">&#x1F511; Change password</button>
-    <button id="btn-2fa" title="Two-factor authentication">&#x1F510; Two-factor auth</button>
-    <button id="btn-logout" title="Log out">&#x23FB; Log out</button>
-  </div>
-  <button id="menu-users" hidden title="Create accounts, reset passwords">&#x1F465; Users&hellip;</button>
+<!-- v5.33: the old Setup menu is now Animation — one home for the animator.
+     Beginner one-button control up front; advanced settings land in Phase 2. -->
+<div id="m-anim" class="menu-drop">
+  <button id="menu-animate-life" title="One-button animation: bring an imported picture to life">&#10024; Bring to life</button>
+  <div class="menu-note">Needs one imported picture — bring it in through the Tiles tray first, then tap here.</div>
+  <hr>
+  <div class="menu-note"><b>Advanced</b> (coming next): color manipulation, action effects, in-depth animator controls.</div>
 </div>
 
 <div id="stage"><canvas id="grid"></canvas></div>
@@ -940,6 +947,13 @@
   <button id="btn-traits" title="Stamp nature traits: hot, cold, sharp, wood, food">Traits</button>
   <button id="btn-link" title="Stamp the selected collision under painted tiles">Stamp collision: off</button>
   <button id="btn-clear" class="danger" title="Clear current layer">Clear layer</button>
+  <!-- v5.33: moved here from the old Build menu (still global for now —
+       Phase 2 makes them selection-aware in this same tray) -->
+  <hr>
+  <button id="menu-rules" title="Game rules for this build">Rules&hellip;</button>
+  <button id="menu-world" title="This world's nature: meters and traits">World&hellip;</button>
+  <button id="menu-items" title="Weapons, tools and things to carry">&#127890; Items&hellip;</button>
+  <button id="menu-npcs" title="Villagers and merchants">&#129489; Folks&hellip;</button>
 </aside>
 
 <div id="sheet-inspect" class="sheet">
@@ -1080,12 +1094,8 @@
   <div id="recovery-events"></div>
 </div>
 
-<div id="sheet-check" class="sheet">
-  <div class="grab"></div>
-  <div class="tray-head">Map check</div>
-  <div id="check-list"></div>
-</div>
-
+<!-- v5.33: sheet-check removed with the Check map menu item (redundant with
+     seeded biome generation). The /api/validate endpoint stays server-side. -->
 <div id="sheet-melody" class="sheet">
   <div class="grab"></div>
   <div class="tray-head">&#128156; Melody's workshop <span class="tray-hint">missions, goals &amp; playtests</span></div>
@@ -4872,7 +4882,13 @@ $("import-cancel").onclick = () => { $("import-form").hidden = true; importFiles
 // no slicing talk, no grid talk.
 // v3.4: "Bring to life" — a sheet gets sliced, a single pose gets a walk
 // faked for it. Either way one tap makes a living character.
-$("import-animate").onclick = async () => {
+// v5.33: named so the Animation menu's beginner button shares it — the menu
+// button bails with a hint when there's no import waiting.
+async function bringToLife() {
+  if (importFiles.length !== 1) {
+    toast("import one picture in the Tiles tray first, then bring it to life");
+    return;
+  }
   const r = await api("/api/bring-to-life", {
     name: $("import-name").value.trim().slice(0, 24) || "custom",
     preset: importPreset,
@@ -4891,7 +4907,9 @@ $("import-animate").onclick = async () => {
   toast(r.method === "sliced"
     ? "Found " + r.frames + " poses — he's alive! Tap the map to place him"
     : "One picture, no problem — I made him walk! Tap the map to place him");
-};
+}
+$("import-animate").onclick = bringToLife;
+$("menu-animate-life").onclick = () => { closeOverlays(); bringToLife(); };
 $("import-add").onclick = async () => {
   // v4.9: every picture becomes its own tile — importing three characters
   // gives you three thumbnails, not one chip with three faces stacked in it.
@@ -6068,23 +6086,6 @@ $("menu-sight").onclick = async () => {
   $("menu-sight").classList.toggle("on", showSight);
   await refreshSight();
 };
-$("menu-validate").onclick = async () => {
-  closeOverlays();
-  const r = await api("/api/validate", {});
-  const list = $("check-list");
-  list.innerHTML = "";
-  if (r.ok && !r.issues.length) {
-    list.innerHTML = '<div class="checkrow good">Map checks out — spawn found, every floor reachable, all tile ids valid.</div>';
-  } else {
-    (r.issues || [{ msg: "check failed" }]).forEach(i => {
-      const d = document.createElement("div");
-      d.className = "checkrow bad";
-      d.textContent = i.msg;
-      list.appendChild(d);
-    });
-  }
-  toggleOverlay("sheet-check");
-};
 async function renderSlots() {
   const list = $("slots-list");
   list.innerHTML = "";
@@ -7241,7 +7242,7 @@ async function melodyDemo() {
         "Welcome to Crumbs HUD \u2014 pick a tile from the left tray.",
         "Paint with one finger. Two fingers drag to pan, pinch to zoom.",
         "Menu \u2192 Generate builds a whole map from a seed.",
-        "Hit \u25b6 Play to walk it. Menu \u2192 Check map keeps it honest."
+        "Hit \u25b6 Play to walk it. Rules, items & folks now live in the Tools tray."
       ];
       steps.forEach((s, i) => setTimeout(() => toast(s), 1800 + i * 2600));
     }
@@ -7254,7 +7255,9 @@ const MELODY_HELLOS = [
   "Got a dungeon that needs a purpose? Give me the goal, the difficulty, the reward — I'll handle the board.",
 ];
 function melodySay(t) { $("melody-says").textContent = t; }
-$("menu-melody").onclick = () => { toggleOverlay("sheet-melody"); openMelody(); };
+// v5.33: workshop entry moved here from the old Build menu — the dock is
+// Melody's single entry point now.
+$("melody-workshop").onclick = () => { toggleOverlay("sheet-melody"); openMelody(); };
 
 async function openMelody() {
   melodySay(MELODY_HELLOS[Math.floor(Math.random() * MELODY_HELLOS.length)]);
@@ -7438,6 +7441,9 @@ async function deleteMission(id) {
     <span id="melody-quota"></span>
     <button id="melody-speaker" title="Melody's voice">&#128266;</button>
     <button id="melody-clear" title="Clear conversation">&#10218;</button>
+    <!-- v5.33: workshop moved here from the old Build menu — the dock is the
+         single Melody entry point now -->
+    <button id="melody-workshop" title="Melody's workshop: missions, goals & playtests">&#128156;</button>
     <button id="melody-min" title="Minimize">&minus;</button>
   </div>
   <div id="melody-log"></div>

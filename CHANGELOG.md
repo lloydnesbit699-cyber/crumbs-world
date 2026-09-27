@@ -5,6 +5,18 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.38.0 — 2026-09-27
+
+**QR code for 2FA enrollment.** The signup-time "Protect with authenticator
+app" step now shows a scannable QR code (the standard `otpauth://totp/`
+URI) alongside the manual key — both encode the same server-issued secret.
+Same treatment in Setup → 2FA, which had the same manual-key-only gap. The
+QR encoder is hand-rolled and dependency-free (byte mode, EC level M,
+versions 1–10): no external QR API is ever called, so the TOTP secret never
+leaves the device/server. The rest of the flow is untouched — 10-minute
+single-use pending ticket, six-digit confirmation, eight one-time recovery
+codes, wrong codes don't consume the ticket, manual key remains as fallback.
+
 ## v5.37.0 — 2026-09-27
 
 **The animator redesign.** The Animation menu is now the one home for every

@@ -125,6 +125,99 @@
   .anim-card-sw button.on { border-color: #fff; }
   #anim-state { flex-wrap: wrap; }
   #anim-state button { font-size: 12px; }
+  /* v5.44: tags as labeled chips — never spreadsheet rows. Big tap targets:
+     emoji + name + the frame count living under that tag. */
+  #anim-state.anim-tags { display: flex; gap: 6px; padding: 2px 10px 6px;
+                         flex-wrap: wrap; }
+  #anim-state.anim-tags button { flex: 1 1 30%; min-height: 52px;
+    border-radius: 12px; border: 2px solid #3a3a44; background: #1d1d22;
+    color: #eee; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 1px; padding: 6px 4px; }
+  #anim-state.anim-tags button .te { font-size: 18px; line-height: 1; }
+  #anim-state.anim-tags button .tl { font-size: 12px; font-weight: 700; }
+  #anim-state.anim-tags button .tc { font-size: 10px; color: #999; }
+  #anim-state.anim-tags button.on { border-color: #ffd75f; background: #2a2416; }
+  /* v5.44: the filmstrip — Aseprite-style, phone-first. Horizontal scroll,
+     big thumb cards, per-card duration badge, fat dup/del buttons. */
+  #filmstrip-wrap { padding: 2px 0 4px; }
+  #filmstrip { display: flex; gap: 8px; overflow-x: auto; padding: 6px 10px;
+               -webkit-overflow-scrolling: touch; }
+  .fcard { flex: none; width: 96px; background: #1d1d22;
+           border: 2px solid #3a3a44; border-radius: 12px; overflow: hidden;
+           position: relative; }
+  .fcard.sel { border-color: #ffd75f; }
+  .fcard img { width: 92px; height: 92px; display: block;
+               image-rendering: pixelated; background: #101014; }
+  .fcard .fpos { position: absolute; top: 2px; left: 4px; font-size: 10px;
+                 color: #999; text-shadow: 0 1px 2px #000; }
+  .fcard .fms { position: absolute; top: 2px; right: 2px; font-size: 10px;
+                background: #0d0d12cc; color: #ffd75f; border-radius: 6px;
+                padding: 1px 5px; }
+  .fcard .fms.mod { color: #7dff8a; }   /* per-frame timing override */
+  .fcard .fops { display: flex; border-top: 1px solid #2c2c34; }
+  .fcard .fops button { flex: 1; min-height: 40px; font-size: 17px;
+                        background: none; border: 0; color: #ccc; }
+  .fcard .fops button:active { background: #2a2a32; }
+  #film-transport { display: flex; align-items: center; gap: 8px;
+                    padding: 4px 12px; }
+  #film-play { min-width: 52px; min-height: 44px; font-size: 18px;
+               border-radius: 12px; border: 2px solid #3a3a44;
+               background: #1d1d22; color: #eee; }
+  #film-play.on { border-color: #7dff8a; }
+  #film-scrub { flex: 1; min-width: 0; min-height: 44px; }
+  #film-onion { min-height: 44px; border-radius: 12px; font-size: 13px;
+                border: 2px solid #3a3a44; background: #1d1d22; color: #eee;
+                padding: 0 10px; }
+  #film-onion.on { border-color: #c99aff; background: #241a2e; }
+  #film-canvas { width: calc(100% - 20px); height: auto; display: block;
+                 margin: 2px 10px; border-radius: 10px; background: #0d0d12;
+                 border: 1px solid #2c2c34; image-rendering: pixelated; }
+  #frame-editor { background: #141419; border-top: 1px solid #2c2c34;
+                  border-bottom: 1px solid #2c2c34; padding: 4px 0 6px;
+                  margin: 4px 0; }
+  #frame-editor .fe-row { display: flex; align-items: center; gap: 6px;
+                          padding: 3px 12px; font-size: 12px; color: #aaa; }
+  #frame-editor .fe-row input[type=range] { flex: 1; min-width: 0; }
+  #frame-editor .fe-row .av { min-width: 56px; text-align: right; color: #eee; }
+  #frame-editor .fe-btns { display: flex; gap: 6px; padding: 4px 12px; }
+  #frame-editor .fe-btns button { flex: 1; min-height: 44px; font-size: 15px;
+    border-radius: 10px; border: 2px solid #3a3a44; background: #1d1d22;
+    color: #eee; }
+  /* v5.44: FX layers — stackable, reorderable with up/down arrows (never
+     drag handles on a phone), eye toggles, one-tap add row. */
+  #fx-layers { padding: 2px 10px 4px; display: flex; flex-direction: column;
+               gap: 6px; }
+  .fx-layer { display: flex; align-items: center; gap: 6px; background: #1d1d22;
+              border: 2px solid #3a3a44; border-radius: 12px; padding: 4px 6px; }
+  .fx-layer.off { opacity: 0.55; }
+  .fx-layer .fe { font-size: 20px; }
+  .fx-layer .fn { flex: 1; min-width: 0; font-size: 12px; font-weight: 700;
+                  color: #eee; }
+  .fx-layer .fn small { display: block; font-weight: 400; color: #999;
+                        font-size: 10px; }
+  .fx-layer input[type=range] { width: 74px; flex: none; }
+  .fx-layer button { min-width: 40px; min-height: 40px; font-size: 15px;
+    border-radius: 10px; border: 1px solid #3a3a44; background: #141419;
+    color: #eee; padding: 0 6px; }
+  .fx-layer button.eye-off { opacity: 0.5; }
+  #fx-add { display: flex; gap: 6px; padding: 2px 10px 6px; flex-wrap: wrap; }
+  #fx-add button { flex: 1 1 28%; min-height: 44px; font-size: 13px;
+    border-radius: 10px; border: 2px dashed #3a3a44; background: none;
+    color: #ccc; }
+  /* v5.44: export — four big buttons + the JSON share import */
+  #anim-export { display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+                 padding: 4px 10px 8px; }
+  #anim-export button { min-height: 52px; font-size: 13px; font-weight: 700;
+    border-radius: 12px; border: 2px solid #3a3a44; background: #1d1d22;
+    color: #eee; }
+  #anim-export button small { display: block; font-weight: 400; font-size: 10px;
+                             color: #999; }
+  #anim-import-row { display: flex; gap: 8px; padding: 0 10px 8px;
+                     align-items: center; }
+  #anim-import-row label { flex: 1; min-height: 44px; display: flex;
+    align-items: center; justify-content: center; font-size: 13px;
+    border-radius: 12px; border: 2px dashed #3a3a44; color: #ccc; }
+  #anim-import-file { display: none; }
   .stoprow select { font-size: 12px; max-width: 92px; }
   /* v5.37: the tray's live animator preview — upper portion only, the tray
      keeps its own scroll for card/import/palette below */
@@ -918,11 +1011,47 @@
   </div>
   <div id="anim-advanced" hidden>
     <div class="menu-note" id="anim-target"></div>
-    <!-- v5.43: which animation state these controls dress up -->
-    <div class="menu-note"><b>State</b> — which moment you're dressing up</div>
-    <div class="seg" id="anim-state">
-      <button data-s="idle" class="on">idle</button><button data-s="walk">walk</button><button data-s="sleep">sleep</button><button data-s="talk">talk</button><button data-s="hurt">hurt</button><button data-s="magic">magic</button>
+    <!-- v5.44: tags as labeled chips — which moment you're dressing up.
+         Never spreadsheet rows: emoji + name + the frame count under it. -->
+    <div class="menu-note"><b>Tags</b> — which moment you're dressing up</div>
+    <div class="anim-tags" id="anim-state">
+      <button data-s="idle" class="on"><span class="te">🌿</span><span class="tl">Idle</span><span class="tc"></span></button><button data-s="walk"><span class="te">🚶</span><span class="tl">Walk</span><span class="tc"></span></button><button data-s="sleep"><span class="te">😴</span><span class="tl">Sleep</span><span class="tc"></span></button><button data-s="talk"><span class="te">💬</span><span class="tl">Talk</span><span class="tc"></span></button><button data-s="hurt"><span class="te">💥</span><span class="tl">Hurt</span><span class="tc"></span></button><button data-s="magic"><span class="te">✨</span><span class="tl">Magic</span><span class="tc"></span></button>
     </div>
+    <!-- v5.44: the filmstrip — Aseprite-style, phone-first. Horizontal cards
+         with per-frame timing badges, scrubber, duplicate/delete, onion
+         skinning. Everything here edits the shared anim record. -->
+    <div class="menu-note"><b>Filmstrip</b> — his frames, left to right. Tap one to pick it up.</div>
+    <div id="filmstrip-wrap">
+      <div id="filmstrip"></div>
+      <div id="film-transport">
+        <button id="film-play" title="play / pause the strip">▶</button>
+        <input id="film-scrub" type="range" min="0" max="0" value="0" step="1" aria-label="scrub frames">
+        <button id="film-onion" title="onion skin: ghost the frames before and after this one">🧅 onion</button>
+      </div>
+      <canvas id="film-canvas" width="300" height="150"></canvas>
+      <div id="frame-editor" hidden>
+        <div class="fe-row"><span>⏱ frame time</span><input id="fe-ms" type="range" min="80" max="2000" step="20" value="400"><span class="av" id="fe-ms-val">400ms</span></div>
+        <div class="fe-btns">
+          <button id="fe-left" title="move this frame earlier">◀ earlier</button>
+          <button id="fe-tint" title="tint just this frame (advanced)">🎨 tint: off</button>
+          <button id="fe-right" title="move this frame later">later ▶</button>
+        </div>
+        <div id="fe-tint-rows" hidden>
+          <div class="fe-row"><span>hue</span><input id="fe-hue" type="range" min="-180" max="180" step="5" value="0"><span class="av" id="fe-hue-val">0°</span></div>
+          <div class="fe-row"><span>sat</span><input id="fe-sat" type="range" min="0" max="200" step="5" value="100"><span class="av" id="fe-sat-val">100%</span></div>
+          <div class="fe-row"><span>bri</span><input id="fe-bri" type="range" min="0" max="200" step="5" value="100"><span class="av" id="fe-bri-val">100%</span></div>
+        </div>
+      </div>
+    </div>
+    <!-- v5.44: FX as non-destructive layers above the base frames —
+         stackable, reorderable (up/down arrows — never drag handles on a
+         phone), eye toggles to hide. Aura is the reusable glow renderer. -->
+    <div class="menu-note"><b>FX layers</b> — effects stacked over the frames. They never touch the art.</div>
+    <div id="fx-layers"></div>
+    <div id="fx-add"></div>
+    <!-- v5.44: tweening — auto in-betweening between poses -->
+    <div class="menu-note"><b>Smooth</b> — auto in-betweens between poses (the loop keeps its timing, just gets silkier)</div>
+    <div class="anim-field"><span class="al">tween</span><input id="anim-tween" type="range" min="0" max="4" step="1" value="0"><span class="av" id="anim-tween-val">off</span></div>
     <div class="menu-note"><b>Frame timing</b> — how fast he moves</div>
     <div class="anim-field"><span class="al">speed</span><input id="anim-ms" type="range" min="80" max="2000" step="40" value="400"><span class="av" id="anim-ms-val">400ms</span></div>
     <div class="menu-note"><b>Color</b> — repaint him without touching the art</div>
@@ -945,6 +1074,19 @@
       <button data-c="#ff7d7d" title="red" style="background:#ff7d7d"></button>
     </div>
     <button id="anim-clear">↺ Clear all FX</button>
+    <!-- v5.44: export — GIF, PNG sequence (zip), sprite sheet, and the
+         single-file JSON share format (which imports back whole). -->
+    <div class="menu-note"><b>Export</b> — take him with you</div>
+    <div id="anim-export">
+      <button data-x="gif">🎞 GIF<small>animated, shares anywhere</small></button>
+      <button data-x="pngseq">🖼 PNGs<small>zip of every frame</small></button>
+      <button data-x="sheet">🗺 Sheet<small>one sprite-sheet PNG</small></button>
+      <button data-x="json">📦 JSON<small>single-file share format</small></button>
+    </div>
+    <div id="anim-import-row">
+      <label for="anim-import-file">📥 import a shared animation</label>
+      <input id="anim-import-file" type="file" accept=".json,application/json">
+    </div>
     <div class="menu-note">Changes apply live to the selected tile and save themselves — watch him in the tray preview.</div>
   </div>
 </div>
@@ -2650,7 +2792,21 @@ function rebuildFxOnMap() {
 const ANIM_STATES = ["idle", "walk", "sleep", "talk", "hurt", "magic"];
 const ANIM_STATE_DEFAULTS = { act: "none", amp: 100, hue: 0, sat: 100,
                               bri: 100, magic: null, frame_ms: 400,
-                              frames: null };
+                              frames: null,
+                              // v5.44: the filmstrip fields — FX layers,
+                              // tween steps, per-frame mods. Pass through
+                              // untouched; null/0 = absent.
+                              fx_layers: null, tween_steps: 0,
+                              frame_mods: null };
+// v5.44: tag chips — the six states, labeled for thumbs (never rows).
+const ANIM_TAG_META = {
+  idle:  { emoji: "🌿", label: "Idle" },
+  walk:  { emoji: "🚶", label: "Walk" },
+  sleep: { emoji: "😴", label: "Sleep" },
+  talk:  { emoji: "💬", label: "Talk" },
+  hurt:  { emoji: "💥", label: "Hurt" },
+  magic: { emoji: "✨", label: "Magic" },
+};
 function stateParams(t, state) {
   const base = Object.assign({}, ANIM_STATE_DEFAULTS);
   const A = t && t.anim, S = A && A.states;
@@ -2666,16 +2822,60 @@ function stateParams(t, state) {
   base.frame_ms = (t && t.frame_ms) || 400;
   return base;
 }
+// v5.44: the filmstrip's sequence — the state's explicit frames list
+// (validated against the art on disk) or every frame in order. Positions
+// in this list are what per-frame mods and strip ops address.
+function filmstripFrames(t, state) {
+  const n = (t && t.frames) || 1;
+  const p = stateParams(t, state);
+  const fl = p.frames;
+  if (Array.isArray(fl) && fl.length) {
+    const seq = fl.filter(f => Number.isInteger(f) && f >= 0 && f < n);
+    if (seq.length) return seq;
+  }
+  const seq = [];
+  for (let i = 0; i < n; i++) seq.push(i);
+  return seq;
+}
+// v5.44: the per-frame mods for one strip position ({ms?, hue?, sat?,
+// bri?} — "apply to this frame"), or null. Keys may be ints or strings.
+function frameModsFor(p, pos) {
+  const mods = (p && p.frame_mods && typeof p.frame_mods === "object")
+    ? p.frame_mods : {};
+  const m = mods[pos] !== undefined ? mods[pos] : mods[String(pos)];
+  return (m && typeof m === "object") ? m : null;
+}
+// v5.44: the tween-aware playhead — which strip position is showing, its
+// file, its duration, and the crossfade into the next frame. Each frame's
+// slot splits into (steps+1) equal ticks (the frame, then its in-betweens),
+// so tweening never changes the loop's total time — it just gets smoother.
+// `now` may be passed explicitly (tests, frozen strip scrubbing).
+function stateTick(t, state, now) {
+  const p = stateParams(t, state);
+  const seq = filmstripFrames(t, state);
+  const n = seq.length;
+  const durs = seq.map((f, j) => {
+    const m = frameModsFor(p, j) || {};
+    return Math.max(80, Math.min(2000, +m.ms || p.frame_ms || 400));
+  });
+  const total = durs.reduce((a, b) => a + b, 0) || 400;
+  const s = Math.max(0, Math.min(4, p.tween_steps | 0));
+  let tt = (now === undefined ? performance.now() : now) % total;
+  if (tt < 0) tt += total;
+  let j = 0;
+  while (j < n - 1 && tt >= durs[j]) { tt -= durs[j]; j++; }
+  const tick = durs[j] / (s + 1);
+  const k = Math.min(s, Math.floor(tt / tick));
+  return { pos: j, file: seq[j], ms: durs[j], step: k,
+           blend: (s ? k / (s + 1) : 0), bfile: seq[(j + 1) % n],
+           bpos: (j + 1) % n, steps: s, phase: j / n, n: n };
+}
 // v5.43: which frame of a state is showing — honors the state's own
 // frame list (sleep can freeze on frame 0) and its own timing.
+// v5.44: delegates to the tween-aware playhead so per-frame timing reads
+// on the map too (the map skips the crossfade itself).
 function stateFrameIdx(t, state, now) {
-  const p = stateParams(t, state);
-  const fr = (p.frames && p.frames.length) ? p.frames : null;
-  const n = fr ? fr.length : ((t && t.frames) || 1);
-  if (n <= 1) return 0;
-  const ms = Math.max(80, p.frame_ms || 400);
-  const k = Math.floor((now === undefined ? performance.now() : now) / ms) % n;
-  return fr ? fr[k] : k;
+  return stateTick(t, state, now).file;
 }
 function stateTileImage(id, state) {
   const ct = customById[id];
@@ -2697,7 +2897,10 @@ function tileHasMotion(id) {
   if (!S) return false;
   return Object.keys(S).some(s => {
     const p = S[s] || {};
-    return (p.act && p.act !== "none") || !!p.magic;
+    // v5.44: a lone FX layer counts as motion even with act "none"
+    return (p.act && p.act !== "none") || !!p.magic ||
+           (p.fx_layers && p.fx_layers.some(l => l && l.visible !== false)) ||
+           !!p.tween_steps;
   });
 }
 // v5.43: Rive-style state blend — numeric params lerp, act/magic/frames
@@ -2710,6 +2913,10 @@ function animLerpParams(a, b, t) {
   o.act = t < 0.5 ? a.act : b.act;
   o.magic = t < 0.5 ? a.magic : b.magic;
   o.frames = t < 0.5 ? a.frames : b.frames;
+  // v5.44: the filmstrip fields cut at the midpoint with the motion
+  o.fx_layers = t < 0.5 ? a.fx_layers : b.fx_layers;
+  o.tween_steps = t < 0.5 ? a.tween_steps : b.tween_steps;
+  o.frame_mods = t < 0.5 ? a.frame_mods : b.frame_mods;
   return o;
 }
 // v5.43: which animation state a patrol stop triggers — an explicit
@@ -2742,40 +2949,120 @@ function drawFxTile(g, id, im, dx, dy, dw, dh, now, state, blend) {
     const bt = Math.min(1, Math.max(0, (now - blend.at) / Math.max(1, blend.ms)));
     p = animLerpParams(stateParams(t, blend.from), p, bt);
   }
+  // v5.44: the per-frame tint rides along on the map too
+  p.fmods = frameModsFor(p, stateTick(t, state || "idle", now).pos);
   drawFxParams(g, im, dx, dy, dw, dh, now, p);
 }
+// v5.44: one motion kind's transform deltas at a loop phase — mirrors the
+// server's _apply_act_transform so the preview and the export agree.
+function fxMotion(kind, amp, phase, dw, dh) {
+  const k = Math.max(0, Math.min(1, (amp === undefined || amp === null ? 70 : amp) / 100));
+  const ph = 2 * Math.PI * (((phase % 1) + 1) % 1);
+  const o = { ox: 0, oy: 0, sc: 1, scx: 1, scy: 1, rot: 0,
+              hue: 0, sat: 0, bri: 0 };
+  if (kind === "alive") o.sc = 1 + 0.035 * k * Math.sin(ph);
+  else if (kind === "bounce") {
+    const sq = Math.max(0, Math.cos(ph));
+    o.oy = -Math.abs(Math.sin(ph)) * dh * 0.14 * k;
+    o.scx = 1 + 0.07 * k * sq; o.scy = 1 - 0.10 * k * sq;
+  }
+  else if (kind === "float") o.oy = -(0.5 + 0.5 * Math.sin(ph)) * dh * 0.07 * k;
+  else if (kind === "pulse") {
+    const s = Math.sin(ph) * k;
+    o.hue = 6 * s; o.sat = 8 * s; o.bri = 10 * s;
+  }
+  else if (kind === "shake") {
+    o.ox = Math.sin(2 * ph) * dw * 0.03 * k;
+    o.rot = (3 * Math.PI / 180) * k * Math.sin(2 * ph);
+  }
+  return o;
+}
+// v5.44: the Magic Aura as a reusable renderer effect — colored glow behind
+// the sprite, pulsing with the loop phase. Never hand-painted frames.
+function fxAuraDraw(g, cx, cy, dw, dh, color, amp, phase) {
+  if (!color) return;
+  const k = Math.max(0, Math.min(1, (amp === undefined || amp === null ? 70 : amp) / 100));
+  const a = 0.35 + 0.30 * k * Math.sin(2 * Math.PI * phase);
+  if (a <= 0.01) return;
+  const r = Math.max(dw, dh) * 0.85 * (0.55 + 0.45 * k);
+  g.save();
+  g.globalAlpha = Math.min(1, a);
+  const gr = g.createRadialGradient(cx, cy, 0, cx, cy, r);
+  gr.addColorStop(0, color);
+  gr.addColorStop(1, "rgba(0,0,0,0)");
+  g.fillStyle = gr;
+  g.fillRect(cx - r, cy - r, r * 2, r * 2);
+  g.restore();
+}
 function drawFxParams(g, im, dx, dy, dw, dh, now, p) {
-  const k = ((p.amp === undefined || p.amp === null) ? 100 : p.amp) / 100;
-  let ox = 0, oy = 0, sc = 1, scx = 1, scy = 1, rot = 0;
-  let hue = p.hue || 0, sat = (p.sat === undefined ? 100 : p.sat),
-      bri = (p.bri === undefined ? 100 : p.bri);
-  const act = p.act || "none";
-  if (act === "alive") sc = 1 + 0.035 * k * Math.sin(now / 700);
-  else if (act === "bounce") {
-    const sq = Math.max(0, Math.cos(now / 180));
-    oy = -Math.abs(Math.sin(now / 180)) * dh * 0.14 * k;
-    scx = 1 + 0.07 * k * sq; scy = 1 - 0.10 * k * sq;   // squash on landing
-  }
-  else if (act === "float") oy = -(0.5 + 0.5 * Math.sin(now / 900)) * dh * 0.07 * k;
-  else if (act === "pulse") {   // v5.43: conservative H/S/B throb
-    const s = Math.sin(now / 400) * k;
-    hue += 6 * s; sat += 8 * s; bri += 10 * s;
-  }
-  else if (act === "shake") {
-    ox = Math.sin(now / 55) * dw * 0.035 * k;
-    rot = 0.035 * k * Math.sin(now / 70);
-  }
   const cx = dx + dw / 2, cy = dy + dh / 2;
-  if (p.magic) {
-    g.save();
-    const r = Math.max(dw, dh) * 0.85 * (0.55 + 0.45 * k);
-    g.globalAlpha = 0.30 + 0.35 * k;
-    const gr = g.createRadialGradient(cx, cy, 0, cx, cy, r);
-    gr.addColorStop(0, p.magic);
-    gr.addColorStop(1, "rgba(0,0,0,0)");
-    g.fillStyle = gr;
-    g.fillRect(cx - r, cy - r, r * 2, r * 2);
-    g.restore();
+  // v5.44: per-frame tint ("apply to this frame") wins over the state's
+  // H/S/B for that frame only — the state still owns the default look.
+  const fm = p.fmods || null;
+  let hue = (fm && fm.hue !== undefined) ? fm.hue : (p.hue || 0);
+  let sat = (fm && fm.sat !== undefined) ? fm.sat
+    : (p.sat === undefined ? 100 : p.sat);
+  let bri = (fm && fm.bri !== undefined) ? fm.bri
+    : (p.bri === undefined ? 100 : p.bri);
+  // v5.44: FX layers — visible ones only; auras glow behind the sprite,
+  // motion kinds accumulate onto the base act's transform.
+  const layers = Array.isArray(p.fx_layers) ? p.fx_layers : [];
+  const vis = layers.filter(l => l && l.visible !== false &&
+                                 FX_LAYER_KINDS.indexOf(l.kind) >= 0);
+  const auras = vis.filter(l => l.kind === "aura");
+  const motions = vis.filter(l => l.kind !== "aura");
+  const amp = ((p.amp === undefined || p.amp === null) ? 100 : p.amp);
+  const k = amp / 100;
+  // the layer clock: an explicit loop phase (preview/export parity) or a
+  // free wall-clock loop for the map
+  const phased = (p.phase !== undefined && p.phase !== null);
+  const ph = phased ? p.phase : ((((now || 0) / 2400) % 1) + 1) % 1;
+  let ox = 0, oy = 0, sc = 1, scx = 1, scy = 1, rot = 0;
+  const acc = m => {
+    ox += m.ox; oy += m.oy; sc *= m.sc; scx *= m.scx; scy *= m.scy;
+    rot += m.rot; hue += m.hue; sat += m.sat; bri += m.bri;
+  };
+  if (phased) {
+    // phase-driven full stack — what the export bakes
+    if (p.magic) fxAuraDraw(g, cx, cy, dw, dh, p.magic, amp, ph);
+    auras.forEach(l => fxAuraDraw(g, cx, cy, dw, dh,
+                                  l.magic || p.magic || "#ffd75f",
+                                  l.amp, ph));
+    acc(fxMotion(p.act || "none", amp, ph, dw, dh));
+    motions.forEach(l => acc(fxMotion(l.kind, l.amp, ph, dw, dh)));
+  } else {
+    // legacy wall-clock base act — the map's look, untouched
+    const act = p.act || "none";
+    if (act === "alive") sc = 1 + 0.035 * k * Math.sin(now / 700);
+    else if (act === "bounce") {
+      const sq = Math.max(0, Math.cos(now / 180));
+      oy = -Math.abs(Math.sin(now / 180)) * dh * 0.14 * k;
+      scx = 1 + 0.07 * k * sq; scy = 1 - 0.10 * k * sq;   // squash on landing
+    }
+    else if (act === "float") oy = -(0.5 + 0.5 * Math.sin(now / 900)) * dh * 0.07 * k;
+    else if (act === "pulse") {   // v5.43: conservative H/S/B throb
+      const s = Math.sin(now / 400) * k;
+      hue += 6 * s; sat += 8 * s; bri += 10 * s;
+    }
+    else if (act === "shake") {
+      ox = Math.sin(now / 55) * dw * 0.035 * k;
+      rot = 0.035 * k * Math.sin(now / 70);
+    }
+    if (p.magic) {
+      g.save();
+      const r = Math.max(dw, dh) * 0.85 * (0.55 + 0.45 * k);
+      g.globalAlpha = 0.30 + 0.35 * k;
+      const gr = g.createRadialGradient(cx, cy, 0, cx, cy, r);
+      gr.addColorStop(0, p.magic);
+      gr.addColorStop(1, "rgba(0,0,0,0)");
+      g.fillStyle = gr;
+      g.fillRect(cx - r, cy - r, r * 2, r * 2);
+      g.restore();
+    }
+    auras.forEach(l => fxAuraDraw(g, cx, cy, dw, dh,
+                                  l.magic || p.magic || "#ffd75f",
+                                  l.amp, ph));
+    motions.forEach(l => acc(fxMotion(l.kind, l.amp, ph, dw, dh)));
   }
   g.save();
   if (rot) { g.translate(cx, cy); g.rotate(rot); g.translate(-cx, -cy); }
@@ -2788,6 +3075,70 @@ function drawFxParams(g, im, dx, dy, dw, dh, now, p) {
                "%) brightness(" + bri + "%)";
   g.drawImage(im, dx, dy, dw, dh);
   g.restore();   // restores transform AND filter
+}
+// v5.44: the FX layer kinds the client knows how to draw (mirrors the
+// server's FX_LAYER_KINDS — the eye toggle and add-row validate against it).
+const FX_LAYER_KINDS = ["bounce", "float", "pulse", "shake", "aura"];
+const FX_LAYER_META = {
+  bounce: { emoji: "🦘", name: "Bounce", desc: "squash & stretch" },
+  float:  { emoji: "🎈", name: "Float", desc: "gentle hover" },
+  pulse:  { emoji: "💓", name: "Pulse", desc: "color throb" },
+  shake:  { emoji: "📳", name: "Shake", desc: "tiny tremble" },
+  aura:   { emoji: "✨", name: "Aura", desc: "colored glow" },
+};
+// v5.44: the full-stack frame renderer — ONE code path for the tray preview
+// and the filmstrip canvas: per-frame timing, per-frame tint, state H/S/B,
+// base act, FX layers, and the tween crossfade. opts: {w, h, tick?, onion?}.
+// tick overrides the playhead (frozen scrubbing); onion ghosts the real
+// prev/next frames (red = before, green = after) behind the current one.
+function drawAnimFrame(g, t, state, now, opts) {
+  opts = opts || {};
+  const W = opts.w || 300, H = opts.h || 150;
+  g.clearRect(0, 0, W, H);
+  const fr = ensureFrames(t);
+  const tick = opts.tick || stateTick(t, state, now);
+  const seq = filmstripFrames(t, state);
+  const n = seq.length || 1;
+  const p = stateParams(t, state);
+  const ready = i => {
+    const im = fr && fr[i];
+    return (im && im.complete && im.naturalWidth) ? im : null;
+  };
+  const im = ready(tick.file);
+  if (!im) return false;
+  const iw = im.naturalWidth || 48, ih = im.naturalHeight || 48;
+  const s = Math.min((W - 16) / iw, (H - 16) / ih, 4);
+  const dw = Math.max(1, Math.round(iw * s)), dh = Math.max(1, Math.round(ih * s));
+  const dx = Math.round((W - dw) / 2), dy = Math.round((H - dh) / 2);
+  const drawOne = (file, pos, alpha) => {
+    const img = ready(file);
+    if (!img) return;
+    const q = Object.assign({}, p, { phase: pos / n,
+                                     fmods: frameModsFor(p, pos) });
+    if (alpha !== 1) { g.save(); g.globalAlpha = alpha; }
+    drawFxParams(g, img, dx, dy, dw, dh, now, q);
+    if (alpha !== 1) g.restore();
+  };
+  if (opts.onion && n > 1 && !tick.blend) {
+    // onion skin: previous frame ghosted red, next ghosted green — raw
+    // poses with no motion, so the spacing reads honestly
+    const pim = ready(seq[(tick.pos - 1 + n) % n]);
+    const nim = ready(seq[(tick.pos + 1) % n]);
+    g.save();
+    g.globalAlpha = 0.35;
+    if (pim) {
+      g.filter = "sepia(1) saturate(4) hue-rotate(-45deg)";
+      g.drawImage(pim, dx, dy, dw, dh);
+    }
+    if (nim) {
+      g.filter = "sepia(1) saturate(4) hue-rotate(95deg)";
+      g.drawImage(nim, dx, dy, dw, dh);
+    }
+    g.restore();
+  }
+  drawOne(tick.file, tick.pos, 1);
+  if (tick.blend > 0.01) drawOne(tick.bfile, tick.bpos, tick.blend);
+  return true;
 }
 // v5.29: object-layer cells are None | int | {tid,size,hero,flavor,
 // interactive,role}. The int is the legacy shape — a bare tile id with
@@ -6500,6 +6851,57 @@ async function pushAnimState(t) {
   if (r.tile) { if (r.tile.anim) t.anim = r.tile.anim; t.fx = r.tile.fx || null; }
   return true;
 }
+// v5.44: two views, same data — a beginner card tap is a MERGE, not a
+// wipe. The card's motion (act/amp/magic/timing) lands on idle+walk; every
+// Advanced edit (frame lists, per-frame mods, FX layers, tweening, other
+// states, transitions) survives. Pure: operates on the record object only,
+// so the filmstrip tests can exercise the round-trip.
+function mergeBeginnerPreset(anim, key, amp, magicColor) {
+  const P = (typeof ANIM_PRESETS !== "undefined" && ANIM_PRESETS[key]) ||
+            (typeof ANIM_PRESETS !== "undefined" && ANIM_PRESETS.alive);
+  const A = (anim && typeof anim === "object" && anim.states)
+    ? JSON.parse(JSON.stringify(anim))
+    : { v: 1, states: {}, transitions: {} };
+  A.v = 2;
+  A.default = A.default || "idle";
+  const keep = st => {
+    st = st || {};
+    return { frames: st.frames, frame_mods: st.frame_mods,
+             fx_layers: st.fx_layers, tween_steps: st.tween_steps,
+             hue: st.hue, sat: st.sat, bri: st.bri };
+  };
+  const mk = (old, ms) => {
+    const o = Object.assign(keep(old),
+      { act: P.act, amp: amp, magic: P.magic ? magicColor : null,
+        frame_ms: ms });
+    Object.keys(o).forEach(k => { if (o[k] === undefined) delete o[k]; });
+    return o;
+  };
+  A.states.idle = mk(A.states.idle, 900);
+  A.states.walk = mk(A.states.walk, 420);
+  if (!A.states.sleep)
+    A.states.sleep = { act: "none", amp: 0, hue: 0, sat: 100, bri: 100,
+                       magic: null, frame_ms: 1200, frames: [0] };
+  A.transitions = A.transitions || {};
+  if (!A.transitions["idle->walk"])
+    A.transitions["idle->walk"] = { blend_ms: 150 };
+  if (!A.transitions["walk->idle"])
+    A.transitions["walk->idle"] = { blend_ms: 200 };
+  return A;
+}
+// v5.44: the legacy fx mirror follows the default state's effective look
+function mirrorLegacyFx(t) {
+  const st = (t.anim && t.anim.states &&
+              t.anim.states[t.anim.default || "idle"]) || {};
+  const hue = st.hue || 0, sat = (st.sat === undefined ? 100 : st.sat),
+        bri = (st.bri === undefined ? 100 : st.bri);
+  t.fx = (st.act === "none" && !hue && sat === 100 && bri === 100 &&
+          !st.magic)
+    ? null
+    : { hue: hue, sat: sat, bri: bri, act: st.act || "none",
+        magic: st.magic || null };
+  if (st.frame_ms) t.frame_ms = st.frame_ms;
+}
 async function applyBeginnerPreset(key, live) {
   const t = beginnerTargetTile();
   if (!t) {
@@ -6511,21 +6913,12 @@ async function applyBeginnerPreset(key, live) {
   beginnerPreset = key; saveCardAmp();
   document.querySelectorAll("#anim-cards .anim-card").forEach(c =>
     c.classList.toggle("picked", c.dataset.preset === key));
-  const st = ms => ({ act: P.act, amp: amp, hue: 0, sat: 100, bri: 100,
-                      magic: P.magic ? beginnerMagic : null, frame_ms: ms });
-  t.anim = { v: 1, default: "idle",
-    states: {
-      idle: st(900),
-      walk: st(420),
-      sleep: { act: "none", amp: 0, hue: 0, sat: 100, bri: 100,
-               magic: null, frame_ms: 1200, frames: [0] },
-    },
-    transitions: { "idle->walk": { blend_ms: 150 },
-                   "walk->idle": { blend_ms: 200 } } };
-  t.fx = { hue: 0, sat: 100, bri: 100, act: P.act,
-           magic: P.magic ? beginnerMagic : null };
+  // v5.44: merge — the card dresses idle+walk, Advanced edits survive
+  t.anim = mergeBeginnerPreset(t.anim, key, amp, beginnerMagic);
+  mirrorLegacyFx(t);
   appliedPreset[t.id] = key;
   rebuildFxOnMap(); queueRender(); previewTick(true);
+  if (animMode === "advanced") { loadAnimTarget(); loadFilmstrip(); }
   if (live) {   // slider drag — save debounced, no toast storm
     clearTimeout(applyT);
     applyT = setTimeout(() => pushAnimState(t), 600);
@@ -6559,6 +6952,7 @@ function animTargetTile() {
 let animEditState = "idle";
 document.querySelectorAll("#anim-state button").forEach(b => b.onclick = () => {
   animEditState = b.dataset.s;
+  filmPos = 0;   // a new tag starts at its first frame
   document.querySelectorAll("#anim-state button")
     .forEach(x => x.classList.toggle("on", x === b));
   loadAnimTarget();
@@ -6571,14 +6965,18 @@ function ensureAnim(t) {
 function loadAnimTarget() {
   const t = animTargetTile();
   const ok = !!t;
-  ["anim-ms", "anim-hue", "anim-sat", "anim-bri", "anim-amp", "anim-clear"].forEach(id => {
+  ["anim-ms", "anim-hue", "anim-sat", "anim-bri", "anim-amp", "anim-clear",
+   "anim-tween", "film-play", "film-scrub", "film-onion",
+   "fe-ms", "fe-tint", "fe-left", "fe-right", "fe-hue", "fe-sat", "fe-bri"
+  ].forEach(id => {
     $(id).disabled = !ok;
   });
-  document.querySelectorAll("#anim-act button, #anim-magic-sw button, #anim-state button").forEach(b => {
+  document.querySelectorAll("#anim-act button, #anim-magic-sw button, #anim-state button, #anim-export button, #fx-add button").forEach(b => {
     b.disabled = !ok;
   });
   if (!t) {
     $("anim-target").innerHTML = "Select an <b>imported tile</b> in the Tiles tray first — then dress him up here.";
+    renderAnimTags(); loadFilmstrip();
     return;
   }
   const p = stateParams(t, animEditState);
@@ -6591,11 +6989,16 @@ function loadAnimTarget() {
   $("anim-sat").value = p.sat; $("anim-sat-val").textContent = p.sat + "%";
   $("anim-bri").value = p.bri; $("anim-bri-val").textContent = p.bri + "%";
   $("anim-amp").value = p.amp; $("anim-amp-val").textContent = p.amp;
+  // v5.44: tween slider follows the state
+  const tw = p.tween_steps | 0;
+  $("anim-tween").value = tw;
+  $("anim-tween-val").textContent = tw ? tw + " in-between" + (tw > 1 ? "s" : "") : "off";
   document.querySelectorAll("#anim-act button").forEach(b =>
     b.classList.toggle("on", b.dataset.a === p.act));
   document.querySelectorAll("#anim-magic-sw button").forEach(b =>
     b.classList.toggle("on", (b.dataset.c || null) === p.magic));
   $("anim-ms").disabled = !(t.frames > 1);   // timing only matters when he moves
+  renderAnimTags(); loadFilmstrip();
 }
 // changes hit the tile instantly (map + preview) and save themselves, debounced
 let animSaveT = null;
@@ -6615,21 +7018,24 @@ function animPush() {
 function animSetFx(patch) {
   const t = animTargetTile(); if (!t) return;
   ensureAnim(t);
+  const old = (t.anim.states && t.anim.states[animEditState]) || {};
   const cur = stateParams(t, animEditState);
   const next = Object.assign({}, cur, patch);
   const st = { act: next.act, amp: Math.max(0, Math.min(100, Math.round(next.amp))),
                hue: next.hue, sat: next.sat, bri: next.bri, magic: next.magic,
                frame_ms: Math.max(80, Math.min(2000, Math.round(next.frame_ms))) };
-  if (next.frames) st.frames = next.frames;
+  // v5.44: the filmstrip fields survive knob tweaks — a patch only touches
+  // what it names; the old state's lists ride along untouched
+  ["frames", "frame_mods", "fx_layers", "tween_steps"].forEach(k => {
+    const v = (patch[k] !== undefined) ? patch[k] : old[k];
+    if (v !== undefined && v !== null) st[k] = v;
+  });
   t.anim.states[animEditState] = st;
+  t.anim.v = 2;
   if (animEditState === (t.anim.default || "idle")) {
     // the default state IS the legacy fx view — keep both in step so the
     // map, tray, and old saves render the same tile the same way
-    t.fx = (st.act === "none" && st.hue === 0 && st.sat === 100 &&
-            st.bri === 100 && !st.magic)
-      ? null
-      : { hue: st.hue, sat: st.sat, bri: st.bri, act: st.act, magic: st.magic };
-    t.frame_ms = st.frame_ms;
+    mirrorLegacyFx(t);
   }
   animPush();
 }
@@ -6653,6 +7059,12 @@ $("anim-amp").oninput = e => {
   $("anim-amp-val").textContent = e.target.value;
   animSetFx({ amp: +e.target.value });
 };
+// v5.44: tweening — auto in-betweening between poses, per state
+$("anim-tween").oninput = e => {
+  const n = +e.target.value;
+  $("anim-tween-val").textContent = n ? n + " in-between" + (n > 1 ? "s" : "") : "off";
+  animSetFx({ tween_steps: n });
+};
 document.querySelectorAll("#anim-act button").forEach(b => b.onclick = () => {
   document.querySelectorAll("#anim-act button").forEach(x => x.classList.remove("on"));
   b.classList.add("on");
@@ -6668,6 +7080,388 @@ $("anim-clear").onclick = () => {
   t.fx = null; t.anim = null; delete appliedPreset[t.id];
   loadAnimTarget(); animPush(); toast("FX cleared");
 };
+// ---- v5.44: the filmstrip --------------------------------------------------
+// Aseprite-style, phone-first: horizontal cards, per-frame timing badges,
+// scrubber, duplicate/delete, onion skinning. Everything here edits the
+// shared anim record — beginner cards and the strip never fork.
+let filmPos = 0;            // selected strip position
+let filmPlaying = false;    // transport play state
+let onionOn = false;        // onion skin toggle (default OFF, auto-off on play)
+let filmNonce = 0;          // bumps when frame files change (thumb cache-bust)
+let filmRafOn = false;
+
+function filmTarget() { return animTargetTile(); }
+
+// v5.44: tags as labeled chips — frame count under each tag
+function renderAnimTags() {
+  const t = filmTarget();
+  document.querySelectorAll("#anim-state button").forEach(b => {
+    const cap = b.querySelector(".tc");
+    if (cap) cap.textContent = t ? filmstripFrames(t, b.dataset.s).length + " fr" : "·";
+  });
+}
+
+function loadFilmstrip() {
+  const t = filmTarget();
+  if (!t) {
+    $("filmstrip").innerHTML = "";
+    $("frame-editor").hidden = true;
+    renderFxLayers(); filmDrawEmpty();
+    return;
+  }
+  const seq = filmstripFrames(t, animEditState);
+  if (filmPos >= seq.length) filmPos = 0;
+  filmPlaying = false; updateFilmPlayBtn();
+  buildFilmstripCards(t, seq);
+  loadFrameEditor(t);
+  renderFxLayers();
+  startFilmLoop();
+}
+
+function buildFilmstripCards(t, seq) {
+  const box = $("filmstrip");
+  box.innerHTML = "";
+  const p = stateParams(t, animEditState);
+  seq.forEach((file, pos) => {
+    const card = document.createElement("div");
+    card.className = "fcard" + (pos === filmPos ? " sel" : "");
+    const m = frameModsFor(p, pos) || {};
+    const ms = Math.max(80, Math.min(2000, +m.ms || p.frame_ms || 400));
+    const tinted = (m.hue !== undefined || m.sat !== undefined ||
+                    m.bri !== undefined);
+    card.innerHTML =
+      '<span class="fpos">' + (pos + 1) + '</span>' +
+      '<span class="fms' + (m.ms ? " mod" : "") + '"' +
+        (tinted ? ' title="this frame has its own tint"' : "") + ">" +
+        (tinted ? "🎨" : "") + ms + "ms</span>" +
+      '<img alt="frame ' + (pos + 1) + '">' +
+      '<div class="fops"><button data-op="dup" title="duplicate this frame">⧉</button>' +
+      '<button data-op="del" title="delete this frame">🗑</button></div>';
+    const img = card.querySelector("img");
+    img.src = "/api/thumb/" + t.id + "?frame=" + file + "&v=" + filmNonce;
+    img.onclick = () => {
+      filmPos = pos; filmPlaying = false; updateFilmPlayBtn();
+      const tt = filmTarget();
+      if (tt) {
+        buildFilmstripCards(tt, filmstripFrames(tt, animEditState));
+        loadFrameEditor(tt); filmDrawNow();
+      }
+    };
+    card.querySelectorAll(".fops button").forEach(b => {
+      b.onclick = ev => { ev.stopPropagation(); filmOp(b.dataset.op, pos); };
+    });
+    box.appendChild(card);
+  });
+  const sc = $("film-scrub");
+  sc.max = Math.max(0, seq.length - 1);
+  sc.value = filmPos;
+  const sel = box.querySelector(".fcard.sel");
+  if (sel) sel.scrollIntoView({ inline: "nearest", block: "nearest" });
+}
+
+// structural ops go through the server (file copy/delete + index remap)
+async function filmOp(op, pos, extra) {
+  const t = filmTarget(); if (!t) return;
+  const r = await api("/api/anim/frame", Object.assign(
+    { id: t.id, state: animEditState, op: op, pos: pos }, extra || {}));
+  if (!r.ok) { toast("frame " + op + " failed: " + (r.error || "unknown")); return; }
+  t.anim = r.anim; t.frames = r.frames; filmNonce++;
+  // v5.44: dup/del renumber the art on disk — the cached Images are stale
+  const cf = (typeof customFrames !== "undefined") ? customFrames : null;
+  if (cf) cf[t.id] = null;
+  const n = filmstripFrames(t, animEditState).length;
+  if (op === "dup") filmPos = Math.min(pos + 1, n - 1);
+  else if (op === "move" && extra && extra.dir)
+    filmPos = Math.max(0, Math.min(n - 1, pos + extra.dir));
+  else if (filmPos >= n) filmPos = Math.max(0, n - 1);
+  rebuildFxOnMap(); queueRender(); previewTick(true);
+  loadAnimTarget();   // refreshes sliders, tags, and the strip
+}
+
+// ---- transport: play/pause, scrubber, onion skinning ------------------------
+function updateFilmPlayBtn() {
+  const b = $("film-play");
+  b.textContent = filmPlaying ? "⏸" : "▶";
+  b.classList.toggle("on", filmPlaying);
+  // v5.44: onion skinning auto-disables during playback
+  if (filmPlaying && onionOn) setOnion(false);
+}
+function setOnion(on) {
+  onionOn = on;
+  $("film-onion").classList.toggle("on", on);
+}
+$("film-play").onclick = () => {
+  if (!filmTarget()) return;
+  filmPlaying = !filmPlaying;
+  updateFilmPlayBtn();
+};
+$("film-scrub").oninput = e => {
+  filmPos = +e.target.value;
+  filmPlaying = false; updateFilmPlayBtn();
+  const t = filmTarget();
+  if (t) {
+    buildFilmstripCards(t, filmstripFrames(t, animEditState));
+    loadFrameEditor(t); filmDrawNow();
+  }
+};
+$("film-onion").onclick = () => {
+  if (!filmTarget()) return;
+  setOnion(!onionOn);
+  if (onionOn && filmPlaying) { filmPlaying = false; updateFilmPlayBtn(); }
+  filmDrawNow();
+};
+function filmDrawNow() {
+  const cv = $("film-canvas");
+  if (!cv) return;
+  const g = cv.getContext("2d");
+  g.imageSmoothingEnabled = false;
+  const t = filmTarget();
+  if (!t) { g.clearRect(0, 0, cv.width, cv.height); return; }
+  const seq = filmstripFrames(t, animEditState);
+  const n = seq.length || 1;
+  let tick;
+  if (filmPlaying) {
+    tick = stateTick(t, animEditState, performance.now());
+    filmPos = tick.pos;
+    const sc = $("film-scrub");
+    if (document.activeElement !== sc) sc.value = tick.pos;
+    document.querySelectorAll("#filmstrip .fcard").forEach((c, i) =>
+      c.classList.toggle("sel", i === tick.pos));
+  } else {
+    // frozen: the picked frame at its own loop phase (matches the export)
+    const pos = Math.max(0, Math.min(n - 1, filmPos));
+    tick = { pos: pos, file: seq[pos], ms: 400, step: 0, blend: 0,
+             bfile: seq[(pos + 1) % n], bpos: (pos + 1) % n, steps: 0,
+             phase: pos / n, n: n };
+  }
+  drawAnimFrame(g, t, animEditState, performance.now(),
+                { w: cv.width, h: cv.height, tick: tick,
+                  onion: onionOn && !filmPlaying });
+}
+function startFilmLoop() {
+  if (filmRafOn) return;
+  filmRafOn = true;
+  const loop = () => {
+    if (animMode === "advanced" && $("m-anim") &&
+        $("m-anim").classList.contains("open")) filmDrawNow();
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+}
+function filmDrawEmpty() {
+  const cv = $("film-canvas");
+  if (cv) cv.getContext("2d").clearRect(0, 0, cv.width, cv.height);
+}
+// ---- frame editor: per-frame timing, per-frame tint, reorder ---------------
+function filmEditPos() {
+  const t = filmTarget();
+  const n = t ? filmstripFrames(t, animEditState).length : 1;
+  return Math.max(0, Math.min(n - 1, filmPos));
+}
+function loadFrameEditor(t) {
+  const ed = $("frame-editor");
+  if (!t) { ed.hidden = true; return; }
+  ed.hidden = false;
+  const p = stateParams(t, animEditState);
+  const pos = filmEditPos();
+  const m = frameModsFor(p, pos) || {};
+  const ms = Math.max(80, Math.min(2000, +m.ms || p.frame_ms || 400));
+  $("fe-ms").value = ms; $("fe-ms-val").textContent = ms + "ms";
+  const tinted = (m.hue !== undefined || m.sat !== undefined ||
+                  m.bri !== undefined);
+  $("fe-tint").textContent = "🎨 tint: " + (tinted ? "on" : "off");
+  $("fe-tint-rows").hidden = !tinted;
+  if (tinted) {
+    $("fe-hue").value = m.hue !== undefined ? m.hue : (p.hue || 0);
+    $("fe-sat").value = m.sat !== undefined ? m.sat : (p.sat === undefined ? 100 : p.sat);
+    $("fe-bri").value = m.bri !== undefined ? m.bri : (p.bri === undefined ? 100 : p.bri);
+    $("fe-hue-val").textContent = $("fe-hue").value + "°";
+    $("fe-sat-val").textContent = $("fe-sat").value + "%";
+    $("fe-bri-val").textContent = $("fe-bri").value + "%";
+  }
+}
+// per-frame mods are edited client-side and ride the debounced whole-record
+// save (animPush); structural ops (dup/del/move) go through /api/anim/frame
+function setFrameMod(patch, erase) {
+  const t = filmTarget(); if (!t) return;
+  ensureAnim(t);
+  if (!t.anim.states[animEditState]) t.anim.states[animEditState] = {};
+  const st = t.anim.states[animEditState];
+  st.frames = filmstripFrames(t, animEditState).slice();  // stable positions
+  const mods = Object.assign({}, st.frame_mods || {});
+  const key = String(filmEditPos());
+  const cur = Object.assign({}, mods[key] || {});
+  if (erase) Object.keys(patch).forEach(k => delete cur[k]);
+  else Object.assign(cur, patch);
+  if (Object.keys(cur).length) mods[key] = cur; else delete mods[key];
+  if (Object.keys(mods).length) st.frame_mods = mods;
+  else delete st.frame_mods;
+  t.anim.v = 2;
+  animPush();
+  loadFrameEditor(t); previewTick(true); filmDrawNow();
+  buildFilmstripCards(t, filmstripFrames(t, animEditState));  // badge refresh
+}
+$("fe-ms").oninput = e => { $("fe-ms-val").textContent = e.target.value + "ms"; };
+$("fe-ms").onchange = e => setFrameMod({ ms: +e.target.value });
+$("fe-tint").onclick = () => {
+  const t = filmTarget(); if (!t) return;
+  const p = stateParams(t, animEditState);
+  const m = frameModsFor(p, filmEditPos()) || {};
+  const tinted = (m.hue !== undefined || m.sat !== undefined ||
+                  m.bri !== undefined);
+  if (tinted) setFrameMod({ hue: 1, sat: 1, bri: 1 }, true);
+  else setFrameMod({ hue: p.hue || 0,
+                     sat: p.sat === undefined ? 100 : p.sat,
+                     bri: p.bri === undefined ? 100 : p.bri });
+};
+[["fe-hue", "fe-hue-val", "hue", "°"], ["fe-sat", "fe-sat-val", "sat", "%"],
+ ["fe-bri", "fe-bri-val", "bri", "%"]].forEach(([id, lab, k, unit]) => {
+  $(id).oninput = e => { $(lab).textContent = e.target.value + unit; };
+  $(id).onchange = e => { const o = {}; o[k] = +e.target.value; setFrameMod(o); };
+});
+$("fe-left").onclick = () => filmOp("move", filmEditPos(), { dir: -1 });
+$("fe-right").onclick = () => filmOp("move", filmEditPos(), { dir: 1 });
+// ---- FX layers -------------------------------------------------------------
+function fxLayersOf(t) {
+  const p = stateParams(t, animEditState);
+  return Array.isArray(p.fx_layers) ? p.fx_layers : [];
+}
+function setFxLayers(layers) {
+  const t = filmTarget(); if (!t) return;
+  ensureAnim(t);
+  if (!t.anim.states[animEditState]) t.anim.states[animEditState] = {};
+  const st = t.anim.states[animEditState];
+  if (layers && layers.length) st.fx_layers = layers;
+  else delete st.fx_layers;
+  t.anim.v = 2;
+  animPush(); renderFxLayers(); previewTick(true); filmDrawNow();
+}
+// v5.44: pure, testable layer ops — the buttons call these
+function fxMoveLayer(layers, i, dir) {
+  const nl = layers.slice();
+  const j = i + dir;
+  if (j < 0 || j >= nl.length) return nl;
+  nl[i] = layers[j]; nl[j] = layers[i];
+  return nl;
+}
+function fxToggleLayer(layers, i) {
+  const nl = layers.slice();
+  const l = nl[i] || {};
+  nl[i] = Object.assign({}, l, { visible: !(l.visible !== false) });
+  return nl;
+}
+// v5.44: onion skinning is only drawn when the toggle is on AND paused
+function onionVisible(onionOn, playing) { return !!onionOn && !playing; }
+function renderFxLayers() {
+  const t = filmTarget();
+  const box = $("fx-layers"); box.innerHTML = "";
+  const add = $("fx-add"); add.innerHTML = "";
+  if (!t) return;
+  const layers = fxLayersOf(t);
+  layers.forEach((l, i) => {
+    const meta = FX_LAYER_META[l.kind] || { emoji: "✨", name: l.kind, desc: "" };
+    const row = document.createElement("div");
+    row.className = "fx-layer" + (l.visible === false ? " off" : "");
+    row.innerHTML =
+      '<span class="fe">' + meta.emoji + '</span>' +
+      '<span class="fn">' + esc(meta.name) + '<small>' + esc(meta.desc) +
+        " · " + (l.amp | 0) + "</small></span>" +
+      (l.kind === "aura"
+        ? '<button data-k="color" title="aura color" style="background:' +
+          (l.magic || "#ffd75f") + '">&nbsp;</button>' : "") +
+      '<input type="range" min="0" max="100" value="' + (l.amp | 0) +
+        '" aria-label="layer strength">' +
+      '<button data-k="up" title="move layer up">▲</button>' +
+      '<button data-k="down" title="move layer down">▼</button>' +
+      '<button data-k="eye" title="show / hide layer" class="' +
+        (l.visible === false ? "eye-off" : "") + '">' +
+        (l.visible === false ? "🚫" : "👁") + "</button>" +
+      '<button data-k="del" title="remove layer">✕</button>';
+    const ampR = row.querySelector("input[type=range]");
+    ampR.oninput = () => {
+      row.querySelector(".fn small").textContent = meta.desc + " · " + ampR.value;
+    };
+    ampR.onchange = () => {
+      const nl = layers.slice();
+      nl[i] = Object.assign({}, l, { amp: +ampR.value });
+      setFxLayers(nl);
+    };
+    row.querySelectorAll("button").forEach(b => {
+      b.onclick = () => {
+        let nl = layers.slice(); const kk = b.dataset.k;
+        if (kk === "del") nl.splice(i, 1);
+        else if (kk === "eye") nl = fxToggleLayer(layers, i);
+        else if (kk === "up" && i > 0) nl = fxMoveLayer(layers, i, -1);
+        else if (kk === "down" && i < layers.length - 1)
+          nl = fxMoveLayer(layers, i, +1);
+        else if (kk === "color") {
+          const cols = ANIM_MAGIC_COLORS;
+          const ci = cols.indexOf(l.magic || "#ffd75f");
+          nl[i] = Object.assign({}, l, { magic: cols[(ci + 1) % cols.length] });
+        } else return;
+        setFxLayers(nl);
+      };
+    });
+    box.appendChild(row);
+  });
+  Object.keys(FX_LAYER_META).forEach(kind => {
+    const meta = FX_LAYER_META[kind];
+    const b = document.createElement("button");
+    b.innerHTML = "＋ " + meta.emoji + " " + esc(meta.name);
+    b.title = "add " + meta.name + " layer";
+    b.onclick = () => {
+      if (layers.length >= 8) { toast("8 layers max — remove one first"); return; }
+      setFxLayers(layers.concat([{ kind: kind, amp: 70,
+        magic: kind === "aura" ? beginnerMagic : null, visible: true }]));
+    };
+    add.appendChild(b);
+  });
+}
+// ---- export ----------------------------------------------------------------
+document.querySelectorAll("#anim-export button").forEach(b =>
+  b.onclick = () => exportAnim(b.dataset.x));
+async function exportAnim(fmt) {
+  const t = filmTarget(); if (!t) return;
+  toast("rendering " + fmt + "…");
+  let r;
+  try {
+    r = await api("/api/anim/export",
+                  { id: t.id, state: animEditState, format: fmt });
+  } catch (e) { toast("export failed: network"); return; }
+  if (!r || !r.ok) {
+    toast("export failed: " + ((r && r.error) || "unknown")); return;
+  }
+  const dl = (url, name) => {
+    const a = document.createElement("a");
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => a.remove(), 800);
+  };
+  if (fmt === "json") {
+    const blob = new Blob([JSON.stringify(r.doc)],
+                          { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    dl(url, r.meta.file);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  } else dl(r.data, r.meta.file);
+  toast("exported " + r.meta.file +
+        (r.meta.ms_total ? " · " + (r.meta.ms_total / 1000).toFixed(1) + "s loop" : ""));
+}
+$("anim-import-file").onchange = async e => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  let doc = null;
+  try { doc = JSON.parse(await f.text()); }
+  catch (err) { toast("that file isn't JSON"); e.target.value = ""; return; }
+  e.target.value = "";
+  const r = await api("/api/anim/import", { doc: doc });
+  if (!r || !r.ok) {
+    toast("import failed: " + ((r && r.error) || "unknown")); return;
+  }
+  await loadCustomTiles();
+  selTile = r.tile.id; buildPalette(); previewTick(true);
+  toast("imported “" + r.tile.name + "” — tap the map to place him");
+};
 // opening the Animation menu refreshes the advanced target
 document.querySelector('.mtop[data-menu="m-anim"]').addEventListener("click", () => {
   if ($("m-anim").classList.contains("open") && animMode === "advanced") loadAnimTarget();
@@ -6681,17 +7475,14 @@ function previewTick(force) {
   const W2 = pvCv.width, H2 = pvCv.height;
   pvCtx.clearRect(0, 0, W2, H2);
   if (!t) { $("anim-preview-cap").textContent = "select a tile to see him move"; return; }
-  // v5.43: the preview shows the state Advanced is currently dressing up
-  const im = stateTileImage(t.id, (typeof animEditState !== "undefined") ? animEditState : "idle");
-  if (!im) { $("anim-preview-cap").textContent = t.name + " — loading…"; return; }
-  const iw = im.naturalWidth || 48, ih = im.naturalHeight || 48;
-  const s = Math.min((W2 - 16) / iw, (H2 - 16) / ih);
-  const dw = Math.max(1, Math.round(iw * s)), dh = Math.max(1, Math.round(ih * s));
-  const dx = Math.round((W2 - dw) / 2), dy = Math.round((H2 - dh) / 2);
-  drawFxTile(pvCtx, t.id, im, dx, dy, dw, dh);
+  // v5.44: the full stack renders through the shared preview path
+  const pvState = (typeof animEditState !== "undefined") ? animEditState : "idle";
+  if (!drawAnimFrame(pvCtx, t, pvState, performance.now(), { w: W2, h: H2 })) {
+    $("anim-preview-cap").textContent = t.name + " — loading…"; return;
+  }
   const f = tileFx(t.id);
   // v5.43: caption describes the state being edited (falls back to legacy fx)
-  const pf = stateParams(t, (typeof animEditState !== "undefined") ? animEditState : "idle");
+  const pf = stateParams(t, pvState);
   let cap = t.name + (t.frames > 1
     ? " · " + t.frames + " frames · " + (pf.frame_ms || 400) + "ms" : " · still");
   {
@@ -6699,6 +7490,10 @@ function previewTick(force) {
     if (pf.act !== "none") bits.push(pf.act);
     if (pf.magic) bits.push("magic");
     if (pf.hue || pf.sat !== 100 || pf.bri !== 100) bits.push("tinted");
+    // v5.44: layers + tween read on the caption too
+    const lays = (pf.fx_layers || []).filter(l => l && l.visible !== false);
+    if (lays.length) bits.push(lays.length + " fx");
+    if (pf.tween_steps) bits.push("tween " + pf.tween_steps);
     if (bits.length) cap += " · " + bits.join(" · ");
   }
   // v5.43: the beginner motion dressing him, if one is

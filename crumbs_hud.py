@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.43.0"
+APP_VERSION = "5.44.0"
 # v5.41: single source of truth for the map-size cap (was 64, hardcoded in
 # four places). 500x500 = 250k cells. The client additionally caps tilePx so
 # the full-map backing canvas never exceeds 4096px per side (see editor.html).
@@ -1466,6 +1466,65 @@ FX_ACTS = ("none", "bounce", "float", "pulse", "shake", "alive")
 ANIM_STATES = ("idle", "walk", "sleep", "talk", "hurt", "magic")
 # v5.43: beginner preset motions (the cards in the Animation menu).
 ANIM_PRESETS = ("alive", "bounce", "float", "pulse", "shake", "magic")
+# v5.44: FX layer kinds — non-destructive, stackable effects above a state's
+# base frames. "aura" is the reusable Magic Aura renderer (never hand-painted
+# frames); the rest are the same motion vocabulary as the base act.
+FX_LAYER_KINDS = ("bounce", "float", "pulse", "shake", "aura")
+FX_LAYER_MAX = 8
+
+
+def _clean_fx_layer(raw):
+    """v5.44: one FX layer -> sanitized dict {kind, amp, magic, visible}.
+    Unknown kinds and junk drop the layer (returns None); never raises."""
+    if not isinstance(raw, dict):
+        return None
+    kind = raw.get("kind")
+    if kind not in FX_LAYER_KINDS:
+        return None
+    try:
+        amp = max(0, min(100, int(raw.get("amp", 70))))
+    except (TypeError, ValueError):
+        amp = 70
+    magic = raw.get("magic")
+    if magic is not None:
+        magic = str(magic).strip()
+        if not re.fullmatch(r"#[0-9a-fA-F]{6}", magic):
+            magic = None
+    vis = raw.get("visible", True)
+    visible = bool(vis) if isinstance(vis, (bool, int)) else True
+    return {"kind": kind, "amp": amp, "magic": magic, "visible": visible}
+
+
+def _clean_frame_mods(raw, n):
+    """v5.44: per-frame modifications keyed by sequence position ->
+    {pos(str): {ms?, hue?, sat?, bri?}}. Out-of-range positions and empty
+    mod dicts are dropped; None when nothing survives. n is the sequence
+    length (None = unknown: accept any non-negative position, capped)."""
+    if not isinstance(raw, dict):
+        return None
+    out = {}
+    for k, v in raw.items():
+        try:
+            pos = int(k)
+        except (TypeError, ValueError):
+            continue
+        if pos < 0 or pos > 999:
+            continue
+        if n is not None and not (0 <= pos < n):
+            continue
+        if not isinstance(v, dict):
+            continue
+        m = {}
+        for fld, lo, hi in (("ms", 80, 2000), ("hue", -180, 180),
+                            ("sat", 0, 200), ("bri", 0, 200)):
+            if fld in v:
+                try:
+                    m[fld] = max(lo, min(hi, int(v[fld])))
+                except (TypeError, ValueError):
+                    pass
+        if m:
+            out[str(pos)] = m
+    return out or None
 
 
 def _clean_fx(raw):
@@ -2025,9 +2084,11 @@ def _walkbob_frames(img):
     return frames
 
 
-def _clean_anim_state(sd):
+def _clean_anim_state(sd, n_frames=None):
     """v5.43: one animation state -> sanitized dict. Unknown/invalid fields
-    fall back to safe defaults; never raises on junk."""
+    fall back to safe defaults; never raises on junk.
+    v5.44: + fx_layers / tween_steps / frame_mods (n_frames hints the
+    sequence length for frame_mods range validation)."""
     act = sd.get("act", "none")
     if act not in FX_ACTS:
         act = "none"
@@ -2071,12 +2132,37 @@ def _clean_anim_state(sd):
            "magic": magic, "frame_ms": frame_ms}
     if frames:
         out["frames"] = frames
+    # v5.44: non-destructive FX layers (stackable, reorderable, eye-toggled)
+    layers = sd.get("fx_layers")
+    if isinstance(layers, list):
+        cl = [_clean_fx_layer(l) for l in layers[:FX_LAYER_MAX]]
+        cl = [l for l in cl if l]
+        if cl:
+            out["fx_layers"] = cl
+    # v5.44: auto in-betweening between poses (render-time crossfades) —
+    # 0 = off, up to 4 tween frames per step
+    try:
+        ts = int(sd.get("tween_steps", 0))
+    except (TypeError, ValueError):
+        ts = 0
+    ts = max(0, min(4, ts))
+    if ts:
+        out["tween_steps"] = ts
+    # v5.44: per-frame mods keyed by sequence position —
+    # {ms?, hue?, sat?, bri?} ("apply to this frame" advanced option)
+    fm = _clean_frame_mods(sd.get("frame_mods"),
+                           len(frames) if frames else None)
+    if fm:
+        out["frame_mods"] = fm
     return out
 
 
-def _clean_anim(raw):
+def _clean_anim(raw, n_frames=None):
     """v5.43: the tile's animation record ->
     {v, default, states: {idle, walk, sleep, talk, hurt, magic}, transitions}.
+    v5.44: + per-state fx_layers / tween_steps / frame_mods (record version
+    stamps v2 when any are present). n_frames hints the sequence length for
+    frame_mods range validation; None accepts any non-negative position.
     Returns None when nothing usable survives."""
     if not isinstance(raw, dict):
         return None
@@ -2086,13 +2172,16 @@ def _clean_anim(raw):
     states = {}
     for st, sd in sraw.items():
         if st in ANIM_STATES and isinstance(sd, dict):
-            states[st] = _clean_anim_state(sd)
+            states[st] = _clean_anim_state(sd, n_frames)
     if not states:
         return None
     default = raw.get("default")
     if default not in states:
         default = "idle" if "idle" in states else sorted(states)[0]
-    out = {"v": 1, "default": default, "states": states}
+    # v5.44: stamp v2 when any state carries the new filmstrip fields
+    v2 = any("fx_layers" in s or "tween_steps" in s or "frame_mods" in s
+             for s in states.values())
+    out = {"v": 2 if v2 else 1, "default": default, "states": states}
     trow = raw.get("transitions")
     if isinstance(trow, dict):
         tr = {}
@@ -2139,59 +2228,111 @@ def _glow_layer(w, h, color, alpha):
     return glow
 
 
+def _apply_hsb_pil(img, hue, sat, bri):
+    """v5.44: PIL twin of the client's canvas filter stack
+    (hue-rotate -> saturate -> brightness, same order)."""
+    f = img.convert("RGBA")
+    if hue:
+        f = _shift_hue(f, hue)
+    if sat != 100:
+        f = core.ImageEnhance.Color(f).enhance(max(0.0, sat / 100.0))
+    if bri != 100:
+        f = core.ImageEnhance.Brightness(f).enhance(max(0.0, bri / 100.0))
+    return f
+
+
+def _apply_act_transform(img, act, amp, phase):
+    """v5.44: one preset's motion as a pure function of a frame + loop phase
+    (0..1). Extracted from _tween_frames so the export renderer, FX layers,
+    and the client preview all move identically — never forked math."""
+    img = img.convert("RGBA")
+    w, h = img.size
+    k = max(0.0, min(1.0, (amp or 0) / 100.0))
+    ph = 2 * math.pi * phase
+    cell = core.Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    if act == "pulse":
+        # conservative H/S/B throb — the old scale-throb lives on as "alive"
+        s = math.sin(ph)
+        f = core.ImageEnhance.Brightness(img).enhance(1 + 0.10 * k * s)
+        f = core.ImageEnhance.Color(f).enhance(1 + 0.08 * k * s)
+        hs = 6 * k * s
+        if hs:
+            f = _shift_hue(f, hs)
+        cell.paste(f, (0, 0), f)
+    elif act == "bounce":
+        # squash & stretch, bottom-anchored so he lands on his feet
+        sq = max(0.0, math.cos(ph))
+        scx, scy = 1 + 0.07 * k * sq, 1 - 0.10 * k * sq
+        lift = int(round(abs(math.sin(ph)) * h * 0.14 * k))
+        nw, nh = max(1, round(w * scx)), max(1, round(h * scy))
+        r = img.resize((nw, nh), core.Image.Resampling.BILINEAR)
+        cell.paste(r, ((w - nw) // 2, h - nh - lift), r)
+    elif act == "float":
+        oy = -int(round((0.5 + 0.5 * math.sin(ph)) * h * 0.07 * k))
+        cell.paste(img, (0, oy), img)
+    elif act == "shake":
+        r = img.rotate(3 * k * math.sin(2 * ph),
+                       core.Image.Resampling.BILINEAR, expand=False)
+        ox = int(round(0.03 * w * k * math.sin(2 * ph)))
+        cell.paste(r, (ox, 0), r)
+    elif act == "alive":
+        sc = 1 + 0.035 * k * math.sin(ph)
+        nw, nh = max(1, round(w * sc)), max(1, round(h * sc))
+        r = img.resize((nw, nh), core.Image.Resampling.BILINEAR)
+        cell.paste(r, ((w - nw) // 2, (h - nh) // 2), r)
+    else:  # "none" and anything unknown: the frame, untouched
+        cell.paste(img, (0, 0), img)
+    return cell
+
+
+def _aura_layer(img, color, amp, phase):
+    """v5.44: the Magic Aura as a reusable renderer effect — a colored glow
+    composited BEHIND the frame, pulsing with the loop phase. Non-destructive:
+    no hand-painted glow frames anywhere."""
+    img = img.convert("RGBA")
+    w, h = img.size
+    k = max(0.0, min(1.0, (amp or 0) / 100.0))
+    ph = 2 * math.pi * phase
+    glow = _glow_layer(w, h, color or "#ffd75f",
+                       0.35 + 0.30 * k * math.sin(ph))
+    cell = core.Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    cell.paste(glow, (0, 0), glow)
+    cell.paste(img, (0, 0), img)
+    return cell
+
+
+def _apply_fx_layers(img, layers, phase):
+    """v5.44: stack the state's FX layers over a rendered frame, in order.
+    Hidden layers (eye toggled off) are skipped. Motion layers reuse the
+    same transform math as the base act; aura is the shared glow renderer."""
+    out = img
+    for l in layers or []:
+        if not isinstance(l, dict) or not l.get("visible", True):
+            continue
+        kind = l.get("kind")
+        if kind == "aura":
+            out = _aura_layer(out, l.get("magic"), l.get("amp", 70), phase)
+        elif kind in ("bounce", "float", "pulse", "shake"):
+            out = _apply_act_transform(out, kind, l.get("amp", 70), phase)
+    return out
+
+
 def _tween_frames(img, preset, amp, magic=None, n=6):
     """v5.43: tween-style auto in-betweening — generate n frames from one
     picture by interpolating the preset's motion. Every frame is a real
     editable tile frame (never a dead-end render): the Advanced animator
-    retimes / retints / re-acts them like any other frames."""
+    retimes / retints / re-acts them like any other frames.
+    v5.44: the motion math moved into _apply_act_transform (shared with
+    exports and FX layers); the aura into _aura_layer."""
     img = img.convert("RGBA")
     if max(img.size) > 256:
         img.thumbnail((256, 256), core.Image.Resampling.NEAREST)
-    w, h = img.size
-    k = max(0.0, min(1.0, (amp or 0) / 100.0))
     frames = []
     for i in range(n):
-        ph = 2 * math.pi * i / n
-        cell = core.Image.new("RGBA", (w, h), (0, 0, 0, 0))
-        if preset == "pulse":
-            # conservative H/S/B throb — the old scale-throb lives on as
-            # the Still Alive ("alive") preset.
-            f = core.ImageEnhance.Brightness(img).enhance(
-                1 + 0.10 * k * math.sin(ph))
-            f = core.ImageEnhance.Color(f).enhance(1 + 0.08 * k * math.sin(ph))
-            hs = 6 * k * math.sin(ph)
-            if hs:
-                f = _shift_hue(f, hs)
-            cell.paste(f, (0, 0), f)
-        elif preset == "magic":
-            glow = _glow_layer(w, h, magic or "#ffd75f",
-                               0.35 + 0.30 * k * math.sin(ph))
-            cell.paste(glow, (0, 0), glow)
-            cell.paste(img, (0, 0), img)
+        if preset == "magic":
+            frames.append(_aura_layer(img, magic, amp, i / n))
         else:
-            m = img
-            if preset == "bounce":
-                # squash & stretch, bottom-anchored so he lands on his feet
-                sq = max(0.0, math.cos(ph))
-                scx, scy = 1 + 0.07 * k * sq, 1 - 0.10 * k * sq
-                lift = int(round(abs(math.sin(ph)) * h * 0.14 * k))
-                nw, nh = max(1, round(w * scx)), max(1, round(h * scy))
-                r = m.resize((nw, nh), core.Image.Resampling.BILINEAR)
-                cell.paste(r, ((w - nw) // 2, h - nh - lift), r)
-            elif preset == "float":
-                oy = -int(round((0.5 + 0.5 * math.sin(ph)) * h * 0.07 * k))
-                cell.paste(m, (0, oy), m)
-            elif preset == "shake":
-                r = m.rotate(3 * k * math.sin(2 * ph),
-                             core.Image.Resampling.BILINEAR, expand=False)
-                ox = int(round(0.03 * w * k * math.sin(2 * ph)))
-                cell.paste(r, (ox, 0), r)
-            else:  # "alive" (default): subtle breathing scale
-                sc = 1 + 0.035 * k * math.sin(ph)
-                nw, nh = max(1, round(w * sc)), max(1, round(h * sc))
-                r = m.resize((nw, nh), core.Image.Resampling.BILINEAR)
-                cell.paste(r, ((w - nw) // 2, (h - nh) // 2), r)
-        frames.append(cell)
+            frames.append(_apply_act_transform(img, preset, amp, i / n))
     return frames
 
 
@@ -2232,6 +2373,257 @@ def _bring_to_life_frames(img, preset, intensity, magic):
     if len(frames) == 1:
         return _tween_frames(img, preset, intensity, magic), preset
     return frames, "sliced"
+
+
+def _render_anim_sequence(tile_dir, files, sd, cap=64):
+    """v5.44: the full animation stack for one state, rendered server-side
+    for export: base frames -> per-frame mods -> state H/S/B -> act motion
+    -> FX layers -> tween in-betweens. Returns [(PIL RGBA, ms)].
+
+    Tweening splits each frame's slot into (steps+1) equal ticks — the frame
+    then its crossfades to the next — so the loop keeps its total time and
+    just gets smoother (the client preview uses the same tick math)."""
+    n = len(files)
+    if not n:
+        return []
+    fl = sd.get("frames")
+    if isinstance(fl, list):
+        seq = [f for f in fl if isinstance(f, int) and 0 <= f < n]
+    else:
+        seq = list(range(n))
+    seq = (seq or [0])[:cap]
+    mods = sd.get("frame_mods") if isinstance(sd.get("frame_mods"),
+                                              dict) else {}
+    hue = sd.get("hue", 0)
+    sat = sd.get("sat", 100)
+    bri = sd.get("bri", 100)
+    act = sd.get("act", "none")
+    amp = sd.get("amp", 70)
+    layers = [l for l in (sd.get("fx_layers") or [])
+              if isinstance(l, dict) and l.get("visible", True)]
+    try:
+        steps = max(0, min(4, int(sd.get("tween_steps") or 0)))
+    except (TypeError, ValueError):
+        steps = 0
+    m = len(seq)
+    rendered = []
+    for j, fi in enumerate(seq):
+        try:
+            base = core.Image.open(os.path.join(tile_dir,
+                                                files[fi])).convert("RGBA")
+        except Exception:
+            continue
+        fm = mods.get(str(j), {})
+        if not isinstance(fm, dict):
+            fm = {}
+        img = _apply_hsb_pil(base, fm.get("hue", 0), fm.get("sat", 100),
+                             fm.get("bri", 100))
+        img = _apply_hsb_pil(img, hue, sat, bri)
+        phase = j / m
+        img = _apply_act_transform(img, act, amp, phase)
+        img = _apply_fx_layers(img, layers, phase)
+        try:
+            dur = max(80, min(2000, int(fm.get("ms") or
+                                       sd.get("frame_ms", 400))))
+        except (TypeError, ValueError):
+            dur = 400
+        rendered.append((img, dur))
+    if steps and len(rendered) > 1:
+        out = []
+        for j, (img, dur) in enumerate(rendered):
+            nxt = rendered[(j + 1) % len(rendered)][0]
+            tick = dur / (steps + 1)
+            out.append((img, tick))
+            for s in range(1, steps + 1):
+                a = s / (steps + 1)
+                try:
+                    out.append((core.Image.blend(img, nxt, a), tick))
+                except Exception:
+                    out.append((img.copy(), tick))
+        return out
+    return rendered
+
+
+def _anim_seq_for_state(files, sd):
+    """v5.44: the state's effective frame sequence — the explicit frames
+    list (validated) or every file in order. Shared by the frame ops."""
+    n = len(files)
+    fl = sd.get("frames") if isinstance(sd, dict) else None
+    if isinstance(fl, list):
+        seq = [f for f in fl if isinstance(f, int) and 0 <= f < n]
+    else:
+        seq = list(range(n))
+    return seq or [0]
+
+
+def _anim_frame_op(entry, tile_dir, state, op, pos, ms=None, direction=0):
+    """v5.44: the filmstrip frame engine — dup | del | move | retime on one
+    state's frame sequence. Returns (anim_record, frame_count) or
+    (None, error). dup copies the frame's file and appends it (other states
+    keep their indexes); del removes the file, renumbers the rest, and
+    remaps EVERY state's frame lists + this state's per-frame mods so
+    nothing dangles. Registry is saved by the caller."""
+    files = list(entry.get("files") or [])
+    n = len(files)
+    if not n:
+        return None, "no frames"
+    if state not in ANIM_STATES:
+        return None, "bad state"
+    tid = entry.get("id")
+    anim = _clean_anim(entry.get("anim"), n) or {"v": 1, "default": "idle",
+                                                 "states": {}, "transitions": {}}
+    states = anim["states"]
+    sd = states.get(state)
+    if not isinstance(sd, dict):
+        sd = {}
+        states[state] = sd
+    seq = _anim_seq_for_state(files, sd)
+    m = len(seq)
+    if not (0 <= pos < m):
+        return None, "bad pos"
+    mods = dict(sd.get("frame_mods") or {})
+
+    def shift_mods(after, delta, inherit=None):
+        """Remap position-keyed mods around an insert/delete at `after`.
+        dup (+1): later positions shift up; the copy inherits the source's
+        mods. del (-1): later positions shift down; the gone position's
+        mods go with it."""
+        nm = {}
+        for k, v in mods.items():
+            try:
+                p = int(k)
+            except (TypeError, ValueError):
+                continue
+            if delta < 0 and p == after:
+                continue
+            nm[str(p + delta if p > after else p)] = v
+        if inherit is not None:
+            nm[str(after + 1)] = dict(inherit)
+        return nm
+
+    def valid_list(fl):
+        if isinstance(fl, list):
+            return [f for f in fl if isinstance(f, int) and 0 <= f < n]
+        return list(range(n))
+
+    if op == "dup":
+        src = os.path.join(tile_dir, files[seq[pos]])
+        try:
+            im = core.Image.open(src).convert("RGBA")
+        except Exception:
+            return None, "unreadable frame"
+        fn = f"{tid}_f{n}.png"
+        try:
+            im.save(os.path.join(tile_dir, fn), "PNG")
+        except Exception:
+            return None, "could not write frame"
+        files.append(fn)
+        mods = shift_mods(pos, +1, mods.get(str(pos)))
+        seq.insert(pos + 1, n)
+        sd["frames"] = seq
+    elif op == "del":
+        if n == 1:
+            return None, "can't delete the last frame"
+        fi = seq.pop(pos)
+        mods = shift_mods(pos, -1)
+        # which files survive? anything still referenced by any state
+        used = set()
+        for sname, sdd in states.items():
+            fl = seq if sname == state else valid_list(sdd.get("frames"))
+            used.update(fl)
+        if fi not in used:
+            # prune the file and renumber everything above it
+            idx = {old: new for new, old in
+                   enumerate(i for i in range(n) if i != fi)}
+            for i in range(n):
+                if i == fi:
+                    try:
+                        os.remove(os.path.join(tile_dir, files[i]))
+                    except OSError:
+                        pass
+                elif i > fi:
+                    try:
+                        os.rename(os.path.join(tile_dir, files[i]),
+                                  os.path.join(tile_dir, files[idx[i]]))
+                    except OSError:
+                        pass
+            old_n = n
+            new_files = []
+            for i in range(old_n):
+                if i == fi:
+                    continue
+                # files above the hole were renamed down onto the name
+                # the file below them used to carry
+                new_files.append(files[i] if i < fi else files[idx[i]])
+            files = new_files
+            n = len(files)
+            for sname, sdd in states.items():
+                if sname == state:
+                    fl = seq
+                else:
+                    rfl = sdd.get("frames")
+                    # validate against the OLD numbering, then remap
+                    fl = ([f for f in rfl
+                           if isinstance(f, int) and 0 <= f < old_n]
+                          if isinstance(rfl, list) else list(range(old_n)))
+                sdd["frames"] = [idx[f] for f in fl if f in idx]
+            seq = states[state]["frames"]
+        sd["frames"] = seq
+        if not sd["frames"]:
+            sd.pop("frames", None)  # empty -> fall back to all files
+    elif op == "move":
+        q = pos + (1 if direction > 0 else -1)
+        if not (0 <= q < m):
+            return None, "can't move that way"
+        seq[pos], seq[q] = seq[q], seq[pos]
+        a, b = mods.get(str(pos)), mods.get(str(q))
+        mods.pop(str(pos), None)
+        mods.pop(str(q), None)
+        if a is not None:
+            mods[str(q)] = a
+        if b is not None:
+            mods[str(pos)] = b
+        sd["frames"] = seq
+    elif op == "retime":
+        try:
+            ms = max(80, min(2000, int(ms)))
+        except (TypeError, ValueError):
+            return None, "bad ms"
+        cur = dict(mods.get(str(pos)) or {})
+        cur["ms"] = ms
+        mods[str(pos)] = cur
+        sd["frames"] = seq
+    else:
+        return None, "bad op"
+    if mods:
+        sd["frame_mods"] = mods
+    else:
+        sd.pop("frame_mods", None)
+    # re-stamp: the record may have gained/lost its v2 fields
+    anim = _clean_anim(anim, len(files)) or anim
+    entry["anim"] = anim
+    entry["files"] = files
+    return anim, len(files)
+
+
+def _anim_share_doc(entry, tile_dir, state, sd, frames_b64):
+    """v5.44: the single-file share format — one JSON doc carries the tile's
+    name, the tile's RAW base frames (file order, base64 PNGs), and the full
+    anim record, so another Crumbs install can import it whole with the
+    anim indexes still pointing at the right art (a lossless round-trip)."""
+    w = h = 0
+    if frames_b64:
+        try:
+            im = core.Image.open(io.BytesIO(base64.b64decode(
+                frames_b64[0]))).convert("RGBA")
+            w, h = im.size
+        except Exception:
+            pass
+    return {"format": "crumbs-anim/1", "app": "crumbs-world",
+            "app_version": APP_VERSION, "tile": entry.get("name", "custom"),
+            "state": state, "cell": [w, h], "frames": frames_b64,
+            "anim": _clean_anim(entry.get("anim")) or None,
+            "exported": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
 
 
 def _body_scope(body):
@@ -7869,8 +8261,11 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     entry.pop("fx", None)
             # v5.43: animation states — the record both animator modes share.
+            # v5.44: the frame-count hint lets frame_mods validate positions
+            # against the art on disk.
             if "anim" in body:
-                clean_a = _clean_anim(body.get("anim"))
+                clean_a = _clean_anim(body.get("anim"),
+                                      len(entry.get("files") or []))
                 if clean_a:
                     entry["anim"] = clean_a
                 else:
@@ -7890,6 +8285,200 @@ class Handler(BaseHTTPRequestHandler):
             _save_custom_registry(scope)
             resp = {"ok": True, "tile": _custom_public(entry)}
             if note:  # v5.29: guardrail correction — the client toasts this
+                resp["note"] = note
+            return self._send_json(resp)
+
+        if path == "/api/anim/frame":
+            # v5.44: filmstrip frame ops — {id, state, op, pos, ms?, dir?}.
+            # op: dup | del | move | retime. Edits ONE state's frame
+            # sequence (the shared anim record — beginner and advanced read
+            # the same data). del prunes the file and renumbers; dup appends
+            # a copy. Returns the cleaned record + frame count.
+            if not core.PIL_AVAILABLE:
+                return self._send_json({"ok": False,
+                                        "error": "image support unavailable"},
+                                       500)
+            try:
+                tid = int(body.get("id"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "bad id"}, 400)
+            entry, scope = _find_custom(tid)
+            if entry is None:
+                return self._send_json({"ok": False, "error": "not found"},
+                                       404)
+            op = body.get("op")
+            state = body.get("state", "idle")
+            try:
+                pos = int(body.get("pos", -1))
+            except (TypeError, ValueError):
+                pos = -1
+            try:
+                direction = int(body.get("dir", 0))
+            except (TypeError, ValueError):
+                direction = 0
+            tile_dir = SHARED_DIR if scope == "shared" else _custom_dir()
+            anim, n_or_err = _anim_frame_op(entry, tile_dir, state, op, pos,
+                                            ms=body.get("ms"),
+                                            direction=direction)
+            if anim is None:
+                return self._send_json({"ok": False, "error": n_or_err}, 400)
+            _save_custom_registry(scope)
+            return self._send_json({"ok": True, "anim": anim,
+                                    "frames": n_or_err,
+                                    "tile": _custom_public(entry)})
+
+        if path == "/api/anim/export":
+            # v5.44: render one animation state through the full stack
+            # (frames -> per-frame mods -> H/S/B -> act -> FX layers ->
+            # tween) and hand it back. {id, state, format} where format is
+            # gif | pngseq | sheet | json. gif/pngseq/sheet ride as dataURLs;
+            # json is the single-file share doc (frames + anim record).
+            if not core.PIL_AVAILABLE:
+                return self._send_json({"ok": False,
+                                        "error": "image support unavailable"},
+                                       500)
+            try:
+                tid = int(body.get("id"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "bad id"}, 400)
+            entry, scope = _find_custom(tid)
+            if entry is None:
+                return self._send_json({"ok": False, "error": "not found"},
+                                       404)
+            fmt = body.get("format", "gif")
+            if fmt not in ("gif", "pngseq", "sheet", "json"):
+                return self._send_json({"ok": False, "error": "bad format"},
+                                       400)
+            state = body.get("state", "idle")
+            if state not in ANIM_STATES:
+                return self._send_json({"ok": False, "error": "bad state"},
+                                       400)
+            files = list(entry.get("files") or [])
+            tile_dir = SHARED_DIR if scope == "shared" else _custom_dir()
+            anim = _clean_anim(entry.get("anim"), len(files))
+            sd = (anim["states"].get(state) if anim else None) or {}
+            seq = _render_anim_sequence(tile_dir, files, sd)
+            if not seq:
+                return self._send_json({"ok": False,
+                                        "error": "nothing to render"}, 400)
+            name = re.sub(r"[^a-z0-9]+", "-",
+                          str(entry.get("name", "tile")).lower()).strip("-")
+            name = name or "tile"
+            meta = {"state": state, "frames": len(seq),
+                    "ms_total": int(sum(m for _, m in seq))}
+            if fmt == "gif":
+                buf = io.BytesIO()
+                imgs = [im for im, _ in seq]
+                durs = [max(20, int(m)) for _, m in seq]
+                try:
+                    imgs[0].save(buf, "GIF", save_all=True,
+                                 append_images=imgs[1:], duration=durs,
+                                 loop=0, disposal=2)
+                except Exception as e:
+                    return self._send_json({"ok": False,
+                                            "error": f"gif failed: {e}"}, 500)
+                data = ("data:image/gif;base64," +
+                        base64.b64encode(buf.getvalue()).decode("ascii"))
+                meta["file"] = f"{name}-{state}.gif"
+            elif fmt == "pngseq":
+                zbuf = io.BytesIO()
+                try:
+                    with zipfile.ZipFile(zbuf, "w",
+                                         zipfile.ZIP_DEFLATED) as zf:
+                        for i, (im, _) in enumerate(seq):
+                            pbuf = io.BytesIO()
+                            im.save(pbuf, "PNG")
+                            zf.writestr(f"{name}-{state}-{i:03d}.png",
+                                        pbuf.getvalue())
+                except Exception as e:
+                    return self._send_json({"ok": False,
+                                            "error": f"zip failed: {e}"}, 500)
+                data = ("data:application/zip;base64," +
+                        base64.b64encode(zbuf.getvalue()).decode("ascii"))
+                meta["file"] = f"{name}-{state}-pngseq.zip"
+            elif fmt == "sheet":
+                n = len(seq)
+                cw, ch = seq[0][0].size
+                cols = max(1, int(math.ceil(math.sqrt(n))))
+                rows = max(1, int(math.ceil(n / cols)))
+                sheet = core.Image.new("RGBA", (cols * cw, rows * ch),
+                                       (0, 0, 0, 0))
+                for i, (im, _) in enumerate(seq):
+                    sheet.paste(im, ((i % cols) * cw, (i // cols) * ch), im)
+                sbuf = io.BytesIO()
+                sheet.save(sbuf, "PNG")
+                data = ("data:image/png;base64," +
+                        base64.b64encode(sbuf.getvalue()).decode("ascii"))
+                meta.update({"file": f"{name}-{state}-sheet.png", "cols": cols,
+                             "rows": rows, "cell": [cw, ch]})
+            else:  # json — the single-file share format: RAW base frames in
+                # file order + the full anim record, so an import is a
+                # lossless round-trip. (Rendered frames would double-apply
+                # the stack: baked into the art AND re-applied from anim.)
+                b64 = []
+                try:
+                    for fn in files[:64]:
+                        with core.Image.open(
+                                os.path.join(tile_dir, fn)) as im:
+                            pbuf = io.BytesIO()
+                            im.convert("RGBA").save(pbuf, "PNG")
+                            b64.append(base64.b64encode(
+                                pbuf.getvalue()).decode("ascii"))
+                except Exception as e:
+                    return self._send_json({"ok": False,
+                                            "error": f"art failed: {e}"}, 500)
+                if not b64:
+                    return self._send_json({"ok": False,
+                                            "error": "nothing to share"},
+                                           400)
+                doc = _anim_share_doc(entry, tile_dir, state, sd, b64)
+                meta["file"] = f"{name}-{state}.crumbs-anim.json"
+                return self._send_json({"ok": True, "format": fmt,
+                                        "doc": doc, "meta": meta})
+            return self._send_json({"ok": True, "format": fmt, "data": data,
+                                    "meta": meta})
+
+        if path == "/api/anim/import":
+            # v5.44: the JSON share format back into a tile — {doc}. The doc
+            # is validated (format tag, frame count, real decodable PNGs) and
+            # the anim record is re-sanitized; a bad doc is rejected, never
+            # half-imported.
+            if not core.PIL_AVAILABLE:
+                return self._send_json({"ok": False,
+                                        "error": "image support unavailable"},
+                                       500)
+            doc = body.get("doc")
+            if not isinstance(doc, dict) or \
+                    doc.get("format") != "crumbs-anim/1":
+                return self._send_json({"ok": False,
+                                        "error": "not a crumbs anim doc"},
+                                       400)
+            raw_frames = doc.get("frames")
+            if not isinstance(raw_frames, list) or \
+                    not (1 <= len(raw_frames) <= 64):
+                return self._send_json({"ok": False,
+                                        "error": "bad frame count"}, 400)
+            frames = []
+            try:
+                for i, b64 in enumerate(raw_frames):
+                    if not isinstance(b64, str) or len(b64) > 2_000_000:
+                        raise ValueError(f"frame {i}: too large")
+                    raw = base64.b64decode(b64)
+                    frames.append(self._safe_open_image(
+                        raw, f"import frame {i}"))
+            except Exception as e:
+                return self._send_json({"ok": False,
+                                        "error": f"bad frame art: {e}"}, 400)
+            anim = _clean_anim(doc.get("anim"), len(frames))
+            name = str(doc.get("tile", "imported")).strip()[:24] or "imported"
+            try:
+                entry, note = _store_custom_tile(
+                    name, "decor", 400, frames, _body_scope(body), anim=anim)
+            except Exception as e:
+                return self._send_json({"ok": False,
+                                        "error": f"import failed: {e}"}, 400)
+            resp = {"ok": True, "tile": _custom_public(entry)}
+            if note:
                 resp["note"] = note
             return self._send_json(resp)
 

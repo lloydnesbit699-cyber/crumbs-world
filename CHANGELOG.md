@@ -5,6 +5,45 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.44.0 — 2026-09-27
+
+**Advanced animation Phase 2: the filmstrip.** The Animation menu's
+Advanced mode grew an Aseprite-style, phone-first filmstrip — a
+horizontal row of big 96px cards, one per frame, each with its own
+duration badge. Tap a card to pick the frame up; ⧉ duplicates it, 🗑
+deletes it, and the frame editor below moves it earlier/later, retimes
+just that frame, or gives it its own tint (hidden behind an explicit
+"tint: off/on" advanced switch). A scrubber and play/pause transport
+sit under the strip, and onion skinning (off by default) ghosts the
+previous frame red and the next green — never during playback.
+
+**Non-destructive FX layers.** Bounce, Float, Pulse, Shake, and Aura are
+now stackable layers under the state controls: tap ＋ to add, 👁 to
+eye-toggle, ▲▼ to reorder, drag the strength slider, and Aura's color
+chip cycles the palette. Layers render non-destructively on top of the
+base art — the tray preview, the map, and the exports all run the same
+stack, and a tile with layers counts as animated everywhere. Up to 8
+per state.
+
+**Auto tweening.** A per-state tween slider (0–4) adds in-between frames
+between poses — rendered as crossfades in the preview, the map, and
+exports. Each frame's time slot splits into equal ticks, so the loop
+keeps its total duration and just gets smoother.
+
+**Export the animation, share it whole.** Four export buttons render the
+state through the full stack (per-frame mods → H/S/B → act → FX layers
+→ tween): animated GIF, PNG-sequence zip, sprite-sheet PNG, and a
+single-file JSON doc. The JSON doc carries the tile's raw base frames
+plus the full anim record — importing it on another Crumbs install is
+a lossless round-trip (pixel-identical art, identical record).
+
+**Beginner and Advanced still share one record.** A beginner card tap is
+now a merge, not a wipe: the card dresses idle+walk while every Advanced
+edit (frame lists, per-frame mods, FX layers, tweening, other states,
+transitions) survives — and Advanced edits show up when you flip back.
+Records stamp v2 when the new filmstrip fields are present; old v1
+records keep working untouched.
+
 ## v5.43.0 — 2026-09-27
 
 **Beginner animation: six live preset cards, and every result stays

@@ -36,11 +36,17 @@ let customById = {};   // stateParams/tileHasMotion read customById
 
 eval(extractConst("ANIM_STATES"));
 eval(extractConst("ANIM_STATE_DEFAULTS"));
+eval(extractConst("ANIM_PRESETS"));      // v5.44 (mergeBeginnerPreset)
+eval(extractConst("FX_LAYER_KINDS"));   // v5.44
+eval(extract("filmstripFrames"));       // v5.44
+eval(extract("frameModsFor"));          // v5.44
+eval(extract("stateTick"));             // v5.44
 eval(extract("stateParams"));
 eval(extract("stateFrameIdx"));
 eval(extract("animLerpParams"));
 eval(extract("tileFx"));
 eval(extract("tileHasMotion"));
+eval(extract("mergeBeginnerPreset"));   // v5.44
 
 let PASS = 0, FAIL = 0;
 function check(name, cond, detail) {
@@ -113,7 +119,8 @@ check("unknown id has none", !tileHasMotion(999));
 console.log("== static: beginner surface ==");
 const cards = (html.match(/class="anim-card"/g) || []).length;
 check("cards are built in JS (container exists)", html.indexOf('id="anim-cards"') >= 0);
-const presetKeys = (html.match(/^\s{2}(alive|bounce|float|pulse|shake|magic):\s+\{/gm) || []).length;
+const presetKeys = ((html.match(/const ANIM_PRESETS = \{[\s\S]*?\n\};/) || [""])[0]
+  .match(/^\s{2}(alive|bounce|float|pulse|shake|magic):\s+\{/gm) || []).length;
 check("ANIM_PRESETS has six entries", presetKeys === 6, "found " + presetKeys);
 ["alive", "bounce", "float", "pulse", "shake", "magic"].forEach(k => {
   check("preset card for " + k, html.indexOf('"' + k + '":') >= 0 ||

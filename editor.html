@@ -5725,6 +5725,7 @@ async function togglePlay() {
     await syncInv();   // v5.13: pack + gold onto the HUD
     // "can't reach" confusion was play mode intercepting taps — paint tools rest now
     $("btn-play").classList.add("on");
+    $("budget-strip").hidden = true;   // v5.50.14: meters owns this corner during a run
     // v5.47: full map for the run — the panel UI hides, the FAB becomes Stop
     // v5.50: the renderer hides its own panels (sheet: closed; trays: shut)
     PanelSys.renderer().close();
@@ -5756,6 +5757,7 @@ async function togglePlay() {
     playOver = false; $("end-overlay").hidden = true;   // v3.9
     await syncMap();   // v3.9: picked-up keys / opened doors come back
     $("gear-hud").hidden = true; $("pack-btn").hidden = true;   // v5.13: pack rests
+    $("budget-strip").hidden = false;   // v5.50.14: budget + tap-undo back for editing
     packState = null;
     toast("back to editing");
     // v5.47: hand his camera and selection back exactly

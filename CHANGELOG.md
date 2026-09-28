@@ -3,6 +3,14 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.50.14 — 2026-09-28
+
+**Budget strip rests during play.** It sat at the exact top-left corner the
+meters pill covers in play mode (z-58 under z-60) — dead UI peeking out from
+behind the pill. It now hides when a run starts and returns when editing
+resumes, budget counts and tap-to-undo intact. Top-bar undo/redo untouched.
+Still open: two-finger pinch zoom.
+
 ## v5.50.13 — 2026-09-28
 
 **Undo/redo unburied.** The play-mode pills sat on top of the top bar

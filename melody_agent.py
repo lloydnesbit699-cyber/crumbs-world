@@ -1052,7 +1052,9 @@ def tool_suggest_map_change(script_dir, username, kind, label, where="",
           f"kind={kind} label={label[:60]}")
     return (f"Suggestion saved: {label} — the player sees it as a ghost "
             f"preview on the map and accepts or declines it with one tap. "
-            f"Tell them it's waiting; don't paint anything yourself.")
+            f"Tell them it's waiting; don't paint anything yourself. "
+            f"If they say nothing appeared, their map likely isn't saved "
+            f"yet — ask them to save it (File > Save) and ask you again.")
 
 
 TOOLS = [
@@ -1770,7 +1772,20 @@ def handle_chat(script_dir, username, message, tier=DEFAULT_TIER, world=None):
                     f"plan ({quota}/day) — she'll be back tomorrow!")
             reply = (reply + "\n\n" + note).strip() if reply else note
         elif not reply:
-            reply = "Hmm, my brain hiccuped — ask me again?"
+            if tools_used:
+                # v5.51.6: the brain went quiet after using tools — don't
+                # claim a hiccup. Tell the player what was done instead.
+                if "suggest_map_change" in tools_used:
+                    reply = ("I've sketched that as a ghost preview on your "
+                             "map — look for the violet outline and tap to "
+                             "accept it, or tell me what to change. If you "
+                             "don't see it, save the map first (File > "
+                             "Save) and ask me again.")
+                else:
+                    reply = ("I've looked into that with my tools — ask me "
+                             "again and I'll walk you through what I found.")
+            else:
+                reply = "Hmm, my brain hiccuped — ask me again?"
         history_append(script_dir, username, "user", message)
         history_append(script_dir, username, "assistant", reply)
         audit(script_dir, username, "chat",

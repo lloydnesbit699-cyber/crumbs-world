@@ -3,6 +3,15 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.50.9 — 2026-09-28
+
+**D-pad taps step once.** A quick tap could outrun its own release: the
+step's repeat timer was scheduled after the server answered, by which
+time the finger was already up and the clear had missed it — so a tap
+kept walking on its own. The repeat chain now only continues while the
+button is physically still held. Hold still walks, double-tap-hold still
+runs. Still open: two-finger pinch zoom.
+
 ## v5.50.8 — 2026-09-28
 
 **Play button stops burying tiles.** The draggable Play button now dodges

@@ -7340,6 +7340,7 @@ function dodgePlayFab() {
 }
 // v4.5: touch = go, release = halt, double-tap-hold the same arrow = run.
 let runMode = false, lastTap = { t: 0, btn: null }, runHintShown = false;
+let dpadHeld = null;   // v5.50.9: which dpad button is currently held (null = none)
 dpad.querySelectorAll("button").forEach(b => {
   const dx = +b.dataset.dx, dy = +b.dataset.dy;
   b.addEventListener("pointerdown", e => {
@@ -7349,12 +7350,14 @@ dpad.querySelectorAll("button").forEach(b => {
     runMode = (lastTap.btn === b && now - lastTap.t < 320);
     lastTap = { t: 0, btn: null };   // the tap is spent
     if (runMode && !runHintShown) { runHintShown = true; toast("running — release to stop"); }
+    dpadHeld = b;   // v5.50.9: the repeat chain below only continues while held
     doStep(dx, dy, true);   // tap steps once; hold walks; double-tap-hold runs
   });
   ["pointerup", "pointercancel", "pointerleave"].forEach(ev =>
     b.addEventListener(ev, () => {
       lastTap = { t: performance.now(), btn: b };
       runMode = false;
+      if (dpadHeld === b) dpadHeld = null;
       clearTimeout(stepTimer); stepTimer = null;   // release = halt
     }));
 });
@@ -7374,7 +7377,9 @@ async function doStep(dx, dy, repeat) {
   syncMissionHud();   // v5.12: objectives update per step
   clearTimeout(stepTimer); stepTimer = null;
   if (await playEvents(r.events)) return;   // v3.9: win/lose ends the walk
-  if (repeat && !r.blocked) {
+  // v5.50.9: only chain the next step while the dpad button is still held —
+  // a quick tap used to outrun the release and keep walking on its own
+  if (repeat && !r.blocked && dpadHeld) {
     // v4.5: run gear — half the walk delay, floored so the server keeps up
     let stepMs = runMode ? Math.max(Math.round(RULES.walk_ms / 2), 60) : RULES.walk_ms;
     if (r.swim || r.deep) stepMs *= RULES.swim_mult;

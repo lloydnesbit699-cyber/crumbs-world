@@ -27,6 +27,10 @@ echo "HTTP:$CODE1"
 head -c 300 /tmp/groq_diag_models.json; echo ""
 
 echo ""
+echo "--- Test 1b: model IDs this key can actually use (one per line) ---"
+python3 -c "import json;d=json.load(open('/tmp/groq_diag_models.json'));[print(m['id']) for m in d.get('data',[])]"
+
+echo ""
 echo "--- Test 2: brain path  (POST /openai/v1/chat/completions, qwen/qwen3.6-27b) ---"
 CODE2=$(curl -s -o /tmp/groq_diag_chat.json -w "%{http_code}" \
   https://api.groq.com/openai/v1/chat/completions \

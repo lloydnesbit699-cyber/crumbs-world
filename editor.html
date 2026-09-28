@@ -13548,14 +13548,14 @@ function renderSuggestCard() {
   const btns = document.createElement("div");
   btns.className = "sg-btns";
   if (!unmat) {
-  const ok = document.createElement("button");
-  ok.type = "button"; ok.id = "suggest-accept"; ok.textContent = "✅ Do it";
-  ok.onclick = acceptSuggestion;
+    const ok = document.createElement("button");
+    ok.type = "button"; ok.id = "suggest-accept"; ok.textContent = "✅ Do it";
+    ok.onclick = acceptSuggestion;
+    btns.appendChild(ok);
   }
   const no = document.createElement("button");
   no.type = "button"; no.id = "suggest-decline"; no.className = "ghost"; no.textContent = "Not now";
   no.onclick = () => declineSuggestion("declined");
-  if (!unmat) btns.appendChild(ok);
   btns.appendChild(no);
   card.appendChild(lbl); card.appendChild(sub); card.appendChild(btns);
   v.appendChild(card);

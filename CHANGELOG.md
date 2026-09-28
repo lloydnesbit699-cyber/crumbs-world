@@ -3,6 +3,17 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.53.4 — 2026-09-28
+
+**The approval card is back.** v5.53.1's card patch declared the ✅ Do it
+button inside a block and appended it outside — a scope crash that threw a
+ReferenceError and blanked the whole card for every normal suggestion (the
+ghost rendered fine, so it looked like an approval that never arrives).
+The button is now created and appended in the same block; a DOM-stubbed
+test proves the card renders with ✅ Do it + Not now, and the
+unmaterializable path renders its Dismiss card. (Wren's miss: the bug was
+spotted pre-commit and shipped anyway.)
+
 ## v5.53.3 — 2026-09-28
 
 **Melody stops guessing about her ghosts.** Her brain had no visibility

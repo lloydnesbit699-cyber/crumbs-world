@@ -3,6 +3,13 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.50.10 — 2026-09-28
+
+**The Pack button drags.** It kept sitting under Lloyd's thumb in play
+mode. Tap still opens the pack sheet; a drag parks it anywhere on
+screen, and the spot persists per device like the Play and Melody
+buttons. Still open: two-finger pinch zoom.
+
 ## v5.50.9 — 2026-09-28
 
 **D-pad taps step once.** A quick tap could outrun its own release: the

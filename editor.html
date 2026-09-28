@@ -941,7 +941,8 @@
     padding: 6px 10px; font-size: 13px; color: #e8f5e9; }
   #pack-btn { position: fixed; right: 10px; bottom: 96px; z-index: 60;
     background: #1d2b22; border: 1px solid #3f5a4a; color: #e8f5e9;
-    border-radius: 10px; padding: 10px 12px; font-size: 15px; }
+    border-radius: 10px; padding: 10px 12px; font-size: 15px;
+    touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; }
   #sheet-form { background: #1c1c1c; border: 1px solid #444; border-radius: 10px;
       padding: 10px; margin-bottom: 10px; }
   #sheet-tabs { margin-bottom: 8px; }
@@ -11423,7 +11424,59 @@ async function shopSell(iid) {
 // ---- menu wiring --------------------------------------------------------------
 $("menu-items").onclick = () => { toggleOverlay("sheet-items"); loadItems(); };
 $("menu-npcs").onclick = () => { toggleOverlay("sheet-npcs"); loadItems(); loadNpcs(); };
-$("pack-btn").onclick = () => { toggleOverlay("sheet-pack"); syncInv(); };
+// v5.50.10: the Pack button drags — it kept sitting under Lloyd's thumb in
+// play mode. A tap still opens the pack sheet; a drag parks it, and the spot
+// persists per device like the Play and Melody buttons.
+let packBtnMoved = false;
+$("pack-btn").onclick = () => {
+  if (packBtnMoved) { packBtnMoved = false; return; }   // it was a drag, not a tap
+  toggleOverlay("sheet-pack"); syncInv();
+};
+(function initPackBtnDrag() {
+  const btn = $("pack-btn");
+  const clamp = () => {
+    const w = btn.offsetWidth || 80, h = btn.offsetHeight || 44;
+    btn.style.left = Math.min(Math.max(0, btn.offsetLeft), window.innerWidth - w) + "px";
+    btn.style.top = Math.min(Math.max(48, btn.offsetTop), window.innerHeight - h - 8) + "px";
+    btn.style.right = "auto"; btn.style.bottom = "auto";
+  };
+  try {   // restore the parked spot, if any
+    const p = JSON.parse(localStorage.getItem("crumbs.packBtnPos") || "null");
+    if (p && isFinite(p.left) && isFinite(p.top)) {
+      btn.style.left = Math.min(Math.max(0, p.left), window.innerWidth - 80) + "px";
+      btn.style.top = Math.min(Math.max(48, p.top), window.innerHeight - 52) + "px";
+      btn.style.right = "auto"; btn.style.bottom = "auto";
+    }
+  } catch (e) {}
+  let drag = null;
+  btn.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    try { btn.setPointerCapture(e.pointerId); } catch (_) {}
+    drag = { x0: e.clientX, y0: e.clientY, l0: btn.offsetLeft, t0: btn.offsetTop, moved: false };
+  });
+  btn.addEventListener("pointermove", e => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
+    if (!drag.moved && Math.hypot(dx, dy) < 10) return;   // 10px: tap or drag?
+    drag.moved = true;
+    e.preventDefault();
+    btn.style.left = (drag.l0 + dx) + "px";
+    btn.style.top = (drag.t0 + dy) + "px";
+    btn.style.right = "auto"; btn.style.bottom = "auto";
+    clamp();
+  });
+  const release = () => {
+    if (drag && drag.moved) {
+      packBtnMoved = true;   // swallow the click that follows a drag
+      clamp();   // only on-screen coords ever get saved
+      try { localStorage.setItem("crumbs.packBtnPos",
+        JSON.stringify({ left: btn.offsetLeft, top: btn.offsetTop })); } catch (e) {}
+    }
+    drag = null;
+  };
+  btn.addEventListener("pointerup", release);
+  btn.addEventListener("pointercancel", release);
+})();
 
 // v5.28: Melody chat dock — Phase 1 agent (teach + diagnose, read-only).
 // v5.28.1: demo mode — pre-login taste, knowledge-base only, 5/day/IP.

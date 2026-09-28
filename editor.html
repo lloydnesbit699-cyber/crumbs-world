@@ -11364,6 +11364,41 @@ function melodyGreet() {
   melSay("Hey! I'm Melody \u2014 your guide inside Crumbs World. " +
     "Ask me how to paint, find tiles, undo, or what's wrong with your map!");
 }
+// v5.48: her eyes — a compact snapshot of the live game rides with every
+// chat message. The server treats it as untrusted data (cleaned + capped);
+// here we just keep it small: dims, cursor, open panel, budget, placed
+// characters (cap 12), patrol count.
+function melodyWorld() {
+  try {
+    const npcs = [];
+    outer:
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const oc = objects[y] && objects[y][x];
+      const oid = oc == null ? null : objTid(oc);
+      if (oid == null) continue;
+      npcs.push({ id: oid, x: x, y: y });
+      if (npcs.length >= 12) break outer;
+    }
+    let sel = null;
+    try {
+      if (typeof inspectPos !== "undefined" && inspectPos &&
+          inspectPos.x >= 0 && inspectPos.y >= 0)
+        sel = { x: inspectPos.x, y: inspectPos.y };
+    } catch (e) {}
+    let budget = null;
+    try {
+      const c = budgetCounts({ tags: semGrid, objects: objects, patrols: patrols,
+        fxIds: fxOnMap, tiles: tiles, undoDepth: undoDepth, redoDepth: redoDepth });
+      budget = { painted: c.painted | 0, npcs: c.npcs | 0, fx: c.fx | 0 };
+    } catch (e) {}
+    const snap = { w: W, h: H, npcs: npcs,
+      counts: { patrols: (patrols || []).length } };
+    if (sel) snap.sel = sel;
+    try { if (typeof sheetView !== "undefined" && sheetView) snap.tool = sheetView; } catch (e) {}
+    if (budget) snap.budget = budget;
+    return snap;
+  } catch (e) { return null; }
+}
 async function melodySend() {
   melTtsUnlock();  // v5.29.1: send is a tap — her reply may speak
   if (MELODY.phase !== "ready") {  // v5.29.2: bootloader governor — no thinking before she's dressed
@@ -11384,7 +11419,7 @@ async function melodySend() {
     const url = MELODY.demo ? "/api/melody/demo" : "/api/melody/chat";
     const r = await fetch(url, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: msg }) });
+      body: JSON.stringify({ message: msg, world: melodyWorld() }) });
     const j = await r.json();
     if (j.ok) {
       melSay(j.reply); melodySetQuota(j.quota);
@@ -11982,9 +12017,66 @@ async function revertAnimSuggestion() {
   driveSheetView();
   toast("motion reverted");
 }
+// v5.48: resolve a room draft's full stroke plan with the HUD's own room
+// layout — her spot if she picked one, else the visible center (same as the
+// manual room buttons). Unknown kinds fall through to dungeon_room, never crash.
+function suggestRoomPlan(s) {
+  let cx = Math.floor(W / 2), cy = Math.floor(H / 2);
+  if (s.where_xy && s.where_xy.length === 2) {
+    cx = s.where_xy[0]; cy = s.where_xy[1];
+  } else {
+    try {
+      const ov = visibleTiles();
+      if (ov) { cx = Math.floor((ov.x0 + ov.x1) / 2); cy = Math.floor((ov.y0 + ov.y1) / 2); }
+    } catch (e) {}
+  }
+  const room = (s.room === "boss_arena") ? "boss_arena" : "dungeon_room";
+  return roomPresetCells(room, cx, cy, W, H);
+}
+function suggestRoomCells(s) {
+  const cells = [];
+  for (const st of suggestRoomPlan(s).strokes || [])
+    for (const c of st.cells || []) cells.push(c);
+  return cells;
+}
 function drawSuggestGhost() {
   if (!ghostSug || ghostSug.status !== "pending") return;
   const s = tilePx;
+  // v5.48: a room draft ghosts with the HUD's own room layout — the same
+  // cells accept() will paint, so the preview never lies.
+  if (ghostSug.kind === "room_draft") {
+    const cells = suggestRoomCells(ghostSug);
+    ctx.fillStyle = "rgba(150,110,255,0.35)";
+    ctx.strokeStyle = "rgba(190,170,255,0.85)";
+    ctx.setLineDash([4, 3]);
+    for (const c of cells) {
+      ctx.fillRect(c.x * s, c.y * s, s, s);
+      ctx.strokeRect(c.x * s + 1, c.y * s + 1, s - 2, s - 2);
+    }
+    ctx.setLineDash([]);
+    return;
+  }
+  // v5.48: a patrol draft ghosts its route — dashed violet path, anchor ringed.
+  if (ghostSug.kind === "patrol_draft" && ghostSug.points) {
+    const pts = ghostSug.points;
+    ctx.strokeStyle = "rgba(200,180,255,0.95)";
+    ctx.lineWidth = Math.max(3, s * 0.1);
+    ctx.setLineDash([8, 5]);
+    ctx.beginPath();
+    pts.forEach((pt, i) => {
+      const X = (pt[0] + 0.5) * s, Y = (pt[1] + 0.5) * s;
+      if (i === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
+    });
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (ghostSug.anchor_xy) {
+      const ax = ghostSug.anchor_xy[0], ay = ghostSug.anchor_xy[1];
+      ctx.strokeStyle = "rgba(220,200,255,1)";
+      ctx.lineWidth = Math.max(2, s * 0.06);
+      ctx.strokeRect(ax * s + 2, ay * s + 2, s - 4, s - 4);
+    }
+    return;
+  }
   if (ghostSug.kind === "wall_ring" && ghostSug.cells) {
     for (const c of ghostSug.cells) {
       const x = c[0], y = c[1];
@@ -12058,6 +12150,10 @@ function renderSuggestCard() {
   sub.className = "sg-sub";
   sub.textContent = ghostSug.kind === "animation_preset"
     ? "by Melody · the motion is playing on the map right now — accept to keep it, or it evaporates"
+    : ghostSug.kind === "room_draft"
+    ? "by Melody · a room sketched in violet — accept to paint it in one undoable stroke"
+    : ghostSug.kind === "patrol_draft"
+    ? "by Melody · a walking route sketched in violet — accept to assign it, one tap undoes"
     : "by Melody · a ghost preview — the map keeps its paint until you accept";
   const btns = document.createElement("div");
   btns.className = "sg-btns";
@@ -12096,6 +12192,23 @@ async function acceptSuggestion() {
     if (!t) { toast("the tile is gone — nothing to do"); return; }
     if (!await pushAnimState(t)) return;
     refreshBudget();
+  } else if (g.kind === "room_draft") {
+    // v5.48: her room draft paints through the same stroke endpoint as the
+    // manual room buttons — one stroke, one undo, the ghost becomes real.
+    const r = await api("/api/semantic/stroke", { strokes: suggestRoomPlan(g).strokes });
+    if (!r.ok) { toast("couldn't place it: " + (r.error || "unknown")); return; }
+    if (r.cells && r.cells.length) applyStrokeEcho(r.cells);
+    else { try { await refresh(); } catch (e) {} }
+    refreshBudget();
+  } else if (g.kind === "patrol_draft") {
+    // v5.48: her patrol draft assigns through the normal patrol endpoint —
+    // the server re-validates anchor, stops, and walkability, one undo step.
+    const r = await api("/api/patrols/create", {
+      tile_id: g.tile_id, x: g.anchor_xy[0], y: g.anchor_xy[1],
+      points: g.points,
+    });
+    if (!r.ok) { toast("couldn't walk it: " + (r.error || "unknown")); return; }
+    await loadPatrols(); render(); refreshBudget();
   } else {
     toast("that kind isn't paintable yet");
     return;

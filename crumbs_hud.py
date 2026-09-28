@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.47.4"
+APP_VERSION = "5.48.0"
 # v5.41: single source of truth for the map-size cap (was 64, hardcoded in
 # four places). 500x500 = 250k cells. The client additionally caps tilePx so
 # the full-map backing canvas never exceeds 4096px per side (see editor.html).
@@ -6377,7 +6377,8 @@ class Handler(BaseHTTPRequestHandler):
                                        400)
             res = _melody_agent.handle_chat(SCRIPT_DIR, user,
                                             body.get("message", ""),
-                                            self._melody_tier(user))
+                                            self._melody_tier(user),
+                                            world=body.get("world"))
             status = 200 if res.get("ok") else (
                 429 if res.get("error") == "quota" else 400)
             return self._send_json(res, status)

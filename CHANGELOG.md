@@ -5,6 +5,21 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.48.0 — 2026-09-27
+
+**Melody moves in: hands, eyes, and a proposal pen (co-build).** She was a
+charming teacher who couldn't see your game — now the HUD posts a compact
+snapshot of the live game with every chat message (map dims, cursor, open
+panel, budget, placed characters), and the agent treats it as labeled data,
+never instructions. New `tile_lookup` tool (shared library + your customs).
+Two new ghost-suggestion kinds: `room_draft` (she drafts a dungeon_room or
+boss_arena with the HUD's own room layout — the ghost preview and the accept
+stroke come from the same `roomPresetCells`, so the preview never lies) and
+`patrol_draft` (she drafts a 2–8 stop route for a placed character; the
+server re-validates anchor, stops, and walkability at accept time). Both
+accept through the existing undoable endpoints — no new server routes, no
+silent edits, Law 18 throughout. New `melody_cobuild_test.py`.
+
 ## v5.47.4 — 2026-09-27
 
 **Panel transparency reaches the bottom sheet.** The v5.29 ◨ panel-visibility

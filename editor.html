@@ -2015,7 +2015,15 @@ const WRITE_KEY = (new URLSearchParams(location.search).get("key") || "").trim()
   }
   function report(msg, src, line, col, stack) {
     if (isExtNoise(msg, stack)) return;   // v5.21.4: extension noise, not ours
-    show(String(msg).slice(0, 200) + " @ " + (src || "") + ":" + (line || "?"));
+    // v5.50.3: the on-page panel now carries the first stack frames, so a
+    // phone screenshot identifies the throwing line — not just the message.
+    let at = "";
+    try {
+      at = String(stack || "").split("\n").slice(0, 3).join(" ")
+        .replace(/\s+/g, " ").slice(0, 160);
+    } catch (_) {}
+    show(String(msg).slice(0, 200) + " @ " + (src || "") + ":" + (line || "?") +
+      (at ? "\n" + at : ""));
     try {
       const headers = { "Content-Type": "application/json" };
       if (WRITE_KEY) headers["X-Crumbs-Key"] = WRITE_KEY;
@@ -11642,7 +11650,7 @@ async function melodySend() {
   }
   inp.focus();
 }
-async function melodyInit() {
+async function melodyInitInner() {
   melodyPhase("boot");
   let h;
   try { h = await (await fetch("/api/melody/health")).json(); }
@@ -11738,6 +11746,15 @@ async function melodyInit() {
   melodyPhase("warmup");
   await new Promise(r => setTimeout(r, 1100));
   melodyPhase("ready");
+}
+async function melodyInit() {
+  // v5.50.3: loader guard — an internal stumble marks her offline instead
+  // of hanging at "getting ready" and leaking an unhandled rejection.
+  try { await melodyInitInner(); }
+  catch (e) {
+    melodyPhase("offline");
+    try { toast("Melody's loader stumbled: " + (e && e.message || e)); } catch (_) {}
+  }
 }
 // v5.28.1: pre-login demo — the taste before the profile. Knowledge-base
 // only (zero brain cost), 5 questions/day/IP, nothing remembered.
@@ -12861,12 +12878,14 @@ function melodySay(t) { $("melody-says").textContent = t; }
 $("melody-workshop").onclick = () => { toggleOverlay("sheet-melody"); openMelody(); };
 
 async function openMelody() {
+  try {  // v5.50.3: fire-and-forget caller — never leak a rejection
   melodySay(MELODY_HELLOS[Math.floor(Math.random() * MELODY_HELLOS.length)]);
   const r = await api("/api/missions/presets");
   if (r.ok) { melodyPresets = r.presets || []; melodyDiffs = r.difficulties || []; }
   $("melody-presets").hidden = true; $("melody-form").hidden = true;
   $("melody-new").hidden = false; melodyPick = null;
   await loadMelodyMissions();
+  } catch (e) { toast("workshop hit a snag — " + (e && e.message || e)); }
 }
 function diffLabel(n) {
   const d = melodyDiffs.find(d => d.n === n);
@@ -12991,6 +13010,7 @@ function melodyPickTap(cell) {
   toast("marked ✓");
 }
 async function createMission() {
+  try {  // v5.50.3: honest toast instead of a mystery rejection
   const f = melodyForm, p = melodyPresets.find(p => p.id === f.preset);
   const answers = { name: f.name, difficulty: f.difficulty, reward: f.reward };
   if (p.fields.includes("target")) {
@@ -13010,20 +13030,25 @@ async function createMission() {
   melodyForm = null; melodyPick = null;
   await loadMelodyMissions();
   toast("designed ✓ — tap Build and I'll set the board + playtest it");
+  } catch (e) { toast("mission hit a snag — " + (e && e.message || e)); }
 }
 async function applyMission(id) {
+  try {  // v5.50.3: a dead server used to surface as a mystery rejection toast
   const r = await api("/api/missions/apply", { id });
   if (!r.ok) { toast(r.error || "build failed"); return; }
   melodySay(r.melody_says + (r.issues && r.issues.length ? " Problem: " + r.issues.join(" ") : ""));
   await loadPatrols(); await loadMelodyMissions();
   render();
+  } catch (e) { toast("build hit a snag — " + (e && e.message || e)); }
 }
 async function deleteMission(id) {
+  try {  // v5.50.3: same guard as applyMission
   const r = await api("/api/missions/delete", { id });
   if (!r.ok) { toast(r.error || "delete failed"); return; }
   await loadPatrols(); await loadMelodyMissions();
   render();
   toast("mission deleted");
+  } catch (e) { toast("delete hit a snag — " + (e && e.message || e)); }
 }
 
   } catch (e) {

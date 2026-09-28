@@ -3,6 +3,17 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.53.6 — 2026-09-28
+
+**She remembers what happened to her ghosts.** v5.53.3 told her about the
+pending suggestion; Lloyd caught her asking to place the wall ring again
+right after it was answered. Now every chat turn carries the pending ghost
+(if any) plus the last one's fate — "'Add walls' (wall_ring) was accepted
+5 min ago — don't propose it again unless the player asks." The line is
+server-side truth and is always attached, even when the client sends no
+game snapshot. The duplicate-proposal tool refusal now names the waiting
+ghost so she references it instead of vaguely re-asking.
+
 ## v5.53.5 — 2026-09-28
 
 **Dismissed approvals stay dismissed.** After tapping ✅ the card could

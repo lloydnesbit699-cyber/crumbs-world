@@ -162,7 +162,7 @@ print("== suggestion line (v5.53.3: she never guesses) ==")
 tmp = fresh_dir()
 try:
     line = ma._suggestion_line(tmp, "alice")
-    check("no file -> none pending", line == "ghost suggestion: none pending.", line)
+    check("no file -> none yet", line == "ghost suggestion: none yet.", line)
     p = os.path.join(ma.melody_dir(tmp, "alice"), "suggestion.json")
     with open(p, "w") as f:
         json.dump({"kind": "wall_ring", "label": "Add walls around this floor?",
@@ -175,12 +175,27 @@ try:
         json.dump({"kind": "wall_ring", "label": "x" * 200, "status": "pending"}, f)
     line = ma._suggestion_line(tmp, "alice")
     check("label capped at 80", len(line.split('"')[1]) <= 80, line[:100])
+    # v5.53.6: she remembers what happened to the last one
+    import time as _t
     with open(p, "w") as f:
-        json.dump({"kind": "wall_ring", "label": "old", "status": "accepted"}, f)
-    check("accepted -> none pending",
-          ma._suggestion_line(tmp, "alice") == "ghost suggestion: none pending.")
+        json.dump({"kind": "wall_ring", "label": "old walls",
+                   "status": "accepted", "created": int(_t.time()) - 300}, f)
+    line = ma._suggestion_line(tmp, "alice")
+    check("accepted names the last one",
+          "none pending" in line and "old walls" in line and "accepted" in line, line)
+    check("accepted says when", "5 min ago" in line, line)
+    check("accepted says don't re-propose", "don't propose it again" in line, line)
+    with open(p, "w") as f:
+        json.dump({"kind": "room_draft", "label": "old room",
+                   "status": "declined", "created": int(_t.time()) - 9000}, f)
+    line = ma._suggestion_line(tmp, "alice")
+    check("declined reports too",
+          "none pending" in line and "declined" in line and "2 h ago" in line, line)
     check("bad username can't break it",
-          ma._suggestion_line(tmp, "not a user!!") == "ghost suggestion: none pending.")
+          ma._suggestion_line(tmp, "not a user!!") == "ghost suggestion: none yet.")
+    check("_ago just now", ma._ago(_t.time() - 5) == " just now")
+    check("_ago days", ma._ago(_t.time() - 90000) == " 1 day ago")
+    check("_ago garbage", ma._ago("nope") == "")
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

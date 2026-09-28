@@ -3,6 +3,21 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.51.2 — 2026-09-28
+
+**The "ballooning buttons" were the browser's zoom, not the HUD's.** Zooming
+deep on the Chromebook (Ctrl+Plus / trackpad pinch) scales the whole page,
+HUD buttons included; the HUD's own + / − only ever change the map tile size
+and every HUD chrome rule is fixed-px CSS with zero tile-size references, so
+map zoom can never balloon the UI. New: a one-per-session hint on
+desktop-class browsers caught running page-zoomed ("Browser zoom is at ~300%
+— it enlarges the HUD buttons too. Use the HUD's + / − for map-only zoom").
+Also in this version: a zoom-invariance regression suite (34 checks — HUD
+chrome static audit, zoomAt anchor math, pan clamps, hero/NPC/Melody sprite
+scaling) locking the behavior in. Menus, pills, trays, and the dpad audited
+at min/fit/max zoom: all fixed-size, no drift.
+Still open: two-finger pinch zoom on iPhone.
+
 ## v5.51.1 — 2026-09-28
 
 **Grid lines toggle.** The map grid now has its own ▦ button at the foot of

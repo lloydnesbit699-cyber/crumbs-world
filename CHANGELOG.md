@@ -3,6 +3,14 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.50.11 — 2026-09-28
+
+**Starter gear kit.** Every map now begins with seven defined, pickup-able
+items: Rusty Sword, Worn Dagger, Old Shield (ward), Smoked Meat, Apple, Red
+Potion, Traveler's Scroll — all using curated starter-pack tiles. Seeded
+once, when the map's items sidecar doesn't exist yet; a library the
+builder empties on purpose stays empty. Still open: two-finger pinch zoom.
+
 ## v5.50.10 — 2026-09-28
 
 **The Pack button drags.** It kept sitting under Lloyd's thumb in play

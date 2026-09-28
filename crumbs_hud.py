@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.50.10"
+APP_VERSION = "5.50.11"
 # v5.41: single source of truth for the map-size cap (was 64, hardcoded in
 # four places). 500x500 = 250k cells. The client additionally caps tilePx so
 # the full-map backing canvas never exceeds 4096px per side (see editor.html).
@@ -3291,6 +3291,7 @@ def _save_gear(name):
 
 def _load_items(name):
     global _items, _item_seq, _item_cells
+    fresh = not os.path.exists(_items_path(name))
     d, err = _load_json_file(_items_path(name), "items",
                              {"items": [], "next": 1, "cells": {}})
     if err:
@@ -3303,6 +3304,8 @@ def _load_items(name):
                        for k, v in (d.get("cells") or {}).items()}
     except (TypeError, ValueError):
         _items, _item_seq, _item_cells = [], {"next": 1}, {}
+    if fresh and not _items:
+        _seed_starter_items(name)
 
 
 def _save_items(name):
@@ -3312,6 +3315,37 @@ def _save_items(name):
                        "cells": _item_cells}), f)
     except OSError as e:
         print(f"[hud] could not save items: {e}")
+
+
+# v5.50.11: the starter gear kit — defined, pickup-able things from the
+# first boot. (name, tile_id, kind, power, effect, stack, price); tile ids
+# are the curated starter-pack cells in shared_library.json.
+STARTER_KIT = [
+    ("Rusty Sword", 70083, "weapon", 3, "none", 1, 15),
+    ("Worn Dagger", 70091, "weapon", 2, "none", 1, 8),
+    ("Old Shield", 70087, "tool", 0, "ward", 1, 12),
+    ("Smoked Meat", 70086, "food", 4, "none", 5, 3),
+    ("Apple", 70085, "food", 2, "none", 5, 2),
+    ("Red Potion", 70082, "food", 8, "none", 3, 10),
+    ("Traveler's Scroll", 70084, "trinket", 0, "none", 1, 5),
+]
+
+def _seed_starter_items(name):
+    """Seed the starter kit once: only when the map's items sidecar never
+    existed. A library the builder emptied on purpose stays empty."""
+    global _items, _item_seq
+    made = 0
+    for spec in STARTER_KIT:
+        try:
+            d = core.build_item(*spec)
+        except ValueError:
+            continue
+        d["id"] = _item_seq["next"]
+        _item_seq["next"] += 1
+        _items.append(d)
+        made += 1
+    _save_items(name)
+    _log_event(f"seeded {made} starter items for {name}")
 
 
 def _load_npcs(name):

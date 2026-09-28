@@ -3,6 +3,13 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.50.7 — 2026-09-28
+
+**File menu scrolls.** The top-bar dropdowns get a `100vh` max-height
+fallback (an unsupported `100dvh` silently dropped the height cap, leaving
+no scroll container at all) plus an explicit `touch-action: pan-y` so the
+scroll gesture can't be negotiated away. Still open: two-finger pinch zoom.
+
 ## v5.50.6 — 2026-09-28
 
 **Map size, findable.** The Tools panel's leftover "Setup" section heading

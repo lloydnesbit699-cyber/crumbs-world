@@ -64,7 +64,13 @@
   .menu-drop { position: fixed; top: 52px; left: 8px; z-index: 75; background: #222;
                    border: 1px solid #444; border-radius: 12px; padding: 6px;
                    display: none; min-width: 210px;
-                   max-height: calc(100dvh - 64px); overflow-y: auto;
+                   /* v5.50.7: the File menu is 19 rows tall — without a working
+                      max-height there is no scroll container at all. vh first so
+                      older webviews still get one if dvh is unsupported, and an
+                      explicit pan-y so the scroll gesture can't be negotiated
+                      away by an ancestor's touch-action. */
+                   max-height: calc(100vh - 64px); max-height: calc(100dvh - 64px);
+                   overflow-y: auto; touch-action: pan-y;
                    overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
                    box-shadow: 0 8px 24px rgba(0,0,0,.5); }
   .menu-drop.open { display: block; }

@@ -3,6 +3,14 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.50.13 — 2026-09-28
+
+**Undo/redo unburied.** The play-mode pills sat on top of the top bar
+(z-60 over z-45): the 🪙🎒 gear pill covered the undo/redo cluster at the
+bar's right end, and the ❤️✨ meters pill could overlap the bar on notched
+screens. Both now hang just below the bar (notch-aware).
+Still open: two-finger pinch zoom.
+
 ## v5.50.12 — 2026-09-28
 
 **Pack stops piling onto the zoom buttons.** Its default spot (bottom:96px)

@@ -936,7 +936,9 @@
     border-radius: 6px; color: #fff; padding: 6px; font-size: 13px; }
   .stockrow select { flex: 1; min-width: 0; }
   .stockrow input { width: 52px; }
-  #gear-hud { position: fixed; top: 8px; right: 8px; z-index: 60;
+  /* v5.50.13: was top:8px — sat ON the topbar (z-60 over z-45) and buried
+     the undo/redo cluster at the bar's right end. Now hangs below the bar. */
+  #gear-hud { position: fixed; top: calc(56px + env(safe-area-inset-top)); right: 8px; z-index: 60;
     background: rgba(20, 30, 22, 0.92); border: 1px solid #3f5a4a; border-radius: 10px;
     padding: 6px 10px; font-size: 13px; color: #e8f5e9; }
   /* v5.50.12: default parks above the zoom cluster (which owns the bottom
@@ -989,7 +991,7 @@
                  z-index: 90; }
   #end-overlay[hidden] { display: none; }
   /* v4.0: nature HUD — hero meters + build-fire button, play mode only */
-  #meters { position: fixed; top: 52px; left: 10px; z-index: 60; display: none;
+  #meters { position: fixed; top: calc(56px + env(safe-area-inset-top)); left: 10px; z-index: 60; display: none;
             background: rgba(10,14,20,.78); border: 1px solid #2a3340;
             border-radius: 10px; padding: 6px 10px; font-size: 15px; }
   #meters.show { display: block; }

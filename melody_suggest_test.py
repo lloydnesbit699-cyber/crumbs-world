@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""melody_suggest_test.py — v5.47 Melody suggestion tests. Run: python3 melody_suggest_test.py
-Covers: the suggest_map_change tool lifecycle (pending -> accepted/declined),
-the one-pending-suggestion rule, kind validation, where parsing, vault
-isolation (Law 18 — the Agent Sees Only Its Player), run_tool dispatch, and
-the never-paints-silently contract (the tool writes a proposal, never tiles).
+"""melody_suggest_test.py — v5.54 Melody suggestion QUEUE tests. Run: python3 melody_suggest_test.py
+Covers: the suggest_map_change tool lifecycle (queue -> accept head -> next
+surfaces), the 5-deep queue cap, decline/accept by id, idempotent clears,
+kind validation, where parsing, vault isolation (Law 18 — the Agent Sees Only
+Its Player), migration from the old single-suggestion file, run_tool dispatch,
+and the never-paints-silently contract (the tool writes a proposal, never tiles).
 """
 import json
 import os
@@ -34,7 +35,7 @@ def fresh_dir():
     return tempfile.mkdtemp(prefix="melody-suggest-test-")
 
 
-print("== suggestion lifecycle ==")
+print("== suggestion queue lifecycle (v5.54) ==")
 tmp = fresh_dir()
 try:
     check("nothing pending at first", ma.suggestion_pending(tmp, "alice") is None)
@@ -44,16 +45,84 @@ try:
     check("pending now", sug is not None and sug["kind"] == "wall_ring")
     check("label kept", sug["label"] == "Walls around the floor?", sug.get("label"))
     check("status pending", sug["status"] == "pending")
+    check("unique id assigned", bool(sug.get("id")), sug.get("id"))
     r2 = ma.tool_suggest_map_change(tmp, "alice", "connect_patrols", "Join them?")
-    check("second suggestion refused while one pends", "already a suggestion" in r2, r2)
-    check("still the first one", ma.suggestion_pending(tmp, "alice")["kind"] == "wall_ring")
-    check("accept clears", ma.suggestion_set_status(tmp, "alice", "accepted") is True)
-    check("nothing pending after accept", ma.suggestion_pending(tmp, "alice") is None)
-    r3 = ma.tool_suggest_map_change(tmp, "alice", "connect_patrols", "Join them?")
-    check("new suggestion after accept", "Suggestion saved" in r3, r3)
-    check("decline clears", ma.suggestion_set_status(tmp, "alice", "declined") is True)
+    check("second suggestion QUEUES", "Suggestion saved" in r2 and "#2 in the queue" in r2, r2)
+    check("head is still the first one",
+          ma.suggestion_pending(tmp, "alice")["kind"] == "wall_ring")
+    check("two pending in order",
+          [s["kind"] for s in ma.suggestions_pending_all(tmp, "alice")] ==
+          ["wall_ring", "connect_patrols"])
+    ids = [s["id"] for s in ma.suggestions_pending_all(tmp, "alice")]
+    check("ids unique", len(set(ids)) == 2, ids)
+    check("accept marks the head",
+          ma.suggestion_set_status(tmp, "alice", "accepted") is True)
+    check("next surfaces as head",
+          ma.suggestion_pending(tmp, "alice")["kind"] == "connect_patrols")
+    check("decline by id",
+          ma.suggestion_set_status(tmp, "alice", "declined", ids[1]) is True)
     check("nothing pending after decline", ma.suggestion_pending(tmp, "alice") is None)
     check("bad status rejected", ma.suggestion_set_status(tmp, "alice", "maybe") is False)
+    check("idempotent: unknown id still True",
+          ma.suggestion_set_status(tmp, "alice", "declined", "nope") is True)
+    check("idempotent: empty queue still True",
+          ma.suggestion_set_status(tmp, "alice", "accepted") is True)
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
+print("== queue cap ==")
+tmp = fresh_dir()
+try:
+    for i in range(5):
+        r = ma.tool_suggest_map_change(tmp, "alice", "wall_ring", f"idea {i}")
+        check(f"slot {i + 1} queues", "Suggestion saved" in r, r)
+    r = ma.tool_suggest_map_change(tmp, "alice", "wall_ring", "one too many")
+    check("6th refused", "queue is full" in r, r)
+    check("still 5 pending",
+          len(ma.suggestions_pending_all(tmp, "alice")) == 5)
+    ma.suggestion_set_status(tmp, "alice", "declined")  # head answered
+    r = ma.tool_suggest_map_change(tmp, "alice", "wall_ring", "room again")
+    check("room after one answered", "Suggestion saved" in r and "#5 in the queue" in r, r)
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
+print("== migration from the old single file ==")
+tmp = fresh_dir()
+try:
+    d = ma.melody_dir(tmp, "alice")
+    os.makedirs(d, exist_ok=True)
+    old = os.path.join(d, "suggestion.json")
+    with open(old, "w") as f:
+        json.dump({"kind": "wall_ring", "label": "old walls",
+                   "status": "pending", "created": 111}, f)
+    check("old file migrates to head",
+          ma.suggestion_pending(tmp, "alice")["label"] == "old walls")
+    check("new queue file written",
+          os.path.exists(os.path.join(d, "suggestions.json")))
+    check("old file removed", not os.path.exists(old))
+    r = ma.tool_suggest_map_change(tmp, "alice", "connect_patrols", "new one")
+    check("queues behind the migrant", "#2 in the queue" in r, r)
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
+print("== answered history is trimmed ==")
+tmp = fresh_dir()
+try:
+    items = [{"kind": "wall_ring", "label": f"old {i}", "status": "declined",
+              "created": i, "id": f"id-{i}"} for i in range(30)]
+    check("save ok", ma._suggestions_save(tmp, "alice", items) is True)
+    loaded = ma._suggestions_load(tmp, "alice")
+    check("history trimmed to 20", len(loaded) == 20, len(loaded))
+    check("newest kept", loaded[-1]["label"] == "old 29", loaded[-1]["label"])
+    # pending entries are never trimmed
+    items = ([{"kind": "wall_ring", "label": "keep me", "status": "pending",
+               "created": 1, "id": "p1"}] +
+             [{"kind": "wall_ring", "label": f"old {i}", "status": "declined",
+               "created": i, "id": f"id-{i}"} for i in range(30)])
+    ma._suggestions_save(tmp, "alice", items)
+    loaded = ma._suggestions_load(tmp, "alice")
+    check("pending survives the trim",
+          loaded[0]["label"] == "keep me" and len(loaded) == 21, len(loaded))
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
@@ -141,7 +210,7 @@ try:
         for f in files:
             after.add(os.path.join(root, f))
     new_files = after - before
-    allowed = {os.path.join("melody", "suggestion.json"),
+    allowed = {os.path.join("melody", "suggestions.json"),
                os.path.join("melody", "audit.jsonl")}
     check("only the proposal + audit files are written",
           len(new_files) == 2 and all(

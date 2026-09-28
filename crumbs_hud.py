@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.53.6"
+APP_VERSION = "5.54.0"
 # v5.41: single source of truth for the map-size cap (was 64, hardcoded in
 # four places). 500x500 = 250k cells. The client additionally caps tilePx so
 # the full-map backing canvas never exceeds 4096px per side (see editor.html).
@@ -5356,24 +5356,23 @@ def _suggest_connect_patrols():
             "points": [[int(x), int(y)] for x, y in combined]}
 
 
-def _melody_suggestion_view(user):
-    """The pending agent suggestion for `user`, materialized against the
-    live world into ghost cells/routes. -> dict or None. Called with the
-    caller's vault active (public mode) or the ambient world (local).
+def _melody_suggestion_view_one(user, sug):
+    """One agent suggestion, materialized against the live world into ghost
+    cells/routes. Called with the caller's vault active (public mode) or the
+    ambient world (local).
 
     v5.53.1: the HUD gates the ghost on status == "pending" and tracks
     freshness by id — the view must carry both (missing since v5.47.0, so
     no ghost ever rendered). Kinds the world can't materialize come back
     as unmaterializable instead of None, so the player gets a card with a
-    Dismiss instead of a phantom approval that blocks everything."""
-    sug = _melody_agent.suggestion_pending(SCRIPT_DIR, user)
-    if not sug:
-        return None
+    Dismiss instead of a phantom approval that blocks everything.
+    v5.54: split from the old single-view so the whole queue materializes."""
     kind = sug.get("kind")
     label = sug.get("label") or ""
     base = {"kind": kind, "label": label,
             "status": sug.get("status") or "pending",
-            "id": sug.get("created") or 0}
+            # v5.54: unique ids (pre-queue entries fall back to created)
+            "id": sug.get("id") or sug.get("created") or 0}
     if kind == "wall_ring":
         where = sug.get("where_xy")
         cells = _suggest_wall_ring(tuple(where) if where else None)
@@ -5422,6 +5421,22 @@ def _melody_suggestion_view(user):
             base["anchor_xy"] = sug["anchor_xy"]
         return base
     return None
+
+
+def _melody_suggestion_views(user):
+    """Every pending suggestion materialized, oldest first. v5.54 queue."""
+    out = []
+    for sug in _melody_agent.suggestions_pending_all(SCRIPT_DIR, user):
+        v = _melody_suggestion_view_one(user, sug)
+        if v:
+            out.append(v)
+    return out
+
+
+def _melody_suggestion_view(user):
+    """Head of the queue — kept for older clients."""
+    views = _melody_suggestion_views(user)
+    return views[0] if views else None
 
 
 def _deep_at(tx, ty):
@@ -6492,6 +6507,9 @@ class Handler(BaseHTTPRequestHandler):
             # v5.47: Melody's pending suggestion, materialized against the
             # LIVE map into ghost cells. The agent proposes; the server
             # resolves; the player accepts (one tap, one undo) or declines.
+            # v5.54: the whole queue materializes — `suggestions` is every
+            # pending ghost oldest-first; `suggestion` stays as the head
+            # for older clients.
             user = self._melody_user()
             if user is None:
                 return self._send_json({"ok": False, "error": "login required"},
@@ -6503,12 +6521,14 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     if not self._auth_activate(path):
                         return
-                    sug = _melody_suggestion_view(user)
+                    views = _melody_suggestion_views(user)
                 finally:
                     _vault_lock.release()
             else:
-                sug = _melody_suggestion_view(user)
-            return self._send_json({"ok": True, "suggestion": sug})
+                views = _melody_suggestion_views(user)
+            return self._send_json({"ok": True,
+                                    "suggestion": views[0] if views else None,
+                                    "suggestions": views})
         if path == "/api/melody/suggestion/decline" and is_post:
             # v5.47: the player said no (or accepted via the normal undoable
             # endpoints and is just clearing the pending card).
@@ -6527,7 +6547,9 @@ class Handler(BaseHTTPRequestHandler):
             status = (body or {}).get("status") or "declined"
             if status not in ("declined", "accepted"):
                 status = "declined"
-            _melody_agent.suggestion_set_status(SCRIPT_DIR, user, status)
+            # v5.54: decline answers one queue entry by id (head when absent)
+            sug_id = (body or {}).get("id")
+            _melody_agent.suggestion_set_status(SCRIPT_DIR, user, status, sug_id)
             return self._send_json({"ok": True})
         if path == "/api/melody/health":
             # no auth — the page checks this before showing the dock.

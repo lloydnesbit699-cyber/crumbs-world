@@ -112,6 +112,26 @@ try:
         h._suggest_wall_ring = real_ring
         h.SCRIPT_DIR = ORIG_SCRIPT_DIR
         shutil.rmtree(tmp, ignore_errors=True)
+
+    print("== queue materializes oldest-first (v5.54) ==")
+    tmp = tempfile.mkdtemp(prefix="suggest-view-test-")
+    h.SCRIPT_DIR = tmp
+    try:
+        ma.tool_suggest_map_change(tmp, "bob", "wall_ring", "First?")
+        ma.tool_suggest_map_change(tmp, "bob", "wall_ring", "Second?")
+        views = h._melody_suggestion_views("bob")
+        check("two views", len(views) == 2, len(views))
+        check("oldest first", [v["label"] for v in views] == ["First?", "Second?"])
+        check("unique ids", views[0]["id"] != views[1]["id"],
+              (views[0]["id"], views[1]["id"]))
+        check("head compat", h._melody_suggestion_view("bob")["label"] == "First?")
+        ma.suggestion_set_status(tmp, "bob", "declined")
+        views = h._melody_suggestion_views("bob")
+        check("answered drops out", len(views) == 1 and views[0]["label"] == "Second?",
+              [v["label"] for v in views])
+    finally:
+        h.SCRIPT_DIR = ORIG_SCRIPT_DIR
+        shutil.rmtree(tmp, ignore_errors=True)
 finally:
     h.SCRIPT_DIR = ORIG_SCRIPT_DIR
 

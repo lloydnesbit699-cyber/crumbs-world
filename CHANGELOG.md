@@ -3,6 +3,19 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.54.0 — 2026-09-28
+
+**The suggestion queue.** Melody no longer gets refused when a ghost is
+already waiting — she queues up to 5, oldest first, each with its own violet
+ghost on the map. The card answers the head ("+2 more sketches waiting —
+tap through in order") and the next surfaces immediately after each tap.
+Every fresh ghost gets its auto-clip (the 2/day cap still holds). The brain
+sees the whole queue every turn — head, who's waiting behind it, and what
+the last answered one was. Storage is one `suggestions.json` per player
+(old single files migrate once); declines/accepts answer by id and are
+idempotent; suggestion ids are now unique (ms + pid + counter). Tests:
+70 suggest, 54 cobuild, 23 view, 96 melody — all green.
+
 ## v5.53.6 — 2026-09-28
 
 **She remembers what happened to her ghosts.** v5.53.3 told her about the

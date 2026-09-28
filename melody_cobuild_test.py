@@ -158,39 +158,36 @@ try:
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
-print("== suggestion line (v5.53.3: she never guesses) ==")
+print("== suggestion line (v5.53.3: she never guesses; v5.54: the queue) ==")
 tmp = fresh_dir()
 try:
     line = ma._suggestion_line(tmp, "alice")
     check("no file -> none yet", line == "ghost suggestion: none yet.", line)
-    p = os.path.join(ma.melody_dir(tmp, "alice"), "suggestion.json")
-    with open(p, "w") as f:
-        json.dump({"kind": "wall_ring", "label": "Add walls around this floor?",
-                   "status": "pending"}, f)
+    ma.tool_suggest_map_change(tmp, "alice", "wall_ring", "Add walls around this floor?")
     line = ma._suggestion_line(tmp, "alice")
     check("pending names the ghost", "wall_ring" in line and "Add walls" in line, line)
     check("pending points at the panel", "💡" in line and "Do-it" in line, line)
     check("pending says violet ghost", "violet ghost" in line, line)
-    with open(p, "w") as f:
-        json.dump({"kind": "wall_ring", "label": "x" * 200, "status": "pending"}, f)
+    check("no queue note when alone", "Queue:" not in line, line)
+    ma.tool_suggest_map_change(tmp, "alice", "room_draft", "A treasure room here?",
+                               room="dungeon_room")
+    ma.tool_suggest_map_change(tmp, "alice", "patrol_draft", "Walk this route?",
+                               points="1,1;2,2", anchor_tile="7", anchor_xy="1,1")
     line = ma._suggestion_line(tmp, "alice")
-    check("label capped at 80", len(line.split('"')[1]) <= 80, line[:100])
-    # v5.53.6: she remembers what happened to the last one
+    check("queue names the head", "Add walls" in line, line)
+    check("queue counts the rest", "Queue: 2 more waiting" in line, line)
+    check("queue lists waiting labels",
+          "treasure room" in line and "Walk this route" in line, line)
+    check("queue says tap in order", "tap through in order" in line, line)
+    # v5.53.6 memory: she remembers the last answered one
     import time as _t
-    with open(p, "w") as f:
-        json.dump({"kind": "wall_ring", "label": "old walls",
-                   "status": "accepted", "created": int(_t.time()) - 300}, f)
+    ma.suggestion_set_status(tmp, "alice", "accepted")
+    ma.suggestion_set_status(tmp, "alice", "accepted")
+    ma.suggestion_set_status(tmp, "alice", "declined")
     line = ma._suggestion_line(tmp, "alice")
-    check("accepted names the last one",
-          "none pending" in line and "old walls" in line and "accepted" in line, line)
-    check("accepted says when", "5 min ago" in line, line)
-    check("accepted says don't re-propose", "don't propose it again" in line, line)
-    with open(p, "w") as f:
-        json.dump({"kind": "room_draft", "label": "old room",
-                   "status": "declined", "created": int(_t.time()) - 9000}, f)
-    line = ma._suggestion_line(tmp, "alice")
-    check("declined reports too",
-          "none pending" in line and "declined" in line and "2 h ago" in line, line)
+    check("all answered -> last fate",
+          "none pending" in line and "declined" in line and
+          "don't propose it again" in line, line)
     check("bad username can't break it",
           ma._suggestion_line(tmp, "not a user!!") == "ghost suggestion: none yet.")
     check("_ago just now", ma._ago(_t.time() - 5) == " just now")

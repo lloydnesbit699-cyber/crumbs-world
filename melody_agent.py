@@ -1033,52 +1033,134 @@ def _suggestion_path(script_dir, username):
     return os.path.join(melody_dir(script_dir, username), "suggestion.json")
 
 
-def suggestion_pending(script_dir, username):
-    """The player's pending suggestion, or None. Vault-scoped (Law 18):
-    the path is built from the authenticated username alone."""
-    try:
-        p = _suggestion_path(script_dir, username)
-    except ValueError:
-        return None
-    try:
-        with open(p, "r", encoding="utf-8") as f:
-            sug = json.load(f)
-    except (OSError, ValueError):
-        return None
-    if not isinstance(sug, dict) or sug.get("status") != "pending":
-        return None
-    if sug.get("kind") not in _SUGGEST_KINDS:
-        return None
-    return sug
+# v5.54: the suggestion QUEUE. One file holds the whole list — pending
+# ghosts in FIFO order plus answered history (so she remembers what the
+# player already said yes/no to). Old single-suggestion files migrate once.
+MAX_SUGGEST_QUEUE = 5      # pending cap — she stacks plates, not mountains
+_SUGGEST_HISTORY = 20      # answered entries kept for her memory
+_SUG_SEQ = 0               # per-process counter feeding unique suggestion ids
 
 
-def suggestion_set_status(script_dir, username, status):
-    """Mark the pending suggestion accepted/declined — the HUD clears it
-    after the player taps. Unknown/absent file: silent no-op."""
+def _suggestions_path(script_dir, username):
+    return os.path.join(melody_dir(script_dir, username), "suggestions.json")
+
+
+def _suggestions_valid(items):
+    return isinstance(items, list) and all(
+        isinstance(s, dict) and s.get("kind") in _SUGGEST_KINDS for s in items)
+
+
+def _suggestions_load(script_dir, username):
+    """The whole queue, oldest first. Migrates the old single file once."""
     try:
-        p = _suggestion_path(script_dir, username)
+        p = _suggestions_path(script_dir, username)
+    except ValueError:
+        return []
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            items = json.load(f)
+        if _suggestions_valid(items):
+            return items
+    except (OSError, ValueError):
+        pass
+    except Exception:
+        pass
+    # one-time migration from the pre-queue single file
+    try:
+        old = _suggestion_path(script_dir, username)
+        with open(old, "r", encoding="utf-8") as f:
+            sug = json.load(f)
+        if isinstance(sug, dict) and sug.get("kind") in _SUGGEST_KINDS:
+            items = [sug]
+            _suggestions_save(script_dir, username, items)
+            try:
+                os.remove(old)
+            except OSError:
+                pass
+            return items
+    except (OSError, ValueError):
+        pass
+    except Exception:
+        pass
+    return []
+
+
+def _suggestions_save(script_dir, username, items):
+    """Atomic write; answered history is trimmed, pending never is."""
+    try:
+        d = melody_dir(script_dir, username)
     except ValueError:
         return False
     try:
-        with open(p, "r", encoding="utf-8") as f:
-            sug = json.load(f)
-    except (OSError, ValueError):
-        return False
-    if not isinstance(sug, dict) or sug.get("status") != "pending":
-        return False
-    sug["status"] = status
-    tmp = p + ".tmp"
-    try:
+        os.makedirs(d, exist_ok=True)
+        p = _suggestions_path(script_dir, username)
+        pend = [s for s in items if s.get("status") == "pending"]
+        done = [s for s in items if s.get("status") != "pending"]
+        items = pend + done[-_SUGGEST_HISTORY:]
+        tmp = p + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(sug, f)
+            json.dump(items, f)
         os.replace(tmp, p)
+        return True
     except OSError:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
         return False
-    return True
+    except Exception:
+        return False
+
+
+def suggestions_pending_all(script_dir, username):
+    """Every pending suggestion, oldest first."""
+    return [s for s in _suggestions_load(script_dir, username)
+            if s.get("status") == "pending"]
+
+
+def suggestion_pending(script_dir, username):
+    """The head of the queue — the ghost on the card. Vault-scoped (Law 18):
+    the path is built from the authenticated username alone."""
+    allp = suggestions_pending_all(script_dir, username)
+    return allp[0] if allp else None
+
+
+def suggestion_set_status(script_dir, username, status, sug_id=None):
+    """Mark a suggestion accepted/declined — by id, or the queue head when
+    no id is given. Idempotent: a valid status on a missing/already-answered
+    suggestion still returns True (the player's goal — it's gone — holds).
+    Unknown/absent vault: False. Bad status: False."""
+    if status not in ("accepted", "declined"):
+        return False
+    items = _suggestions_load(script_dir, username)
+    if not items:
+        return True  # nothing there — the card's goal is already met
+    target = None
+    if sug_id is not None:
+        for s in items:
+            if s.get("id") == sug_id or s.get("created") == sug_id:
+                target = s
+                break
+        if target is None:
+            return True  # already answered or unknown — still gone
+    else:
+        pend = [s for s in items if s.get("status") == "pending"]
+        if not pend:
+            return True
+        target = pend[0]
+    target["status"] = status
+    target["answered"] = int(time.time())  # v5.54: answer order, not file order
+    return _suggestions_save(script_dir, username, items)
+
+
+def suggestion_append(script_dir, username, sug):
+    """Queue one more ghost. Returns (position, error) — position is the
+    1-based place in the pending queue, error names why it didn't queue."""
+    items = _suggestions_load(script_dir, username)
+    pend = [s for s in items if s.get("status") == "pending"]
+    if len(pend) >= MAX_SUGGEST_QUEUE:
+        return None, (f"the queue is full ({MAX_SUGGEST_QUEUE} waiting) — "
+                       f"the player should tap through them first.")
+    items.append(sug)
+    if not _suggestions_save(script_dir, username, items):
+        return None, "Couldn't save it — try again."
+    return len(pend) + 1, None
 
 
 def _parse_where(where):
@@ -1159,33 +1241,27 @@ def tool_suggest_map_change(script_dir, username, kind, label, where="",
                  "room_draft": f"Draft a {room.replace('_', ' ')} here?",
                  "patrol_draft": "Walk this route?"}[kind]
     where_xy = _parse_where(where)
-    pend = suggestion_pending(script_dir, username)
-    if pend:
-        # v5.53.6: name it — she references the waiting ghost instead of
-        # vaguely re-asking about it.
-        plabel = str(pend.get("label") or pend.get("kind") or "a change")[:80]
-        return (f"There's already a suggestion waiting: \"{plabel}\" — the "
-                f"player accepts or declines that one first.")
-    try:
-        d = melody_dir(script_dir, username)
-        os.makedirs(d, exist_ok=True)
-        p = _suggestion_path(script_dir, username)
-        sug = {"kind": kind, "label": label, "status": "pending",
-               "created": int(time.time())}
-        sug.update(sug_extra)
-        if where_xy:
-            sug["where_xy"] = where_xy
-        if kind == "animation_preset":
-            sug["preset"] = preset
-        tmp = p + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(sug, f)
-        os.replace(tmp, p)
-    except (OSError, ValueError) as exc:
-        return f"Couldn't save the suggestion ({exc})."
+    # v5.54: the queue — she stacks suggestions instead of being refused.
+    # v5.53.6 named the waiting ghost; now she just joins the line.
+    # ids are unique: ms timestamp + pid + per-process counter (v5.53.5's
+    # one-second ids could collide on a fast double-proposal).
+    global _SUG_SEQ
+    _SUG_SEQ += 1
+    sug = {"kind": kind, "label": label, "status": "pending",
+           "created": int(time.time()),
+           "id": f"{int(time.time() * 1000)}-{os.getpid()}-{_SUG_SEQ}"}
+    sug.update(sug_extra)
+    if where_xy:
+        sug["where_xy"] = where_xy
+    if kind == "animation_preset":
+        sug["preset"] = preset
+    pos, err = suggestion_append(script_dir, username, sug)
+    if err:
+        return err
     audit(script_dir, username, "suggest",
-          f"kind={kind} label={label[:60]}")
-    return (f"Suggestion saved: {label} — the player sees it as a ghost "
+          f"kind={kind} label={label[:60]} queue_pos={pos}")
+    at = f" — it's #{pos} in the queue" if pos > 1 else ""
+    return (f"Suggestion saved: {label}{at} — the player sees it as a ghost "
             f"preview on the map and accepts or declines it with one tap. "
             f"Tell them it's waiting; don't paint anything yourself. "
             f"If they say nothing appeared, their map likely isn't saved "
@@ -1244,7 +1320,7 @@ TOOLS = [
          "required": []}}},
     {"type": "function", "function": {
         "name": "suggest_map_change",
-        "description": "Propose a change the player sees as a ghost preview they accept or undo with one tap. Kinds: wall_ring (walls around the open floor), connect_patrols (join two patrol routes), animation_preset (a motion for a tile), room_draft (draft a dungeon_room or boss_arena at a spot — the ghost uses the HUD's own room layout), patrol_draft (draft a 2-8 stop route for a placed character; needs his tile id + where he stands). Never for anything destructive. The preview is reversible; you never paint directly.",
+        "description": "Propose a change the player sees as a ghost preview they accept or undo with one tap. Kinds: wall_ring (walls around the open floor), connect_patrols (join two patrol routes), animation_preset (a motion for a tile), room_draft (draft a dungeon_room or boss_arena at a spot — the ghost uses the HUD's own room layout), patrol_draft (draft a 2-8 stop route for a placed character; needs his tile id + where he stands). Suggestions QUEUE up (max 5 waiting) — the player taps through them oldest-first, each with its own violet ghost. Never for anything destructive. The preview is reversible; you never paint directly.",
         "parameters": {"type": "object", "properties": {
             "kind": {"type": "string",
                      "description": "One of: wall_ring (walls around the open floor), connect_patrols (join two patrol routes into one), animation_preset (suggest a motion for the tile at a spot)."},
@@ -1584,13 +1660,15 @@ Rules you never break:
 - You can look things up and diagnose, but you cannot change the player's
   world yourself. If they want a change, describe exactly what to tap — or
   propose it with your suggest_map_change tool, which shows them a ghost
-  preview they accept or undo with one tap. Never paint silently: every
+  preview they accept or undo with one tap. Suggestions queue up — up to 5
+  waiting, oldest first, each with its own violet ghost — so pitch a whole
+  set at once when the player asks for ideas. Never paint silently: every
   suggestion stays reversible until they say yes.
 - Use your tools when the player asks about the Repair Laws, the guide, their
   vault stats, or map problems. Don't narrate tool calls; just answer with
   what you found.
 - You can see the player's live game (map size, cursor, budget, placed
-  characters, your pending ghost suggestion) — it's handed to you with each
+  characters, your suggestion queue) — it's handed to you with each
   message. Use it: answer about what they're looking at, and pick real spots
   and real characters when you draft things. The ghost line is the truth
   about your pending suggestion — never claim there isn't one when it says
@@ -1731,37 +1809,44 @@ def _ago(ts):
 
 
 def _suggestion_line(script_dir, username):
-    """Her suggestion state, from the server's own file — the pending ghost
-    plus what happened to the last one. v5.53.3 stopped her guessing whether
-    a ghost is on screen; v5.53.6 stops her re-asking about one the player
-    already answered (she asked to place the wall ring again right after it
-    was dismissed). Always injected — it never depends on the client's
-    snapshot."""
+    """Her suggestion state, from the server's own queue file — the head
+    ghost, how many more wait behind it, and what happened to the last
+    answered one. v5.53.3 stopped her guessing whether a ghost is on screen;
+    v5.53.6 stopped her re-asking about answered ones; v5.54 teaches her the
+    queue. Always injected — never depends on the client's snapshot."""
     try:
-        p = _suggestion_path(script_dir, username)
-    except ValueError:
-        return "ghost suggestion: none yet."
-    try:
-        with open(p, "r", encoding="utf-8") as f:
-            sug = json.load(f)
-    except (OSError, ValueError):
-        return "ghost suggestion: none yet."
+        items = _suggestions_load(script_dir, username)
     except Exception:
-        return "ghost suggestion: none yet."
-    if not isinstance(sug, dict):
-        return "ghost suggestion: none yet."
-    label = str(sug.get("label") or sug.get("kind") or "a change")[:80]
-    kind = str(sug.get("kind") or "unknown")[:40]
-    if sug.get("status") == "pending":
-        return (f"ghost suggestion: \"{label}\" ({kind}) — the player sees it as "
+        items = []
+    pend = [s for s in items if s.get("status") == "pending"]
+    if pend:
+        head = pend[0]
+        label = str(head.get("label") or head.get("kind") or "a change")[:80]
+        kind = str(head.get("kind") or "unknown")[:40]
+        line = (f"ghost suggestion: \"{label}\" ({kind}) — the player sees it as "
                 f"a violet ghost on their map; they accept it with the Do-it "
                 f"button in the 💡 panel, or decline it there.")
-    if sug.get("status") in ("accepted", "declined"):
-        ago = _ago(sug.get("created"))
+        if len(pend) > 1:
+            rest = ", ".join(
+                f"\"{str(s.get('label') or s.get('kind') or 'a change')[:40]}\""
+                for s in pend[1:4])
+            more = f" (+{len(pend) - 4} more)" if len(pend) > 4 else ""
+            line += (f" Queue: {len(pend) - 1} more waiting behind it "
+                     f"({rest}{more}) — they tap through in order.")
+        return line
+    done = [s for s in items if s.get("status") in ("accepted", "declined")]
+    if done:
+        # v5.54: most recently ANSWERED, not last in file order (the save
+        # reorders). Unstamped (pre-queue) entries fall back to file order.
+        stamped = [s for s in done if s.get("answered")]
+        last = max(stamped, key=lambda s: s["answered"]) if stamped else done[-1]
+        label = str(last.get("label") or last.get("kind") or "a change")[:80]
+        kind = str(last.get("kind") or "unknown")[:40]
+        ago = _ago(last.get("created"))
         return (f"ghost suggestion: none pending. Last one: \"{label}\" "
-                f"({kind}) was {sug['status']}{ago} — don't propose it again "
+                f"({kind}) was {last['status']}{ago} — don't propose it again "
                 f"unless the player asks for it.")
-    return "ghost suggestion: none pending."
+    return "ghost suggestion: none yet."
 
 
 # -- injection tripwire -------------------------------------------------------

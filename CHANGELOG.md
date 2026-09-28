@@ -3,6 +3,13 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.50.6 — 2026-09-28
+
+**Map size, findable.** The Tools panel's leftover "Setup" section heading
+(a ghost of the retired Setup menu) is now "Map" — the width × height +
+Resize row lives there, under the map file name. Still open: two-finger
+pinch zoom.
+
 ## v5.50.5 — 2026-09-28
 
 **Scatter toast points at the open panel.** Arming the scatter brush with

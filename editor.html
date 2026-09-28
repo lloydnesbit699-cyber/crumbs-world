@@ -269,6 +269,13 @@
     color: #bbb; cursor: pointer; }
   .tray-tabs button.on { border-color: #ffd75f; color: #ffd75f; background: #2a2416; }
   #tray-right .tray-tabs button { width: auto; margin-bottom: 0; }  /* over the tray's full-width rule */
+  /* v5.49.5: the [x] that closes a tray — last item in the tray's tab bar */
+  .tray-tabs button.tx { flex: none; width: 40px; font-size: 18px; }
+  /* v5.49.5: the [x] that dismisses the bottom sheet, riding the grabber row */
+  #sheet-close { margin-left: auto; flex: none; width: 36px; height: 36px; min-height: 36px;
+    font-size: 20px; line-height: 1; background: #222; color: #bbb;
+    border: 1px solid #444; border-radius: 10px; cursor: pointer; }
+  #sheet-close:active { color: #ffd75f; border-color: #ffd75f; }
   .tray .sheet-view { padding: 2px 0 8px; }
   /* v5.50: the panel-layout segmented control in the panel visibility sheet */
   #layout-seg { display: flex; gap: 6px; flex: 1; min-width: 0; }
@@ -1919,6 +1926,7 @@
     <div class="grab"></div>
     <div id="sheet-title">🎨 Paint</div>
     <div id="sheet-peekline"></div>
+    <button id="sheet-close" type="button" title="Close panel">×</button>
   </div>
   <div id="sheet-tabs" aria-label="Panel views"></div>
   <div id="sheet-body">
@@ -11789,6 +11797,11 @@ function initSheetGrab() {
   const g = $("sheet-grab");
   let y0 = null, moved = false;
   g.addEventListener("pointerdown", e => { y0 = e.clientY; moved = false; });
+  // v5.49.5: the [x] dismisses the sheet — stop its pointer from reaching the
+  // grabber so the tap doesn't also cycle the sheet size
+  const xc = $("sheet-close");
+  xc.addEventListener("pointerdown", e => e.stopPropagation());
+  xc.addEventListener("click", e => { e.stopPropagation(); setSheetHeight("closed"); });
   g.addEventListener("pointermove", e => {
     if (y0 == null) return;
     if (Math.abs(e.clientY - y0) > 12) moved = true;
@@ -12013,6 +12026,13 @@ function renderTrayTabs() {
       b.onclick = () => PanelSys.setView(m.id);
       bar.appendChild(b);
     });
+    // v5.49.5: small [x] at the end of the tab bar — the explicit backup for
+    // tap-the-map-to-close (the scrim), carried by every open tray
+    const x = document.createElement("button");
+    x.type = "button"; x.textContent = "×"; x.title = "Close panel";
+    x.className = "tx";
+    x.onclick = () => closeOverlays();
+    bar.appendChild(x);
     PANEL_MODULES.filter(m => m.tray === side).forEach(m => {
       const r = panelRoot(m.id);
       if (r) r.hidden = (trayTab[side] !== m.id);

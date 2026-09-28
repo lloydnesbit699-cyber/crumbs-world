@@ -114,5 +114,18 @@ check("boot restores the saved layout before first mount",
   /const p = readUiPrefs\(\);[\s\S]*?p\.panelLayout === "sheet"[\s\S]*?PanelSys\.layout = p\.panelLayout/.test(html));
 check("tray tab bar styling exists", /\.tray-tabs \{/.test(html) && /\.tray-tabs button\.on/.test(html));
 
+console.log("== v5.49.5: the little [x] on every panel ==");
+check("the sheet's grabber row carries a close button",
+  /id="sheet-close"/.test(html) && />×<\/button>/.test(html));
+check("the sheet [x] dismisses the sheet without tripping the grabber drag",
+  /sheet-close[\s\S]*?pointerdown[\s\S]*?stopPropagation/.test(html) &&
+  /setSheetHeight\("closed"\)/.test(html));
+check("every tray tab bar ends with an [x] that closes the overlays",
+  /button\.tx[\s\S]*?x\.onclick = \(\) => closeOverlays\(\)/.test(html));
+check("the tray [x] has its own styling", /\.tray-tabs button\.tx \{/.test(html));
+check("the sheet [x] has its own styling", /#sheet-close \{/.test(html));
+check("tap-the-map-to-close still works through the scrim",
+  /\$\("scrim"\)\.onclick = closeOverlays/.test(html));
+
 console.log(`\n${PASS} passed, ${FAIL} failed`);
 process.exit(FAIL ? 1 : 0);

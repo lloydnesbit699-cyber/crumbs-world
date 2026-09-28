@@ -5,6 +5,17 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.49.5 — 2026-09-28
+
+**The little [x] on every panel.** Lloyd wanted tap-the-map-to-close back —
+with the side trays it already rides along (the scrim eats the tap and closes
+the tray, same as the old days) — plus a small [x] as the explicit backup.
+Both trays now end their module tab bars with an × that closes the overlays,
+and the bottom sheet carries an × in its grabber row that dismisses it to the
+closed detent; the × stops its own pointer so the grabber never mistakes the
+tap for a resize/drag. Reopening is unchanged: edge tabs summon trays, TILES
+summons the sheet.
+
 ## v5.49.4 — 2026-09-28
 
 **The panels stop caring where they live.** Lloyd liked the side panels

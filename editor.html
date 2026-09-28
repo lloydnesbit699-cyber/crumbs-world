@@ -4586,7 +4586,12 @@ function setBrushTool(t, skipModal) {
   if (t === "scatter" && !scatterMix.length && selTile != null) {
     scatterMix = [selTile]; persistMix(); buildScatterRow();   // seed from the brush
   }
-  if (t === "scatter" && !scatterMix.length) toast("tap + below, then palette tiles, to build the mix");
+  if (t === "scatter" && !scatterMix.length) {
+    // v5.50.5: the mix lives in the Tiles panel — open it so the + is on
+    // screen instead of the toast pointing at a closed tray.
+    try { PanelSys.open("tiles"); } catch (e) {}
+    toast("tap ＋, then palette tiles, to build the mix");
+  }
 }
 
 // ---- v5.47: the one bottom sheet — pure state machine ----------------------------

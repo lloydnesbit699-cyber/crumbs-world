@@ -3,6 +3,13 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.50.5 — 2026-09-28
+
+**Scatter toast points at the open panel.** Arming the scatter brush with
+an empty mix now opens the Tiles panel itself (both tray and sheet
+layouts) so the ＋ and the palette are on screen — the old "tap + below"
+toast was pointing at a closed tray. Still open: two-finger pinch zoom.
+
 ## v5.50.4 — 2026-09-28
 
 **Play button drags; paint panel fits; look defaults exist.** Three of

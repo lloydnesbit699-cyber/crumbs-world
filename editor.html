@@ -248,8 +248,9 @@
   #tab-left { left: 0; border-radius: 0 12px 12px 0; border-left: none; }
   #tab-right { right: 0; border-radius: 12px 0 0 12px; border-right: none; }
 
-  .tray { position: fixed; top: 48px; bottom: 0; width: min(80vw, 320px); z-index: 70;
-          background: #161616; padding: 12px; overflow-y: auto;
+  .tray { position: fixed; top: 48px; bottom: 0; width: min(76vw, 300px); z-index: 70;
+          background: #161616; padding: 12px; overflow-x: hidden; overflow-y: auto;
+          overscroll-behavior: contain; /* v5.50.1: no sideways drift or rubber-band of tray UI */
           transition: transform .22s ease-out; -webkit-overflow-scrolling: touch; }
   #tray-left { left: 0; border-right: 1px solid #333; transform: translateX(-103%); }
   #tray-right { right: 0; border-left: 1px solid #333; transform: translateX(103%); }

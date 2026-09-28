@@ -5636,6 +5636,32 @@ canvas.addEventListener("pointercancel", e => {
   if (stroke) { stroke = null; queueRender(); }   // v5.45: ghost only — nothing to revert
   if (hstroke) { hstroke = null; queueRender(); }   // v5.45.2: ghost only — nothing was written
 });
+// v5.51.3: trackpad pinch zooms the MAP — desktop browsers report a two-finger
+// trackpad pinch as wheel events with ctrlKey === true, which the browser would
+// otherwise eat as *page* zoom (magnifying the whole HUD — Lloyd's "can they
+// not respect each other"). Intercept only on the canvas: preventDefault blocks
+// the browser's page zoom and the gesture routes into the existing zoomAt(),
+// anchored at the cursor, exactly like the HUD's + / − buttons. Plain wheel
+// keeps today's behavior (nothing is bound to it — there is no scroll
+// container), keyboard Ctrl+Plus stays the browser's (the v5.51.2 hint covers
+// it), and touch pinch keeps its own Pointer Events path.
+let _pinchAccum = 0;   // v5.51.3: accumulated ctrl+wheel delta between zoom steps
+function onCanvasWheel(e) {
+  if (!e.ctrlKey) return;              // plain wheel: no binding today — untouched
+  e.preventDefault();                  // block the browser's page zoom
+  const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;  // wheel lines -> px
+  _pinchAccum += dy;
+  // v5.51.3: sweep continuously — apply in the same 8px steps as the +/−
+  // buttons so one pinch sweeps smoothly instead of jumping; zoomAt clamps.
+  const THRESH = 50;
+  const steps = Math.trunc(_pinchAccum / THRESH);
+  if (steps) {
+    _pinchAccum -= steps * THRESH;
+    manualZoom = true;
+    zoomAt(e.clientX, e.clientY, tilePx - steps * 8);  // pinch-out (dy<0) zooms in
+  }
+}
+canvas.addEventListener("wheel", onCanvasWheel, { passive: false });
 
 // v1.7 camera: Move toggles pan mode, -/+ zoom, Fit re-fits the screen
 $("btn-pan").onclick = () => {

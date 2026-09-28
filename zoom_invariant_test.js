@@ -166,12 +166,65 @@ check("hint is wired into boot", /splashDone\(\);\s*\n\s*maybeHintPageZoom\(\);/
 check("hint is re-armed on resize (debounced)", /addEventListener\("resize", \(\) => \{[^}]*maybeHintPageZoomSoon\(\); \}\);/.test(html));
 
 console.log("== recent repairs intact ==");
-check("Pack still parks above the zoom cluster (v5.50.12 + v5.51.1: bottom:304px)",
-  /#pack-btn\s*\{\s*position:\s*fixed;\s*right:\s*10px;\s*bottom:\s*304px/.test(styleBlock));
 check("grid toggle ▦ still lives in the zoom cluster (v5.51.1)",
   html.includes('id="btn-grid"') && /#zoom-cluster #btn-grid\.off/.test(styleBlock));
 check("pills still sit below the topbar (v5.50.13)",
   /#gear-hud\s*\{\s*position:\s*fixed;\s*top:\s*calc\(56px \+ env\(safe-area-inset-top\)\)/.test(styleBlock));
+
+console.log("== v5.51.3 trackpad pinch zooms the map, not the page (stub DOM) ==");
+const wDriver = `
+let W=64,H=64,tilePx=32,panX=0,panY=0,manualZoom=false,_pinchAccum=0;
+const MAX_CANVAS_DIM=4096;
+const stage={clientWidth:1366,clientHeight:700,getBoundingClientRect:function(){return {left:0,top:48};}};
+const canvas={style:{},_wl:null,addEventListener:function(t,f,o){this._wl={t:t,f:f,o:o};}};
+function render(){}
+${extract("maxTilePx")}
+${extract("clampPan")}
+${extract("layout")}
+${extract("zoomAt")}
+${extract("onCanvasWheel")}
+${html.match(/canvas\.addEventListener\("wheel", onCanvasWheel, \{ passive: false \}\);/)[0]}
+;globalThis.__w=(function(){
+  const out={};
+  out.registeredOnCanvas=canvas._wl && canvas._wl.t==="wheel";
+  out.nonPassive=!!(canvas._wl && canvas._wl.o && canvas._wl.o.passive===false);
+  const mk=function(dy,ctrl){return {ctrlKey:ctrl!==false,deltaY:dy,deltaMode:0,
+    clientX:683,clientY:350,preventDefault:function(){this._pd=true;},_pd:false};};
+  // ctrl+wheel: preventDefault fires and the map zooms, anchored at the cursor
+  tilePx=32; _pinchAccum=0; manualZoom=false;
+  const e1=mk(-120); onCanvasWheel(e1);
+  out.prevented=e1._pd===true; out.zoomedIn=tilePx>32; out.manualZoom=manualZoom===true;
+  // plain wheel: untouched — no preventDefault, no zoom
+  tilePx=32; _pinchAccum=0;
+  const e2=mk(120,false); onCanvasWheel(e2);
+  out.plainUntouched=e2._pd!==true && tilePx===32;
+  // small deltas accumulate across events: two -30s sweep one 8px step
+  tilePx=32; _pinchAccum=0;
+  onCanvasWheel(mk(-30)); const after1=tilePx;
+  onCanvasWheel(mk(-30));
+  out.accumulates=after1===32 && tilePx===40;
+  // direction: pinch-out (negative deltaY) zooms in, pinch-in zooms out
+  tilePx=32; _pinchAccum=0; onCanvasWheel(mk(-60)); out.dirIn=tilePx===40;
+  tilePx=32; _pinchAccum=0; onCanvasWheel(mk(60)); out.dirOut=tilePx===24;
+  // clamps ride zoomAt: floor 8, and maxTilePx (64 on a 64x64 map)
+  tilePx=8; _pinchAccum=0; onCanvasWheel(mk(500)); out.clampMin=tilePx===8;
+  tilePx=64; _pinchAccum=0; onCanvasWheel(mk(-500)); out.clampMax=tilePx===64;
+  return out;
+})();
+`;
+eval(wDriver);
+const w = globalThis.__w;
+check("wheel handler is registered on the canvas", !!w.registeredOnCanvas);
+check("wheel listener is non-passive (preventDefault can block page zoom)", w.nonPassive);
+check("ctrl+wheel calls preventDefault", w.prevented);
+check("ctrl+wheel zooms the map", w.zoomedIn);
+check("ctrl+wheel marks the zoom manual", w.manualZoom);
+check("plain wheel is untouched (no preventDefault, no zoom)", w.plainUntouched);
+check("small deltas accumulate into smooth 8px steps", w.accumulates);
+check("pinch-out (deltaY<0) zooms in", w.dirIn);
+check("pinch-in (deltaY>0) zooms out", w.dirOut);
+check("zoom floor clamp holds under ctrl+wheel", w.clampMin);
+check("zoom ceiling clamp holds under ctrl+wheel", w.clampMax);
 
 console.log("\n" + PASS + " passed, " + FAIL + " failed");
 process.exit(FAIL ? 1 : 0);

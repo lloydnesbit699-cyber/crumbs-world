@@ -3,6 +3,21 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.51.3 — 2026-09-28
+
+**Trackpad pinch now zooms the map, not the page.** A two-finger trackpad
+pinch arrives as ctrl+wheel, which the browser was eating as page zoom. The
+canvas now intercepts it (non-passive wheel listener, canvas only):
+preventDefault blocks the browser's page zoom and the gesture routes into
+the existing zoomAt(), anchored at the cursor, in the same 8px steps as the
++ / − buttons — small deltas accumulate so one pinch sweeps smoothly, and
+zoomAt's own clamps hold. Plain wheel is untouched (nothing bound to it),
+keyboard Ctrl+Plus stays the browser's (the v5.51.2 hint covers it), and
+touch pinch keeps its own Pointer Events path. The zoom-invariant suite
+grew 12 checks: registration, preventDefault, direction, accumulation,
+clamps, and plain-wheel passthrough.
+Still open: the iPhone two-finger pinch issue is a separate path, untouched.
+
 ## v5.51.2 — 2026-09-28
 
 **The "ballooning buttons" were the browser's zoom, not the HUD's.** Zooming

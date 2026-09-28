@@ -184,7 +184,7 @@ backs = ma.brain_backends()
 check("groq+qwen primary",
       backs and backs[0][0] == "groq+qwen"
       and backs[0][1] == "https://api.groq.com/openai/v1/chat/completions"
-      and backs[0][3] == "qwen/qwen3.6-27b",
+      and backs[0][3] == "qwen/qwen3.8-27b",
       str([(b[0], b[3]) for b in backs]))
 check("no llama default anywhere",
       all("llama" not in b[3] for b in backs))

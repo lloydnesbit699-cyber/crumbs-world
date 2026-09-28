@@ -3,6 +3,18 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.51.4 — 2026-09-28
+
+**Melody's brain model was a dead ID — she's back.** The Groq chat default
+`qwen/qwen3.6-27b` answers 404 (`model_not_found`) — it was never on
+Lloyd's key, so every brain call failed since v5.28.1 and chat always fell
+back to "my brain isn't connected." Verified live against Groq with his key
+via tools/groq_diag.sh: `qwen/qwen3.8-27b` returns 200 on the exact brain
+payload (tools + tool_choice:auto), keeping her in the Qwen family per
+Lloyd's call. Default moves to `qwen/qwen3.8-27b` (still env-overridable
+via GROQ_MODEL). Republish the deployment to pick it up. Voice STT model
+`whisper-large-v3` is confirmed on the key's model list — retest next.
+
 ## v5.51.3 — 2026-09-28
 
 **Trackpad pinch now zooms the map, not the page.** A two-finger trackpad

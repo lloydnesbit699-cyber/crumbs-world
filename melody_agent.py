@@ -1210,7 +1210,7 @@ def brain_backends():
     groq_key = _env("GROQ_API_KEY")
     groq = ("groq+qwen",
             "https://api.groq.com/openai/v1/chat/completions",
-            groq_key, _env("GROQ_MODEL", "qwen/qwen3.6-27b"))
+            groq_key, _env("GROQ_MODEL", "qwen/qwen3.8-27b"))
     gemini = ("gemini",
               "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
               gem_key, _env("GEMINI_MODEL", "gemini-2.5-flash"))

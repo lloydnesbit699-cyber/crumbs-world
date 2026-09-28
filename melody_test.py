@@ -219,7 +219,7 @@ def fake_stt_post(url, body, content_type, key, timeout=60):
 
 ma._stt_post = fake_stt_post
 tmp5 = fresh_dir()
-res = ma.handle_stt(tmp5, "alice", b"x" * 5000, "voice.webm", "free")
+res = ma.handle_stt(tmp5, "alice", b"x" * 5000, "voice.webm", "basic")
 check("stt ok, text trimmed", res.get("ok") and res.get("text") == "hello melody",
       str(res))
 check("stt hits whisper endpoint",
@@ -227,6 +227,10 @@ check("stt hits whisper endpoint",
       str(stt_posted.get("url")))
 check("stt posts multipart",
       "multipart/form-data" in stt_posted.get("content_type", ""))
+# v5.51.8: free tier is text-only — STT rejects with upgrade prompt
+res = ma.handle_stt(tmp5, "alice", b"x" * 5000, "voice.webm", "free")
+check("stt free tier -> upgrade prompt",
+      not res.get("ok") and "basic" in res.get("error", "").lower(), str(res))
 _, remaining, _, _ = ma.quota_check(tmp5, "alice", "free")
 check("stt burns one brain-call quota", remaining == 199,
       f"remaining={remaining}")
@@ -258,11 +262,11 @@ res = ma.handle_stt(tmp5, "__commons__", b"x" * 5000)
 check("stt commons id rejected", not res.get("ok"))
 
 # bad audio handling
-res = ma.handle_stt(tmp5, "alice", b"")
+res = ma.handle_stt(tmp5, "alice", b"", "voice.webm", "basic")
 check("stt empty audio rejected",
       not res.get("ok") and "empty" in res.get("error", "").lower(),
       str(res))
-res = ma.handle_stt(tmp5, "alice", b"x" * (ma._STT_MAX_BYTES + 1))
+res = ma.handle_stt(tmp5, "alice", b"x" * (ma._STT_MAX_BYTES + 1), "voice.webm", "basic")
 check("stt oversize rejected",
       not res.get("ok") and "long" in res.get("error", "").lower(),
       str(res))
@@ -286,15 +290,21 @@ def fake_stt_fail(url, body, content_type, key, timeout=60):
 
 ma._stt_post = fake_stt_fail
 _, before, _, _ = ma.quota_check(tmp5, "alice", "free")
-res = ma.handle_stt(tmp5, "alice", b"x" * 5000, "voice.mp4")
+res = ma.handle_stt(tmp5, "alice", b"x" * 5000, "voice.mp4", "basic")
 check("stt backend failure -> clear error", not res.get("ok"), str(res))
 _, after, _, _ = ma.quota_check(tmp5, "alice", "free")
 check("stt failure burns no quota", before == after,
       f"before={before} after={after}")
 
+# v5.51.8: tier ladder — free texts, basic talks, pro builds
+check("tools_for_tier pro -> all tools", ma.tools_for_tier("pro") == ma.TOOLS)
+check("tools_for_tier basic -> no tools", ma.tools_for_tier("basic") is None)
+check("tools_for_tier free -> no tools", ma.tools_for_tier("free") is None)
+check("tools_for_tier unknown -> no tools", ma.tools_for_tier("nope") is None)
+
 # cross-vault: bob's stt writes only under vaults/bob (Law 18)
 ma._stt_post = fake_stt_post
-res = ma.handle_stt(tmp5, "bob", b"x" * 5000)
+res = ma.handle_stt(tmp5, "bob", b"x" * 5000, "voice.webm", "basic")
 check("stt for bob ok", res.get("ok"), str(res))
 check("stt bob quota under vaults/bob",
       os.path.isfile(os.path.join(tmp5, "vaults", "bob", "melody",

@@ -11764,7 +11764,7 @@ $("pack-btn").onclick = () => {
 
 // v5.28: Melody chat dock — Phase 1 agent (teach + diagnose, read-only).
 // v5.28.1: demo mode — pre-login taste, knowledge-base only, 5/day/IP.
-const MELODY = { open: false, ready: false, busy: false, demo: false, phase: "boot" };
+const MELODY = { open: false, ready: false, busy: false, demo: false, phase: "boot", tier: null };  // v5.51.8: tier arrives with the first quota
 // v5.29.2: bootloader — she warms up before she thinks. Phases:
 // boot (loading her remembered self) -> warmup (the makeup beat) ->
 // ready (she takes questions) | offline (health check failed).
@@ -11813,9 +11813,26 @@ function melodyAdd(role, text) {
   log.appendChild(d);
   log.scrollTop = log.scrollHeight;
 }
+// v5.51.8: Lloyd's tier ladder — free texts, basic talks (default voice),
+// pro talks in any voice and she builds. Voice UI follows the tier.
+function melTierUI() {
+  const t = MELODY.tier || "free";
+  const voice = (t === "basic" || t === "pro");  // mic + speaker
+  const picker = (t === "pro");                  // alternate voices = pro extra
+  $("melody-mic").style.display = voice ? "" : "none";
+  $("melody-speaker").style.display = voice ? "" : "none";
+  $("melody-voicebtn").style.display = picker ? "" : "none";
+  if (!picker) $("melody-voicerow").hidden = true;
+}
 function melodySetQuota(q) {
-  if (q && typeof q.remaining === "number")
-    $("melody-quota").textContent = q.remaining + " left today";
+  if (!q) return;
+  if (q.tier && q.tier !== MELODY.tier) {
+    MELODY.tier = q.tier;
+    melTierUI();
+  }
+  if (typeof q.remaining === "number")
+    $("melody-quota").textContent =
+      (MELODY.tier ? MELODY.tier + " · " : "") + q.remaining + " left today";
 }
 // v5.29: voice both ways (round-1 ask #20) — TTS out, mic in.
 // TTS is client-side Web Speech only (no server change, zero cost);
@@ -13699,7 +13716,7 @@ async function deleteMission(id) {
     <span id="melody-title">Melody</span>
     <span id="melody-quota"></span>
     <button id="melody-speaker" title="Melody's voice">&#128266;</button>
-    <button id="melody-voicebtn" title="Choose Melody's voice">&#128483;</button>
+    <button id="melody-voicebtn" title="Choose Melody's voice (Pro)" style="display:none">&#128483;</button>
     <button id="melody-clear" title="Clear conversation">&#10218;</button>
     <!-- v5.33: workshop moved here from the old Build menu — the dock is the
          single Melody entry point now -->

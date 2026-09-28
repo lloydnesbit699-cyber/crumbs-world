@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.51.8"
+APP_VERSION = "5.51.9"
 # v5.41: single source of truth for the map-size cap (was 64, hardcoded in
 # four places). 500x500 = 250k cells. The client additionally caps tilePx so
 # the full-map backing canvas never exceeds 4096px per side (see editor.html).
@@ -6419,6 +6419,9 @@ class Handler(BaseHTTPRequestHandler):
             t = os.environ.get("MELODY_LOCAL_TIER", "free")
             return t if t in ("free", "basic", "pro") else "free"
         rec = _load_users().get(username) or {}
+        # v5.51.8: Lloyd owns the place — he always gets pro.
+        if rec.get("is_owner"):
+            return "pro"
         tier = rec.get("tier", "free")
         return tier if tier in ("free", "basic", "pro") else "free"
 

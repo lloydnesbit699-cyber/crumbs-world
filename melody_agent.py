@@ -1135,6 +1135,11 @@ _KNOWN_TOOLS = {"law_lookup", "knowledge_search", "vault_stats",
                 "map_validate", "charter", "remove_background",
                 "tile_lookup", "suggest_map_change", "playtest"}
 
+# v5.51.8: Lloyd's tier ladder — free texts, basic talks, pro builds.
+# Only pro gets her tool belt; free/basic are pure conversation.
+def tools_for_tier(tier):
+    return TOOLS if tier == "pro" else None
+
 # Max characters the model may pass into any single tool argument. Tool args
 # are search topics and queries — anything longer is either a bug or a
 # smuggling attempt, and the tools only need a phrase.
@@ -1375,6 +1380,11 @@ def handle_stt(script_dir, username, audio_bytes, filename="voice.webm",
         if not valid_username(username) and username != _LOCAL_USER:
             # demo / no session: the pre-login taste gets no model calls
             return {"ok": False, "error": "login required"}
+        # v5.51.8: voice input is Basic+ — free is text-only.
+        if tier not in ("basic", "pro"):
+            return {"ok": False,
+                    "error": ("voice input is a Basic perk — free is text-only. "
+                              "Upgrade to talk to her out loud!")}
         audio_bytes = audio_bytes or b""
         if len(audio_bytes) < _STT_MIN_BYTES:
             return {"ok": False,
@@ -1716,7 +1726,7 @@ def handle_chat(script_dir, username, message, tier=DEFAULT_TIER, world=None):
         tools_used = []
         backend = None
         try:
-            reply, tool_calls, backend = brain_chat(messages, TOOLS)
+            reply, tool_calls, backend = brain_chat(messages, tools_for_tier(tier))
         except RuntimeError:
             # no brain configured (or all failed) — say so honestly, free
             reply = ("My brain isn't connected on this server yet — Lloyd "
@@ -1761,7 +1771,7 @@ def handle_chat(script_dir, username, message, tier=DEFAULT_TIER, world=None):
                                  "tool_call_id": tc.get("id", f"call_{i}"),
                                  "content": str(result)[:2000]})
             try:
-                reply, tool_calls, _ = brain_chat(messages, TOOLS)
+                reply, tool_calls, _ = brain_chat(messages, tools_for_tier(tier))
             except RuntimeError:
                 break  # brain died mid-turn — answer with what we have
             _spend()

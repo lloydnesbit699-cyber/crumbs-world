@@ -199,8 +199,14 @@ check("room preset buttons exist", html.includes('id="btn-room"') &&
   html.includes('id="btn-arena"'));
 check("batch stroke endpoint used", hud.includes('"/api/semantic/stroke"') &&
   hud.includes('"strokes"'));
-check("server version bumped", hud.includes('APP_VERSION = "5.47.3"'));
-check("changelog has 5.47.3", changelog.includes("5.47.3"));
+// v5.47.4: version checks read the newest CHANGELOG entry instead of a
+// hardcoded string, so releases stop tripping on a stale expectation
+const latestVer = (changelog.match(/^## v(\d+\.\d+\.\d+)/m) || [])[1];
+check("changelog has a versioned entry", !!latestVer);
+check("server version matches newest changelog entry",
+  !!latestVer && hud.includes('APP_VERSION = "' + latestVer + '"'));
+check("changelog contains the server version",
+  !!latestVer && changelog.includes(latestVer));
 
 console.log("== animation ghost (v5.47.1) ==");
 // stubs for the ghost lifecycle: the merge is real, the plumbing is fake

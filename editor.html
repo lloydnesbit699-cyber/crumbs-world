@@ -384,7 +384,7 @@
     padding: 24px; width: min(86vw, 320px); text-align: center; }
   #login-box h2 { color: #ffd75f; margin: 0 0 4px; font-size: 20px; }
   #login-box .login-sub { color: #888; font-size: 12px; margin-bottom: 14px; }
-  #login-box input { display: block; width: 100%; box-sizing: border-box;
+  #login-box input:not([type=checkbox]) { display: block; width: 100%; box-sizing: border-box;
     margin: 8px 0; padding: 10px; border-radius: 8px; border: 1px solid #333;
     background: #0d0d12; color: #eee; font-size: 16px; }
   /* v5.28: Melody chat dock (Phase 1 agent) */
@@ -459,7 +459,11 @@
   /* v5.36: signup-time 2FA opt-in */
   .login-2fa-opt { display: flex; align-items: center; gap: 8px; color: #bbb;
     font-size: 13px; margin-top: 8px; cursor: pointer; }
-  .login-2fa-opt input { width: 18px; height: 18px; accent-color: #ffd75f; }
+  /* v5.47.4: the checkbox must opt out of the global touch sizing AND the
+     login-box full-width rule — otherwise it renders card-wide and shoves
+     the label text off the card (seen on Lloyd's phone) */
+  .login-2fa-opt input { width: 18px; height: 18px; flex: 0 0 auto; margin: 0;
+    padding: 0; min-height: 0; accent-color: #ffd75f; }
   #su2-back { width: 100%; margin-top: 8px; padding: 10px; border-radius: 8px;
     border: 1px solid #333; background: none; color: #aaa; font-size: 14px; }
   #tfa-overlay { position: fixed; inset: 0; z-index: 300; display: none;
@@ -1040,14 +1044,18 @@
   #panel-sheet .pval { font-size: 12px; color: #999; width: 40px; text-align: right; }
   #panel-sheet .phint { font-size: 11px; color: #777; line-height: 1.4; }
   /* every floating panel/hub/tray rides the opacity var (the control + its
-     sheet + toasts/banners stay solid so they stay readable) */
-  #topbar, .tray, .sheet, .edge-tab, .menu-drop, #zoom-cluster,
+     sheet + toasts/banners stay solid so they stay readable).
+     v5.47.4: #hud-sheet never carried class .sheet (its classes are the
+     peek/half/full detents), so the slider missed it — the sheet and its
+     docked brush bar / ••• tools now ride --panel-op like every other panel */
+  #topbar, .tray, .sheet, #hud-sheet, .edge-tab, .menu-drop, #zoom-cluster,
   #meters, #btn-fire, #pack-btn, #mission-hud, #gear-hud, #height-legend,
   #dbg, #melody-dock, #melody-fab { opacity: var(--panel-op); }
   #dpad { opacity: calc(var(--panel-op) * 0.8); }  /* keep v3.7's 0.8 look, scaled */
   /* hide-all: pure CSS so each panel's own show/hide state is untouched and
      comes back exactly as it was */
   body.panels-hidden #topbar, body.panels-hidden .tray, body.panels-hidden .sheet,
+  body.panels-hidden #hud-sheet, /* v5.47.4: same .sheet-class miss as the opacity var */
   body.panels-hidden .edge-tab, body.panels-hidden .menu-drop, body.panels-hidden #zoom-cluster,
   body.panels-hidden #dpad, body.panels-hidden #meters, body.panels-hidden #btn-fire,
   body.panels-hidden #pack-btn, body.panels-hidden #mission-hud, body.panels-hidden #gear-hud,

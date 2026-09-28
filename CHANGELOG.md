@@ -5,6 +5,27 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.47.4 — 2026-09-27
+
+**Panel transparency reaches the bottom sheet.** The v5.29 ◨ panel-visibility
+control (opacity slider + hide-all) drives a `--panel-op` var and a
+`body.panels-hidden` class, but both stylesheet selector lists keyed off
+`.sheet` — and `#hud-sheet` never carried that class (its classes are the
+peek/half/full detents). The sheet, the docked brush bar, and the ••• tools
+silently ignored the transparency slider and survived hide-all. Both lists now
+name `#hud-sheet` explicitly; children inherit, so the docked bar and
+more-sheet ride along. New `panelvis_test.js`: 9/9.
+
+**Signup 2FA row no longer blows out the card.** The "Protect with
+authenticator app" checkbox was hit by `#login-box input { width: 100% }`
+(ID specificity beat the 18px class rule) plus the global 44px touch sizing,
+so it rendered card-wide and shoved its label text off the card on Lloyd's
+phone. The full-width rule now excludes checkboxes, and the opt-in checkbox
+resets the touch sizing and pins itself at 18px with `flex: 0 0 auto`.
+New `logincard_test.js`: 8/8. Also made `hud_pass_test.js`'s version checks
+read the newest CHANGELOG entry instead of a hardcoded string, so releases
+stop tripping on stale expectations.
+
 ## v5.47.3 — 2026-09-27
 
 **Brush bar docks above the bottom sheet.** The Phase-3 floating brush bar

@@ -4038,7 +4038,7 @@ async function loadSemantic() {
   renderSemDock();
 }
 async function saveSemSettings(patch) {
-  const r = await api("/api/semantic/settings", patch);
+  const r = await api("/api/semantic/settings", { settings: patch });
   if (!r.ok) { toast(r.error || "couldn't save"); await loadSemantic(); return; }
   semSettings = r.settings; semSeed = r.seed || semSeed;
   markBaseDirty(); renderSemDock(); queueRender();

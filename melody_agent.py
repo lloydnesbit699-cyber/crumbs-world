@@ -20,8 +20,10 @@
 # The first configured backend wins; if the primary errors, the fallback is
 # tried once. No key anywhere -> honest "brain not configured" answers.
 
+import hashlib
 import json
 import os
+import random
 import re
 import time
 import urllib.request
@@ -366,6 +368,226 @@ def tool_map_validate(script_dir, username):
             findings.append(f"{mf}: OK — {cells} painted cell(s) across "
                             f"{len(layers)} layer(s).")
     return "\n".join(findings)
+
+
+def _pt_obj_tid(cell):
+    """Tile id of an object-layer cell, whatever its shape. Never raises."""
+    try:
+        if cell is None:
+            return None
+        if isinstance(cell, dict):
+            tid = cell.get("tid")
+            return tid if isinstance(tid, int) else None
+        return cell if isinstance(cell, int) else None
+    except Exception:
+        return None
+
+
+def _pt_grid(doc, key, w, h):
+    """A w×h grid from the map doc; malformed layers become blank, never a crash."""
+    g = doc.get(key)
+    if (isinstance(g, list) and len(g) == h
+            and all(isinstance(r, list) and len(r) == w for r in g)):
+        return [row[:] for row in g]
+    return [[0] * w for _ in range(h)]
+
+
+def _pt_find_map(vdir, map_name):
+    """Resolve which map file to playtest: a named one, else the most recent."""
+    cands = [f for f in os.listdir(vdir)
+             if f.endswith(".json") and "map" in f.lower()
+             and not f.endswith(".rules.json")]  # sidecars aren't maps
+    if os.path.isfile(os.path.join(vdir, "hud_map.json")) \
+            and "hud_map.json" not in cands:
+        cands.append("hud_map.json")
+    if map_name:
+        base = os.path.basename(map_name.strip())[:80]
+        if not base.endswith(".json"):
+            base += ".json"
+        if base in cands:
+            return base
+        return None
+    if not cands:
+        return None
+    cands.sort(key=lambda f: os.path.getmtime(os.path.join(vdir, f)),
+               reverse=True)
+    return cands[0]
+
+
+def _pt_walk(walkable, hazard, spawn, w, h, trials, seed):
+    """Seeded random walks from spawn. Returns (visits, hazard_hits, dead).
+
+    dead = walkable+reachable cells no walk ever stepped on. The seed makes
+    re-runs on an unchanged map report the same numbers.
+    """
+    rng = random.Random(seed)
+    visits = [[0] * w for _ in range(h)]
+    hazard_hits = 0
+    max_steps = min(4 * w * h, 2000)
+    for _ in range(trials):
+        x, y = spawn
+        for _ in range(max_steps):
+            visits[y][x] += 1
+            if hazard[y][x]:
+                hazard_hits += 1
+            nbrs = [(x + dx, y + dy)
+                    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))
+                    if walkable(x + dx, y + dy)]
+            if not nbrs:
+                break
+            x, y = rng.choice(nbrs)
+    return visits, hazard_hits
+
+
+def tool_playtest_map(script_dir, username, map_name="", trials="60"):
+    """Play the dungeon like a QA tester — read-only, never edits the map.
+
+    Flood-fills from spawn over the collision layer (unreachable paint,
+    unwinnable goals), then runs seeded random walks (dead zones no walk
+    ever visits, hazard exposure). The seed comes from the map file, so a
+    re-run on an unchanged map reports the same numbers.
+    Law 18: only this player's vault, only their maps.
+    """
+    vdir = _player_vault_dir(script_dir, username)
+    if not os.path.isdir(vdir):
+        return "I couldn't find your vault."
+    fname = _pt_find_map(vdir, map_name or "")
+    if map_name and not fname:
+        return f"I can't find a map called '{map_name[:40]}' in your vault."
+    if not fname:
+        return "You don't have any saved maps yet — paint something and I'll play it."
+    path = os.path.join(vdir, fname)
+    try:
+        with open(path, encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, ValueError) as exc:
+        return f"{fname}: can't be read ({exc}) — this one needs Lloyd's eyes."
+    if not isinstance(doc, dict):
+        return f"{fname}: unexpected shape (not an object)."
+    try:
+        w, h = int(doc.get("width", 0)), int(doc.get("height", 0))
+    except (TypeError, ValueError):
+        return f"{fname}: the dimensions don't parse."
+    if not (1 <= w <= 500 and 1 <= h <= 500):
+        return f"{fname}: odd dimensions ({w}x{h}) — re-save the map to repair it."
+    tiles = _pt_grid(doc, "tiles", w, h)
+    objects = _pt_grid(doc, "objects", w, h)
+    collision = _pt_grid(doc, "collision", w, h)
+    hazard = _pt_grid(doc, "hazard", w, h)
+
+    def walkable(x, y):
+        return 0 <= x < w and 0 <= y < h and not collision[y][x]
+
+    # rules sidecar: hero designations for spawn, game rules for goals.
+    tweaks, game = {}, []
+    rpath = os.path.join(vdir, (fname[:-5] if fname.endswith(".json") else fname)
+                         + ".rules.json")
+    try:
+        with open(rpath, encoding="utf-8") as f:
+            rdoc = json.load(f)
+        if isinstance(rdoc, dict):
+            tweaks = rdoc.get("tweaks") or {}
+            game = rdoc.get("game") or []
+    except (OSError, ValueError):
+        pass
+
+    def find_hero(tid):
+        for y in range(h):
+            for x in range(w):
+                if _pt_obj_tid(objects[y][x]) == tid and walkable(x, y):
+                    return x, y
+        return None
+
+    spawn, spawn_note = None, "assumed at center"
+    for ht in (tweaks.get("hero_tiles") or []):
+        if isinstance(ht, int):
+            spawn = find_hero(ht)
+            if spawn:
+                spawn_note = f"your hero (tile #{ht})"
+                break
+    if not spawn and isinstance(tweaks.get("hero_tile"), int):
+        spawn = find_hero(tweaks["hero_tile"])
+        if spawn:
+            spawn_note = f"your hero (tile #{tweaks['hero_tile']})"
+    if not spawn:
+        for y in range(h):
+            for x in range(w):
+                if walkable(x, y):
+                    spawn = (x, y)
+                    break
+            if spawn:
+                break
+    if not spawn:
+        return (f"Playtest: {fname} ({w}x{h}) — no walkable cell at all. "
+                "The whole map is blocked; nothing could ever move here.")
+
+    # reachability: flood fill from spawn over walkable cells.
+    seen = {spawn}
+    dq = [spawn]
+    while dq:
+        cx, cy = dq.pop()
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = cx + dx, cy + dy
+            if walkable(nx, ny) and (nx, ny) not in seen:
+                seen.add((nx, ny))
+                dq.append((nx, ny))
+    walkable_n = sum(1 for y in range(h) for x in range(w) if walkable(x, y))
+    walled = [(x, y) for y in range(h) for x in range(w)
+              if tiles[y][x] and walkable(x, y) and (x, y) not in seen]
+
+    # goals: unwinnable if unreachable; missing entirely is worth saying.
+    goals = [(r.get("x"), r.get("y")) for r in game
+             if isinstance(r, dict) and r.get("kind") == "goal"
+             and isinstance(r.get("x"), int) and isinstance(r.get("y"), int)]
+    bad_goals = [(x, y) for x, y in goals
+                 if not (walkable(x, y) and (x, y) in seen)]
+
+    # hazard exposure from the overlay.
+    hazard_n = sum(1 for y in range(h) for x in range(w) if hazard[y][x])
+
+    # Monte Carlo: seeded random walks find the dead zones.
+    try:
+        n_trials = int(str(trials or "60").strip() or "60")
+    except ValueError:
+        n_trials = 60
+    n_trials = max(10, min(300, n_trials))
+    seed_src = f"{fname}:{os.path.getmtime(path)}".encode()
+    seed = int(hashlib.sha256(seed_src).hexdigest(), 16) % 2**32
+    visits, hazard_hits = _pt_walk(walkable, hazard, spawn, w, h,
+                                  n_trials, seed)
+    dead = [(x, y) for y in range(h) for x in range(w)
+            if walkable(x, y) and (x, y) in seen and visits[y][x] == 0]
+
+    issues = len(walled) + len(bad_goals) + (1 if not goals else 0)
+    verdict = "looks playable" if issues == 0 else f"{issues} issue(s)"
+    lines = [f"Playtest: {fname} ({w}x{h}) — {verdict}.",
+             f"Spawn {spawn} ({spawn_note}); {n_trials} walks, "
+             f"{len(seen)}/{walkable_n} walkable cells reached."]
+    if walled:
+        sample = ", ".join(f"({x},{y})" for x, y in walled[:5])
+        lines.append(f"Walled-off paint: {len(walled)} painted cell(s) no walk "
+                     f"can reach — e.g. {sample}.")
+    else:
+        lines.append("Reachability: every painted walkable cell is reachable.")
+    if not goals:
+        lines.append("Goals: none set — there's nothing to win yet.")
+    elif bad_goals:
+        sample = ", ".join(f"({x},{y})" for x, y in bad_goals[:5])
+        lines.append(f"Goals: UNWINNABLE — {len(bad_goals)} goal(s) unreachable: "
+                     f"{sample}.")
+    else:
+        lines.append(f"Goals: all {len(goals)} reachable.")
+    if hazard_n:
+        avg = hazard_hits / n_trials
+        lines.append(f"Hazards: {hazard_n} hazard cell(s); about {avg:.1f} "
+                     f"hazard steps per walk.")
+    if dead:
+        sample = ", ".join(f"({x},{y})" for x, y in dead[:5])
+        lines.append(f"Dead zones: {len(dead)} walkable cell(s) no walk ever "
+                     f"visited — e.g. {sample}. (Quiet corners, or wasted space?)")
+    lines.append("Note: climb limits and swimming aren't modeled — the HUD's "
+                 "own one-tap check covers those.")
+    return "\n".join(lines)
 
 
 def tool_tile_lookup(script_dir, username, query):
@@ -875,6 +1097,15 @@ TOOLS = [
                       "description": "A word from the tile's name, like 'torch' or 'door'."}},
          "required": ["query"]}}},
     {"type": "function", "function": {
+        "name": "playtest",
+        "description": "Playtest the player's dungeon like a QA tester: flood-fills from spawn over the collision layer, then runs dozens of seeded random walks. Reports unreachable painted cells, unwinnable or missing goals, dead zones no walk ever visits, and hazard exposure. Read-only — never edits the map. Use it when the player asks 'is this playable', 'playtest my dungeon', or wants a design review.",
+        "parameters": {"type": "object", "properties": {
+            "map": {"type": "string",
+                    "description": "Map filename in the vault; leave empty for the most recently saved map."},
+            "trials": {"type": "string",
+                    "description": "Random-walk trials, 10-300 (default 60). More trials find rarer dead zones."}},
+         "required": []}}},
+    {"type": "function", "function": {
         "name": "suggest_map_change",
         "description": "Propose a change the player sees as a ghost preview they accept or undo with one tap. Kinds: wall_ring (walls around the open floor), connect_patrols (join two patrol routes), animation_preset (a motion for a tile), room_draft (draft a dungeon_room or boss_arena at a spot — the ghost uses the HUD's own room layout), patrol_draft (draft a 2-8 stop route for a placed character; needs his tile id + where he stands). Never for anything destructive. The preview is reversible; you never paint directly.",
         "parameters": {"type": "object", "properties": {
@@ -900,7 +1131,7 @@ TOOLS = [
 
 _KNOWN_TOOLS = {"law_lookup", "knowledge_search", "vault_stats",
                 "map_validate", "charter", "remove_background",
-                "tile_lookup", "suggest_map_change"}
+                "tile_lookup", "suggest_map_change", "playtest"}
 
 # Max characters the model may pass into any single tool argument. Tool args
 # are search topics and queries — anything longer is either a bug or a
@@ -944,6 +1175,9 @@ def run_tool(script_dir, username, name, args):
         return tool_remove_background(script_dir, username, _arg("tile_id"))
     if name == "tile_lookup":
         return tool_tile_lookup(script_dir, username, _arg("query"))
+    if name == "playtest":
+        return tool_playtest_map(script_dir, username,
+                                 _arg("map"), _arg("trials"))
     if name == "suggest_map_change":
         return tool_suggest_map_change(script_dir, username,
                                        str(args.get("kind", ""))[:64],
@@ -1204,6 +1438,11 @@ Rules you never break:
   or boss_arena); if they want a character to walk somewhere, draft the route
   with patrol_draft. The player sees your draft as a ghost and accepts it
   with one tap — or declines it and it's gone.
+- When the player asks "is this playable" or wants a design review, run the
+  playtest tool: she walks the dungeon dozens of times (seeded, so re-runs
+  agree) and reports unreachable paint, unwinnable or missing goals, dead
+  zones no walk ever visits, and hazard exposure. Narrate the findings in
+  plain words — which spots, what to fix, what to keep.
 - Keep answers short enough for a phone screen. Offer one next step, not five.
 - If you don't know, say so and suggest where to look — never invent buttons,
   menus, or features.

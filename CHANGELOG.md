@@ -5,6 +5,17 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.49.0 — 2026-09-27
+
+**Melody the playtester (Lloyd's favorite).** Ask her "is this playable" and
+she walks your dungeon dozens of times: a flood-fill from spawn over the
+collision layer (unreachable painted cells, unwinnable goals), plus seeded
+Monte Carlo random walks (dead zones no walk ever visits, hazard exposure
+per walk). The seed comes from the map file, so a re-run on an unchanged
+map reports the same numbers. Read-only by contract — she never edits the
+map she tests; Law 18 (your vault only). New `melody_playtest_test.py`:
+22/22.
+
 ## v5.48.0 — 2026-09-27
 
 **Melody moves in: hands, eyes, and a proposal pen (co-build).** She was a

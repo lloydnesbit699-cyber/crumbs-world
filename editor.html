@@ -1224,6 +1224,8 @@
   <button id="menu-load">Load&hellip;</button>
   <button id="menu-slots" title="Save and load play sessions">Save slots&hellip;</button>
   <button id="menu-export" title="Download this map as a PNG picture">Export PNG</button>
+  <!-- v5.51: birth certificates — a shareable time-lapse of this map's construction -->
+  <button id="menu-birth" title="Export a shareable time-lapse of how this map was built">&#127916; Birth certificate&#8230;</button>
   <button id="menu-recovery" title="Checkpoint slots and recent recovery events">Recovery&hellip;</button>
   <hr>
   <!-- v5.33: account + world controls moved here from the old Setup menu -->
@@ -1650,6 +1652,18 @@
     <button id="btn-update-later" class="ghost">Not now</button>
   </div>
   <div class="tray-hint" style="margin: 6px 10px 2px;">Your map is saved first; the current app files are backed up, and File &rarr; Roll back update can undo the install.</div>
+</div>
+
+<!-- v5.51: birth certificates — a shareable time-lapse of this map's construction -->
+<div id="sheet-birth" class="sheet">
+  <div class="grab"></div>
+  <div class="tray-head">Birth certificate</div>
+  <div id="birth-info" class="tray-hint" style="margin: 6px 10px 2px;"></div>
+  <div class="row2">
+    <button id="btn-birth-record">&#9679; Record time-lapse</button>
+    <button id="btn-birth-close" class="ghost">Close</button>
+  </div>
+  <div id="birth-progress" class="tray-hint" style="margin: 6px 10px 2px;"></div>
 </div>
 
 <div id="sheet-slots" class="sheet">
@@ -5962,6 +5976,156 @@ async function finishRecording() {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
   toast("video saved — share it anywhere");
 }
+
+// ---- v5.51: birth certificates ----------------------------------------------
+// A shareable creation time-lapse, replayed from the append-only edit log
+// (/api/birth/log). The events rebuild each sampled frame on an offscreen
+// canvas — tiles then objects, oldest edit first — and canvas.captureStream
+// + MediaRecorder (the v3.5 pattern) turns it into a shareable video.
+// Pure client-side; the live map is never touched.
+let birthRec = null;
+$("menu-birth").onclick = async () => {
+  closeOverlays();
+  let r = null;
+  try { r = await api("/api/birth/log"); } catch (e) {}
+  const evts = (r && r.ok && Array.isArray(r.events)) ? r.events : [];
+  if (evts.length < 2) {
+    toast("not enough build history yet — paint something, then come back");
+    return;
+  }
+  const keys = evts.filter(e => e.key).length;
+  $("birth-info").textContent = evts.length + " recorded edits" +
+    (keys ? " (" + keys + " full-map moment" + (keys > 1 ? "s" : "") + ")" : "") +
+    " — the time-lapse replays them in the order they were built.";
+  $("birth-progress").textContent = "";
+  $("btn-birth-record").disabled = false;
+  toggleOverlay("sheet-birth");
+};
+$("btn-birth-close").onclick = () => toggleOverlay("sheet-birth");
+function birthDrawCell(b, id, px, py, tp, imgCache) {
+  // v5.51: one replay cell — the tile art if it's loaded, else its flat
+  // color, else black. Same fallback order as renderBase.
+  let im = imgCache.get(id);
+  if (im === undefined) {
+    try { im = tileFrameImage(id) || null; } catch (e) { im = null; }
+    imgCache.set(id, im);
+  }
+  if (im) { b.drawImage(im, px, py, tp, tp); return; }
+  b.fillStyle = colorOf[id] || "#000";
+  b.fillRect(px, py, tp, tp);
+}
+$("btn-birth-record").onclick = async () => {
+  if (birthRec) return;
+  if (!REC_MIME || typeof HTMLCanvasElement === "undefined") {
+    toast("recording isn't supported in this browser"); return;
+  }
+  let r = null;
+  try { r = await api("/api/birth/log"); } catch (e) {}
+  const evts = (r && r.ok && Array.isArray(r.events)) ? r.events : [];
+  if (evts.length < 2) { toast("build history went missing — try again"); return; }
+  const bw = r.w | 0, bh = r.h | 0;
+  if (!bw || !bh) { toast("map has no size yet"); return; }
+  // v5.51: phone-friendly frame — longest edge ~960px, whole tiles only.
+  const tp = Math.max(2, Math.floor(960 / Math.max(bw, bh)));
+  const bc = document.createElement("canvas");
+  bc.width = bw * tp; bc.height = bh * tp;
+  const b = bc.getContext("2d");
+  b.imageSmoothingEnabled = false;
+  const imgCache = new Map();
+  // replay grids — blank until the first keyframe or cell event fills them
+  let gTiles = null, gObjs = null;
+  const blank = () => Array.from({ length: bh }, () => new Array(bw).fill(0));
+  function applyEvent(e) {
+    if (e.key && e.g) {
+      // keyframe — wholesale state. Normalized onto the live map size so a
+      // mid-log resize can't skew the replay grid.
+      const srcT = e.g.tiles || [], srcO = e.g.objects || [];
+      gTiles = blank(); gObjs = blank();
+      const rows = Math.min(bh, srcT.length);
+      for (let y = 0; y < rows; y++) {
+        const sr = srcT[y] || [], dr = gTiles[y], n = Math.min(bw, sr.length);
+        for (let x = 0; x < n; x++) dr[x] = sr[x];
+      }
+      const rowsO = Math.min(bh, srcO.length);
+      for (let y = 0; y < rowsO; y++) {
+        const sr = srcO[y] || [], dr = gObjs[y], n = Math.min(bw, sr.length);
+        for (let x = 0; x < n; x++) dr[x] = sr[x];
+      }
+      return;
+    }
+    if (!gTiles) { gTiles = blank(); gObjs = blank(); }
+    const cells = e.c || [];
+    for (let i = 0; i < cells.length; i++) {
+      const c = cells[i], li = c[0], x = c[1], y = c[2], v = c[3];
+      if (x < 0 || y < 0 || x >= bw || y >= bh) continue;
+      if (li === 0) gTiles[y][x] = v; else gObjs[y][x] = v;
+    }
+  }
+  function drawFrame() {
+    b.fillStyle = "#000"; b.fillRect(0, 0, bc.width, bc.height);
+    for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++)
+      birthDrawCell(b, gTiles[y][x], x * tp, y * tp, tp, imgCache);
+    for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) {
+      const oid = objTid(gObjs[y][x]);
+      if (oid != null) birthDrawCell(b, oid, x * tp, y * tp, tp, imgCache);
+    }
+  }
+  // v5.51: sample the story down to a ~20s clip — events spread evenly so
+  // a long build and a quick sketch both watch well.
+  const FPS = 12, FRAMES = 240, HOLD = 12;
+  let recChunks = [];
+  try {
+    birthRec = new MediaRecorder(bc.captureStream(FPS),
+      { mimeType: REC_MIME, videoBitsPerSecond: 6000000 });
+  } catch (e) { toast("couldn't start recording"); birthRec = null; return; }
+  birthRec.ondataavailable = e => { if (e.data && e.data.size) recChunks.push(e.data); };
+  birthRec.onstop = async () => {
+    const mime = REC_MIME, ext = mime.includes("mp4") ? "mp4" : "webm";
+    const blob = new Blob(recChunks, { type: mime });
+    const file = new File([blob], "birth-certificate." + ext, { type: mime });
+    birthRec = null; recChunks = [];
+    $("btn-birth-record").disabled = false;
+    $("birth-progress").textContent = "";
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: "Birth certificate" });
+        toast("sent to the share sheet");
+        return;
+      }
+    } catch (e) { /* user cancelled — fall through to download */ }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = file.name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    toast("time-lapse saved — share it anywhere");
+  };
+  $("btn-birth-record").disabled = true;
+  birthRec.start(250);
+  const t0 = Date.now();
+  let applied = 0, frame = 0;
+  const total = FRAMES + HOLD;
+  const timer = setInterval(() => {
+    // draw the next sampled frame (or hold the finished map at the end)
+    if (frame < FRAMES) {
+      const target = Math.round(frame * (evts.length - 1) / (FRAMES - 1));
+      while (applied <= target) { applyEvent(evts[applied]); applied++; }
+      drawFrame();
+      frame++;
+    } else if (frame < total) {
+      drawFrame();   // hold the finished dungeon for the last second
+      frame++;
+    } else {
+      clearInterval(timer);
+      try { if (birthRec && birthRec.state !== "inactive") birthRec.stop(); }
+      catch (e) { birthRec = null; }
+      return;
+    }
+    const s = Math.floor((Date.now() - t0) / 1000);
+    $("birth-progress").textContent = "recording " + s + "s of ~" +
+      Math.ceil(total / FPS) + "s — keep this page open…";
+  }, 1000 / FPS);
+};
 
 // ---- v3.7: rules, touch controls, controller --------------------------------
 // Rules live per build (server sidecar) + per user (localStorage defaults).

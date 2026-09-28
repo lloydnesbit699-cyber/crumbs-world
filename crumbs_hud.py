@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.50.15"
+APP_VERSION = "5.51.0"
 # v5.41: single source of truth for the map-size cap (was 64, hardcoded in
 # four places). 500x500 = 250k cells. The client additionally caps tilePx so
 # the full-map backing canvas never exceeds 4096px per side (see editor.html).
@@ -1150,7 +1150,8 @@ _SIDECAR_SUFFIXES = (".rules.json", ".traits.json", ".names.json",
                      ".missions.json", ".items.json", ".npcs.json",
                      ".gear.json", ".slots.json",
                      ".portals.json",  # v5.29: pocket-map links ride along
-                     ".neighbors.json")  # v5.42: edge links ride along
+                     ".neighbors.json",  # v5.42: edge links ride along
+                     ".birth.json")  # v5.51: the birth-certificate edit log
 
 
 def _git_tracked(fname):
@@ -4041,6 +4042,7 @@ def _switch_map(name, path):
     _load_npcs(name)
     _load_portals(name)  # v5.29
     _load_neighbors(name)  # v5.42: edge links ride the map switch
+    _birth_load(name)  # v5.51: the birth-certificate edit log rides too
     _mission_reconcile_patrols()
     _log_event(f"loaded {name}")
     return True, {"width": world.width, "height": world.height,
@@ -4202,7 +4204,7 @@ def _map_sidecars(name):
             for ext in (".json", ".rules.json", ".traits.json", ".names.json",
                         ".missions.json", ".items.json",
                         ".npcs.json", ".portals.json",
-                        ".neighbors.json")]  # v5.12, v5.13, v5.29, v5.42
+                        ".neighbors.json", ".birth.json")]  # v5.12, v5.13, v5.29, v5.42, v5.51
 
 
 # ---- v5.42: neighboring maps ------------------------------------------------
@@ -4537,7 +4539,126 @@ def _undoable(label, fn, full=False, grids=True):
     cmd._rev_before = rev_before
     cmd._rev_after = _grid_rev
     history.push(cmd)
+    _birth_record(label, cmd)   # v5.51: the edit log for birth certificates
     return out
+
+
+# ---- v5.51: birth certificates -------------------------------------------
+# Every dungeon exports a shareable creation time-lapse, built from an
+# append-only edit log. Each undoable mutation appends one event carrying
+# the cells it set (after-values); undo/redo append the inverse. Replaying
+# the events in order from a blank map rebuilds the construction story —
+# walls, rooms and changes appearing in the order the builder made them.
+# The log lives in a gitignored sidecar (<map>.birth.json): user data that
+# never enters the repo and never disturbs map saves.
+_BIRTH_VISUAL_LAYERS = ("tiles", "objects")
+_BIRTH_CELL_CAP = 30000   # a single event bigger than this becomes a keyframe
+_BIRTH_EVENT_CAP = 4000   # the log stays bounded; overflow collapses to a keyframe
+_birth_events = []        # events for the live map, oldest first
+_birth_map = None         # which map the live log belongs to
+
+
+def _birth_path(name):
+    return _vpath(name + ".birth.json")
+
+
+def _birth_keyframe(label):
+    """The live visual grids as one keyframe event — whole-map changes
+    (generate / resize / reset) and log-overflow compaction."""
+    return {"t": time.time(), "label": label, "key": True,
+            "w": world.width, "h": world.height,
+            "g": {"tiles": [row[:] for row in world.data],
+                  "objects": [row[:] for row in world.object_layer]}}
+
+
+def _birth_cells_of(cmd, forward=True):
+    """Normalized [(layer, x, y, value)] for one birth event, visual layers
+    only. Returns None for whole-state commands (the caller keyframes)."""
+    cells = []
+    if isinstance(cmd, core.SetTileCommand):
+        if cmd.layer in _BIRTH_VISUAL_LAYERS:
+            cells.append((cmd.layer, cmd.x, cmd.y,
+                          cmd.new_val if forward else cmd.old_val))
+    elif isinstance(cmd, core.MultiCommand):
+        for c in cmd.commands:
+            sub = _birth_cells_of(c, forward)
+            if sub:
+                cells.extend(sub)
+    elif isinstance(cmd, _StateDiffCommand):
+        for layer, dl in (cmd.diffs or {}).items():
+            if layer not in _BIRTH_VISUAL_LAYERS:
+                continue
+            for (x, y, old, new) in dl:
+                cells.append((layer, x, y, new if forward else old))
+    else:
+        return None  # StateSnapshotCommand and friends — keyframe instead
+    return cells
+
+
+def _birth_record(label, cmd=None, forward=True):
+    """Append one birth event for the live map. Never throws: the log is a
+    nice-to-have and must never break the edit it records."""
+    global _birth_events, _birth_map
+    try:
+        if _birth_map != _current_map:
+            # first edit since boot (or a path that skipped _switch_map) —
+            # adopt the map as found, then record on top of it.
+            _birth_load(_current_map)
+        if cmd is None:
+            ev = _birth_keyframe(label)
+        else:
+            cells = _birth_cells_of(cmd, forward)
+            if cells is None or len(cells) > _BIRTH_CELL_CAP:
+                ev = _birth_keyframe(label)
+            elif not cells:
+                return  # no visual change — nothing for the time-lapse
+            else:
+                li = {n: i for i, n in enumerate(_BIRTH_VISUAL_LAYERS)}
+                ev = {"t": time.time(), "label": label,
+                      "c": [[li[ly], x, y, v] for (ly, x, y, v) in cells]}
+        _birth_events.append(ev)
+        if len(_birth_events) > _BIRTH_EVENT_CAP:
+            # collapse the oldest half into one keyframe of the live grids —
+            # the keyframe IS their cumulative result, so replay stays exact.
+            _birth_events = ([_birth_keyframe("compacted")] +
+                             _birth_events[_BIRTH_EVENT_CAP // 2:])
+    except Exception:
+        pass
+
+
+def _birth_save(name=None):
+    """Persist the live log beside the map. Gitignored sidecar — user data,
+    saved on the same beat as the map itself."""
+    try:
+        with open(_birth_path(name or _current_map), "w") as f:
+            json.dump({"v": 1, "layers": list(_BIRTH_VISUAL_LAYERS),
+                       "events": _birth_events}, f)
+    except Exception:
+        pass
+
+
+def _birth_load(name):
+    """Load the log for a freshly switched map. Maps that predate birth
+    logging get one seed keyframe of the map as found, so they still get
+    a birth certificate — their story starts here."""
+    global _birth_events, _birth_map
+    _birth_map = name
+    _birth_events = []
+    try:
+        p = _birth_path(name)
+        if os.path.isfile(p):
+            doc = json.load(open(p))
+            if isinstance(doc, dict) and isinstance(doc.get("events"), list) \
+                    and doc["events"]:
+                _birth_events = doc["events"]
+                return
+    except Exception:
+        pass
+    try:
+        if world.width > 0 and world.height > 0:
+            _birth_events = [_birth_keyframe("as found")]
+    except Exception:
+        pass
 
 
 def _preset_noise_over():
@@ -5417,6 +5538,7 @@ def _save_now(name=DEFAULT_SAVE):
         _save_rules(name)  # v3.7: rules ride alongside the map
         _save_portals(name)  # v5.29: portal links ride alongside the map
         _checkpoint_save()  # v5.21.x: checkpoint rides alongside the save
+        _birth_save(name)  # v5.51: the birth log rides alongside the map
         return True
     return False
 
@@ -7170,6 +7292,13 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "private, max-age=3600")
             self.end_headers()
             self.wfile.write(data)
+        elif path == "/api/birth/log":
+            # v5.51: the append-only edit log for birth certificates — the
+            # raw material of the creation time-lapse. Read-only map data.
+            self._send_json({"ok": True, "map": _current_map,
+                             "w": world.width, "h": world.height,
+                             "layers": list(_BIRTH_VISUAL_LAYERS),
+                             "events": _birth_events})
         elif path == "/api/slots":
             # v5.6: play-session save slots for the current map
             self._send_json({"slots": _load_slots(), "map": _current_map})
@@ -7788,6 +7917,7 @@ class Handler(BaseHTTPRequestHandler):
                 cmd = core.SetTileCommand(world, x, y, grid[y][x], new_val, layer)
                 cmd._rev_before = _grid_rev  # v5.42.1: height-cache revs
                 history.push(cmd)
+                _birth_record("paint", cmd)  # v5.51: birth-certificate edit log
                 cmd.execute()
                 _mark_dirty()
                 cmd._rev_after = _grid_rev
@@ -7879,6 +8009,7 @@ class Handler(BaseHTTPRequestHandler):
             multi = core.MultiCommand(cmds)
             multi._rev_before = _grid_rev  # v5.42.1: height-cache revs
             history.push(multi)
+            _birth_record("stroke", multi)  # v5.51: birth-certificate edit log
             multi.execute()
             _mark_dirty()
             multi._rev_after = _grid_rev
@@ -9251,8 +9382,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"ok": True})
 
         if path == "/api/undo":
+            cmd = history.undo_stack[-1] if history.undo_stack else None
             ok = history.undo()
             if ok:
+                if cmd is not None:
+                    _birth_record("undo", cmd, forward=False)  # v5.51
                 _mark_dirty()
                 # v5.42.1: the live grids are exactly the command's recorded
                 # before-state — adopt its rev so the height cache hits.
@@ -9260,8 +9394,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"ok": ok})
 
         if path == "/api/redo":
+            cmd = history.redo_stack[-1] if history.redo_stack else None
             ok = history.redo()
             if ok:
+                if cmd is not None:
+                    _birth_record("redo", cmd, forward=True)  # v5.51
                 _mark_dirty()
                 _sync_rev_from_stack(history.undo_stack, "after")
             return self._send_json({"ok": ok})

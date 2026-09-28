@@ -3,6 +3,20 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.51.0 — 2026-09-28
+
+**Birth certificates.** Every dungeon now exports a shareable creation
+time-lapse. An append-only edit log records each undoable mutation as the
+cells it set (undo/redo record the inverse); whole-map changes like
+generate/resize/reset land as keyframes. The log lives in a gitignored
+`<map>.birth.json` sidecar — user data that never enters the repo — and
+rides map save/load alongside the other sidecars. File → 🎬 Birth
+certificate… replays the log on an offscreen canvas and records a ~20s
+video (MP4 on Safari, WebM elsewhere) via the v3.5 capture pattern, ending
+in the iOS share sheet or a download. Maps that predate v5.51 get one seed
+keyframe of the map as found, so their story starts here.
+Still open: two-finger pinch zoom.
+
 ## v5.50.15 — 2026-09-28
 
 **The write-key dead end now explains itself.** In public mode the updater

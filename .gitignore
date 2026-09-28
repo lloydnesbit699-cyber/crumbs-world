@@ -18,6 +18,7 @@ custom_tiles/
 *.backup
 *.traits.json
 *.names.json
+*.birth.json
 *.slots.json
 *.missions.json
 *.items.json

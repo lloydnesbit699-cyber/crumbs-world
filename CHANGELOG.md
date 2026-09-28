@@ -3,6 +3,17 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.51.5 — 2026-09-28
+
+**The brain's second bug: Cloudflare was blocking her.** Fixing the model
+ID (v5.51.4) revealed the next layer — Groq sits behind Cloudflare, whose
+browser-integrity check (error 1010) 403s Python-urllib's default
+User-Agent. That's why the key worked via curl but Melody's Python calls
+always failed: chat got "brain isn't connected" and voice got "hiccup"
+(the STT path uses the same urllib code). Both `_post_json` and `_stt_post`
+now send a browser User-Agent. tools/brain_smoke.py verifies the real
+brain path end-to-end; tools/brain_bisect.py isolates payload issues.
+
 ## v5.51.4 — 2026-09-28
 
 **Melody's brain model was a dead ID — she's back.** The Groq chat default

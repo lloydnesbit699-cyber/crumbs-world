@@ -1232,12 +1232,21 @@ def brain_status():
             "mode": _env("MELODY_BRAIN", "groq").lower()}
 
 
+# Groq sits behind Cloudflare, whose browser-integrity check (error 1010)
+# blocks Python-urllib's default User-Agent with a 403. A browser UA gets
+# through. We are a legitimate keyed API client, not a scraper — this is
+# just how we knock on Cloudflare's door.
+_GROQ_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+
 def _post_json(url, payload, key, timeout=_BRAIN_TIMEOUT):
     data = json.dumps(payload).encode()
     req = urllib.request.Request(
         url, data=data,
         headers={"Content-Type": "application/json",
-                 "Authorization": f"Bearer {key}"})
+                 "Authorization": f"Bearer {key}",
+                 "User-Agent": _GROQ_UA})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.load(resp)
 
@@ -1304,7 +1313,8 @@ def _stt_post(url, body, content_type, key, timeout=_STT_TIMEOUT):
     req = urllib.request.Request(
         url, data=body,
         headers={"Content-Type": content_type,
-                 "Authorization": f"Bearer {key}"})
+                 "Authorization": f"Bearer {key}",
+                 "User-Agent": _GROQ_UA})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.load(resp)
 

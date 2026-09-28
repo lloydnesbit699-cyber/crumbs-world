@@ -53,23 +53,47 @@ dl = ma.melody_dir(tmp, "local")
 check("local session dir", dl == os.path.join(tmp, "melody"), dl)
 shutil.rmtree(tmp, ignore_errors=True)
 
-print("== quota tiers (Lloyd's 200/600/1000) ==")
-check("free=200", ma.TIER_QUOTAS["free"] == 200)
-check("basic=600", ma.TIER_QUOTAS["basic"] == 600)
-check("pro=1000", ma.TIER_QUOTAS["pro"] == 1000)
+print("== quota tiers (monthly + daily caps) ==")
+check("free=200/mo", ma.TIER_MONTHLY["free"] == 200)
+check("basic=1500/mo", ma.TIER_MONTHLY["basic"] == 1500)
+check("pro=3000/mo", ma.TIER_MONTHLY["pro"] == 3000)
+check("free daily cap 50", ma.TIER_DAILY_CAP["free"] == 50)
 tmp = fresh_dir()
-allowed, remaining, quota, tier = ma.quota_check(tmp, "alice", "free")
-check("fresh quota allowed", allowed and remaining == 200 and tier == "free")
+allowed, remaining, quota, tier, hit = ma.quota_check(tmp, "alice", "free")
+check("fresh quota allowed", allowed and remaining == 200 and tier == "free"
+      and hit is None)
 ma.quota_bump(tmp, "alice", "free")
-allowed, remaining, quota, tier = ma.quota_check(tmp, "alice", "free")
-check("bump decrements", remaining == 199, f"remaining={remaining}")
-# exhaust it
-for _ in range(199):
+allowed, remaining, quota, tier, hit = ma.quota_check(tmp, "alice", "free")
+check("bump decrements monthly", remaining == 199, f"remaining={remaining}")
+# daily burst cap: 50/day for free
+for _ in range(49):
     ma.quota_bump(tmp, "alice", "free")
-allowed, remaining, _, _ = ma.quota_check(tmp, "alice", "free")
-check("quota exhausts at 200", not allowed and remaining == 0)
+allowed, remaining, _, _, hit = ma.quota_check(tmp, "alice", "free")
+check("daily cap hits at 50", not allowed and hit == "daily",
+      f"allowed={allowed} hit={hit}")
+check("monthly remaining still 150", remaining == 150, f"remaining={remaining}")
+shutil.rmtree(tmp, ignore_errors=True)
+# monthly exhaustion (use basic's higher daily cap to reach monthly)
+tmp = fresh_dir()
+for _ in range(0):
+    pass
+# simulate: bump 1500 times across fake days by resetting day_used
+import time as _t
+for _ in range(1500):
+    ma.quota_bump(tmp, "bob", "basic")
+    # reset daily counter to bypass burst cap for this test
+    import json as _j, os as _o
+    _qp = _o.path.join(tmp, "vaults", "bob", "melody", "quota.json")
+    with open(_qp) as _f:
+        _r = _j.load(_f)
+    _r["day_used"] = 0
+    with open(_qp, "w") as _f:
+        _j.dump(_r, _f)
+allowed, remaining, _, _, hit = ma.quota_check(tmp, "bob", "basic")
+check("monthly exhausts at 1500", not allowed and hit == "monthly" and remaining == 0,
+      f"allowed={allowed} hit={hit}")
 # bad tier coerces to free
-_, _, _, tier = ma.quota_check(tmp, "alice", "platinum")
+_, _, _, tier, _ = ma.quota_check(tmp, "alice", "platinum")
 check("bad tier -> free", tier == "free")
 shutil.rmtree(tmp, ignore_errors=True)
 
@@ -94,7 +118,7 @@ print("== chat: knowledge-direct (zero brain, zero quota) ==")
 tmp = fresh_dir()
 res = ma.handle_chat(tmp, "alice", "how do I paint tiles?")
 check("kb-direct ok", res.get("ok") and res.get("source") == "knowledge")
-_, remaining, _, _ = ma.quota_check(tmp, "alice", "free")
+_, remaining, _, _, _ = ma.quota_check(tmp, "alice", "free")
 check("kb-direct burns no quota", remaining == 200, f"remaining={remaining}")
 hist = ma.history_load(tmp, "alice")
 check("history saved", len(hist) == 2 and hist[0]["role"] == "user")
@@ -132,7 +156,7 @@ check("tool ran", res.get("tools_used") == ["map_validate"],
       str(res.get("tools_used")))
 check("tool result in reply", "valid" in res.get("reply", "").lower(),
       res.get("reply", "")[:100])
-_, remaining, _, _ = ma.quota_check(tmp2, "bob", "free")
+_, remaining, _, _, _ = ma.quota_check(tmp2, "bob", "free")
 check("brain turn burns one quota per real call (2 calls here)",
       remaining == 198, f"remaining={remaining}")
 # audit line exists
@@ -167,7 +191,7 @@ check("demo empty rejected", not res.get("ok"))
 # demo burns no quota and writes no history
 tmp4 = fresh_dir()
 ma.demo_answer("how do I undo?")
-_, remaining, _, _ = ma.quota_check(tmp4, "alice", "free")
+_, remaining, _, _, _ = ma.quota_check(tmp4, "alice", "free")
 check("demo burns no quota", remaining == 200)
 check("demo writes no history",
       ma.history_load(tmp4, "alice") == [])
@@ -231,7 +255,7 @@ check("stt posts multipart",
 res = ma.handle_stt(tmp5, "alice", b"x" * 5000, "voice.webm", "free")
 check("stt free tier -> upgrade prompt",
       not res.get("ok") and "basic" in res.get("error", "").lower(), str(res))
-_, remaining, _, _ = ma.quota_check(tmp5, "alice", "free")
+_, remaining, _, _, _ = ma.quota_check(tmp5, "alice", "free")
 check("stt burns one brain-call quota", remaining == 199,
       f"remaining={remaining}")
 # Law 18: quota + audit live under vaults/<user>/melody only
@@ -289,10 +313,10 @@ def fake_stt_fail(url, body, content_type, key, timeout=60):
 
 
 ma._stt_post = fake_stt_fail
-_, before, _, _ = ma.quota_check(tmp5, "alice", "free")
+_, before, _, _, _ = ma.quota_check(tmp5, "alice", "free")
 res = ma.handle_stt(tmp5, "alice", b"x" * 5000, "voice.mp4", "basic")
 check("stt backend failure -> clear error", not res.get("ok"), str(res))
-_, after, _, _ = ma.quota_check(tmp5, "alice", "free")
+_, after, _, _, _ = ma.quota_check(tmp5, "alice", "free")
 check("stt failure burns no quota", before == after,
       f"before={before} after={after}")
 

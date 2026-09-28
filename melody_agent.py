@@ -34,7 +34,12 @@ _LOCAL_USER = "local"          # single-player session id in local (login-free) 
 _COMMONS_VAULT = "__commons__"
 
 # Lloyd's tiers (2026-09-26): free 200, basic 600, pro 1000 brain calls/day.
-TIER_QUOTAS = {"free": 200, "basic": 600, "pro": 1000}
+# v5.52.1: Lloyd's "not drowning" numbers — monthly allowances keep the
+# Groq bill survivable; daily caps are just anti-burst guardrails.
+# Free 200/mo ($0.64 max), Basic 1500/mo $5 ($4.80 max), Pro 3000/mo $10
+# ($9.60 max). Tokens ($5/500, $10/1000) are the real margin at 68%.
+TIER_MONTHLY = {"free": 200, "basic": 1500, "pro": 3000}
+TIER_DAILY_CAP = {"free": 50, "basic": 100, "pro": 200}
 DEFAULT_TIER = "free"
 
 _BRAIN_TIMEOUT = 30            # seconds; a slow brain must never hang the game
@@ -96,23 +101,35 @@ def _quota_path(script_dir, username):
 
 
 def quota_check(script_dir, username, tier=DEFAULT_TIER):
-    """-> (allowed, remaining, quota, tier). Counts brain calls per day."""
-    tier = tier if tier in TIER_QUOTAS else DEFAULT_TIER
-    quota = TIER_QUOTAS[tier]
+    """-> (allowed, remaining, quota, tier, hit). Monthly allowance with a
+    daily burst cap. `hit` is 'monthly' or 'daily' when not allowed."""
+    tier = tier if tier in TIER_MONTHLY else DEFAULT_TIER
+    quota = TIER_MONTHLY[tier]
+    daily_cap = TIER_DAILY_CAP[tier]
+    month = time.strftime("%Y-%m")
     today = time.strftime("%Y-%m-%d")
-    used = 0
+    month_used = 0
+    day_used = 0
     try:
         with open(_quota_path(script_dir, username)) as f:
             rec = json.load(f)
-        if isinstance(rec, dict) and rec.get("date") == today:
-            used = int(rec.get("used", 0))
+        if isinstance(rec, dict):
+            if rec.get("month") == month:
+                month_used = int(rec.get("month_used", 0))
+            if rec.get("date") == today:
+                day_used = int(rec.get("day_used", rec.get("used", 0)))
     except (OSError, ValueError):
-        used = 0
-    remaining = max(0, quota - used)
-    return used < quota, remaining, quota, tier
+        pass
+    remaining = max(0, quota - month_used)
+    if month_used >= quota:
+        return False, 0, quota, tier, "monthly"
+    if day_used >= daily_cap:
+        return False, remaining, quota, tier, "daily"
+    return True, remaining, quota, tier, None
 
 
 def quota_bump(script_dir, username, tier=DEFAULT_TIER):
+    month = time.strftime("%Y-%m")
     today = time.strftime("%Y-%m-%d")
     path = _quota_path(script_dir, username)
     try:
@@ -120,9 +137,16 @@ def quota_bump(script_dir, username, tier=DEFAULT_TIER):
             rec = json.load(f)
     except (OSError, ValueError):
         rec = {}
-    if not isinstance(rec, dict) or rec.get("date") != today:
-        rec = {"date": today, "used": 0}
-    rec["used"] = int(rec.get("used", 0)) + 1
+    if not isinstance(rec, dict):
+        rec = {}
+    if rec.get("month") != month:
+        rec = {"month": month, "month_used": 0}
+    if rec.get("date") != today:
+        rec["date"] = today
+        rec["day_used"] = 0
+    rec["month_used"] = int(rec.get("month_used", 0)) + 1
+    rec["day_used"] = int(rec.get("day_used", 0)) + 1
+    rec.pop("used", None)  # v5.52.0 daily-only format, retired
     try:
         with open(path, "w") as f:
             json.dump(rec, f)
@@ -1499,13 +1523,14 @@ def handle_stt(script_dir, username, audio_bytes, filename="voice.webm",
             return {"ok": False,
                     "error": "that clip's too long — keep it under ~30 seconds"}
 
-        allowed, remaining, quota, tier = quota_check(script_dir, username,
-                                                      tier)
+        allowed, remaining, quota, tier, hit = quota_check(script_dir, username,
+                                                        tier)
         if not allowed:
             audit(script_dir, username, "stt", "quota exhausted")
             return {"ok": False, "error": "quota",
-                    "detail": (f"That's the day's Melody time on the {tier} "
-                               f"plan ({quota}/day) — she'll be back tomorrow!")}
+                    "detail": (f"That's the month's Melody time on the {tier} "
+                               f"plan ({quota}/month) — she'll be back next month! "
+                               f"Or grab tokens to keep going.")}
 
         res = transcribe_audio(audio_bytes, filename)
         if not res.get("ok"):
@@ -1516,7 +1541,7 @@ def handle_stt(script_dir, username, audio_bytes, filename="voice.webm",
         quota_bump(script_dir, username, tier)
         # accountability without the words: audio and transcript never persist
         audit(script_dir, username, "stt", f"ok chars={len(text)}")
-        _, remaining, quota, tier = quota_check(script_dir, username, tier)
+        _, remaining, quota, tier, _ = quota_check(script_dir, username, tier)
         return {"ok": True, "text": text,
                 "quota": {"remaining": remaining, "quota": quota, "tier": tier,
                           "tokens": token_balance(script_dir, username)}}
@@ -1801,14 +1826,18 @@ def handle_chat(script_dir, username, message, tier=DEFAULT_TIER, world=None):
             calls_left = trial_left
             quota, remaining = TRIAL_CALLS, trial_left
         else:
-            allowed, remaining, quota, tier = quota_check(script_dir, username, tier)
+            allowed, remaining, quota, tier, hit = quota_check(script_dir, username, tier)
             tok_bal = token_balance(script_dir, username)
             if not allowed and tok_bal <= 0:
                 audit(script_dir, username, "chat", "quota exhausted")
-                return {"ok": False, "error": "quota",
-                        "detail": (f"That's the day's Melody time on the {tier} "
-                                   f"plan ({quota}/day) — she'll be back tomorrow! "
-                                   f"Or grab tokens to keep going.")}
+                if hit == "daily":
+                    detail = ("Whoa, slow down — that's the day's burst limit! "
+                              "She'll be back tomorrow, or grab tokens to keep going.")
+                else:
+                    detail = (f"That's the month's Melody time on the {tier} "
+                              f"plan ({quota}/month) — she'll be back next month! "
+                              f"Or grab tokens to keep going.")
+                return {"ok": False, "error": "quota", "detail": detail}
             calls_left = remaining + tok_bal
         calls_spent = 0
 
@@ -1821,7 +1850,7 @@ def handle_chat(script_dir, username, message, tier=DEFAULT_TIER, world=None):
                 trial_bump(script_dir, username)
             else:
                 # quota first, tokens when it's dry — 1 token = 1 call
-                _, rem_now, _, _ = quota_check(script_dir, username, tier)
+                _, rem_now, _, _, _ = quota_check(script_dir, username, tier)
                 if rem_now > 0:
                     quota_bump(script_dir, username, tier)
                 else:
@@ -1926,7 +1955,7 @@ def handle_chat(script_dir, username, message, tier=DEFAULT_TIER, world=None):
               f"brain={backend} calls={calls_spent} "
               f"tools={','.join(tools_used) or 'none'}"
               + (" quota-died" if quota_died else ""))
-        _, remaining, quota, tier = quota_check(script_dir, username, tier)
+        _, remaining, quota, tier, _ = quota_check(script_dir, username, tier)
         on_trial_now, trial_left_now = trial_check(script_dir, username)
         return {"ok": True, "reply": reply, "source": "brain",
                 "tools_used": tools_used,

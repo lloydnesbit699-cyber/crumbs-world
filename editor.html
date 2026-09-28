@@ -11835,7 +11835,7 @@ function melodySetQuota(q) {
   let txt = "";
   if (q.trial) txt = "PRO TRIAL · " + q.trial_left + " calls left · ";
   else if (MELODY.tier) txt = MELODY.tier + " · ";
-  if (typeof q.remaining === "number") txt += q.remaining + " left today";
+  if (typeof q.remaining === "number") txt += q.remaining + " left this month";
   if (q.tokens > 0) txt += " · " + q.tokens + " tokens";
   if (txt) $("melody-quota").textContent = txt;
 }

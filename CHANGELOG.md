@@ -5,6 +5,17 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.49.1 — 2026-09-27
+
+**The Mel button gets out of the sheet's way.** The draggable Mel button's
+parked spot persisted even when it sat on top of the open bottom sheet,
+covering brush sizes, tabs, and panel buttons. Now every sheet open, detent
+change, and page load checks: if the button would cover sheet content, it
+steps just above the sheet's top edge (aimed at the detent's target, since
+the sheet animates). The dodge is never saved — the parked spot survives
+underneath and returns when the sheet closes — and a manual drag always
+wins. Static client test `melody_fabdodge_test.js`: 10/10.
+
 ## v5.49.0 — 2026-09-27
 
 **Melody the playtester (Lloyd's favorite).** Ask her "is this playable" and

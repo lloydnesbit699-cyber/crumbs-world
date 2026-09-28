@@ -7155,6 +7155,36 @@ function clampMelFab() {
   fab.style.right = "auto"; fab.style.bottom = "auto";
 }
 window.addEventListener("resize", () => { try { clampMelFab(); } catch (_) {} });
+// v5.49.1: the Mel button never parks on top of the open bottom sheet. The
+// sheet animates its detents with a transform, so the dodge aims at the
+// detent's *target* top edge rather than the mid-animation rect. A manual
+// drag always wins — it clears the dodge and parks like before; the dodge
+// only re-runs on sheet open, detent change, or page load.
+let melFabDodged = false;
+function melSheetTargetTop() {
+  const sh = $("hud-sheet");
+  if (!sh || sh.classList.contains("closed")) return null;
+  const vh = window.innerHeight;
+  if (sh.classList.contains("full")) return vh - vh * 0.82;
+  if (sh.classList.contains("half")) return vh - vh * 0.45;
+  return vh - 64; // peek — matches #hud-sheet.peek's 64px grab strip
+}
+function dodgeMelFab() {
+  const fab = $("melody-fab");
+  if (!fab || fab.hidden) return;
+  const top = melSheetTargetTop();
+  if (top === null) {  // sheet closed: hand back the parked spot
+    if (melFabDodged) { melFabDodged = false; placeMelFab(); }
+    return;
+  }
+  const fr = fab.getBoundingClientRect();
+  const h = fr.height || 52, w = fr.width || 52;
+  if (fr.bottom <= top + 4) return;  // already clear of the sheet
+  fab.style.left = Math.min(Math.max(0, fr.left), window.innerWidth - w) + "px";
+  fab.style.top = Math.max(48, top - h - 10) + "px";  // 10px air, below the topbar
+  fab.style.right = "auto"; fab.style.bottom = "auto";
+  melFabDodged = true;  // never persisted — the parked spot survives underneath
+}
 // v4.5: touch = go, release = halt, double-tap-hold the same arrow = run.
 let runMode = false, lastTap = { t: 0, btn: null }, runHintShown = false;
 dpad.querySelectorAll("button").forEach(b => {
@@ -11466,6 +11496,7 @@ async function melodyInit() {
   $("melody-log").innerHTML = "";
   $("melody-fab").hidden = false;
   placeMelFab();  // v5.34: restore the parked spot (or the default corner)
+  dodgeMelFab();  // v5.49.1: …but never on top of the open sheet
   // v5.34: the Mel button drags — a tap (no movement) opens the dock, a drag
   // parks it. melFabMoved swallows the click that follows a drag.
   let melFabMoved = false;
@@ -11503,6 +11534,7 @@ async function melodyInit() {
       fab.classList.remove("dragging");
       if (dragging) {
         melFabMoved = true;
+        melFabDodged = false;  // v5.49.1: a manual park always beats the dodge
         clampMelFab();   // only on-screen coords ever get saved
         try { localStorage.setItem("crumbs_melfab",
           JSON.stringify({ x: fab.offsetLeft, y: fab.offsetTop })); } catch (err) {}
@@ -11625,6 +11657,7 @@ function setSheetHeight(h) {
   el.classList.remove("peek", "half", "full", "closed");
   el.classList.add(sheetHeight);
   positionFabForSheet();
+  dodgeMelFab();  // v5.49.1: the Mel button steps above the sheet, never on it
   renderSheet();
 }
 // v5.47.3: the brush bar docks above the sheet, so in peek the Play FAB

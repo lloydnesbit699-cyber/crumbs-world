@@ -3,6 +3,16 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.53.3 — 2026-09-28
+
+**Melody stops guessing about her ghosts.** Her brain had no visibility
+into pending suggestions — the "live game" snapshot never included one —
+so she told Lloyd "I don't see a ghost suggestion" while the violet outline
+was on his screen. The server now injects one line per chat turn, from its
+own suggestion file: the pending ghost's label and kind, or "none pending."
+The system prompt was taught to trust it and point at the 💡 panel's Do-it
+button instead of confabulating.
+
 ## v5.53.2 — 2026-09-28
 
 **Long-press crashed instead of opening its menu.** `armLongPress` called

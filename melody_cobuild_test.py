@@ -158,5 +158,31 @@ try:
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
+print("== suggestion line (v5.53.3: she never guesses) ==")
+tmp = fresh_dir()
+try:
+    line = ma._suggestion_line(tmp, "alice")
+    check("no file -> none pending", line == "ghost suggestion: none pending.", line)
+    p = os.path.join(ma.melody_dir(tmp, "alice"), "suggestion.json")
+    with open(p, "w") as f:
+        json.dump({"kind": "wall_ring", "label": "Add walls around this floor?",
+                   "status": "pending"}, f)
+    line = ma._suggestion_line(tmp, "alice")
+    check("pending names the ghost", "wall_ring" in line and "Add walls" in line, line)
+    check("pending points at the panel", "💡" in line and "Do-it" in line, line)
+    check("pending says violet ghost", "violet ghost" in line, line)
+    with open(p, "w") as f:
+        json.dump({"kind": "wall_ring", "label": "x" * 200, "status": "pending"}, f)
+    line = ma._suggestion_line(tmp, "alice")
+    check("label capped at 80", len(line.split('"')[1]) <= 80, line[:100])
+    with open(p, "w") as f:
+        json.dump({"kind": "wall_ring", "label": "old", "status": "accepted"}, f)
+    check("accepted -> none pending",
+          ma._suggestion_line(tmp, "alice") == "ghost suggestion: none pending.")
+    check("bad username can't break it",
+          ma._suggestion_line(tmp, "not a user!!") == "ghost suggestion: none pending.")
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

@@ -5,6 +5,18 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.49.2 — 2026-09-27
+
+**The tile panel minds its manners.** Two real defects Lloyd caught on his
+phone: (1) the bottom sheet could never be dismissed — tapping the grabber
+cycled peek/half/full forever and dragging down clamped at peek, so the only
+way out was Play mode; now a deliberate drag down past peek closes it, and
+the TILES edge tab reopens it. (2) Modal dialogs (update, save slots, server
+log, recovery) and the scrim rendered *under* the tile panel, so the update
+dialog's "Install update" couldn't be tapped while any panel was open — the
+layer stack is now menus (75) > modal sheets/trays (70) > scrim (66) > tile
+panel (60). Static client test `sheet_dismiss_test.js`: 10/10.
+
 ## v5.49.1 — 2026-09-27
 
 **The Mel button gets out of the sheet's way.** The draggable Mel button's

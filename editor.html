@@ -61,7 +61,7 @@
   #topbar-undo button { font-size: 22px; padding: 6px 14px; min-height: 44px;   /* v5.45.3: thumb-sized */
                         min-width: 52px; line-height: 1; }
 
-  .menu-drop { position: fixed; top: 52px; left: 8px; z-index: 60; background: #222;
+  .menu-drop { position: fixed; top: 52px; left: 8px; z-index: 75; background: #222;
                    border: 1px solid #444; border-radius: 12px; padding: 6px;
                    display: none; min-width: 210px;
                    max-height: calc(100dvh - 64px); overflow-y: auto;
@@ -248,7 +248,7 @@
   #tab-left { left: 0; border-radius: 0 12px 12px 0; border-left: none; }
   #tab-right { right: 0; border-radius: 12px 0 0 12px; border-right: none; }
 
-  .tray { position: fixed; top: 48px; bottom: 0; width: min(80vw, 320px); z-index: 55;
+  .tray { position: fixed; top: 48px; bottom: 0; width: min(80vw, 320px); z-index: 70;
           background: #161616; padding: 12px; overflow-y: auto;
           transition: transform .22s ease-out; -webkit-overflow-scrolling: touch; }
   #tray-left { left: 0; border-right: 1px solid #333; transform: translateX(-103%); }
@@ -270,7 +270,10 @@
   #traits-morph .m-scope a.on { color: #ffd98a; font-weight: 600; }
   #traits-morph .m-note { font-size: 11px; color: #777; margin-top: 8px; }
 
-  .sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 55;
+  /* v5.49.2: modal sheets sit above the tile panel (#hud-sheet z-60) with the
+     scrim between — before this the update dialog opened UNDER the panel and
+     "Install update" couldn't be tapped while any panel was open */
+  .sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 70;
            background: #161616; border-top: 1px solid #333;
            border-radius: 16px 16px 0 0;
            padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
@@ -532,7 +535,7 @@
   .lbl { color: #888; font-size: 12px; margin-right: 6px; }
   #map-name { color: #eee; font-size: 14px; word-break: break-all; }
 
-  #scrim { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.45);
+  #scrim { position: fixed; inset: 0; z-index: 66; background: rgba(0,0,0,.45);
            display: none; }
   #scrim.on { display: block; }
 
@@ -1892,7 +1895,7 @@
      switching by selection. peek / half / full heights; tap the grab to
      cycle, drag to snap. Non-modal: the map stays tappable underneath. -->
 <div id="hud-sheet" class="peek" aria-label="Editor panel">
-  <div id="sheet-grab" title="tap to resize, drag to snap">
+  <div id="sheet-grab" title="tap to resize · drag down to close">
     <div class="grab"></div>
     <div id="sheet-title">🎨 Paint</div>
     <div id="sheet-peekline"></div>
@@ -11648,7 +11651,9 @@ function animViewOpen() {
 function openSheet(view, height) {
   if (view) sheetView = view;
   if (height) sheetHeight = height;
-  else if (sheetHeight === "peek") sheetHeight = "half";
+  // v5.49.2: a dismissed sheet reopens instead of staying shut — the TILES
+  // edge tab is the way back in
+  else if (sheetHeight === "peek" || sheetHeight === "closed") sheetHeight = "half";
   setSheetHeight(sheetHeight);
 }
 function setSheetHeight(h) {
@@ -11747,9 +11752,16 @@ function initSheetGrab() {
     if (y0 == null) return;
     const dy = e.clientY - y0; y0 = null;
     if (!moved) { setSheetHeight(sheetNextHeight(sheetHeight)); return; }
-    const order = ["peek", "half", "full"];
-    let i = order.indexOf(sheetHeight) + (dy < 0 ? 1 : -1);
-    i = Math.max(0, Math.min(2, i));
+    // v5.49.2: drag down past peek dismisses the sheet — tap only cycles
+    // sizes, and Play mode was the only way out before this
+    const order = ["closed", "peek", "half", "full"];
+    let i = order.indexOf(sheetHeight);
+    if (i < 0) i = 1;
+    i = i + (dy < 0 ? 1 : -1);
+    // v5.49.2: dismissing takes a deliberate drag — a 12px nudge from peek
+    // shouldn't close the panel by accident
+    if (i === 0 && dy < 48) i = 1;
+    i = Math.max(0, Math.min(3, i));
     setSheetHeight(order[i]);
   };
   g.addEventListener("pointerup", up);

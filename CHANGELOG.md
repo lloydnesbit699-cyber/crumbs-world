@@ -3,6 +3,18 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.50.8 — 2026-09-28
+
+**Play button stops burying tiles.** The draggable Play button now dodges
+open panels like the Melody button does (steps right of the left tray,
+left of the right tray, above the bottom sheet) and hands back its parked
+spot when they close — it can no longer be dropped somewhere that traps
+tiles underneath it. The tray dodge also learned about the left tray, so
+both floating buttons clear it. The palette's subcategory chip row
+(All/Walls/Floors/Doors/…) gets the same scroll hardening as the File
+menu so chips past the tray edge stay reachable. Still open: two-finger
+pinch zoom.
+
 ## v5.50.7 — 2026-09-28
 
 **File menu scrolls.** The top-bar dropdowns get a `100vh` max-height

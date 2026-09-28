@@ -847,7 +847,9 @@
   #strip-search::placeholder { color: #666; }
   /* v5.25: subcategory chips — the palette's Minecraft-style tabs */
   #subcat-row { display: none; gap: 6px; padding: 2px 2px 8px; overflow-x: auto;
-    flex: none; align-items: center; }
+    flex: none; align-items: center;
+    /* v5.50.8: the row is wider than the tray — guarantee the sideways swipe */
+    -webkit-overflow-scrolling: touch; touch-action: pan-x pan-y; }
   .subcat-chip { flex: none; padding: 5px 11px; border-radius: 12px;
     border: 1px solid #555; background: #1c1c26; color: #ccc; font-size: 12px; }
   .subcat-chip.on { background: #3a5a8a; border-color: #7ab; color: #fff; }
@@ -7279,6 +7281,11 @@ function dodgeMelFab() {
     if (fr.bottom <= top + 4) return;  // already clear of the sheet
     fab.style.left = Math.min(Math.max(0, fr.left), window.innerWidth - w) + "px";
     fab.style.top = Math.max(48, top - h - 10) + "px";  // 10px air, below the topbar
+  } else if (av.right != null) {
+    const right = av.right;
+    if (fr.left >= right - 4) return;  // already clear of the left tray
+    fab.style.top = Math.min(Math.max(48, fr.top), window.innerHeight - h - 8) + "px";
+    fab.style.left = (right + 10) + "px";  // 10px air, right of the tray
   } else {
     const left = av.left;
     if (fr.right <= left + 4) return;  // already clear of the tray
@@ -7287,6 +7294,49 @@ function dodgeMelFab() {
   }
   fab.style.right = "auto"; fab.style.bottom = "auto";
   melFabDodged = true;  // never persisted — the parked spot survives underneath
+}
+// v5.50.8: the draggable Play button could be parked on top of an open tray
+// (Lloyd's tiles were under it). Like the Melody button, it steps clear of
+// open panels and hands back the parked spot when they close.
+let playFabDodged = false, playFabPark = null;
+function dodgePlayFab() {
+  const fab = $("btn-play-fab");
+  if (!fab) return;
+  // same TDZ guard as dodgeMelFab — the facade is a const later in this script
+  let sys = null;
+  try { sys = PanelSys; } catch (e) { return; }
+  const av = sys.fabAvoid();
+  const fr = fab.getBoundingClientRect();
+  const h = fr.height || 64, w = fr.width || 64;
+  let overlap = false;
+  if (av) {
+    if (av.top != null) overlap = fr.bottom > av.top + 4;
+    else if (av.right != null) overlap = fr.left < av.right - 4;
+    else if (av.left != null) overlap = fr.right > av.left + 4;
+  }
+  if (!overlap) {
+    if (playFabDodged) {
+      playFabDodged = false;
+      if (playFabPark) { fab.style.left = playFabPark.left; fab.style.top = playFabPark.top; }
+      fab.style.right = "auto"; fab.style.bottom = "auto";
+    }
+    return;
+  }
+  if (!playFabDodged) {
+    playFabPark = { left: fab.style.left, top: fab.style.top };
+    playFabDodged = true;
+  }
+  if (av.top != null) {
+    fab.style.left = Math.min(Math.max(0, fr.left), window.innerWidth - w) + "px";
+    fab.style.top = Math.max(48, av.top - h - 10) + "px";  // 10px air, above the sheet
+  } else if (av.right != null) {
+    fab.style.top = Math.min(Math.max(48, fr.top), window.innerHeight - h - 8) + "px";
+    fab.style.left = (av.right + 10) + "px";  // 10px air, right of the left tray
+  } else {
+    fab.style.top = Math.min(Math.max(48, fr.top), window.innerHeight - h - 8) + "px";
+    fab.style.left = Math.max(8, av.left - w - 10) + "px";  // 10px air, left of the right tray
+  }
+  fab.style.right = "auto"; fab.style.bottom = "auto";
 }
 // v4.5: touch = go, release = halt, double-tap-hold the same arrow = run.
 let runMode = false, lastTap = { t: 0, btn: null }, runHintShown = false;
@@ -10319,6 +10369,7 @@ function closeOverlays() {
     .forEach(el => el.classList.remove("open"));
   $("scrim").classList.remove("on");
   dodgeMelFab();   // v5.50: a closed tray hands the Mel button back its park
+  dodgePlayFab();  // v5.50.8: same for the draggable Play button
 }
 function toggleOverlay(id) {
   const el = $(id);
@@ -10326,6 +10377,7 @@ function toggleOverlay(id) {
   closeOverlays();
   if (!wasOpen) { el.classList.add("open"); $("scrim").classList.add("on"); }
   dodgeMelFab();   // v5.50: an open tray moves the Mel button clear of it
+  dodgePlayFab();  // v5.50.8: same for the draggable Play button
 }
 // v5.20: Windows-style menu bar — each top label toggles its own dropdown
 document.querySelectorAll(".mtop").forEach(b => {
@@ -12135,11 +12187,17 @@ const TrayRenderer = {
   },
   close() { closeOverlays(); },   // play mode: trays shut till summoned
   reopen() { /* trays stay shut — the edge tabs summon them */ },
-  fabAvoid() {   // the open right tray is full-height: the button steps left of it
-    const tr = $("tray-right");
+  fabAvoid() {   // v5.49.1's dodge, now behind the renderer seam
+    const tr = $("tray-right");   // the open right tray is full-height: the button steps left of it
     if (tr && tr.classList.contains("open")) {
       const r = tr.getBoundingClientRect();
       if (r.width > 8) return { left: r.left };
+    }
+    // v5.50.8: same for the left tray — the button steps right of it
+    const tl = $("tray-left");
+    if (tl && tl.classList.contains("open")) {
+      const r = tl.getBoundingClientRect();
+      if (r.width > 8) return { right: r.right };
     }
     return null;
   },
@@ -12335,7 +12393,13 @@ function initPlayFab() {
     clearTimeout(abTimer); abTimer = null;
     const wasDrag = !!(drag && drag.moved);
     drag = null;
-    if (wasDrag) { saveFabPos(); return; }   // a drag is never a tap
+    if (wasDrag) {
+      saveFabPos();
+      // v5.50.8: the drop is the new parked spot — re-dodge from there so a
+      // tray it landed on can't keep it (or the tiles under it) trapped
+      playFabDodged = false; playFabPark = null; dodgePlayFab();
+      return;
+    }   // a drag is never a tap
     if (abShown) {
       abShown = false;
       const t = (typeof beginnerTargetTile === "function") ? beginnerTargetTile() : null;

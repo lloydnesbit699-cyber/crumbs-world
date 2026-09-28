@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.49.5"
+APP_VERSION = "5.50.0"
 # v5.41: single source of truth for the map-size cap (was 64, hardcoded in
 # four places). 500x500 = 250k cells. The client additionally caps tilePx so
 # the full-map backing canvas never exceeds 4096px per side (see editor.html).
@@ -4981,6 +4981,21 @@ def _walkable(tx, ty):
     if _deep_at(tx, ty):
         return SWIM_UNLOCKED  # v3.6: no swim animation yet — deep water blocks
     return not _tile_solid(tx, ty)
+
+
+def _near_walkable(sx, sy, radius=4):
+    """v5.50: nearest walkable tile to (sx, sy), ring by ring — where Melody
+    stands when she walks into the dungeon. None when the spawn is walled in."""
+    if not isinstance(sx, int) or not isinstance(sy, int):
+        return None
+    for r in range(1, radius + 1):
+        for dy in range(-r, r + 1):
+            for dx in range(-r, r + 1):
+                if max(abs(dx), abs(dy)) != r:
+                    continue
+                if _walkable(sx + dx, sy + dy):
+                    return [sx + dx, sy + dy]
+    return None
 
 
 # -- v5.47: patrol validation shared by create + merge (Melody's
@@ -9884,6 +9899,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"ok": True, "x": sx, "y": sy,
                                     "nature": _nature_state(),
                                     "mission": _mission_run_text()})
+
+        if path == "/api/play/melody_spot":
+            # v5.50: where Melody stands in the dungeon — nearest walkable
+            # tile to the given cell. Read-only: never touches run state.
+            x, y = body.get("x"), body.get("y")
+            spot = _near_walkable(x, y) if isinstance(x, int) and isinstance(y, int) else None
+            return self._send_json({"ok": True, "spot": spot})
 
         if path == "/api/play/move":
             if not play["active"]:

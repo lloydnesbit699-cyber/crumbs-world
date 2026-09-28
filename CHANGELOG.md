@@ -5,6 +5,22 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.50.0 — 2026-09-28
+
+**Melody walks into the dungeon.** She is a character in Play mode now: when
+a run starts she spawns on the nearest walkable tile to your spawn (new
+read-only `/api/play/melody_spot` endpoint — ring-by-ring search, no run
+state touched) and waits there. No patrol — she's waiting for *you*. Walk
+within 2 tiles and she says hello (once per run); a 💬 Talk to Mel chip
+appears while you're close. Three doors into the same conversation: the
+chip, tapping her tile while standing next to her, or the 💜 FAB — all open
+her dock through one `openMelDock()`. On screen she's unmistakable: purple
+glow ring, 💜 overhead, "Melody" nameplate, drawn even if her body tile is
+missing (she wears a "melody"-named tile if the map has one, else a fellow
+character, else your hero's tile). Pockets keep their own cast — she stays
+in her home world and walks back in when you return through a portal.
+Chat-only in the world: Law 18 holds, she never touches the map from play.
+
 ## v5.49.5 — 2026-09-28
 
 **The little [x] on every panel.** Lloyd wanted tap-the-map-to-close back —

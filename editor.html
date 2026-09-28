@@ -432,6 +432,15 @@
     flex-direction: column; background: #14141c; border: 1px solid #2a2a38;
     border-radius: 12px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,.6); }
   #melody-dock[hidden] { display: none; }
+  /* v5.50: the "talk to her" chip — appears in Play mode when you're standing
+     near Melody in the world. Below the dock so opening chat covers it. */
+  #mel-talk { position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: 168px; z-index: 235; padding: 10px 18px; border-radius: 999px;
+    background: rgba(46, 28, 78, 0.95); color: #f3e8ff; font-size: 15px;
+    border: 1px solid #a678ff; cursor: pointer;
+    box-shadow: 0 0 18px rgba(166, 120, 255, 0.45); }
+  #mel-talk[hidden] { display: none; }
+  #mel-talk:active { transform: translateX(-50%) scale(.95); }
   #melody-head { display: flex; align-items: center; gap: 8px;
     padding: 8px 10px; background: #1d1d28; border-bottom: 1px solid #2a2a38; }
   #melody-title { color: #ffd75f; font-weight: bold; font-size: 14px; flex: 1; }
@@ -5601,6 +5610,12 @@ async function playTap(cell) {
   if (heroTimer || playOver) return;  // let the current walk finish first
   // v5.40: tapping a paused walker while standing next to him = hello, no walk
   if (hero) {
+    // v5.50: tapping Melody herself while standing close = talk, no walk
+    if (melodyNpc &&
+        Math.round(melodyNpc.x) === cell.x && Math.round(melodyNpc.y) === cell.y &&
+        Math.max(Math.abs(melodyNpc.x - hero.x), Math.abs(melodyNpc.y - hero.y)) <= 2) {
+      openMelDock(); return;
+    }
     const w = npcs.find(n => n.pauseUntil &&
       Math.round(n.x) === cell.x && Math.round(n.y) === cell.y &&
       Math.max(Math.abs(n.x - hero.x), Math.abs(n.y - hero.y)) <= 1);
@@ -5626,6 +5641,7 @@ async function playTap(cell) {
     i++; render();
     // v5.40: walked up to a resting walker — he notices you
     for (const w of walkerNear(hero.x, hero.y)) fireWalkerInteract(w);
+    melodyProximity();   // v5.50: close enough to Melody to talk?
     if (await playEvents(evs)) { heroTimer = null; return; }
     if (i >= path.length) { heroTimer = null; heroSwimming = false; heroInDeep = false; refreshSight(); syncMissionHud(); return; }
     const wms = RULES.walk_ms;   // v3.7: tap-to-walk obeys this build's rules
@@ -5665,6 +5681,9 @@ async function togglePlay() {
     playOver = false; $("end-overlay").hidden = true;
     runHintShown = false;   // v4.5: the run hint teaches once per run
     await buildNpcs();
+    // v5.50: she walks into the dungeon — this world is her home, not the pockets
+    melodyHomeMap = currentFile; melodyGreeted = false;
+    await spawnMelodyNpc();
     if (npcs.length) npcTimer = setInterval(() => npcTick(0.1), 100);
     await syncMissionHud();   // v5.12: Melody's objective HUD for this run
     await syncInv();   // v5.13: pack + gold onto the HUD
@@ -5688,6 +5707,7 @@ async function togglePlay() {
     if (natureTimer) { clearInterval(natureTimer); natureTimer = null; }  // v4.0: nature rests
     wxStop();   // v4.1: the sky rests
     npcs = [];
+    melodyNpc = null; melodyGreeted = false; $("mel-talk").hidden = true;   // v5.50: she leaves with the run
     clearTimeout(stepTimer); stepTimer = null;   // v3.7: D-pad repeat stops
     $("mission-hud").hidden = true; missionDanger = new Set();  // v5.12
     updateDpad();   // v3.7: hide the touch controls (pad loop self-stops)
@@ -7550,8 +7570,29 @@ function drawNpc(n) {
   // v5.43: the walker's current animation state picks his frame + motion
   const st = n.animState || "walk";
   const im = n.away ? npcSilhouette(n.tile_id) : stateTileImage(n.tile_id, st);
+  const px = n.x * tilePx, py = n.y * tilePx;   // v5.50: up early — her marker needs it too
+  // v5.50: Melody's marker — purple glow ring, 💜 overhead, her name on a
+  // pill. Drawn even when her body tile is missing: she's herself regardless.
+  if (n.melody) {
+    const cx = px + tilePx / 2;
+    ctx.save();
+    ctx.strokeStyle = "rgba(190,120,255,0.9)";
+    ctx.lineWidth = Math.max(2, tilePx / 16);
+    ctx.beginPath(); ctx.arc(cx, py + tilePx / 2, tilePx * 0.46, 0, Math.PI * 2); ctx.stroke();
+    ctx.font = "bold " + Math.round(tilePx * 0.40) + "px sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("💜", cx, py - tilePx * 0.16);
+    const fs = Math.max(10, Math.round(tilePx * 0.24));
+    ctx.font = fs + "px sans-serif";
+    const w = ctx.measureText("Melody").width;
+    const by = py - tilePx * 0.16 - tilePx * 0.22 - fs;
+    ctx.fillStyle = "rgba(30,16,54,0.88)";
+    ctx.fillRect(cx - w / 2 - 4, by, w + 8, fs + 6);
+    ctx.fillStyle = "#e3c6ff";
+    ctx.fillText("Melody", cx, by + fs / 2 + 3);
+    ctx.restore();
+  }
   if (!im) return;
-  const px = n.x * tilePx, py = n.y * tilePx;
   const sz = n.size || 1.0;   // v5.29: walkers keep their build size
   const dw = tilePx * sz, dh = tilePx * sz;
   const dx = px + (tilePx - dw) / 2, dy = py + tilePx - dh;
@@ -7637,6 +7678,69 @@ function fireWalkerInteract(n) {
     Sfx.mumble();   // nothing scripted — he just says hello
   }
 }
+// ---- v5.50: Melody walks into the dungeon --------------------------------
+// She becomes a character in Play mode: she spawns on the nearest walkable
+// tile to your spawn and waits there (no patrol — she's waiting for YOU).
+// Walk up and talk to her — the 💬 chip, tapping her, or the 💜 FAB all open
+// the same dock. Chat-only in the world: Law 18 holds, she never touches
+// the map from play mode, and pockets have their own cast (she stays home).
+let melodyNpc = null, melodyGreeted = false, melodyHomeMap = null;
+
+function melodyBodyTile() {
+  // what she looks like standing there — a tile with "melody" in its name
+  // wins (draw her own tile and she wears it), else another character from
+  // the map, else your own hero tile; the 💜 + nameplate carry her regardless
+  try {
+    for (const id in customById) {
+      const t = customById[id];
+      if (t && /melody/i.test(t.name || "")) return t.id;
+    }
+  } catch (_) {}
+  const other = flagHeroes().find(h => h.tid !== playHeroTid);
+  if (other) return other.tid;
+  return playHeroTid;
+}
+
+async function spawnMelodyNpc() {
+  melodyNpc = null;
+  $("mel-talk").hidden = true;
+  if (!hero) return;
+  const r = await api("/api/play/melody_spot",
+    { x: Math.round(hero.x), y: Math.round(hero.y) }).catch(() => null);
+  const spot = r && r.ok && r.spot;
+  if (!spot) return;   // walled in — she sits this run out
+  melodyNpc = { melody: true, tile_id: melodyBodyTile(),
+    x: spot[0], y: spot[1], loop: [], seg: 0, size: 1.0,
+    nm: "Melody", interactive: true };
+  npcs.push(melodyNpc);
+  queueRender();
+  melodyProximity();   // she may have spawned within earshot
+}
+
+function melodyProximity() {
+  const chip = $("mel-talk");
+  if (!playMode || !melodyNpc || !hero) { chip.hidden = true; return; }
+  const near = Math.max(Math.abs(melodyNpc.x - hero.x),
+                        Math.abs(melodyNpc.y - hero.y)) <= 2;
+  chip.hidden = !near;
+  if (near && !melodyGreeted) {
+    melodyGreeted = true;
+    toast("💜 Melody: “There you are! Tap me, or the 💬 button, to talk.”");
+  }
+}
+
+// v5.50: the one way her dock opens — the FAB, the talk chip, and tapping
+// her in the world all come through here
+function openMelDock() {
+  const dock = $("melody-dock");
+  dock.hidden = false;
+  MELODY.open = true;
+  melTtsUnlock();  // v5.29.1: real tap — prime her voice (iOS needs this first)
+  // v5.29.1: on touch screens don't yank the keyboard up — the tap already
+  // opened the panel, and iOS can shove a bottom-fixed panel behind the keyboard
+  if (!matchMedia("(pointer: coarse)").matches) $("melody-input").focus();
+}
+
 // v5.40: pause timer labels — 3s, 10s, 30s, 1m, 2m, 5m
 function fmtPauseSecs(s) {
   s = +s || 0;
@@ -9927,6 +10031,9 @@ async function warpRefresh(r) {
     hero = { x: r.x, y: r.y };
     heroSwimming = false; heroInDeep = false;
     npcs = []; await buildNpcs();   // the pocket has its own cast
+    // v5.50: she stays home — back in her world, she walks back in
+    melodyNpc = null; $("mel-talk").hidden = true;
+    if (r.warp.file === melodyHomeMap) await spawnMelodyNpc();
     await refreshSight();
     syncMissionHud();
     toast("entered " + r.warp.file);
@@ -11558,15 +11665,10 @@ async function melodyInit() {
   let melFabMoved = false;
   $("melody-fab").onclick = () => {
     if (melFabMoved) { melFabMoved = false; return; }
-    const dock = $("melody-dock");
-    dock.hidden = !dock.hidden;
-    MELODY.open = !dock.hidden;
-    melTtsUnlock();  // v5.29.1: real tap — prime her voice (iOS needs this first)
-    // v5.29.1: on touch screens don't yank the keyboard up — the tap already
-    // opened the panel, and iOS can shove a bottom-fixed panel behind the keyboard
-    if (MELODY.open && !matchMedia("(pointer: coarse)").matches)
-      $("melody-input").focus();
+    if ($("melody-dock").hidden) openMelDock();   // v5.50: the one door in
+    else { $("melody-dock").hidden = true; MELODY.open = false; }
   };
+  $("mel-talk").onclick = () => openMelDock();   // v5.50: the talk chip knocks too
   $("melody-fab").addEventListener("pointerdown", e => {
     e.preventDefault();
     const fab = $("melody-fab");
@@ -12951,5 +13053,8 @@ async function deleteMission(id) {
     <button id="melody-send">Send</button>
   </div>
 </div>
+<!-- v5.50: she walks into the dungeon — the talk chip appears in Play mode
+     when you're standing near her in the world -->
+<button id="mel-talk" hidden>💬 Talk to Mel</button>
 </body>
 </html>

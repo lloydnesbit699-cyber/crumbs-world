@@ -3,6 +3,13 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.53.2 — 2026-09-28
+
+**Long-press crashed instead of opening its menu.** `armLongPress` called
+`closeTray()`, a function that never existed — every stationary long-press
+since v5.45.1 threw `ReferenceError` before the contextual menu could open.
+It now calls `closeOverlays()`, the panel-system close that replaced it.
+
 ## v5.53.1 — 2026-09-28
 
 **The ghost that never was: Melody's approvals were phantoms.** Since

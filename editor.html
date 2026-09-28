@@ -5336,7 +5336,7 @@ function armLongPress(e, cell) {
     // ghost if the finger never dragged.
     if (stroke) { stroke = null; hideScope(); queueRender(); }
     pendingTap = null;
-    closeMoreSheet(); closeTray();
+    closeMoreSheet(); closeOverlays();   // v5.53.2: was closeTray() — never
     buzz(25);   // v5.45.3: the hold registered — here's your menu
     openCtxMenu(cell, p.x, p.y);
   }, 520);

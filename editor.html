@@ -1072,6 +1072,10 @@
   .stoprow button.on { border-color: #8a6dd7; color: #c9b8ff; }
   /* v3.5: recording indicator */
   #btn-record.on { border-color: #e5484d; color: #ff8589; animation: recpulse 1.2s infinite; }
+  /* v5.53: auto-clip gallery rows */
+  .clip-row { display: flex; align-items: center; gap: 6px; margin: 6px 10px; flex-wrap: wrap; }
+  .clip-row .clip-meta { flex: 1 1 100%; font-size: 12px; opacity: .75; }
+  .clip-row button { padding: 4px 10px; }
   @keyframes recpulse { 50% { background: #4a1d1d; } }
   /* v3.7: on-screen controls */
   #dpad { position: fixed; z-index: 55; display: none;
@@ -1264,6 +1268,7 @@
   <!-- v5.33: moved here from the Play menu -->
   <button id="btn-buildbreak" title="Pause the sim and paint the map without leaving play">&#128396;&#65039; Touch up (pause sim)</button>
   <button id="btn-record" title="Record the screen as a video">&#9679; Record</button>
+  <button id="btn-clips" title="Review auto-recorded clips">&#127916; Clips</button>
 </div>
 <div id="m-view" class="menu-drop">
   <button id="btn-light" title="Fog/lighting overlay in play mode">Lighting: on</button>
@@ -1674,6 +1679,16 @@
     <button id="btn-birth-close" class="ghost">Close</button>
   </div>
   <div id="birth-progress" class="tray-hint" style="margin: 6px 10px 2px;"></div>
+</div>
+
+<div id="sheet-clips" class="sheet">
+  <div class="grab"></div>
+  <div class="tray-head">Auto clips <span class="tray-hint">she films her builds — you pick the winners</span></div>
+  <video id="clips-preview" hidden controls playsinline style="width:calc(100% - 20px);margin:6px 10px;border-radius:8px;"></video>
+  <div id="clips-list"></div>
+  <div class="row2">
+    <button id="btn-clips-close" class="ghost">Close</button>
+  </div>
 </div>
 
 <div id="sheet-slots" class="sheet">
@@ -3028,7 +3043,7 @@ $("nu-pass").addEventListener("keydown", e => { if (e.key === "Enter") createUse
 // sweeps, save chirp, error buzz, NPC mumbles (simlish-style), bird chirps,
 // water splash, and a looped wind ambience. No downloads, works offline.
 const Sfx = (() => {
-  let ctx = null, master = null, noiseBuf = null, ambNodes = null, lastTick = 0;
+  let ctx = null, master = null, noiseBuf = null, ambNodes = null, lastTick = 0, recDest = null;
   const cfg = { muted: false, vol: 0.7, amb: false };
   try { Object.assign(cfg, JSON.parse(localStorage.getItem("crumbs_sfx") || "{}")); } catch (e) {}
   const save = () => { try { localStorage.setItem("crumbs_sfx", JSON.stringify(cfg)); } catch (e) {} };
@@ -3135,6 +3150,17 @@ const Sfx = (() => {
       }
     },
     isMuted()  { return cfg.muted; },
+    // v5.53: auto clips — tap the master bus into a MediaStreamDestination so
+    // the recorder captures game SFX/music. Melody's speechSynthesis voice is
+    // NOT routable (browsers expose no tap for it), so her words burn in as
+    // captions instead.
+    recStream() {
+      if (!ensure()) return null;
+      try {
+        if (!recDest) { recDest = ctx.createMediaStreamDestination(); master.connect(recDest); }
+        return recDest.stream;
+      } catch (e) { return null; }
+    },
     getVol()   { return cfg.vol; },
     ambOn()    { return cfg.amb; },
     toggleMute() { cfg.muted = !cfg.muted; ensure(); applyCfg(); save(); return cfg.muted; },
@@ -4391,6 +4417,7 @@ function render() {
     }
   }
   if (playMode && worldWeather !== "clear") drawWeather();  // v4.1: the sky performs
+  if (clipCaption) drawClipCaption();   // v5.53: auto-clip subtitles — her words on the film
   layout();   // v2.2: re-center + apply pan offset after every draw
 }
 
@@ -5998,29 +6025,47 @@ $("menu-clean").onclick = () => {
 let recorder = null, recChunks = [], recTimer = null, recStart = 0;
 const REC_MIME = ["video/mp4;codecs=avc1", "video/mp4", "video/webm;codecs=vp9", "video/webm"]
   .find(m => { try { return window.MediaRecorder && MediaRecorder.isTypeSupported(m); } catch (e) { return false; } });
-$("btn-record").onclick = () => {
-  if (recorder) { stopRecording(); return; }
+// v5.53: startRecording(opts) — opts.auto marks an auto-clip (30s cap, lands
+// in the clips gallery, never the share sheet). Manual recordings keep the
+// 60s cap and the immediate share sheet.
+let recAuto = null;   // {trigger} while an auto-clip is recording, else null
+function startRecording(opts) {
+  opts = opts || {};
+  if (recorder) { stopRecording(); return false; }
   if (!REC_MIME || typeof canvas.captureStream !== "function") {
-    toast("recording isn't supported in this browser"); return;
+    toast("recording isn't supported in this browser"); return false;
   }
   try {
     recChunks = [];
-    recorder = new MediaRecorder(canvas.captureStream(30),
+    // video: the map canvas. audio: game SFX/music tapped off the Sfx bus
+    // (video-only when audio never unlocked — Sfx.ensure needs a gesture).
+    // Game world ONLY: no mic, no camera, ever.
+    const tracks = canvas.captureStream(30).getVideoTracks();
+    try {
+      const as = (typeof Sfx !== "undefined" && Sfx.recStream) ? Sfx.recStream() : null;
+      if (as) as.getAudioTracks().forEach(t => tracks.push(t));
+    } catch (e) {}
+    recorder = new MediaRecorder(new MediaStream(tracks),
       { mimeType: REC_MIME, videoBitsPerSecond: 8000000 });
     recorder.ondataavailable = e => { if (e.data && e.data.size) recChunks.push(e.data); };
     recorder.onstop = finishRecording;
     recorder.start(250);
+    recAuto = opts.auto ? { trigger: opts.trigger || "melody-build" } : null;
+    if (recAuto) clipBump();   // hoisted function — counts only on a real start
     recStart = Date.now();
-    closeOverlays();
+    const cap = recAuto ? CLIP_SECS : 60;
+    if (!recAuto) closeOverlays();
     $("btn-record").classList.add("on");
     recTimer = setInterval(() => {
       const s = Math.floor((Date.now() - recStart) / 1000);
       $("btn-record").innerHTML = "&#9679; " + Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
-      if (s >= 60) stopRecording();   // 60s cap keeps the file phone-friendly
+      if (s >= cap) stopRecording();   // auto 30s / manual 60s — phone-friendly files
     }, 500);
-    toast("recording — open the menu and tap Record to stop");
-  } catch (e) { toast("couldn't start recording"); recorder = null; }
-};
+    if (!recAuto) toast("recording — open the menu and tap Record to stop");
+    return true;
+  } catch (e) { toast("couldn't start recording"); recorder = null; recAuto = null; return false; }
+}
+$("btn-record").onclick = () => startRecording({});
 function stopRecording() {
   clearInterval(recTimer); recTimer = null;
   if (recorder && recorder.state !== "inactive") recorder.stop();
@@ -6029,10 +6074,17 @@ function stopRecording() {
 async function finishRecording() {
   const mime = REC_MIME, ext = mime.includes("mp4") ? "mp4" : "webm";
   const blob = new Blob(recChunks, { type: mime });
+  const wasAuto = recAuto, trig = (wasAuto && wasAuto.trigger) || "melody-build";
   const file = new File([blob], "crumbs-world." + ext, { type: mime });
-  recorder = null; recChunks = [];
+  recorder = null; recChunks = []; recAuto = null;
   $("btn-record").classList.remove("on");
   $("btn-record").innerHTML = "&#9679; Record";
+  if (wasAuto) {
+    // v5.53: auto-clips never ambush the share sheet — they wait in the gallery.
+    clipSave(blob, trig);
+    toast("\u{1F3AC} clip saved — check Clips when you get a sec");
+    return;
+  }
   // iOS share sheet -> TikTok, Messages, Save to Photos
   try {
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -6048,6 +6100,190 @@ async function finishRecording() {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
   toast("video saved — share it anywhere");
 }
+
+// ---- v5.53: auto clips -------------------------------------------------------
+// She films herself. When Melody drops a new build ghost, the game records
+// the next 30 seconds by itself — Lloyd kept forgetting the record button.
+// Max 2 auto-clips per day; clips wait in the gallery, never the share sheet.
+// Game world only: canvas video + game SFX. No mic, no camera, ever.
+// Her voice can't be captured (speechSynthesis has no routable output), so
+// her words burn in as captions — better for TikTok anyway, most watch muted.
+const CLIP_CAP = 2, CLIP_SECS = 30;
+function clipDay() { return new Date().toISOString().slice(0, 10); }
+function clipCount() {
+  try {
+    const s = JSON.parse(localStorage.getItem("crumbs_clipauto") || "{}");
+    return (s.day === clipDay()) ? (s.n | 0) : 0;
+  } catch (e) { return 0; }
+}
+function clipBump() {
+  try { localStorage.setItem("crumbs_clipauto", JSON.stringify({ day: clipDay(), n: clipCount() + 1 })); }
+  catch (e) {}
+}
+// Pure gate — checked twice (at kick and at fire) since a lot can change in 1.5s.
+function clipAutoAllow(recording, hidden, playing, count) {
+  return !recording && !hidden && !playing && count < CLIP_CAP;
+}
+function clipAutoKick(trigger) {
+  if (!clipAutoAllow(!!recorder, document.hidden, !!playMode, clipCount())) return;
+  setTimeout(() => {
+    if (!clipAutoAllow(!!recorder, document.hidden, !!playMode, clipCount())) return;
+    startRecording({ auto: true, trigger: trigger || "melody-build" });
+  }, 1500);   // let the ghost actually render before the camera rolls
+}
+// -- captions: her words, burned onto the canvas while a clip rolls ---------
+let clipCaption = null;   // {text, until}
+function clipSetCaption(text) {
+  let t = "";
+  try { t = melPlain(text); } catch (e) { t = String(text || ""); }
+  t = t.replace(/\s+/g, " ").trim().slice(0, 140);
+  if (!t) return;
+  clipCaption = { text: t, until: performance.now() + 5000 };
+}
+function drawClipCaption() {
+  if (!clipCaption) return;
+  if (performance.now() > clipCaption.until) { clipCaption = null; return; }
+  const pad = 10, fs = Math.max(13, Math.round(canvas.width / 48));
+  ctx.save();
+  ctx.font = "600 " + fs + "px system-ui, sans-serif";
+  ctx.textBaseline = "alphabetic";
+  const words = ("Melody: " + clipCaption.text).split(" "), lines = [];
+  const maxW = canvas.width - pad * 2;
+  let line = "";
+  for (const w of words) {
+    const t = line ? line + " " + w : w;
+    if (line && ctx.measureText(t).width > maxW) { lines.push(line); line = w; }
+    else line = t;
+  }
+  if (line) lines.push(line);
+  const lh = Math.round(fs * 1.35), bh = lines.length * lh + pad;
+  ctx.fillStyle = "rgba(0,0,0,0.62)";
+  ctx.fillRect(0, canvas.height - bh, canvas.width, bh);
+  ctx.fillStyle = "#fff";
+  lines.forEach((ln, i) => ctx.fillText(ln, pad, canvas.height - bh + pad * 0.6 + (i + 1) * lh - 4));
+  ctx.restore();
+}
+// -- gallery: IndexedDB, reviewed on his schedule -----------------------------
+function clipDB() {
+  return new Promise((res, rej) => {
+    try {
+      const q = indexedDB.open("crumbs-clips", 1);
+      q.onupgradeneeded = () => q.result.createObjectStore("clips", { keyPath: "id", autoIncrement: true });
+      q.onsuccess = () => res(q.result);
+      q.onerror = () => rej(q.error);
+    } catch (e) { rej(e); }
+  });
+}
+function clipUnseen() {
+  try { return parseInt(localStorage.getItem("crumbs_clips_unseen") || "0", 10) || 0; }
+  catch (e) { return 0; }
+}
+function clipBadge(delta) {
+  let n = clipUnseen() + (delta || 0);
+  try { localStorage.setItem("crumbs_clips_unseen", String(n)); } catch (e) {}
+  const b = $("btn-clips");
+  if (b) b.innerHTML = "&#127916; Clips" + (n > 0 ? " (" + n + ")" : "");
+}
+async function clipSave(blob, trigger) {
+  try {
+    const db = await clipDB();
+    await new Promise((res, rej) => {
+      const tx = db.transaction("clips", "readwrite");
+      tx.objectStore("clips").add({ ts: Date.now(), trigger: trigger || "melody-build", mime: blob.type, blob });
+      tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+    });
+    db.close();
+  } catch (e) {
+    clipDownload(blob, "crumbs-clip");   // gallery unavailable — don't lose the clip
+  }
+  clipBadge(1);
+}
+function clipDownload(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = (name || "crumbs-world") + "." + (blob.type.includes("mp4") ? "mp4" : "webm");
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+async function clipAll() {
+  const db = await clipDB();
+  const rows = await new Promise((res, rej) => {
+    const tx = db.transaction("clips", "readonly");
+    const q = tx.objectStore("clips").getAll();
+    q.onsuccess = () => res(q.result || []); q.onerror = () => rej(q.error);
+  });
+  db.close();
+  rows.sort((a, b) => b.ts - a.ts);
+  return rows;
+}
+async function clipRenderList() {
+  const list = $("clips-list");
+  list.innerHTML = "<div class='tray-hint' style='margin:6px 10px;'>loading…</div>";
+  let rows = [];
+  try { rows = await clipAll(); } catch (e) {}
+  if (!rows.length) {
+    list.innerHTML = "<div class='tray-hint' style='margin:6px 10px;'>no clips yet — ask Melody to build something and she'll film it 🎬</div>";
+    return;
+  }
+  list.innerHTML = "";
+  rows.forEach(r => {
+    const d = document.createElement("div");
+    d.className = "clip-row";
+    const when = new Date(r.ts).toLocaleString();
+    const meta = document.createElement("div");
+    meta.className = "clip-meta";
+    meta.textContent = when + " · " + (r.trigger === "melody-build" ? "Melody built something" : r.trigger);
+    d.appendChild(meta);
+    const mk = (label, fn, ghost) => {
+      const b = document.createElement("button");
+      b.textContent = label; if (ghost) b.className = "ghost";
+      b.onclick = () => fn(r); return b;
+    };
+    d.appendChild(mk("▶ Preview", clipPreview));
+    d.appendChild(mk("Share", clipShare));
+    d.appendChild(mk("Delete", clipDel, true));
+    list.appendChild(d);
+  });
+}
+async function clipPreview(r) {
+  const v = $("clips-preview");
+  v.src = URL.createObjectURL(r.blob);
+  v.hidden = false; v.play().catch(() => {});
+}
+async function clipShare(r) {
+  const ext = (r.mime || "").includes("mp4") ? "mp4" : "webm";
+  const file = new File([r.blob], "crumbs-world-clip." + ext, { type: r.mime });
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: "Crumbs World" });
+      return;
+    }
+  } catch (e) { /* user cancelled — fall through to download */ }
+  clipDownload(r.blob, "crumbs-world-clip");
+}
+async function clipDel(r) {
+  try {
+    const db = await clipDB();
+    await new Promise((res, rej) => {
+      const tx = db.transaction("clips", "readwrite");
+      tx.objectStore("clips").delete(r.id);
+      tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+    });
+    db.close();
+  } catch (e) {}
+  clipRenderList();
+}
+$("btn-clips").onclick = async () => {
+  closeOverlays();
+  try { localStorage.setItem("crumbs_clips_unseen", "0"); } catch (e) {}
+  clipBadge(0);
+  const v = $("clips-preview");
+  v.hidden = true; v.removeAttribute("src");
+  await clipRenderList();
+  toggleOverlay("sheet-clips");
+};
+$("btn-clips-close").onclick = () => toggleOverlay("sheet-clips");
+clipBadge(0);   // restore the unseen count on boot
 
 // ---- v5.51: birth certificates ----------------------------------------------
 // A shareable creation time-lapse, replayed from the append-only edit log
@@ -11995,7 +12231,11 @@ function melSpeak(text) {
     speechSynthesis.speak(u);
   } catch (e) {}
 }
-function melSay(text) { melodyAdd("mel", text); melSpeak(text); }  // she speaks her replies
+function melSay(text) {
+  melodyAdd("mel", text);
+  if (typeof recorder !== "undefined" && recorder && recAuto) clipSetCaption(text);   // v5.53: her words burn into the clip
+  melSpeak(text);
+}  // she speaks her replies
 function melTtsToggle() {
   melTtsUnlock();  // v5.29.1: tap counts as the gesture, so the test line always plays
   MEL_TTS.on = !MEL_TTS.on; melTtsSave(); melTtsIcon();
@@ -13105,6 +13345,7 @@ async function suggestPoll() {
         // height; trays: the right tray opens on the suggest tab)
         if (sheetView === "suggest") PanelSys.open("suggest");
         queueRender();
+        clipAutoKick("melody-build");   // v5.53: she films her builds
       }
     } else if (ghostSug) {
       clearAnimGhost(true);

@@ -3,6 +3,20 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.53.0 — 2026-09-28
+
+**She films herself: auto-clips.** Lloyd kept forgetting the record button,
+so the game now records by itself — when Melody drops a new build ghost, the
+next 30 seconds of the map canvas are captured automatically (max 2 clips
+per day, never while a recording runs, never in play mode, never on a hidden
+tab). Clips wait in a new 🎬 Clips gallery (IndexedDB, preview/share/save/
+delete) instead of ambushing the share sheet — he picks the winners for
+TikTok. Audio: game SFX/music are tapped off the Sfx Web Audio bus into the
+recording. Her voice itself can't be captured (speechSynthesis has no
+routable output in any browser), so her words burn in as captions on the
+canvas — better for TikTok anyway, where most watch muted. Game world only:
+canvas + SFX, no mic, no camera, ever.
+
 ## v5.51.5 — 2026-09-28
 
 **The brain's second bug: Cloudflare was blocking her.** Fixing the model

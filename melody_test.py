@@ -296,6 +296,24 @@ _, after, _, _ = ma.quota_check(tmp5, "alice", "free")
 check("stt failure burns no quota", before == after,
       f"before={before} after={after}")
 
+# v5.52.0: pro trial + tokens
+tmp6 = fresh_dir()
+ma.trial_start(tmp6, "carol")
+active, left = ma.trial_check(tmp6, "carol")
+check("trial starts active", active and left == 100, f"active={active} left={left}")
+ma.trial_bump(tmp6, "carol")
+_, left2 = ma.trial_check(tmp6, "carol")
+check("trial bump decrements", left2 == 99, f"left={left2}")
+ma.trial_start(tmp6, "carol")  # restart is a no-op
+_, left3 = ma.trial_check(tmp6, "carol")
+check("trial start never resets", left3 == 99, f"left={left3}")
+check("token balance starts at 0", ma.token_balance(tmp6, "carol") == 0)
+check("token spend empty -> False", ma.token_spend(tmp6, "carol") is False)
+bal = ma.token_grant(tmp6, "carol", 500)
+check("token grant 500", bal == 500, f"bal={bal}")
+check("token spend ok -> True", ma.token_spend(tmp6, "carol") is True)
+check("token balance now 499", ma.token_balance(tmp6, "carol") == 499)
+
 # cross-vault: bob's stt writes only under vaults/bob (Law 18)
 ma._stt_post = fake_stt_post
 res = ma.handle_stt(tmp5, "bob", b"x" * 5000, "voice.webm", "basic")

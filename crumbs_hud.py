@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.51.9"
+APP_VERSION = "5.52.0"
 # v5.41: single source of truth for the map-size cap (was 64, hardcoded in
 # four places). 500x500 = 250k cells. The client additionally caps tilePx so
 # the full-map backing canvas never exceeds 4096px per side (see editor.html).
@@ -849,6 +849,12 @@ def _create_user(username, password, email=None, phone=None, is_owner=False):
                        "world": "private"}
     _save_users(users)
     os.makedirs(_user_vault_dir(username), exist_ok=True)
+    # v5.52.0: every new signup gets the 48h Pro taste — trial starts once,
+    # never resets, 100-call total budget caps Lloyd's cost.
+    try:
+        _melody_agent.trial_start(SCRIPT_DIR, username)
+    except Exception:
+        pass
     _log_event(f"account created: {username}")
     return True, ""
 

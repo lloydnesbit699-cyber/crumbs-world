@@ -130,6 +130,113 @@ def quota_bump(script_dir, username, tier=DEFAULT_TIER):
         pass
 
 
+# -- pro trial + tokens -------------------------------------------------------
+# v5.52.0: Lloyd's monetization — 48h Pro taste for new signups, then token
+# packs ($5/500, $10/1000). 1 token = 1 brain call. Tokens spend automatically
+# when the daily quota runs dry.
+
+TRIAL_HOURS = 48
+TRIAL_CALLS = 100  # total trial budget — caps Lloyd's cost at ~$0.32/trial
+
+def _trial_path(script_dir, username):
+    return os.path.join(melody_dir(script_dir, username), "trial.json")
+
+def trial_start(script_dir, username):
+    """Start the 48h Pro trial. Once per user — never resets."""
+    path = _trial_path(script_dir, username)
+    try:
+        with open(path) as f:
+            rec = json.load(f)
+        if isinstance(rec, dict) and rec.get("ends"):
+            return
+    except (OSError, ValueError):
+        pass
+    rec = {"ends": time.time() + TRIAL_HOURS * 3600, "used": 0}
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(rec, f)
+    except OSError:
+        pass
+
+def trial_check(script_dir, username):
+    """-> (active, remaining). Pro trial live with budget left?"""
+    try:
+        with open(_trial_path(script_dir, username)) as f:
+            rec = json.load(f)
+        if not isinstance(rec, dict):
+            return False, 0
+        if time.time() > float(rec.get("ends", 0)):
+            return False, 0
+        used = int(rec.get("used", 0))
+        return used < TRIAL_CALLS, max(0, TRIAL_CALLS - used)
+    except (OSError, ValueError):
+        return False, 0
+
+def trial_bump(script_dir, username):
+    path = _trial_path(script_dir, username)
+    try:
+        with open(path) as f:
+            rec = json.load(f)
+        if not isinstance(rec, dict):
+            rec = {}
+    except (OSError, ValueError):
+        rec = {}
+    rec["used"] = int(rec.get("used", 0)) + 1
+    try:
+        with open(path, "w") as f:
+            json.dump(rec, f)
+    except OSError:
+        pass
+
+def _tokens_path(script_dir, username):
+    return os.path.join(melody_dir(script_dir, username), "tokens.json")
+
+def token_balance(script_dir, username):
+    try:
+        with open(_tokens_path(script_dir, username)) as f:
+            rec = json.load(f)
+        return max(0, int(rec.get("balance", 0))) if isinstance(rec, dict) else 0
+    except (OSError, ValueError):
+        return 0
+
+def token_spend(script_dir, username):
+    """Burn one token. -> True if spent."""
+    path = _tokens_path(script_dir, username)
+    try:
+        with open(path) as f:
+            rec = json.load(f)
+        if not isinstance(rec, dict):
+            rec = {}
+        bal = int(rec.get("balance", 0))
+        if bal <= 0:
+            return False
+        rec["balance"] = bal - 1
+        with open(path, "w") as f:
+            json.dump(rec, f)
+        return True
+    except (OSError, ValueError):
+        return False
+
+def token_grant(script_dir, username, amount):
+    """Add tokens (purchase/admin). -> new balance."""
+    path = _tokens_path(script_dir, username)
+    try:
+        with open(path) as f:
+            rec = json.load(f)
+        if not isinstance(rec, dict):
+            rec = {}
+    except (OSError, ValueError):
+        rec = {}
+    rec["balance"] = max(0, int(rec.get("balance", 0))) + max(0, int(amount))
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(rec, f)
+    except OSError:
+        pass
+    return rec["balance"]
+
 # -- history ------------------------------------------------------------------
 
 def _history_path(script_dir, username):
@@ -1411,7 +1518,8 @@ def handle_stt(script_dir, username, audio_bytes, filename="voice.webm",
         audit(script_dir, username, "stt", f"ok chars={len(text)}")
         _, remaining, quota, tier = quota_check(script_dir, username, tier)
         return {"ok": True, "text": text,
-                "quota": {"remaining": remaining, "quota": quota, "tier": tier}}
+                "quota": {"remaining": remaining, "quota": quota, "tier": tier,
+                          "tokens": token_balance(script_dir, username)}}
     except Exception as exc:  # the agent never crashes the game
         try:
             audit(script_dir, username, "stt-error", str(exc)[:200])
@@ -1685,23 +1793,40 @@ def handle_chat(script_dir, username, message, tier=DEFAULT_TIER, world=None):
             return {"ok": True, "reply": direct, "source": "knowledge",
                     "tools_used": []}
 
-        # 2. quota, then brain
-        allowed, remaining, quota, tier = quota_check(script_dir, username, tier)
-        if not allowed:
-            audit(script_dir, username, "chat", "quota exhausted")
-            return {"ok": False, "error": "quota",
-                    "detail": (f"That's the day's Melody time on the {tier} "
-                               f"plan ({quota}/day) — she'll be back tomorrow!")}
+        # 2. quota, then brain — v5.52.0: trial first, tokens as backup.
+        # 1 token = 1 brain call; tokens burn automatically when quota is dry.
+        on_trial, trial_left = trial_check(script_dir, username)
+        if on_trial:
+            tier = "pro"  # the 48h taste runs at Pro
+            calls_left = trial_left
+            quota, remaining = TRIAL_CALLS, trial_left
+        else:
+            allowed, remaining, quota, tier = quota_check(script_dir, username, tier)
+            tok_bal = token_balance(script_dir, username)
+            if not allowed and tok_bal <= 0:
+                audit(script_dir, username, "chat", "quota exhausted")
+                return {"ok": False, "error": "quota",
+                        "detail": (f"That's the day's Melody time on the {tier} "
+                                   f"plan ({quota}/day) — she'll be back tomorrow! "
+                                   f"Or grab tokens to keep going.")}
+            calls_left = remaining + tok_bal
+        calls_spent = 0
 
         # calls_left is this turn's spend budget: every completed brain_chat
         # invocation burns one via _spend(). A turn that needs more calls
         # than remain stops early and says so honestly.
-        calls_left = remaining
-        calls_spent = 0
-
         def _spend():
             nonlocal calls_left, calls_spent
-            quota_bump(script_dir, username, tier)
+            if on_trial:
+                trial_bump(script_dir, username)
+            else:
+                # quota first, tokens when it's dry — 1 token = 1 call
+                _, rem_now, _, _ = quota_check(script_dir, username, tier)
+                if rem_now > 0:
+                    quota_bump(script_dir, username, tier)
+                else:
+                    token_spend(script_dir, username)
+                    audit(script_dir, username, "chat", "token spent")
             calls_left -= 1
             calls_spent += 1
 
@@ -1802,9 +1927,12 @@ def handle_chat(script_dir, username, message, tier=DEFAULT_TIER, world=None):
               f"tools={','.join(tools_used) or 'none'}"
               + (" quota-died" if quota_died else ""))
         _, remaining, quota, tier = quota_check(script_dir, username, tier)
+        on_trial_now, trial_left_now = trial_check(script_dir, username)
         return {"ok": True, "reply": reply, "source": "brain",
                 "tools_used": tools_used,
-                "quota": {"remaining": remaining, "quota": quota, "tier": tier}}
+                "quota": {"remaining": remaining, "quota": quota, "tier": tier,
+                          "tokens": token_balance(script_dir, username),
+                          "trial": on_trial_now, "trial_left": trial_left_now}}
     except Exception as exc:  # the agent never crashes the game
         try:
             audit(script_dir, username, "chat-error", str(exc)[:200])

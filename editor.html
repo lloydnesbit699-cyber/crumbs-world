@@ -11831,9 +11831,13 @@ function melodySetQuota(q) {
     MELODY.tier = q.tier;
     melTierUI();
   }
-  if (typeof q.remaining === "number")
-    $("melody-quota").textContent =
-      (MELODY.tier ? MELODY.tier + " · " : "") + q.remaining + " left today";
+  // v5.52.0: trial banner + token jar in the quota readout
+  let txt = "";
+  if (q.trial) txt = "PRO TRIAL · " + q.trial_left + " calls left · ";
+  else if (MELODY.tier) txt = MELODY.tier + " · ";
+  if (typeof q.remaining === "number") txt += q.remaining + " left today";
+  if (q.tokens > 0) txt += " · " + q.tokens + " tokens";
+  if (txt) $("melody-quota").textContent = txt;
 }
 // v5.29: voice both ways (round-1 ask #20) — TTS out, mic in.
 // TTS is client-side Web Speech only (no server change, zero cost);

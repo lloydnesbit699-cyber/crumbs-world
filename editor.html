@@ -589,6 +589,9 @@
                         font-size: 20px; background: rgba(42,42,42,.92); }
   #zoom-cluster #btn-pan { font-size: 12px; border-radius: 14px; height: auto;
                           padding: 9px 0; }
+  /* v5.51.1: dim the grid toggle when the grid is off, so the state reads
+     at a glance. */
+  #zoom-cluster #btn-grid.off { opacity: .45; }
 
   /* v5.45: the brush bar — phone-first painting keeps exactly 4 tools
      visible: Stamp (hero), Paint, Erase, and ••• More. Long-press ••• for
@@ -942,8 +945,9 @@
     background: rgba(20, 30, 22, 0.92); border: 1px solid #3f5a4a; border-radius: 10px;
     padding: 6px 10px; font-size: 13px; color: #e8f5e9; }
   /* v5.50.12: default parks above the zoom cluster (which owns the bottom
-     ~230px) — bottom:96px used to pile it onto the +/Fit buttons */
-  #pack-btn { position: fixed; right: 10px; bottom: 244px; z-index: 60;
+     ~292px since v5.51.1 added the grid toggle) — bottom:96px used to pile
+     it onto the +/Fit buttons */
+  #pack-btn { position: fixed; right: 10px; bottom: 304px; z-index: 60;
     background: #1d2b22; border: 1px solid #3f5a4a; color: #e8f5e9;
     border-radius: 10px; padding: 10px 12px; font-size: 15px;
     touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; }
@@ -1908,6 +1912,7 @@
 <div id="scrim"></div>
 
 <div id="zoom-cluster">
+  <button id="btn-grid" title="Toggle grid lines">&#x25A6;</button>
   <button id="zoom-out" title="Zoom out">&minus;</button>
   <button id="zoom-in" title="Zoom in">+</button>
   <button id="zoom-fit" title="Fit map to screen">Fit</button>
@@ -3694,13 +3699,16 @@ function renderBase() {
       }
     }
   }
-  // grid lines — pre-rendered here instead of rebuilt every frame.
-  // v5.41: on a dirty rect, only the lines crossing it.
-  b.strokeStyle = "rgba(0,0,0,0.25)"; b.lineWidth = 1;
-  b.beginPath();
-  for (let x = r.x0; x <= r.x1 + 1; x++) { b.moveTo(x * tilePx + .5, r.y0 * tilePx); b.lineTo(x * tilePx + .5, (r.y1 + 1) * tilePx); }
-  for (let y = r.y0; y <= r.y1 + 1; y++) { b.moveTo(r.x0 * tilePx, y * tilePx + .5); b.lineTo((r.x1 + 1) * tilePx, y * tilePx + .5); }
-  b.stroke();
+  // v5.51.1: grid lines are a toggle now (zoom cluster ▦) — pre-rendered
+  // here instead of rebuilt every frame. v5.41: on a dirty rect, only the
+  // lines crossing it.
+  if (showGrid) {
+    b.strokeStyle = "rgba(0,0,0,0.25)"; b.lineWidth = 1;
+    b.beginPath();
+    for (let x = r.x0; x <= r.x1 + 1; x++) { b.moveTo(x * tilePx + .5, r.y0 * tilePx); b.lineTo(x * tilePx + .5, (r.y1 + 1) * tilePx); }
+    for (let y = r.y0; y <= r.y1 + 1; y++) { b.moveTo(r.x0 * tilePx, y * tilePx + .5); b.lineTo((r.x1 + 1) * tilePx, y * tilePx + .5); }
+    b.stroke();
+  }
   baseDirty = null;
 }
 
@@ -10113,6 +10121,17 @@ function zoomCenter(d) {
 $("zoom-in").onclick  = () => zoomCenter(8);
 $("zoom-out").onclick = () => zoomCenter(-8);
 $("zoom-fit").onclick = () => { manualZoom = false; panX = 0; panY = 0; fitTiles(); render(); toast("fit to screen"); };
+// v5.51.1: grid lines toggle — per-device, default on (the historical look).
+let showGrid = true;
+try { showGrid = localStorage.getItem("crumbs.showGrid") !== "0"; } catch (e) {}
+function applyGridBtn() { const b = $("btn-grid"); if (b) b.classList.toggle("off", !showGrid); }
+$("btn-grid").onclick = () => {
+  showGrid = !showGrid;
+  try { localStorage.setItem("crumbs.showGrid", showGrid ? "1" : "0"); } catch (e) {}
+  applyGridBtn(); markBaseDirty(); queueRender();
+  toast(showGrid ? "grid on" : "grid off");
+};
+applyGridBtn();
 $("btn-gen").onclick = async () => {
   // v5.7: busy indicator — at 64x64 the post-generate chain takes seconds
   // on the phone with zero feedback, which reads as "broken". Disable the

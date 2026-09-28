@@ -3,6 +3,16 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.51.1 — 2026-09-28
+
+**Grid lines toggle.** The map grid now has its own ▦ button at the foot of
+the zoom cluster (bottom-right, below − / + / Fit / Move). Tap to hide the
+grid, tap again to bring it back — the button dims when the grid is off so
+the state reads at a glance. The choice persists per device (default: grid
+on, the historical look). Pack's default park moved up a touch so it still
+starts above the taller cluster.
+Not phone-verified.
+
 ## v5.51.0 — 2026-09-28
 
 **Birth certificates.** Every dungeon now exports a shareable creation

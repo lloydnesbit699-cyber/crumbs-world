@@ -13014,7 +13014,8 @@ const TrayRenderer = {
 };
 
 // one tab bar per tray; the active module's root shows, the rest hide.
-// The suggest tab still obeys Law 11: no ghost, no button.
+// v5.54.1: the suggest tab stays visible always (Law 11 retired for it) —
+// a button that only exists sometimes is undiscoverable.
 function renderTrayTabs() {
   ["left", "right"].forEach(side => {
     const tray = $("tray-" + side);
@@ -13026,7 +13027,8 @@ function renderTrayTabs() {
     }
     bar.innerHTML = "";
     PANEL_MODULES.filter(m => m.tray === side).forEach(m => {
-      if (m.id === "suggest" && !ghostSug) return;   // Law 11: no dead buttons
+      // v5.54.1: the suggest tab stays visible always — a button that only
+      // exists sometimes is undiscoverable. Empty state handled in the card.
       const b = document.createElement("button");
       b.type = "button"; b.textContent = m.icon;
       b.title = SHEET_TITLES[m.id] || m.id;

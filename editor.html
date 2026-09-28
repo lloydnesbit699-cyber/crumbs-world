@@ -11818,7 +11818,8 @@ function melodyAdd(role, text) {
 function melTierUI() {
   const t = MELODY.tier || "free";
   const voice = (t === "basic" || t === "pro");  // mic + speaker
-  const picker = (t === "pro");                  // alternate voices = pro extra
+  const picker = (t === "basic" || t === "pro");  // v5.51.9: basic picks
+                                                  // female/male, pro gets the shelf
   $("melody-mic").style.display = voice ? "" : "none";
   $("melody-speaker").style.display = voice ? "" : "none";
   $("melody-voicebtn").style.display = picker ? "" : "none";
@@ -11867,6 +11868,8 @@ function melTtsIcon() {
 }
 // v5.51.7: Lloyd picks her voice — his saved choice beats her default.
 function melVoiceKey() { return "melody-voice-" + (MEL_TTS.user || "anon"); }
+// v5.51.9: Basic gets the two curated defaults (female/male); the full
+// device library stays a Pro extra.
 function melLoadVoices() {
   try {
     if (!("speechSynthesis" in window)) return;
@@ -11875,18 +11878,29 @@ function melLoadVoices() {
     const all = speechSynthesis.getVoices() || [];
     const en = all.filter(v => v.lang && v.lang.toLowerCase().indexOf("en") === 0);
     const saved = localStorage.getItem(melVoiceKey());
+    const isPro = (MELODY.tier === "pro");
     sel.innerHTML = "";
-    const auto = document.createElement("option");
-    auto.value = "";
-    auto.textContent = "Auto (her default voice)";
-    sel.appendChild(auto);
-    en.forEach(v => {
-      const o = document.createElement("option");
-      o.value = v.name;
-      o.textContent = v.name + " (" + v.lang + ")";
-      sel.appendChild(o);
-    });
-    sel.value = saved && en.some(v => v.name === saved) ? saved : "";
+    if (isPro) {
+      const auto = document.createElement("option");
+      auto.value = "";
+      auto.textContent = "Auto (her default voice)";
+      sel.appendChild(auto);
+      en.forEach(v => {
+        const o = document.createElement("option");
+        o.value = v.name;
+        o.textContent = v.name + " (" + v.lang + ")";
+        sel.appendChild(o);
+      });
+      sel.value = saved && en.some(v => v.name === saved) ? saved : "";
+    } else {
+      // basic: one female, one male — the default pair
+      const f = document.createElement("option");
+      f.value = "female"; f.textContent = "\u2640 Female (default)";
+      const m = document.createElement("option");
+      m.value = "male"; m.textContent = "\u2642 Male";
+      sel.appendChild(f); sel.appendChild(m);
+      sel.value = (saved === "male") ? "male" : "female";
+    }
   } catch (e) {}
 }
 function melSaveVoice(name) {
@@ -11894,6 +11908,17 @@ function melSaveVoice(name) {
     if (name) localStorage.setItem(melVoiceKey(), name);
     else localStorage.removeItem(melVoiceKey());
   } catch (e) {}
+}
+function melPickMaleVoice(en) {
+  // his male register — a warm male voice when one is on the device
+  const masc = ["daniel", "david", "mark", "alex", "fred", "aaron",
+    "google uk english male", "microsoft david", "microsoft mark",
+    "microsoft guy", "microsoft christopher", "nicolas", "paul", "jorge"];
+  for (const m of masc) {
+    const hit = en.find(v => v.name.toLowerCase().indexOf(m) >= 0);
+    if (hit) return hit;
+  }
+  return null;
 }
 function melPickVoice() {
   try {
@@ -11903,7 +11928,12 @@ function melPickVoice() {
     // his pick wins — he didn't care for her default sound
     try {
       const saved = localStorage.getItem(melVoiceKey());
-      if (saved) {
+      if (saved === "male") {
+        // basic's male default
+        return melPickMaleVoice(en) || en[0];
+      }
+      if (saved && saved !== "female") {
+        // pro's specific voice
         const hit = en.find(v => v.name === saved);
         if (hit) return hit;
       }
@@ -13716,7 +13746,7 @@ async function deleteMission(id) {
     <span id="melody-title">Melody</span>
     <span id="melody-quota"></span>
     <button id="melody-speaker" title="Melody's voice">&#128266;</button>
-    <button id="melody-voicebtn" title="Choose Melody's voice (Pro)" style="display:none">&#128483;</button>
+    <button id="melody-voicebtn" title="Choose Melody's voice" style="display:none">&#128483;</button>
     <button id="melody-clear" title="Clear conversation">&#10218;</button>
     <!-- v5.33: workshop moved here from the old Build menu — the dock is the
          single Melody entry point now -->

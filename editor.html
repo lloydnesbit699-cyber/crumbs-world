@@ -11863,13 +11863,38 @@ function melPlain(text) {  // strip markdown for the voice — speak words, not 
   return String(text).replace(/\*\*/g, "").replace(/[*_`#]/g, "")
     .replace(/\s+/g, " ").trim().slice(0, 600);
 }
+// v5.51.6: she speaks the reply's language — detect the script and pick a
+// matching device voice, falling back to her English voice.
+function melLangOf(text) {
+  const t = String(text || "");
+  if (/[\u4e00-\u9fff]/.test(t)) return "zh";
+  if (/[\u3040-\u30ff]/.test(t)) return "ja";
+  if (/[\uac00-\ud7af]/.test(t)) return "ko";
+  if (/[\u0600-\u06ff]/.test(t)) return "ar";
+  if (/[\u0400-\u04ff]/.test(t)) return "ru";
+  if (/[\u0900-\u097f]/.test(t)) return "hi";
+  if (/[\u0e00-\u0e7f]/.test(t)) return "th";
+  if (/[\u0590-\u05ff]/.test(t)) return "he";
+  return "en";
+}
+function melPickVoiceFor(text) {
+  try {
+    const lang = melLangOf(text);
+    if (lang !== "en") {
+      const all = speechSynthesis.getVoices() || [];
+      const hit = all.find(v => v.lang && v.lang.toLowerCase().indexOf(lang) === 0);
+      if (hit) return hit;
+    }
+  } catch (e) {}
+  return melPickVoice();  // English (her warm female default) or bust
+}
 function melSpeak(text) {
   if (!MEL_TTS.on || !MEL_TTS.unlocked) return;  // v5.29.1: silent until a tap unlocks her voice
   try {
     if (!("speechSynthesis" in window)) return;
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(melPlain(text));
-    const v = melPickVoice();
+    const v = melPickVoiceFor(text);
     if (v) u.voice = v;
     u.rate = 1.02; u.pitch = 1.05;  // warm and teacher-y
     speechSynthesis.speak(u);
@@ -11919,11 +11944,19 @@ async function melSendClip(mime) {
     const j = await r.json();
     $("melody-typing").hidden = true;
     if (j.ok && j.text) {
-      // her hearing lands in the input for him to confirm and send — never auto-sent
-      $("melody-input").value = j.text;
-      $("melody-input").focus();
+      // v5.51.6: she heard him — send it straight through, no confirmation
+      // step. The "check my hearing" stop only happens when her hearing is
+      // doubtful (empty or too short to trust).
+      const heard = j.text.trim();
       melodySetQuota(j.quota);
-      melSay("Got it \u2014 check my hearing below, then hit Send!");
+      if (heard.length > 3) {
+        $("melody-input").value = heard;
+        melodySend();
+      } else {
+        $("melody-input").value = heard;
+        $("melody-input").focus();
+        melSay("I didn't quite catch that \u2014 check below and hit Send, or try again?");
+      }
     } else {
       const why = j.retry_after ? ("slow down — try again in " + j.retry_after + "s")
                                 : (j.detail || j.error || "Voice input hiccuped \u2014 type it for me?");
@@ -12076,6 +12109,7 @@ async function melodyInitInner() {
   $("melody-log").innerHTML = "";
   $("melody-fab").hidden = false;
   placeMelFab();  // v5.34: restore the parked spot (or the default corner)
+  placeMelDock(); melDockDragInit();  // v5.51.6: the chat dock parks where you drag it
   dodgeMelFab();  // v5.49.1: …but never on top of the open sheet
   // v5.34: the Mel button drags — a tap (no movement) opens the dock, a drag
   // parks it. melFabMoved swallows the click that follows a drag.
@@ -12086,6 +12120,69 @@ async function melodyInitInner() {
     else { $("melody-dock").hidden = true; MELODY.open = false; }
   };
   $("mel-talk").onclick = () => openMelDock();   // v5.50: the talk chip knocks too
+// v5.51.6: the chat dock drags by its header and remembers where you park it.
+function placeMelDock() {
+  const dock = $("melody-dock");
+  if (!dock) return;
+  let p = null;
+  try { p = JSON.parse(localStorage.getItem("crumbs_meldock")); } catch (e) {}
+  if (p && typeof p.x === "number" && typeof p.y === "number") {
+    dock.style.left = p.x + "px"; dock.style.top = p.y + "px";
+    dock.style.right = "auto"; dock.style.bottom = "auto";
+  }
+  clampMelDock();
+}
+function clampMelDock() {
+  const dock = $("melody-dock");
+  if (!dock || dock.hidden) return;
+  const w = dock.offsetWidth || 320, h = dock.offsetHeight || 420;
+  let x = parseFloat(dock.style.left), y = parseFloat(dock.style.top);
+  if (!isFinite(x)) x = window.innerWidth - w - 14;
+  if (!isFinite(y)) y = window.innerHeight - h - 76;
+  x = Math.max(0, Math.min(x, window.innerWidth - w));
+  y = Math.max(48, Math.min(y, window.innerHeight - 60));
+  dock.style.left = x + "px"; dock.style.top = y + "px";
+  dock.style.right = "auto"; dock.style.bottom = "auto";
+}
+function melDockDragInit() {
+  const dock = $("melody-dock"), head = $("melody-head");
+  if (!dock || !head || head.dataset.dragInit) return;
+  head.dataset.dragInit = "1";
+  head.style.cursor = "grab";
+  head.style.touchAction = "none";
+  head.addEventListener("pointerdown", e => {
+    if (e.target.closest("button")) return;  // the header buttons still tap
+    e.preventDefault();
+    try { head.setPointerCapture(e.pointerId); } catch (_) {}
+    const sx = e.clientX, sy = e.clientY;
+    const r = dock.getBoundingClientRect();
+    const ox = sx - r.left, oy = sy - r.top;
+    let dragging = false;
+    const mv = ev => {
+      if (!dragging && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 10) return;
+      dragging = true;
+      head.style.cursor = "grabbing";
+      dock.style.left = (ev.clientX - ox) + "px";
+      dock.style.top = (ev.clientY - oy) + "px";
+      dock.style.right = "auto"; dock.style.bottom = "auto";
+    };
+    const up = () => {
+      head.removeEventListener("pointermove", mv);
+      head.removeEventListener("pointerup", up);
+      head.removeEventListener("pointercancel", up);
+      head.style.cursor = "grab";
+      if (dragging) {
+        clampMelDock();
+        try { localStorage.setItem("crumbs_meldock",
+          JSON.stringify({ x: parseFloat(dock.style.left), y: parseFloat(dock.style.top) })); } catch (_) {}
+      }
+    };
+    head.addEventListener("pointermove", mv);
+    head.addEventListener("pointerup", up);
+    head.addEventListener("pointercancel", up);
+  });
+}
+window.addEventListener("resize", () => { try { clampMelDock(); } catch (_) {} });
   $("melody-fab").addEventListener("pointerdown", e => {
     e.preventDefault();
     const fab = $("melody-fab");

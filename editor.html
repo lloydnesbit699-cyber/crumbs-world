@@ -10352,6 +10352,17 @@ $("btn-restart").onclick = async () => {
   if (!confirm("Restart the HUD server? Dirty work is saved first.")) return;
   let rr = null;
   try { rr = await api("/api/restart", {}); } catch (e) { /* server is going away */ }
+  if (rr && !rr.ok && /write key/i.test(rr.error || "")) {
+    // v5.50.15: same public-mode lock as installs — say where the key lives
+    // instead of waiting 45s on a restart that was never allowed.
+    closeOverlays();
+    $("update-title").textContent = "That needs the write key";
+    $("update-notes").innerHTML = writeKeyHelpHtml();
+    $("btn-update-install").style.display = "none";
+    toggleOverlay("sheet-update");
+    Sfx.error();
+    return;
+  }
   toast("restarting — waiting for the NEW server instance\u2026");
   const w = await waitForNewInstance(rr && rr.old_instance, rr && rr.expect_version, 45000);
   if (w.ok) { location.reload(); return; }
@@ -10510,6 +10521,16 @@ function restartFailedHtml(detail) {
     + "if it crashes on launch, read the error, then File &rarr; Roll back update "
     + "once it's up (or restore the <b>.update-backup</b> files by hand).</div>";
 }
+// v5.50.15: public mode locks installs/restarts behind the write key so a
+// stranger with the link can't rewrite the server. When the owner hits the
+// lock, say where the key lives instead of just repeating the 403.
+function writeKeyHelpHtml() {
+  return "<div class='tray-hint'>This HUD runs in <b>public mode</b>, so installs "
+    + "need the <b>write key</b> \u2014 it's what proves you're the owner and not "
+    + "a visitor with the link.<br><br>Find it in the server logs at startup "
+    + "(the <b>Write key:</b> line), then <b>File &rarr; Key\u2026</b> and paste it in. "
+    + "After that, Install works from this page.</div>";
+}
 $("menu-update").onclick = async () => {
   closeOverlays();
   $("btn-update-install").style.display = "";  // v5.24: reset after a failed-restart state hid it
@@ -10645,7 +10666,17 @@ $("menu-update").onclick = async () => {
       }
     }
     else {
-      toast("update failed: " + ((a && (a.error + (a.hint ? " \u2014 " + a.hint : ""))) || "unknown"));
+      const errMsg = (a && a.error) || "unknown";
+      if (/write key/i.test(errMsg)) {
+        // v5.50.15: the owner hit the public-mode lock — show where the key
+        // lives instead of just echoing the 403.
+        $("update-title").textContent = "That needs the write key";
+        $("update-notes").innerHTML = writeKeyHelpHtml();
+        $("btn-update-install").style.display = "none";
+        toggleOverlay("sheet-update");
+      } else {
+        toast("update failed: " + (errMsg + ((a && a.hint) ? " \u2014 " + a.hint : "")));
+      }
       Sfx.error();
     }
   };

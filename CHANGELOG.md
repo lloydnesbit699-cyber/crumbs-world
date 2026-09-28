@@ -3,6 +3,16 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.50.15 — 2026-09-28
+
+**The write-key dead end now explains itself.** In public mode the updater
+and the restart button just echoed "needs the write key" with no way
+forward. They now open a sheet: the key proves you're the owner (not a
+visitor with the link), it prints in the server logs at startup as
+"Write key:", and File → Key… is where it goes. Restart no longer waits
+45s on an attempt that was never allowed.
+Still open: two-finger pinch zoom.
+
 ## v5.50.14 — 2026-09-28
 
 **Budget strip rests during play.** It sat at the exact top-left corner the

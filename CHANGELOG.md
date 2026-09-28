@@ -3,6 +3,15 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.50.12 — 2026-09-28
+
+**Pack stops piling onto the zoom buttons.** Its default spot (bottom:96px)
+sat in the middle of the zoom cluster (−/+/Fit/Move own the bottom ~230px
+on the right). It now parks above the cluster by default; drag still moves
+it anywhere and the spot persists. (Lloyd's screenshot: Pack on +/Fit, Mel
+on PANELS — Mel's been draggable since v5.34, so that's his parked spot.)
+Still open: two-finger pinch zoom.
+
 ## v5.50.11 — 2026-09-28
 
 **Starter gear kit.** Every map now begins with seven defined, pickup-able

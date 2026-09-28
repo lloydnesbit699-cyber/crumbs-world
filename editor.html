@@ -939,7 +939,9 @@
   #gear-hud { position: fixed; top: 8px; right: 8px; z-index: 60;
     background: rgba(20, 30, 22, 0.92); border: 1px solid #3f5a4a; border-radius: 10px;
     padding: 6px 10px; font-size: 13px; color: #e8f5e9; }
-  #pack-btn { position: fixed; right: 10px; bottom: 96px; z-index: 60;
+  /* v5.50.12: default parks above the zoom cluster (which owns the bottom
+     ~230px) — bottom:96px used to pile it onto the +/Fit buttons */
+  #pack-btn { position: fixed; right: 10px; bottom: 244px; z-index: 60;
     background: #1d2b22; border: 1px solid #3f5a4a; color: #e8f5e9;
     border-radius: 10px; padding: 10px 12px; font-size: 15px;
     touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; }

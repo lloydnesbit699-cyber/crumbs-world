@@ -455,6 +455,12 @@
   #melody-quota { color: #888; font-size: 11px; }
   #melody-head button { background: none; border: none; color: #aaa;
     font-size: 16px; cursor: pointer; padding: 2px 6px; }
+  /* v5.51.7: voice picker row — hidden until the voice button opens it */
+  #melody-voicerow { padding: 6px 10px; background: #1a1a24;
+    border-bottom: 1px solid #2a2a38; }
+  #melody-voicerow[hidden] { display: none; }
+  #melody-voice { width: 100%; background: #222; color: #ddd;
+    border: 1px solid #333; border-radius: 6px; padding: 6px; font-size: 13px; }
   #melody-log { flex: 1; overflow-y: auto; padding: 10px; display: flex;
     flex-direction: column; gap: 8px; }
   .mel-msg { max-width: 88%; padding: 8px 10px; border-radius: 10px;
@@ -11842,11 +11848,49 @@ function melTtsIcon() {
   $("melody-speaker").textContent = MEL_TTS.on ? "\uD83D\uDD0A" : "\uD83D\uDD07";
   $("melody-speaker").title = MEL_TTS.on ? "Melody's voice: on" : "Melody's voice: off";
 }
+// v5.51.7: Lloyd picks her voice — his saved choice beats her default.
+function melVoiceKey() { return "melody-voice-" + (MEL_TTS.user || "anon"); }
+function melLoadVoices() {
+  try {
+    if (!("speechSynthesis" in window)) return;
+    const sel = $("melody-voice");
+    if (!sel) return;
+    const all = speechSynthesis.getVoices() || [];
+    const en = all.filter(v => v.lang && v.lang.toLowerCase().indexOf("en") === 0);
+    const saved = localStorage.getItem(melVoiceKey());
+    sel.innerHTML = "";
+    const auto = document.createElement("option");
+    auto.value = "";
+    auto.textContent = "Auto (her default voice)";
+    sel.appendChild(auto);
+    en.forEach(v => {
+      const o = document.createElement("option");
+      o.value = v.name;
+      o.textContent = v.name + " (" + v.lang + ")";
+      sel.appendChild(o);
+    });
+    sel.value = saved && en.some(v => v.name === saved) ? saved : "";
+  } catch (e) {}
+}
+function melSaveVoice(name) {
+  try {
+    if (name) localStorage.setItem(melVoiceKey(), name);
+    else localStorage.removeItem(melVoiceKey());
+  } catch (e) {}
+}
 function melPickVoice() {
   try {
     const all = speechSynthesis.getVoices() || [];
     const en = all.filter(v => v.lang && v.lang.toLowerCase().indexOf("en") === 0);
     if (!en.length) return null;
+    // his pick wins — he didn't care for her default sound
+    try {
+      const saved = localStorage.getItem(melVoiceKey());
+      if (saved) {
+        const hit = en.find(v => v.name === saved);
+        if (hit) return hit;
+      }
+    } catch (e) {}
     // her register is the charming teacher — a warm female voice when one
     // is on the device, otherwise the first English voice
     const fem = ["samantha", "zira", "aria", "jenny", "susan", "karen",
@@ -12104,6 +12148,22 @@ async function melodyInitInner() {
   // v5.29: voice — TTS toggle persisted per user, mic for signed-in players
   MEL_TTS.user = h.user || "anon"; melTtsLoad(); melTtsIcon();
   $("melody-speaker").onclick = melTtsToggle;
+  // v5.51.7: voice picker — tap the face to open the list, pick one to hear it
+  $("melody-voicebtn").onclick = () => {
+    const row = $("melody-voicerow");
+    row.hidden = !row.hidden;
+    if (!row.hidden) melLoadVoices();
+  };
+  $("melody-voice").onchange = e => {
+    melSaveVoice(e.target.value);
+    melTtsUnlock();
+    melSpeak("Hi! This is my new voice — how do I sound?");
+  };
+  melLoadVoices();
+  try {
+    if ("speechSynthesis" in window)
+      speechSynthesis.onvoiceschanged = () => melLoadVoices();
+  } catch (e) {}
   $("melody-mic").style.display = "";
   $("melody-mic").onclick = melodyMicTap;
   $("melody-log").innerHTML = "";
@@ -12284,6 +12344,22 @@ async function melodyDemo() {
   // works (it's client-side speech, free). Voice input unlocks with a profile.
   MEL_TTS.user = "demo"; melTtsLoad(); melTtsIcon();
   $("melody-speaker").onclick = melTtsToggle;
+  // v5.51.7: voice picker — tap the face to open the list, pick one to hear it
+  $("melody-voicebtn").onclick = () => {
+    const row = $("melody-voicerow");
+    row.hidden = !row.hidden;
+    if (!row.hidden) melLoadVoices();
+  };
+  $("melody-voice").onchange = e => {
+    melSaveVoice(e.target.value);
+    melTtsUnlock();
+    melSpeak("Hi! This is my new voice — how do I sound?");
+  };
+  melLoadVoices();
+  try {
+    if ("speechSynthesis" in window)
+      speechSynthesis.onvoiceschanged = () => melLoadVoices();
+  } catch (e) {}
   $("melody-mic").style.display = "none";
   $("melody-log").innerHTML = "";
   // wire the dock the same way the full init does
@@ -13623,11 +13699,15 @@ async function deleteMission(id) {
     <span id="melody-title">Melody</span>
     <span id="melody-quota"></span>
     <button id="melody-speaker" title="Melody's voice">&#128266;</button>
+    <button id="melody-voicebtn" title="Choose Melody's voice">&#128483;</button>
     <button id="melody-clear" title="Clear conversation">&#10218;</button>
     <!-- v5.33: workshop moved here from the old Build menu — the dock is the
          single Melody entry point now -->
     <button id="melody-workshop" title="Melody's workshop: missions, goals & playtests">&#128156;</button>
     <button id="melody-min" title="Minimize">&minus;</button>
+  </div>
+  <div id="melody-voicerow" hidden>
+    <select id="melody-voice"></select>
   </div>
   <div id="melody-log"></div>
   <div id="melody-typing" hidden>Melody is thinking&hellip;</div>

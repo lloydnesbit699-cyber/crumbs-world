@@ -3,6 +3,20 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.50.4 — 2026-09-28
+
+**Play button drags; paint panel fits; look defaults exist.** Three of
+Lloyd's phone reports in one pass: (1) the green Play button is draggable
+now — long-press still compares animation, tap still plays, but a drag
+moves it anywhere and the spot persists per device; (2) the paint tray's
+layer row (Ground/Walls/Objects/Routes/FX) no longer clips at the tray
+edge — the five buttons share the width; (3) the Advanced drawer has a
+⭐ Save as defaults button — Floor/Wall/Water looks, shadows and decor
+become every new map's starting point (per-map settings still win once a
+map has its own; saved per vault, never in the repo). Still open: the
+stale popup text pointing at the retired panel (need the exact words),
+and two-finger pinch zoom.
+
 ## Unreleased
 
 ## v5.50.0 — 2026-09-28

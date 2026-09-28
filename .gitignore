@@ -47,3 +47,4 @@ users.json
 vaults/
 # v5.29.3: ops.sh backup snapshots — local safety net, never in the repo
 backups/
+semantic_defaults.json

@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.50.3"
+APP_VERSION = "5.50.4"
 # v5.41: single source of truth for the map-size cap (was 64, hardcoded in
 # four places). 500x500 = 250k cells. The client additionally caps tilePx so
 # the full-map backing canvas never exceeds 4096px per side (see editor.html).
@@ -5779,6 +5779,41 @@ def _sem_settings_for_plan():
     return s
 
 
+def _sem_defaults_path():
+    # v5.50.4: the player's saved look defaults — per vault (per user in
+    # public mode), gitignored in local mode, never in the repo.
+    return _vpath("semantic_defaults.json")
+
+
+def _load_sem_defaults():
+    try:
+        with open(_sem_defaults_path()) as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else None
+    except Exception:
+        return None
+
+
+def _default_sem_settings():
+    # v5.50.4: fresh maps start from the player's saved defaults, not bare
+    # "Mixed (auto)". A default tile id must exist in the live pools —
+    # library ids are stable across maps, but a deleted tile falls back.
+    base = core.sanitize_semantic_settings(None)
+    raw = _load_sem_defaults()
+    if not raw:
+        return base
+    merged = dict(base)
+    merged.update(core.sanitize_semantic_settings(raw))
+    pools = _semantic_pools()
+    styles = dict(merged.get("styles") or {})
+    for t in ("floor", "wall", "water"):
+        v = styles.get(t, "mixed")
+        if v != "mixed" and v not in (pools.get(t) or []):
+            styles[t] = "mixed"
+    merged["styles"] = styles
+    return merged
+
+
 def _echo_changes(changes):
     """v5.46: v5.41-style echo — the client applies these exact cells onto
     its optimistic preview instead of re-downloading the whole map."""
@@ -7923,6 +7958,23 @@ class Handler(BaseHTTPRequestHandler):
                                     "settings": world.semantic_settings,
                                     "seed": _sem_effective_seed()})
 
+        if path == "/api/semantic/defaults":
+            # v5.50.4: the player's look defaults — what fresh maps start
+            # with. Sanitized like live settings; per vault, never in repo.
+            raw = body.get("settings")
+            if not isinstance(raw, dict):
+                return self._send_json({"ok": False,
+                                        "error": "settings object required"},
+                                       400)
+            clean = core.sanitize_semantic_settings(raw)
+            try:
+                with open(_sem_defaults_path(), "w") as f:
+                    json.dump(clean, f)
+            except Exception:
+                return self._send_json({"ok": False,
+                                        "error": "cannot write"}, 500)
+            return self._send_json({"ok": True, "defaults": clean})
+
         if path == "/api/collision/stroke":
             # v5.46: collision AS PAINT — walkable / blocked / hazard brushed
             # on as an overlay. No polygons, no tiny handles. One undo step.
@@ -9254,7 +9306,7 @@ class Handler(BaseHTTPRequestHandler):
                                         for _ in range(world.height)]
                 world.hazard_layer = [[False] * world.width
                                       for _ in range(world.height)]
-                world.semantic_settings = core.sanitize_semantic_settings(None)
+                world.semantic_settings = _default_sem_settings()  # v5.50.4: fresh maps start from saved look defaults
                 rules.clear()
                 rules.update(DEFAULT_RULES)  # v3.7: fresh build, fresh rules
                 world_profile["meters"] = dict(DEFAULT_WORLD["meters"])  # v4.0
@@ -9289,7 +9341,7 @@ class Handler(BaseHTTPRequestHandler):
                 # v5.46: a blank map has no meaning and no hazards either
                 world.semantic_layer = [[None] * w for _ in range(h)]
                 world.hazard_layer = [[False] * w for _ in range(h)]
-                world.semantic_settings = core.sanitize_semantic_settings(None)
+                world.semantic_settings = _default_sem_settings()  # v5.50.4: fresh maps start from saved look defaults
                 rules.clear()
                 rules.update(DEFAULT_RULES)  # v3.7: fresh build, fresh rules
                 world_profile["meters"] = dict(DEFAULT_WORLD["meters"])  # v4.0
@@ -9782,6 +9834,7 @@ class Handler(BaseHTTPRequestHandler):
             if kind not in MAP_KINDS:
                 kind = "overworld"
             blank = core.WorldMap(w, h, assets)
+            blank.semantic_settings = _default_sem_settings()  # v5.50.4: new maps start from saved look defaults
             if not blank.save(_vpath(name), schema=SCHEMA_VERSION):
                 return self._send_json({"ok": False,
                                         "error": "cannot write"}, 500)

@@ -3,6 +3,19 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.53.5 — 2026-09-28
+
+**Dismissed approvals stay dismissed.** After tapping ✅ the card could
+come back: the decline POST raced the suggestion poll (or never landed),
+so the next poll resurrected the ghost and the card — "the approval does
+not go away." Two fixes: (1) a client-side tombstone — once a suggestion
+id is accepted/declined this client never renders it again, whatever the
+server's file says; fresh proposals carry fresh ids so they still show.
+(2) the decline is honest now — if the clear POST fails, the card stays
+with "couldn't clear it — tap again to retry" instead of silently
+vanishing and resurrecting. Flow-tested in Node: stale polls can't
+resurrect, fresh ids render, failed declines keep the card.
+
 ## v5.53.4 — 2026-09-28
 
 **The approval card is back.** v5.53.1's card patch declared the ✅ Do it

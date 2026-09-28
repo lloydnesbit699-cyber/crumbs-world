@@ -12681,6 +12681,12 @@ async function melodyDemo() {
 let sheetView = "paint", sheetHeight = "peek";
 let npcSelectedId = null;      // the patrol whose event card is open
 let ghostSug = null;           // Melody's pending suggestion, rendered as ghost
+// v5.53.5: tombstones for dismissed suggestions (their server-side id).
+// Once the player accepts/declines, the poll never resurrects that
+// suggestion — no matter what the server's file says (replica flap, a
+// decline that raced the poll, a restarted server). Fresh proposals carry
+// fresh ids, so they still render.
+let sugDead = new Set();
 let sugPollBusy = false;
 let animGhost = null;          // v5.47.1: unaccepted animation ghost {tileId, preset, accepted}
 let animRevert = null;         // v5.47.1: accepted animation suggestion, one-tap revert {tileId}
@@ -13334,7 +13340,10 @@ async function suggestPoll() {
   try {
     const r = await api("/api/melody/suggestion");
     const s = (r && r.ok) ? r.suggestion : null;
-    if (s && s.status === "pending") {
+    // v5.53.5: a dismissed suggestion stays dismissed — the tombstone wins
+    // over the server's file, so a decline that raced the poll (or a
+    // replica that never saw it) can't resurrect the card.
+    if (s && s.status === "pending" && !sugDead.has(s.id)) {
       if (!ghostSug || ghostSug.id !== s.id) {
         clearAnimGhost(true);   // a new sketch replaces the old ghost
         animRevert = null;      // ...and retires any earlier revert card
@@ -13606,15 +13615,30 @@ async function acceptSuggestion() {
     toast("that kind isn't paintable yet");
     return;
   }
-  await declineSuggestion("accepted");
-  toast(g.kind === "animation_preset"
+  const cleared = await declineSuggestion("accepted");
+  toast(!cleared
+    ? "painted — but the approval didn't clear, tap ✅ again to retry"
+    : g.kind === "animation_preset"
     ? "done — hold ▶ to compare before/after, ↩ on the card reverts it"
     : "done — changed your mind? one tap on ↩ undoes it");
 }
 async function declineSuggestion(status) {
   // v5.47.1: an accepted animation ghost stays merged (its undo is the
   // ↩ revert on the card); a declined one evaporates back to the before.
+  // v5.53.5: the decline must actually land — the old silent catch let a
+  // failed POST resurrect the card on the next poll ("the approval does not
+  // go away"). On failure the card stays and the tap can be retried.
   const g = ghostSug;
+  let r = null;
+  try { r = await api("/api/melody/suggestion/decline", { status: status || "declined" }); } catch (e) {}
+  if (!r || !r.ok) {
+    toast("couldn't clear it" + (r && r.error ? ": " + r.error : " — tap again to retry"));
+    return false;
+  }
+  if (g && g.id !== undefined && g.id !== null) {
+    sugDead.add(g.id);   // this suggestion never renders again, whatever the server says
+    if (sugDead.size > 30) sugDead.delete(sugDead.values().next().value);
+  }
   if (status === "accepted" && g && g.kind === "animation_preset" && animGhost) {
     animGhost.accepted = true;
     animRevert = { tileId: animGhost.tileId };
@@ -13622,10 +13646,10 @@ async function declineSuggestion(status) {
     clearAnimGhost(true);
     animRevert = null;
   }
-  try { await api("/api/melody/suggestion/decline", { status: status || "declined" }); } catch (e) {}
   ghostSug = null; animGhost = null;
   driveSheetView();
   queueRender();
+  return true;
 }
 
 // -- room presets: one-tap starting layouts -----------------------------------

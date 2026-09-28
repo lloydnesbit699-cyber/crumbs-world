@@ -647,8 +647,8 @@
              max-width: 92vw; }
   #sem-adv .arow { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #ddd; }
   #sem-adv .arow label { min-width: 92px; }
-  #sem-adv .arow input[type=range] { flex: 1; min-height: 34px; }
-  #sem-adv .arow select { font-size: 14px; padding: 6px; border-radius: 8px;
+  #sem-adv .arow input[type=range] { flex: 1; min-width: 0; min-height: 34px; }
+  #sem-adv .arow select { font-size: 14px; padding: 6px; border-radius: 8px; min-width: 0;
                           background: #222; color: #eee; border: 1px solid #666; max-width: 150px; }
   #sem-adv .arow .aval { min-width: 40px; text-align: right; color: #ffd75f; }
   #sem-adv .abtns { display: flex; gap: 8px; }
@@ -727,7 +727,7 @@
   #sheet-view-paint #sem-palette button.on { border-color: #ffd75f; color: #ffd75f; }
   #sheet-view-paint .phint { font-size: 11px; color: #888; }
   #room-presets { display: flex; gap: 8px; margin: 8px 0; }
-  #room-presets button { flex: 1; min-height: 52px; font-size: 14px; border-radius: 12px; }
+  #room-presets button { flex: 1; min-width: 0; min-height: 52px; font-size: 14px; border-radius: 12px; }
   /* v5.47: NPC event cards — plain words, never raw timers on the surface */
   .evcard { background: #1d1a26; border: 1px solid #4a3f6e; border-radius: 12px;
     padding: 10px 12px; margin-bottom: 8px; }
@@ -2031,7 +2031,8 @@ const WRITE_KEY = (new URLSearchParams(location.search).get("key") || "").trim()
     report(msg, src, line, col, err && err.stack);
   window.addEventListener("unhandledrejection", e => {
     const r = e.reason || {};
-    report("unhandled rejection: " + (r.message || r), "", 0, 0, r.stack);
+    const label = "unhandled rejection: " + (r.name ? r.name + ": " : "") + (r.message || r);
+    report(label, "", 0, 0, r.stack);
   });
   if (location.protocol === "file:") {
     show("opened as a file — serve it instead: run crumbs_hud.py, then open http://127.0.0.1:8778");

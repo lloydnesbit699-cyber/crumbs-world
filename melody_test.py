@@ -296,12 +296,6 @@ _, after, _, _ = ma.quota_check(tmp5, "alice", "free")
 check("stt failure burns no quota", before == after,
       f"before={before} after={after}")
 
-# v5.51.8: tier ladder — free texts, basic talks, pro builds
-check("tools_for_tier pro -> all tools", ma.tools_for_tier("pro") == ma.TOOLS)
-check("tools_for_tier basic -> no tools", ma.tools_for_tier("basic") is None)
-check("tools_for_tier free -> no tools", ma.tools_for_tier("free") is None)
-check("tools_for_tier unknown -> no tools", ma.tools_for_tier("nope") is None)
-
 # cross-vault: bob's stt writes only under vaults/bob (Law 18)
 ma._stt_post = fake_stt_post
 res = ma.handle_stt(tmp5, "bob", b"x" * 5000, "voice.webm", "basic")

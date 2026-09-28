@@ -1135,10 +1135,9 @@ _KNOWN_TOOLS = {"law_lookup", "knowledge_search", "vault_stats",
                 "map_validate", "charter", "remove_background",
                 "tile_lookup", "suggest_map_change", "playtest"}
 
-# v5.51.8: Lloyd's tier ladder — free texts, basic talks, pro builds.
-# Only pro gets her tool belt; free/basic are pure conversation.
-def tools_for_tier(tier):
-    return TOOLS if tier == "pro" else None
+# v5.51.9: Lloyd's call — every tier gets her tool belt; the quota
+# (200/600/1000 brain calls) is the leash. A free user CAN ask for a
+# build, but tool rounds burn quota fast, so the taste is small.
 
 # Max characters the model may pass into any single tool argument. Tool args
 # are search topics and queries — anything longer is either a bug or a
@@ -1726,7 +1725,7 @@ def handle_chat(script_dir, username, message, tier=DEFAULT_TIER, world=None):
         tools_used = []
         backend = None
         try:
-            reply, tool_calls, backend = brain_chat(messages, tools_for_tier(tier))
+            reply, tool_calls, backend = brain_chat(messages, TOOLS)
         except RuntimeError:
             # no brain configured (or all failed) — say so honestly, free
             reply = ("My brain isn't connected on this server yet — Lloyd "
@@ -1771,7 +1770,7 @@ def handle_chat(script_dir, username, message, tier=DEFAULT_TIER, world=None):
                                  "tool_call_id": tc.get("id", f"call_{i}"),
                                  "content": str(result)[:2000]})
             try:
-                reply, tool_calls, _ = brain_chat(messages, tools_for_tier(tier))
+                reply, tool_calls, _ = brain_chat(messages, TOOLS)
             except RuntimeError:
                 break  # brain died mid-turn — answer with what we have
             _spend()

@@ -5,6 +5,23 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.49.4 — 2026-09-28
+
+**The panels stop caring where they live.** Lloyd liked the side panels
+better, and patching the bottom sheet had turned into surgery on surgery —
+so the panels got modularized instead. Tiles, Paint, Inspector, Animation,
+NPC/Patrol, Melody-suggest and Tools are now self-contained content modules;
+the bottom sheet and the side trays are interchangeable renderers behind one
+`PanelSys` facade (open, close, mount, render). Layout is a saved per-player
+setting in the panel visibility sheet — **Sides ◀▶** (Lloyd's pick, and the
+default) or **Bottom ▲** — instead of a structural rewrite. Same DOM nodes
+move between renderers: no duplicate controls, state, listeners, or Melody
+backend. Sheet-only behavior (detents, dismiss drag, brush-bar docking, Mel
+FAB dodge) stays inside the sheet renderer; the tray renderer gives each
+side its own tab bar and steps the Mel button left of an open tray. Play mode
+closes/restores whichever renderer is active. Static client test
+`panel_system_test.js`: 39/39; all 20 neighboring JS suites green.
+
 ## v5.49.3 — 2026-09-28
 
 **The Mel button waits its turn.** `melodyInit` unhides the button mid-boot,

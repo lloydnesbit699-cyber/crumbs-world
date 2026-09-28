@@ -260,6 +260,22 @@
   #tray-right button { width: 100%; margin-bottom: 8px; }
   /* v5.33: section divider inside the tools tray (Build-menu items live below it) */
   #tray-right hr { border: none; border-top: 1px solid #333; margin: 10px 0; }
+  /* v5.50: the tray renderer — each tray carries its own tab bar, one
+     module visible at a time, exactly like the sheet's views. The module
+     roots keep their sheet-view ids so every scoped rule keeps working. */
+  .tray-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+  .tray-tabs button { flex: 1; min-width: 0; min-height: 40px; padding: 6px 2px;
+    font-size: 17px; background: #222; border: 1px solid #444; border-radius: 10px;
+    color: #bbb; cursor: pointer; }
+  .tray-tabs button.on { border-color: #ffd75f; color: #ffd75f; background: #2a2416; }
+  #tray-right .tray-tabs button { width: auto; margin-bottom: 0; }  /* over the tray's full-width rule */
+  .tray .sheet-view { padding: 2px 0 8px; }
+  /* v5.50: the panel-layout segmented control in the panel visibility sheet */
+  #layout-seg { display: flex; gap: 6px; flex: 1; min-width: 0; }
+  #layout-seg button { flex: 1; min-width: 0; min-height: 34px; padding: 4px 2px;
+    font-size: 12px; background: #222; border: 1px solid #444; border-radius: 8px;
+    color: #bbb; cursor: pointer; white-space: nowrap; }
+  #layout-seg button.on { border-color: #ffd75f; color: #ffd75f; background: #2a2416; }
   /* v5.35: Phase 2 — the morphing selection editor inside the tools tray */
   #traits-morph { margin: 10px 0; padding: 10px; border: 1px solid #3a3a3a;
     border-radius: 10px; background: #161616; }
@@ -1934,9 +1950,16 @@
     <span class="pval" id="panel-op-val">100%</span>
   </div>
   <div class="prow">
+    <label>Panel layout</label>
+    <div id="layout-seg" role="group" aria-label="Panel layout">
+      <button type="button" data-layout="trays" title="Panels slide in from the screen sides">&#9664;&#9654; Sides</button>
+      <button type="button" data-layout="sheet" title="One panel slides up from the bottom">&#9650; Bottom</button>
+    </div>
+  </div>
+  <div class="prow">
     <button id="panel-hide-btn" class="widebtn">&#128683; Hide panels</button>
   </div>
-  <div class="phint">Dims or hides every panel, tray &amp; hub so the map shows through. Saved per player on this device.</div>
+  <div class="phint">Dims or hides every panel, tray &amp; hub so the map shows through. Layout + opacity saved per player on this device.</div>
 </div>
 
 <div id="dpad" aria-label="On-screen movement controls">
@@ -5639,9 +5662,9 @@ async function togglePlay() {
     await syncInv();   // v5.13: pack + gold onto the HUD
     // "can't reach" confusion was play mode intercepting taps — paint tools rest now
     $("btn-play").classList.add("on");
-    // v5.47: full map for the run — the sheet hides, the FAB becomes Stop
-    $("hud-sheet").classList.add("closed");
-    positionFabForSheet();   // v5.47.3: bar is off-screen with the sheet — FAB home
+    // v5.47: full map for the run — the panel UI hides, the FAB becomes Stop
+    // v5.50: the renderer hides its own panels (sheet: closed; trays: shut)
+    PanelSys.renderer().close();
     const _fab = $("btn-play-fab");
     _fab.textContent = "■"; _fab.classList.add("playing");
     await refreshRules();   // v3.7: this build's rules + touch controls
@@ -5661,9 +5684,9 @@ async function togglePlay() {
     $("mission-hud").hidden = true; missionDanger = new Set();  // v5.12
     updateDpad();   // v3.7: hide the touch controls (pad loop self-stops)
     $("btn-play").classList.remove("on");
-    // v5.47: the sheet comes back, the FAB becomes Play again
-    $("hud-sheet").classList.remove("closed");
-    positionFabForSheet();   // v5.47.3: restore the peek clearance if needed
+    // v5.47: the panel UI comes back, the FAB becomes Play again
+    // v5.50: the renderer brings its own panels back (trays stay shut)
+    PanelSys.renderer().reopen();
     const _fab2 = $("btn-play-fab");
     _fab2.textContent = "▶"; _fab2.classList.remove("playing");
     playOver = false; $("end-overlay").hidden = true;   // v3.9
@@ -5762,7 +5785,8 @@ function readUiPrefs() {
 function saveUiPrefs() {
   try {
     localStorage.setItem(uiPrefsKey(),
-      JSON.stringify({ clean: uiClean, panelOpacity, panelsHidden }));
+      JSON.stringify({ clean: uiClean, panelOpacity, panelsHidden,
+        panelLayout: PanelSys.layout }));   // v5.50: sides vs bottom
   } catch (e) {}
 }
 function loadUiPrefs() {   // call after authGate — ME is known by then
@@ -7179,16 +7203,31 @@ function melSheetTargetTop() {
 function dodgeMelFab() {
   const fab = $("melody-fab");
   if (!fab || fab.hidden) return;
-  const top = melSheetTargetTop();
-  if (top === null) {  // sheet closed: hand back the parked spot
+  // v5.50: the facade is a const later in this script — if anything ever
+  // fires this mid-boot, skip the dodge instead of dying on the TDZ
+  let sys = null;
+  try { sys = PanelSys; } catch (e) { return; }
+  // the active renderer says what to avoid — {top} keeps the button
+  // above a bottom sheet's edge, {left} steps it left of a full-height tray.
+  // null means nothing to avoid: hand back the parked spot.
+  const av = sys.fabAvoid();
+  if (!av) {
     if (melFabDodged) { melFabDodged = false; placeMelFab(); }
     return;
   }
   const fr = fab.getBoundingClientRect();
   const h = fr.height || 52, w = fr.width || 52;
-  if (fr.bottom <= top + 4) return;  // already clear of the sheet
-  fab.style.left = Math.min(Math.max(0, fr.left), window.innerWidth - w) + "px";
-  fab.style.top = Math.max(48, top - h - 10) + "px";  // 10px air, below the topbar
+  if (av.top != null) {
+    const top = av.top;
+    if (fr.bottom <= top + 4) return;  // already clear of the sheet
+    fab.style.left = Math.min(Math.max(0, fr.left), window.innerWidth - w) + "px";
+    fab.style.top = Math.max(48, top - h - 10) + "px";  // 10px air, below the topbar
+  } else {
+    const left = av.left;
+    if (fr.right <= left + 4) return;  // already clear of the tray
+    fab.style.top = Math.min(Math.max(48, fr.top), window.innerHeight - h - 8) + "px";
+    fab.style.left = Math.max(8, left - w - 10) + "px";  // 10px air, off the tray
+  }
   fab.style.right = "auto"; fab.style.bottom = "auto";
   melFabDodged = true;  // never persisted — the parked spot survives underneath
 }
@@ -10135,12 +10174,14 @@ function closeOverlays() {
   document.querySelectorAll(".tray.open, .sheet.open, .menu-drop.open, .mtop.open")
     .forEach(el => el.classList.remove("open"));
   $("scrim").classList.remove("on");
+  dodgeMelFab();   // v5.50: a closed tray hands the Mel button back its park
 }
 function toggleOverlay(id) {
   const el = $(id);
   const wasOpen = el.classList.contains("open");
   closeOverlays();
   if (!wasOpen) { el.classList.add("open"); $("scrim").classList.add("on"); }
+  dodgeMelFab();   // v5.50: an open tray moves the Mel button clear of it
 }
 // v5.20: Windows-style menu bar — each top label toggles its own dropdown
 document.querySelectorAll(".mtop").forEach(b => {
@@ -11648,18 +11689,16 @@ const animABBefore = new Map();  // v5.47: hold-Play A/B — tile id -> anim bef
 const animABAfter = new Map();   // tile id -> anim after the last preset
 
 function animViewOpen() {
-  return sheetView === "anim" && !$("hud-sheet").classList.contains("closed");
+  if (sheetView !== "anim") return false;
+  // v5.50: the animation panel lives wherever the renderer put it
+  return PanelSys.layout === "trays"
+    ? $("tray-right").classList.contains("open") && trayTab.right === "anim"
+    : !$("hud-sheet").classList.contains("closed");
 }
 
 // -- the sheet's height/view state -------------------------------------------
-function openSheet(view, height) {
-  if (view) sheetView = view;
-  if (height) sheetHeight = height;
-  // v5.49.2: a dismissed sheet reopens instead of staying shut — the TILES
-  // edge tab is the way back in
-  else if (sheetHeight === "peek" || sheetHeight === "closed") sheetHeight = "half";
-  setSheetHeight(sheetHeight);
-}
+// (v5.50: openSheet now lives on the PanelSys facade as an alias — the
+// canonical open routes through whichever renderer is active)
 function setSheetHeight(h) {
   sheetHeight = h;
   const el = $("hud-sheet");
@@ -11681,7 +11720,8 @@ function positionFabForSheet() {
   fab.style.bottom = (!closed && sheetHeight === "peek")
     ? "calc(144px + env(safe-area-inset-bottom))" : "";
 }
-function setSheetView(v) { sheetView = v; renderSheet(); }
+// (v5.50: setSheetView now lives on the PanelSys facade as an alias — the
+// canonical view switch also keeps the tray tabs in sync)
 // the auto state machine picks the view from the selection; an override
 // lets a caller force one facet (e.g. the Animation button)
 function driveSheetView(over) {
@@ -11693,7 +11733,8 @@ function driveSheetView(over) {
     tilesOpen: selTile != null,
   }, over || {});
   const v = sheetAutoView(sel);
-  if (v !== sheetView) setSheetView(v); else renderSheet();
+  // v5.50: the facade drives whichever renderer is active
+  if (v !== sheetView) PanelSys.setView(v); else PanelSys.render();
 }
 function peekInfo() {
   if (sheetView === "paint")
@@ -11771,46 +11812,268 @@ function initSheetGrab() {
   g.addEventListener("pointerup", up);
   g.addEventListener("pointercancel", () => { y0 = null; });
 }
-// -- the great consolidation: every panel moves into the one sheet -----------
-function initHudSheet() {
+// -- v5.50: panel modules — content that doesn't know its container ----------
+// A module is a DOM subtree with a preferred tray. The sheet views are
+// already wrapper divs, so they ARE the module roots; the tools get a
+// wrapper so the renderers can move them like everything else. Renderers
+// move the roots around; nothing inside a root cares where it lives.
+const PANEL_MODULES = [
+  { id: "paint",   icon: "🎨", tray: "left"  },
+  { id: "tiles",   icon: "🧱", tray: "left"  },
+  { id: "tools",   icon: "🛠", tray: "right" },
+  { id: "inspect", icon: "🔍", tray: "right" },
+  { id: "anim",    icon: "🎞", tray: "right" },
+  { id: "npc",     icon: "🚶", tray: "right" },
+  { id: "suggest", icon: "💡", tray: "right" },
+];
+function panelRoot(id) {
+  return id === "tools" ? $("tray-view-tools") : $("sheet-view-" + id);
+}
+function panelHome(id) {   // the authored home a renderer returns a root to
+  return id === "tools" ? $("tray-right") : $("sheet-body");
+}
+// one tab per tray remembers its module; the auto view machine drives them
+let trayTab = { left: "tiles", right: "tools" };
+// the brush bar + ••• tools' authored home (viewport bottom) — the sheet
+// renderer docks them above the sheet, the tray renderer sends them home
+let brushBarHome = null, moreSheetHome = null;
+
+// content assembly (once): every module's nodes gather under its module
+// root. This is the old v5.47 consolidation with the layout opinions removed.
+function assemblePanelModules() {
   // paint view: the v5.46 conceptual-layer ribbon + room presets
   const pv = $("sheet-view-paint");
   const dock = $("sem-dock");
-  Array.from(dock.children).forEach(ch => pv.appendChild(ch));
-  // v5.47.3: the brush bar + ••• more-sheet dock above the sheet — they
-  // used to float at viewport-bottom (z-31/z-40) and slid under the sheet
-  // (z-60). Riding the sheet keeps every tool tappable in all detents.
-  const _sh0 = $("hud-sheet"), _bb0 = $("brush-bar"), _ms0 = $("more-sheet");
-  if (_bb0 && _bb0.parentElement !== _sh0) _sh0.prepend(_bb0);
-  if (_ms0 && _ms0.parentElement !== _sh0) _sh0.prepend(_ms0);
-  const rp = document.createElement("div");
-  rp.id = "room-presets";
-  rp.innerHTML = '<button id="btn-room" type="button">🏠 Dungeon room</button>' +
-    '<button id="btn-arena" type="button">🏰 Boss arena</button>';
-  rp.title = "one-tap starting layouts — editable after, one undo";
-  pv.appendChild(rp);
-  $("btn-room").onclick = () => placeRoomPreset("dungeon_room");
-  $("btn-arena").onclick = () => placeRoomPreset("boss_arena");
+  if (dock) Array.from(dock.children).forEach(ch => pv.appendChild(ch));
+  if (!$("room-presets")) {
+    const rp = document.createElement("div");
+    rp.id = "room-presets";
+    rp.innerHTML = '<button id="btn-room" type="button">🏠 Dungeon room</button>' +
+      '<button id="btn-arena" type="button">🏰 Boss arena</button>';
+    rp.title = "one-tap starting layouts — editable after, one undo";
+    pv.appendChild(rp);
+    $("btn-room").onclick = () => placeRoomPreset("dungeon_room");
+    $("btn-arena").onclick = () => placeRoomPreset("boss_arena");
+  }
   // tiles view: the whole old left tray (palette, selected card, preview)
   const tv = $("sheet-view-tiles");
   const tray = $("tray-left");
-  Array.from(tray.children).forEach(ch => tv.appendChild(ch));
-  tray.style.display = "none";
+  if (tray) Array.from(tray.children).forEach(ch => tv.appendChild(ch));
   // inspect view: the morphing inspector
   const iv = $("sheet-view-inspect");
   const si = $("sheet-inspect");
-  Array.from(si.children).forEach(ch => iv.appendChild(ch));
-  si.style.display = "none";
+  if (si) { Array.from(si.children).forEach(ch => iv.appendChild(ch)); si.style.display = "none"; }
   // anim view: the animation panel (mode seg + beginner + advanced)
   const av = $("sheet-view-anim");
   ["anim-mode-seg", "anim-beginner", "anim-advanced"].forEach(id => {
-    const n = $(id); if (n) av.appendChild(n);
+    const n = $(id); if (n && n.parentElement !== av) av.appendChild(n);
   });
-  renderSheet();
-  initSheetGrab();
+  // tools: wrap the right tray's buttons in their own module root so the
+  // renderers can move them like any other module
+  if (!$("tray-view-tools")) {
+    const tw = document.createElement("div");
+    tw.id = "tray-view-tools"; tw.className = "tray-view";
+    const tr = $("tray-right");
+    Array.from(tr.children).forEach(ch => tw.appendChild(ch));
+    tr.appendChild(tw);
+  }
+  const bb = $("brush-bar"), ms = $("more-sheet");
+  if (bb && !brushBarHome) brushBarHome = bb.parentElement;
+  if (ms && !moreSheetHome) moreSheetHome = ms.parentElement;
+  // the visible tab follows the auto view's tray
+  const m0 = PANEL_MODULES.find(m => m.id === sheetView);
+  if (m0) trayTab[m0.tray] = sheetView;
+}
+
+// -- v5.50: renderers — containers that don't know content ------------------
+// Both implement: mount(), render(), openView(view, height), close(),
+// reopen(), fabAvoid(). The sheet keeps every v5.47–v5.49 behavior; the
+// trays resurrect the pre-v5.47 sides around the same modules.
+const SheetRenderer = {
+  id: "sheet",
+  mount() {
+    // every module root home, in tab order; tools stay a right-tray overlay
+    SHEET_VIEWS.forEach(v => {
+      const r = panelRoot(v), h = panelHome(v);
+      if (r && h && r.parentElement !== h) h.appendChild(r);
+    });
+    const tw = panelRoot("tools"), tr = $("tray-right");
+    if (tw && tr) {
+      if (tw.parentElement !== tr) tr.appendChild(tw);
+      tw.hidden = false;   // the tray renderer may have hidden it behind a tab
+    }
+    // the tray renderer's tab bars don't belong here
+    ["tray-left", "tray-right"].forEach(id => {
+      const t = $(id), bar = t && t.querySelector(":scope > .tray-tabs");
+      if (bar) bar.remove();
+    });
+    // v5.47.3: the brush bar + ••• tools dock above the sheet
+    const sh = $("hud-sheet"), bb = $("brush-bar"), ms = $("more-sheet");
+    if (bb && bb.parentElement !== sh) sh.prepend(bb);
+    if (ms && ms.parentElement !== sh) sh.prepend(ms);
+    sh.style.display = "";
+    // edge tabs: TILES opens the sheet; TOOLS still toggles the right tray
+    const tl = $("tab-left"), er = $("tab-right");
+    tl.textContent = "TILES"; tl.title = "Tile palette";
+    tl.onclick = () => PanelSys.open("tiles");
+    er.textContent = "TOOLS"; er.title = "Tools";
+    er.onclick = () => toggleOverlay("tray-right");
+    positionFabForSheet();   // v5.47.3: boot starts in peek — FAB clears the docked bar
+    dodgeMelFab();           // a tray dodge may be stale — re-evaluate
+    this.render();
+  },
+  render() { renderSheet(); },
+  openView(view, height) {
+    if (height) sheetHeight = height;
+    // v5.49.2: a dismissed sheet reopens instead of staying shut — the
+    // TILES edge tab is the way back in
+    else if (sheetHeight === "peek" || sheetHeight === "closed") sheetHeight = "half";
+    setSheetHeight(sheetHeight);
+  },
+  close() {   // play mode: full map for the run
+    $("hud-sheet").classList.add("closed");
+    positionFabForSheet();
+  },
+  reopen() {
+    $("hud-sheet").classList.remove("closed");
+    positionFabForSheet();
+  },
+  fabAvoid() {   // v5.49.1's dodge, now behind the renderer seam
+    const top = melSheetTargetTop();
+    return top === null ? null : { top };
+  },
+};
+
+const TrayRenderer = {
+  id: "trays",
+  mount() {
+    const tl = $("tray-left"), tr = $("tray-right");
+    tl.style.display = ""; tr.style.display = "";
+    PANEL_MODULES.forEach(m => {
+      const host = m.tray === "left" ? tl : tr;
+      const root = panelRoot(m.id);
+      if (root && root.parentElement !== host) host.appendChild(root);
+    });
+    // no sheet, so the brush bar + ••• tools float at viewport bottom again
+    const bb = $("brush-bar"), ms = $("more-sheet");
+    if (bb && brushBarHome && bb.parentElement !== brushBarHome) brushBarHome.appendChild(bb);
+    if (ms && moreSheetHome && ms.parentElement !== moreSheetHome) moreSheetHome.appendChild(ms);
+    const fab = $("btn-play-fab");
+    if (fab) fab.style.bottom = "";   // the peek clearance was sheet-only
+    $("hud-sheet").style.display = "none";
+    // edge tabs toggle the trays
+    const el = $("tab-left"), er = $("tab-right");
+    el.innerHTML = "◀ PANELS"; el.title = "Panels: tiles, paint";
+    el.onclick = () => toggleOverlay("tray-left");
+    er.innerHTML = "PANELS ▶"; er.title = "Panels: tools, inspect, animate";
+    er.onclick = () => toggleOverlay("tray-right");
+    this.render();
+    dodgeMelFab();   // a sheet dodge may be stale — re-evaluate for trays
+  },
+  render() { renderTrayTabs(); },
+  openView(view) {
+    const m = PANEL_MODULES.find(m => m.id === view);
+    if (!m) return;
+    trayTab[m.tray] = view;
+    const tray = $("tray-" + m.tray);
+    if (tray.classList.contains("open")) this.render();
+    else toggleOverlay(tray.id);
+    dodgeMelFab();
+  },
+  close() { closeOverlays(); },   // play mode: trays shut till summoned
+  reopen() { /* trays stay shut — the edge tabs summon them */ },
+  fabAvoid() {   // the open right tray is full-height: the button steps left of it
+    const tr = $("tray-right");
+    if (tr && tr.classList.contains("open")) {
+      const r = tr.getBoundingClientRect();
+      if (r.width > 8) return { left: r.left };
+    }
+    return null;
+  },
+};
+
+// one tab bar per tray; the active module's root shows, the rest hide.
+// The suggest tab still obeys Law 11: no ghost, no button.
+function renderTrayTabs() {
+  ["left", "right"].forEach(side => {
+    const tray = $("tray-" + side);
+    let bar = tray.querySelector(":scope > .tray-tabs");
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.className = "tray-tabs";
+      tray.prepend(bar);
+    }
+    bar.innerHTML = "";
+    PANEL_MODULES.filter(m => m.tray === side).forEach(m => {
+      if (m.id === "suggest" && !ghostSug) return;   // Law 11: no dead buttons
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = m.icon;
+      b.title = SHEET_TITLES[m.id] || m.id;
+      b.classList.toggle("on", trayTab[side] === m.id);
+      b.onclick = () => PanelSys.setView(m.id);
+      bar.appendChild(b);
+    });
+    PANEL_MODULES.filter(m => m.tray === side).forEach(m => {
+      const r = panelRoot(m.id);
+      if (r) r.hidden = (trayTab[side] !== m.id);
+    });
+  });
+  // the sheet's render() refreshes these; the tray renderer owns its own
+  if (sheetView === "npc") renderNpcCards();
+  if (sheetView === "suggest") renderSuggestCard();
+}
+
+// -- v5.50: the facade — the rest of the app talks to PanelSys, never to a
+// renderer directly. openSheet/setSheetView stay as aliases: the old names
+// stuck around in a few call sites and both still work.
+const PanelSys = {
+  layout: "trays",   // Lloyd's pick; saved per player on this device
+  renderer() { return this.layout === "trays" ? TrayRenderer : SheetRenderer; },
+  setView(v) {
+    if (!PANEL_MODULES.some(m => m.id === v)) return;
+    sheetView = v;
+    const m = PANEL_MODULES.find(m => m.id === v);
+    trayTab[m.tray] = v;
+    this.renderer().render();
+  },
+  open(view, height) {
+    if (view) this.setView(view);
+    this.renderer().openView(sheetView, height);
+  },
+  render() { this.renderer().render(); },
+  fabAvoid() { return this.renderer().fabAvoid(); },
+};
+function setSheetView(v) { PanelSys.setView(v); }   // alias — the old name stuck around
+function openSheet(view, height) { PanelSys.open(view, height); }   // alias
+
+function setPanelLayout(which, opts) {
+  opts = opts || {};
+  which = (which === "sheet") ? "sheet" : "trays";
+  document.querySelectorAll("#layout-seg button").forEach(b =>
+    b.classList.toggle("on", b.dataset.layout === which));
+  if (PanelSys.layout === which && !opts.first) return;
+  PanelSys.layout = which;
+  closeOverlays();            // a half-open tray doesn't survive the switch
+  PanelSys.renderer().mount();
+  if (!opts.first) {
+    saveUiPrefs();
+    toast(which === "trays" ? "panels: sides ◀▶" : "panels: bottom ▲");
+  }
+}
+
+function initPanelSystem() {
+  assemblePanelModules();
+  // the saved layout (read directly — loadUiPrefs runs later in boot)
+  const p = readUiPrefs();
+  if (p.panelLayout === "sheet" || p.panelLayout === "trays")
+    PanelSys.layout = p.panelLayout;
+  initSheetGrab();    // sheet chrome never moves — wire once, not per mount
   initPlayFab();
   initBudgetStrip();
-  positionFabForSheet();   // v5.47.3: boot starts in peek — FAB clears the docked bar
+  document.querySelectorAll("#layout-seg button").forEach(b => {
+    b.onclick = () => setPanelLayout(b.dataset.layout);
+  });
+  setPanelLayout(PanelSys.layout, { first: true });
 }
 
 // -- the budget strip ---------------------------------------------------------
@@ -12014,7 +12277,9 @@ async function suggestPoll() {
         ghostSug = s;
         if (s.kind === "animation_preset") applyAnimGhost(s);
         driveSheetView();   // the auto state machine opens the suggest view
-        if (sheetView === "suggest" && sheetHeight === "peek") setSheetHeight("half");
+        // v5.50: the renderer brings the ghost card forward (sheet: half
+        // height; trays: the right tray opens on the suggest tab)
+        if (sheetView === "suggest") PanelSys.open("suggest");
         queueRender();
       }
     } else if (ghostSug) {
@@ -12338,7 +12603,7 @@ async function placeRoomPreset(kind) {
     splashStep(28, "Loading recipes\u2026");
     await loadTaxonomy();   // v5.29: the server's one routing table (Law 15)
     loadTileTraits();       // v5.35: Phase 2 — per-tile-type traits (async, no block)
-    initHudSheet();         // v5.47: the one bottom sheet (moves trays/docks/panels in)
+    initPanelSystem();        // v5.50: modules + renderers (layout is a setting now)
     initSemDock();          // v5.46: the meaning-painting dock (wiring only)
     try { await loadSemantic(); } catch (e) {}   // pools + rules + seed
     const p = await api("/api/palette");

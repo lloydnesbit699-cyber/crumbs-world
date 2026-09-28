@@ -3,7 +3,8 @@
 // 1. The boot black-map bug: peekInfo() referenced `semLayer`, which was never
 //    declared — every boot died in initHudSheet() -> renderSheet() ->
 //    peekInfo() with a ReferenceError, refresh() never ran, canvas stayed
-//    blank. Asserts the reference is gone and the paint peek line resolves
+//    blank. (v5.50 renamed initHudSheet to initPanelSystem.) Asserts the
+//    reference is gone and the paint peek line resolves
 //    against the real `logicalLayer`.
 // 2. Last map per player: remember/restore keyed by username (no cross-user
 //    leak), stale stored maps fall back to the default, and the boot/hooks
@@ -54,11 +55,11 @@ check("paint peek line shows layer name + brush", peekVal === "Ground · stamp",
 const peekVal2 = eval(bootStubs + peekSrc + "; sheetView='paint'; logicalLayer='walls'; SEM_LAYER_DEFS={}; __peek();");
 check("paint peek line falls back to layer key", peekVal2 === "walls · stamp", JSON.stringify(peekVal2));
 
-// initHudSheet must run inside init's try (before the first refresh) without
+// initPanelSystem must run inside init's try (before the first refresh) without
 // referencing anything in a temporal dead zone at that point
 const initSrc = extract("init");
-check("init calls initHudSheet before first refresh",
-  initSrc.indexOf("initHudSheet()") > 0 && initSrc.indexOf("initHudSheet()") < initSrc.indexOf("await refresh()"));
+check("init calls initPanelSystem before first refresh",
+  initSrc.indexOf("initPanelSystem()") > 0 && initSrc.indexOf("initPanelSystem()") < initSrc.indexOf("await refresh()"));
 
 console.log("== last map per player ==");
 // --- eval the last-map helpers with stubbed env ---

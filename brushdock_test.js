@@ -44,10 +44,10 @@ check("brush bar docks above the sheet",
   /#hud-sheet #brush-bar\s*\{\s*position:\s*absolute;\s*bottom:\s*calc\(100% \+ 12px\)/.test(html));
 check("more-sheet rides above the docked bar",
   /#hud-sheet #more-sheet\s*\{\s*position:\s*absolute;\s*bottom:\s*calc\(100% \+ 80px\)/.test(html));
-check("initHudSheet moves the brush bar into the sheet",
-  html.includes('prepend(_bb0)') && html.includes('$("brush-bar")'));
-check("initHudSheet moves more-sheet into the sheet",
-  html.includes('prepend(_ms0)') && html.includes('$("more-sheet")'));
+check("the sheet renderer docks the brush bar into the sheet",   // v5.50: docking moved with the renderer
+  html.includes('sh.prepend(bb)') && html.includes('$("brush-bar")'));
+check("the sheet renderer docks more-sheet into the sheet",
+  html.includes('sh.prepend(ms)') && html.includes('$("more-sheet")'));
 check("setSheetHeight repositions the FAB", /function setSheetHeight\(h\)[\s\S]{0,300}positionFabForSheet\(\)/.test(html));
 check("play toggle restores FAB placement both ways",
   (html.match(/positionFabForSheet\(\);/g) || []).length >= 4);

@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.53.0"
+APP_VERSION = "5.53.1"
 # v5.41: single source of truth for the map-size cap (was 64, hardcoded in
 # four places). 500x500 = 250k cells. The client additionally caps tilePx so
 # the full-map backing canvas never exceeds 4096px per side (see editor.html).
@@ -5359,34 +5359,68 @@ def _suggest_connect_patrols():
 def _melody_suggestion_view(user):
     """The pending agent suggestion for `user`, materialized against the
     live world into ghost cells/routes. -> dict or None. Called with the
-    caller's vault active (public mode) or the ambient world (local)."""
+    caller's vault active (public mode) or the ambient world (local).
+
+    v5.53.1: the HUD gates the ghost on status == "pending" and tracks
+    freshness by id — the view must carry both (missing since v5.47.0, so
+    no ghost ever rendered). Kinds the world can't materialize come back
+    as unmaterializable instead of None, so the player gets a card with a
+    Dismiss instead of a phantom approval that blocks everything."""
     sug = _melody_agent.suggestion_pending(SCRIPT_DIR, user)
     if not sug:
         return None
     kind = sug.get("kind")
     label = sug.get("label") or ""
+    base = {"kind": kind, "label": label,
+            "status": sug.get("status") or "pending",
+            "id": sug.get("created") or 0}
     if kind == "wall_ring":
         where = sug.get("where_xy")
         cells = _suggest_wall_ring(tuple(where) if where else None)
         if not cells:
-            return None
-        return {"kind": kind, "label": label, "cells": cells,
-                "terrain": "wall"}
+            base["unmaterializable"] = True
+            base["reason"] = ("I couldn't find a floor area to ring — "
+                              "paint some floor first, or save the map and ask me again.")
+            return base
+        base.update({"cells": cells, "terrain": "wall"})
+        return base
     if kind == "connect_patrols":
         merge = _suggest_connect_patrols()
         if not merge:
-            return None
-        return {"kind": kind, "label": label, "merge": merge}
+            base["unmaterializable"] = True
+            base["reason"] = "those patrols don't line up anymore."
+            return base
+        base.update({"merge": merge})
+        return base
     if kind == "animation_preset":
         preset = str(sug.get("preset") or "").strip().lower()
-        if preset not in _ANIM_SUGGEST_PRESETS:
-            return None
-        target = _suggest_animation_target(sug.get("where_xy"))
+        target = (_suggest_animation_target(sug.get("where_xy"))
+                  if preset in _ANIM_SUGGEST_PRESETS else None)
         if not target:
-            return None
-        return {"kind": kind, "label": label, "preset": preset,
-                "preset_label": _ANIM_SUGGEST_PRESETS[preset],
-                "target": target}
+            base["unmaterializable"] = True
+            base["reason"] = "I couldn't find that tile to animate."
+            return base
+        base.update({"preset": preset,
+                     "preset_label": _ANIM_SUGGEST_PRESETS[preset],
+                     "target": target})
+        return base
+    # v5.53.1: v5.48 co-build kinds — the HUD renders these itself from the
+    # pass-through fields (roomPresetCells / route polyline); the server
+    # only forwards them. The view never knew these kinds, so they were
+    # phantoms too.
+    if kind == "room_draft":
+        if sug.get("where_xy"):
+            base["where_xy"] = sug["where_xy"]
+        base["room"] = sug.get("room") or "dungeon_room"
+        return base
+    if kind == "patrol_draft":
+        if sug.get("points"):
+            base["points"] = sug["points"]
+        if sug.get("tile_id") is not None:
+            base["tile_id"] = sug["tile_id"]
+        if sug.get("anchor_xy"):
+            base["anchor_xy"] = sug["anchor_xy"]
+        return base
     return None
 
 

@@ -3,6 +3,20 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.53.1 — 2026-09-28
+
+**The ghost that never was: Melody's approvals were phantoms.** Since
+v5.47.0 the HUD has gated her suggestion ghost on `status === "pending"`,
+but `_melody_suggestion_view` never sent `status` (or `id`) — so no ghost
+ever rendered, no approval card ever opened, and no auto-clip ever fired.
+Worse, the pending file blocked every later suggestion ("already waiting")
+with no UI to clear it. The view now carries `status` + `id`, forwards the
+v5.48 co-build kinds (`room_draft`, `patrol_draft` — the server never knew
+them; the HUD renders them itself), and returns an `unmaterializable` card
+(with the reason and a Dismiss) instead of `None` when the world can't draw
+it — e.g. a wall ring with no saved floor yet. The HUD only auto-films real
+ghosts, never the unmaterializable card.
+
 ## v5.53.0 — 2026-09-28
 
 **She films herself: auto-clips.** Lloyd kept forgetting the record button,

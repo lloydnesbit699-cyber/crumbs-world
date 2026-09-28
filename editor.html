@@ -13345,7 +13345,9 @@ async function suggestPoll() {
         // height; trays: the right tray opens on the suggest tab)
         if (sheetView === "suggest") PanelSys.open("suggest");
         queueRender();
-        clipAutoKick("melody-build");   // v5.53: she films her builds
+        // v5.53.1: only film a real ghost — an unmaterializable suggestion
+        // has nothing to show, and filming it would be a blank clip.
+        if (!s.unmaterializable) clipAutoKick("melody-build");   // v5.53: she films her builds
       }
     } else if (ghostSug) {
       clearAnimGhost(true);
@@ -13419,7 +13421,9 @@ function suggestRoomCells(s) {
   return cells;
 }
 function drawSuggestGhost() {
-  if (!ghostSug || ghostSug.status !== "pending") return;
+  // v5.53.1: an unmaterializable suggestion has no cells to draw — its
+  // card carries the reason and a Dismiss instead.
+  if (!ghostSug || ghostSug.status !== "pending" || ghostSug.unmaterializable) return;
   const s = tilePx;
   // v5.48: a room draft ghosts with the HUD's own room layout — the same
   // cells accept() will paint, so the preview never lies.
@@ -13534,15 +13538,25 @@ function renderSuggestCard() {
     : ghostSug.kind === "patrol_draft"
     ? "by Melody · a walking route sketched in violet — accept to assign it, one tap undoes"
     : "by Melody · a ghost preview — the map keeps its paint until you accept";
+  // v5.53.1: a suggestion the world can't draw (stale map, no floor area
+  // yet) still gets a card — the reason plus a Dismiss — instead of a
+  // phantom approval the player can never see or clear.
+  const unmat = !!ghostSug.unmaterializable;
+  if (unmat) {
+    sub.textContent = "by Melody · " + (ghostSug.reason || "I couldn't sketch this one — save the map and ask me again.");
+  }
   const btns = document.createElement("div");
   btns.className = "sg-btns";
+  if (!unmat) {
   const ok = document.createElement("button");
   ok.type = "button"; ok.id = "suggest-accept"; ok.textContent = "✅ Do it";
   ok.onclick = acceptSuggestion;
+  }
   const no = document.createElement("button");
   no.type = "button"; no.id = "suggest-decline"; no.className = "ghost"; no.textContent = "Not now";
   no.onclick = () => declineSuggestion("declined");
-  btns.appendChild(ok); btns.appendChild(no);
+  if (!unmat) btns.appendChild(ok);
+  btns.appendChild(no);
   card.appendChild(lbl); card.appendChild(sub); card.appendChild(btns);
   v.appendChild(card);
 }

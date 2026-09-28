@@ -60,5 +60,26 @@ check("page load dodges after restoring the parked spot",
 check("a manual drag clears the dodge (the park wins)",
   /melFabMoved = true;\s*\n?\s*melFabDodged = false;/.test(html));
 
+console.log("== the fab stays off the boot screens (v5.49.3) ==");
+function cssZ(sel) {
+  const i = html.indexOf(sel + " {");
+  if (i < 0) return null;
+  const m = html.slice(i, html.indexOf("}", i)).match(/z-index:\s*([0-9]+)/);
+  return m ? parseInt(m[1], 10) : null;
+}
+const fabZ = cssZ("#melody-fab"), splashZ = cssZ("#splash"),
+      loginZ = cssZ("#login-overlay"), dockZ = cssZ("#melody-dock");
+check("all four z-indexes readable from CSS",
+  fabZ !== null && splashZ !== null && loginZ !== null && dockZ !== null);
+check("fab sits below the splash title screen",
+  fabZ !== null && splashZ !== null && fabZ < splashZ,
+  `fab ${fabZ} vs splash ${splashZ}`);
+check("fab sits below the login overlay",
+  fabZ !== null && loginZ !== null && fabZ < loginZ,
+  `fab ${fabZ} vs login ${loginZ}`);
+check("the open dock still floats above the splash",
+  dockZ !== null && splashZ !== null && dockZ > splashZ,
+  `dock ${dockZ} vs splash ${splashZ}`);
+
 console.log(`\n${PASS} passed, ${FAIL} failed`);
 process.exit(FAIL ? 1 : 0);

@@ -391,7 +391,11 @@
     margin: 8px 0; padding: 10px; border-radius: 8px; border: 1px solid #333;
     background: #0d0d12; color: #eee; font-size: 16px; }
   /* v5.28: Melody chat dock (Phase 1 agent) */
-  #melody-fab { position: fixed; right: 14px; bottom: 14px; z-index: 240;
+  /* v5.49.3: z-190 — below the splash (200) and the login/2FA/users overlays
+     (300). melodyInit unhides it mid-boot, so at 240 it floated over the
+     title screen on every logged-in load. The dock stays at 240: it's only
+     ever visible after a tap, and an open chat must not get trapped. */
+  #melody-fab { position: fixed; right: 14px; bottom: 14px; z-index: 190;
     width: 52px; height: 52px; border-radius: 50%; border: 2px solid #ffd75f;
     background: #1a1a24; color: #ffd75f; font-size: 15px; font-weight: bold;
     cursor: pointer; box-shadow: 0 2px 12px rgba(0,0,0,.5);

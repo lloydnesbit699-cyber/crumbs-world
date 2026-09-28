@@ -5,6 +5,16 @@ his iPhone; anything else is verified on desktop/server only.
 
 ## Unreleased
 
+## v5.49.3 — 2026-09-28
+
+**The Mel button waits its turn.** `melodyInit` unhides the button mid-boot,
+so on every logged-in load it floated over the splash/title screen (its
+z-240 sat above the splash's z-200). The button now lives at z-190 — below
+the splash and below the login/2FA/users overlays — and only appears once
+boot hands the screen over. The open chat dock stays above everything, so a
+tapped-open conversation is never trapped behind a boot screen. Static
+client test `melody_fabdodge_test.js`: 16/16 (4 new layering checks).
+
 ## v5.49.2 — 2026-09-27
 
 **The tile panel minds its manners.** Two real defects Lloyd caught on his
@@ -26,7 +36,7 @@ change, and page load checks: if the button would cover sheet content, it
 steps just above the sheet's top edge (aimed at the detent's target, since
 the sheet animates). The dodge is never saved — the parked spot survives
 underneath and returns when the sheet closes — and a manual drag always
-wins. Static client test `melody_fabdodge_test.js`: 10/10.
+wins. Static client test `melody_fabdodge_test.js`: 12/12.
 
 ## v5.49.0 — 2026-09-27
 

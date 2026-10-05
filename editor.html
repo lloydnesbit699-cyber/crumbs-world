@@ -1642,6 +1642,7 @@
   <div class="tray-head">Load map</div>
   <div class="row2">
     <button id="btn-new-map" title="Create a brand-new blank map">+ New</button>
+    <button id="btn-new-interior" title="Create a new interior/pocket map — a direct path to a new inside">+ Interior</button>
     <button id="btn-import-map" title="Load a map JSON someone sent you">Import&hellip;</button>
     <input type="file" id="file-import-map" accept=".json,application/json" hidden>
     <button id="btn-export-tiled" title="Tiled JSON + tileset PNG for other engines">Tiled&hellip;</button>
@@ -10564,8 +10565,9 @@ async function endMapSwitch() {
   loadingMap = false;
   renderLoadList();  // repaint badges / sort with the new current map
 }
-async function loadMapFile(file) {
+async function loadMapFile(file, opts) {
   if (loadingMap) return;
+  if (!opts || !opts.keepTrail) { portalTrail = []; renderPortalTrail(); }  // v5.55
   loadingMap = true;
   $("load-list").classList.add("busy");
   showVeil("Loading " + friendlyName(file) + "…");
@@ -10578,10 +10580,37 @@ async function loadMapFile(file) {
   } catch (e) { toast("load failed: " + (e.message || e)); Sfx.error(); }
   endMapSwitch();
 }
+// v5.55: portal trail — the way back out when editing inside a pocket map.
+// Pushed on every edit-mode portal entry, popped by the floating chip.
+// A manual load from the map list clears it (you chose your own path).
+let portalTrail = [];
+function renderPortalTrail() {
+  let chip = $("portal-trail");
+  if (!chip) {
+    chip = document.createElement("button");
+    chip.id = "portal-trail"; chip.type = "button";
+    chip.style.cssText = "position:fixed;left:10px;top:56px;z-index:44;display:none;" +
+      "padding:10px 14px;border-radius:12px;font-size:15px;";
+    chip.onclick = () => {
+      const prev = portalTrail.pop();
+      renderPortalTrail();
+      if (prev) loadMapFile(prev.file, { keepTrail: true });
+    };
+    document.body.appendChild(chip);
+  }
+  if (portalTrail.length > 10) portalTrail = portalTrail.slice(-10);
+  const top = portalTrail[portalTrail.length - 1];
+  chip.style.display = portalTrail.length ? "" : "none";
+  if (top) {
+    chip.textContent = "‹ " + friendlyName(top.file);
+    chip.title = "Back to " + top.file;
+  }
+}
 async function enterPortal(file, x, y) {
   // v5.29: edit-mode walk through a portal — the server saves the map we're
   // leaving first, then the same atomic refresh as a load.
   if (loadingMap) return;
+  portalTrail.push({ file: currentFile });   // v5.55: remember the way back
   loadingMap = true;
   $("load-list").classList.add("busy");
   showVeil("Entering " + friendlyName(file) + "…");
@@ -10590,8 +10619,9 @@ async function enterPortal(file, x, y) {
     if (!r.ok) throw new Error(r.error || "enter failed");
     await reloadMapView(r.file);
     rememberLastMap(r.file);
+    renderPortalTrail();   // v5.55: show the way back out
     toast("entered " + r.file);
-  } catch (e) { toast("enter failed: " + (e.message || e)); Sfx.error(); }
+  } catch (e) { portalTrail.pop(); renderPortalTrail(); toast("enter failed: " + (e.message || e)); Sfx.error(); }
   endMapSwitch();
 }
 async function warpRefresh(r) {
@@ -10800,6 +10830,14 @@ $("btn-new-map").onclick = async () => {   // v5.42: brand-new blank map
   const r = await api("/api/maps/create",
                       { name: name.trim(), width: w, height: h });
   if (r.ok) { renderLoadList(); toast("created " + r.file); }
+  else toast("create failed: " + (r.error || ""));
+};
+$("btn-new-interior").onclick = async () => {   // v5.55: Steph's direct path —
+  const name = prompt("Interior name:", "interior");   // create the inside without
+  if (!name || !name.trim()) return;                   // the portal-tool scavenger hunt
+  const r = await api("/api/maps/create",
+                      { name: name.trim(), width: 24, height: 24, kind: "interior" });
+  if (r.ok) { renderLoadList(); toast("created " + r.file + " — tap it in the list to enter"); }
   else toast("create failed: " + (r.error || ""));
 };
 function escHtml(s) {
@@ -12779,6 +12817,17 @@ function renderSheet() {
   $("sheet-title").textContent = SHEET_TITLES[sheetView] || "Panel";
   const tabs = $("sheet-tabs");
   tabs.innerHTML = "";
+  // v5.55: same back/forward as the tray tab bars
+  const mkN = (label, title, fn, can) => {
+    const n = document.createElement("button");
+    n.type = "button"; n.textContent = label; n.title = title;
+    n.className = "tnav"; n.disabled = !can; n.onclick = fn;
+    tabs.appendChild(n);
+  };
+  mkN("‹", "Back — panel history, then back to the map",
+      () => PanelSys.back(), true);
+  mkN("›", "Forward (panel history)",
+      () => PanelSys.fwd(), PanelSys.hix < PanelSys.hist.length - 1);
   const meta = [["paint", "🎨"], ["tiles", "🧱"], ["inspect", "🔍"], ["anim", "🎞"],
                 ["npc", "🚶"], ["suggest", "💡"]];
   for (const [v, g] of meta) {
@@ -13026,6 +13075,18 @@ function renderTrayTabs() {
       tray.prepend(bar);
     }
     bar.innerHTML = "";
+    // v5.55: Steph's back/forward — ‹ walks panel history, then back to the
+    // map when history runs out; › walks forward again
+    const mkNav = (label, title, fn, can) => {
+      const n = document.createElement("button");
+      n.type = "button"; n.textContent = label; n.title = title;
+      n.className = "tnav"; n.disabled = !can; n.onclick = fn;
+      bar.appendChild(n);
+    };
+    mkNav("‹", "Back — panel history, then back to the map",
+          () => PanelSys.back(), true);
+    mkNav("›", "Forward (panel history)",
+          () => PanelSys.fwd(), PanelSys.hix < PanelSys.hist.length - 1);
     PANEL_MODULES.filter(m => m.tray === side).forEach(m => {
       // v5.54.1: the suggest tab stays visible always — a button that only
       // exists sometimes is undiscoverable. Empty state handled in the card.
@@ -13058,13 +13119,30 @@ function renderTrayTabs() {
 // stuck around in a few call sites and both still work.
 const PanelSys = {
   layout: "trays",   // Lloyd's pick; saved per player on this device
+  hist: [],          // v5.55: view history — back/forward across trays+sheet
+  hix: -1,
   renderer() { return this.layout === "trays" ? TrayRenderer : SheetRenderer; },
-  setView(v) {
+  setView(v, opts) {
     if (!PANEL_MODULES.some(m => m.id === v)) return;
     sheetView = v;
     const m = PANEL_MODULES.find(m => m.id === v);
     trayTab[m.tray] = v;
+    if (!opts || !opts.noHist) {   // programmatic back/fwd moves don't re-record
+      if (this.hist[this.hix] !== v) {
+        this.hist = this.hist.slice(0, this.hix + 1);
+        this.hist.push(v);
+        if (this.hist.length > 30) this.hist.shift();
+        this.hix = this.hist.length - 1;
+      }
+    }
     this.renderer().render();
+  },
+  back() {   // v5.55: Steph's back button — history first, then back to the map
+    if (this.hix > 0) { this.hix--; this.setView(this.hist[this.hix], { noHist: true }); }
+    else closeOverlays();
+  },
+  fwd() {
+    if (this.hix < this.hist.length - 1) { this.hix++; this.setView(this.hist[this.hix], { noHist: true }); }
   },
   open(view, height) {
     if (view) this.setView(view);
@@ -13091,8 +13169,25 @@ function setPanelLayout(which, opts) {
   }
 }
 
+// v5.55: Steph's law — every overlay sheet gets an explicit back button.
+// If you opened it, you can see your way back to the map. Injected once at
+// boot so all 19 sheets (and any future ones) are covered without touching
+// each block; only the sheet's own title header gets one.
+function initSheetBackButtons() {
+  document.querySelectorAll(".sheet").forEach(sh => {
+    const head = sh.querySelector(":scope > .tray-head");
+    if (!head || head.querySelector(".sheet-back")) return;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "sheet-back ghost";
+    b.textContent = "‹ Back"; b.title = "Back to the map";
+    b.onclick = () => closeOverlays();
+    head.insertBefore(b, head.firstChild);
+  });
+}
+
 function initPanelSystem() {
   assemblePanelModules();
+  initSheetBackButtons();
   // the saved layout (read directly — loadUiPrefs runs later in boot)
   const p = readUiPrefs();
   if (p.panelLayout === "sheet" || p.panelLayout === "trays")

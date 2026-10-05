@@ -3,6 +3,22 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.55.0 — 2026-10-05
+
+**Steph's navigation pass.** Back buttons everywhere, panel history, and a
+direct path to new interiors:
+- Every overlay sheet now carries an explicit ‹ Back button in its header
+  (injected at boot — all 19 sheets covered); trays and the bottom sheet
+  got ‹ › history buttons. ‹ walks panel history, then returns to the map
+  when history runs out; › walks forward again.
+- Portal trail: entering a portal in the editor now leaves a floating
+  "‹ parent map" chip — tap it to walk back out through every level you
+  entered. A manual load from the map list clears the trail.
+- The Load sheet grew a **+ Interior** button: one prompt creates an
+  interior/pocket map directly (kind=interior), no portal-tool scavenger
+  hunt required first.
+Tests: 20 nav (new), 25 portal — all green. Not phone-verified yet.
+
 ## v5.54.0 — 2026-09-28
 
 **The suggestion queue.** Melody no longer gets refused when a ghost is

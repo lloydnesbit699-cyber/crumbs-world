@@ -912,6 +912,8 @@
     padding: 8px 10px; margin: 6px 0; font-size: 13px; line-height: 1.45; color: #e8defc; }
   .melody-empty { color: #8d87a0; font-size: 12px; padding: 6px 2px; }
   #melody-missions { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; max-height: 30vh; overflow-y: auto; }
+  #melody-tasks { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; max-height: 24vh; overflow-y: auto; }
+  #melody-task-details { width: 100%; margin: 4px 0; }
   .mrow { display: flex; align-items: center; gap: 6px; background: #221d33; border: 1px solid #4a4370;
     border-radius: 8px; padding: 6px 8px; }
   .mrow.on { border-color: #8a6dd7; }
@@ -1722,6 +1724,18 @@
   <div class="grab"></div>
   <div class="tray-head">&#128156; Melody's workshop <span class="tray-hint">missions, goals &amp; playtests</span></div>
   <div id="melody-says" class="melody-says"></div>
+  <div class="tray-head">My tasks <span class="tray-hint">private, saved, and revisable</span></div>
+  <div class="row2">
+    <select id="melody-task-kind" aria-label="Task type">
+      <option value="general">General</option>
+      <option value="repair">Repair</option>
+      <option value="build">Build</option>
+    </select>
+    <input id="melody-task-title" type="text" maxlength="120" placeholder="Add a task…" aria-label="Task title">
+  </div>
+  <input id="melody-task-details" type="text" maxlength="800" placeholder="Notes or next step (optional)" aria-label="Task notes">
+  <button id="melody-task-add" class="widebtn">＋ Save task</button>
+  <div id="melody-tasks"></div>
   <div id="melody-missions"></div>
   <button id="melody-new" class="widebtn">＋ New mission…</button>
   <div id="melody-presets" hidden></div>
@@ -13983,8 +13997,75 @@ async function openMelody() {
   $("melody-presets").hidden = true; $("melody-form").hidden = true;
   $("melody-new").hidden = false; melodyPick = null;
   await loadMelodyMissions();
+  await loadMelodyTasks();
   } catch (e) { toast("workshop hit a snag — " + (e && e.message || e)); }
 }
+async function loadMelodyTasks() {
+  const box = $("melody-tasks");
+  const r = await api("/api/melody/tasks");
+  if (!r.ok) throw new Error(r.error || "couldn't load tasks");
+  const tasks = Array.isArray(r.tasks) ? r.tasks : [];
+  if (!tasks.length) {
+    box.innerHTML = '<div class="melody-empty">No saved tasks yet. Add one here or ask me to track a repair/build.</div>';
+    return;
+  }
+  box.innerHTML = tasks.slice().reverse().map(t => {
+    const attempts = Array.isArray(t.attempts) ? t.attempts : [];
+    const last = attempts[attempts.length - 1];
+    const note = last
+      ? `${attempts.length} logged attempt(s) · latest: ${esc(last.approach || "")} — ${esc(last.outcome || "")}`
+      : (t.details ? esc(t.details) : "No attempts logged yet");
+    const done = t.status === "done";
+    return `<div class="mrow${done ? "" : " on"}">
+      <div class="mrow-main"><b>${esc(t.title || "Untitled task")}</b>
+        <span class="mrow-sub">${esc(t.kind || "general")} · ${esc(t.status || "open")} · ${note}</span>
+      </div>
+      <button data-task-id="${esc(t.id || "")}" data-task-status="${done ? "open" : "done"}">${done ? "Reopen" : "Done"}</button>
+    </div>`;
+  }).join("");
+  box.querySelectorAll("button[data-task-id]").forEach(b => {
+    b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const saved = await api("/api/melody/tasks", {
+          action: "status", task_id: b.dataset.taskId,
+          status: b.dataset.taskStatus
+        });
+        if (!saved.ok) throw new Error(saved.error || "couldn't update task");
+        await loadMelodyTasks();
+      } catch (e) {
+        b.disabled = false;
+        toast("task update hit a snag — " + (e && e.message || e));
+      }
+    };
+  });
+}
+async function createMelodyTask() {
+  const title = $("melody-task-title").value.trim();
+  if (!title) { toast("Give the task a short title first."); return; }
+  const button = $("melody-task-add");
+  button.disabled = true;
+  try {
+    const r = await api("/api/melody/tasks", {
+      action: "create", title,
+      details: $("melody-task-details").value.trim(),
+      kind: $("melody-task-kind").value
+    });
+    if (!r.ok) throw new Error(r.error || "couldn't save task");
+    $("melody-task-title").value = "";
+    $("melody-task-details").value = "";
+    await loadMelodyTasks();
+    toast("task saved");
+  } catch (e) {
+    toast("task save hit a snag — " + (e && e.message || e));
+  } finally {
+    button.disabled = false;
+  }
+}
+$("melody-task-add").onclick = createMelodyTask;
+$("melody-task-title").onkeydown = e => {
+  if (e.key === "Enter") createMelodyTask();
+};
 function diffLabel(n) {
   const d = melodyDiffs.find(d => d.n === n);
   return d ? `${d.label} — ${d.hazards} hazard patrol${d.hazards === 1 ? "" : "s"}` : "";

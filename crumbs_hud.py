@@ -6070,6 +6070,63 @@ def _recovery_brief():
         return {"available": True, "risk": "?", "outcome": "?"}
 
 
+def _melody_system_diagnostics():
+    """Bounded, read-only server snapshot for Melody's owner-only tool."""
+    return {"version": APP_VERSION,
+            "instance": INSTANCE_ID,
+            "dirty": bool(_save_state["dirty"]),
+            "last_save": _save_state["last"],
+            "play_active": bool(play["active"]),
+            "recovery": _recovery_status(),
+            "recent_events": list(_events)[-40:]}
+
+
+def _melody_agent_diagnostics(snapshot):
+    """Remove raw event text before diagnostics are sent to a brain provider."""
+    recovery = snapshot.get("recovery") or {}
+    if not isinstance(recovery, dict):
+        recovery = {}
+    report = recovery.get("report") or {}
+    if not isinstance(report, dict):
+        report = {}
+    risk = report.get("risk") or {}
+    if not isinstance(risk, dict):
+        risk = {}
+    verification = report.get("verification") or {}
+    if not isinstance(verification, dict):
+        verification = {}
+    categories = {}
+    for event in snapshot.get("recent_events") or []:
+        if not isinstance(event, dict):
+            continue
+        msg = str(event.get("msg", "")).lower()
+        if not any(word in msg for word in
+                   ("error", "failed", "corrupt", "missing", "invalid",
+                    "recovery", "quarantined", "unavailable", "refused")):
+            continue
+        if "sidecar" in msg:
+            category = "map-sidecar warning"
+        elif any(word in msg for word in ("save", "backup", "recovery", "corrupt")):
+            category = "save/recovery warning"
+        elif any(word in msg for word in ("asset", "thumbnail", "sprite", "missing")):
+            category = "asset warning"
+        else:
+            category = "server warning"
+        categories[category] = categories.get(category, 0) + 1
+    return {"version": snapshot.get("version"),
+            "dirty": snapshot.get("dirty"),
+            "last_save": snapshot.get("last_save"),
+            "play_active": snapshot.get("play_active"),
+            "recovery": {
+                "available": recovery.get("available"),
+                "server_serving": recovery.get("server_serving"),
+                "heartbeat_age": recovery.get("heartbeat_age"),
+                "risk": risk.get("level"),
+                "outcome": verification.get("outcome")},
+            "recent_event_count": len(snapshot.get("recent_events") or []),
+            "recent_issue_categories": categories}
+
+
 def _recovery_snapshot():
     return {"map": _map_state(), "rules": copy.deepcopy(rules), "current_map": _current_map}
 
@@ -6561,6 +6618,33 @@ class Handler(BaseHTTPRequestHandler):
                        # Nothing about anyone else is ever exposed here.
                        "user": self._melody_user()})
             return self._send_json(st)
+        if path == "/api/melody/diagnostics" and not is_post:
+            user = self._melody_user()
+            if user is None:
+                return self._send_json({"ok": False, "error": "login required"}, 401)
+            if PUBLIC_MODE and not (self._is_owner_session()
+                                    or self._write_key_ok()):
+                return self._send_json({"ok": False, "error": "owner only"}, 403)
+            if PUBLIC_MODE:
+                _vault_lock.acquire()
+                try:
+                    snapshot = _melody_system_diagnostics()
+                finally:
+                    _vault_lock.release()
+            else:
+                snapshot = _melody_system_diagnostics()
+            return self._send_json({"ok": True, "diagnostics": snapshot})
+        if path == "/api/melody/tasks" and not is_post:
+            user = self._melody_user()
+            if user is None:
+                return self._send_json({"ok": False, "error": "login required"}, 401)
+            try:
+                return self._send_json({
+                    "ok": True,
+                    "tasks": _melody_agent.task_list(SCRIPT_DIR, user)})
+            except (OSError, ValueError) as exc:
+                return self._send_json({"ok": False,
+                                        "error": f"couldn't read tasks: {exc}"}, 500)
         if path == "/api/melody/demo" and is_post:
             # v5.28.1: pre-profile taste. No auth, knowledge-base only —
             # zero brain cost to Lloyd. 5 questions/day/IP, basic
@@ -6627,6 +6711,42 @@ class Handler(BaseHTTPRequestHandler):
             _melody_agent.history_clear(SCRIPT_DIR, user)
             _melody_agent.audit(SCRIPT_DIR, user, "history-clear", "")
             return self._send_json({"ok": True})
+        if path == "/api/melody/tasks" and is_post:
+            if not self._is_json_request():
+                return self._send_json({"ok": False,
+                                        "error": "Content-Type must be application/json"},
+                                       415)
+            if not self._same_origin_ok():
+                return self._send_json({"ok": False,
+                                        "error": "origin/host check failed"}, 403)
+            body = self._read_json(max_bytes=8192)
+            if not isinstance(body, dict):
+                return self._send_json({"ok": False, "error": "bad JSON"}, 400)
+            action = body.get("action")
+            try:
+                if action == "create":
+                    task = _melody_agent.task_create(
+                        SCRIPT_DIR, user, body.get("title", ""),
+                        body.get("details", ""), body.get("kind", "general"))
+                elif action == "attempt":
+                    task = _melody_agent.task_record_attempt(
+                        SCRIPT_DIR, user, body.get("task_id", ""),
+                        body.get("approach", ""), body.get("outcome", ""))
+                elif action == "status":
+                    task = _melody_agent.task_set_status(
+                        SCRIPT_DIR, user, body.get("task_id", ""),
+                        body.get("status", ""))
+                else:
+                    return self._send_json({"ok": False,
+                                            "error": "unknown task action"}, 400)
+            except ValueError as exc:
+                return self._send_json({"ok": False, "error": str(exc)}, 400)
+            except OSError as exc:
+                return self._send_json({"ok": False,
+                                        "error": f"couldn't save task: {exc}"}, 500)
+            _melody_agent.audit(SCRIPT_DIR, user, "task-" + action,
+                                str(task.get("id", "")))
+            return self._send_json({"ok": True, "task": task})
         if path == "/api/melody/chat" and is_post:
             # v5.31: per-user rate limit — chat turns spend brain calls.
             ok, retry = _melody_rate("chat", user)
@@ -6646,10 +6766,26 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(body, dict):
                 return self._send_json({"ok": False, "error": "bad JSON"},
                                        400)
+            is_owner = (not PUBLIC_MODE or self._is_owner_session()
+                        or self._write_key_ok())
+            diagnostics = None
+            if is_owner:
+                if PUBLIC_MODE:
+                    _vault_lock.acquire()
+                    try:
+                        diagnostics = _melody_agent_diagnostics(
+                            _melody_system_diagnostics())
+                    finally:
+                        _vault_lock.release()
+                else:
+                    diagnostics = _melody_agent_diagnostics(
+                        _melody_system_diagnostics())
             res = _melody_agent.handle_chat(SCRIPT_DIR, user,
                                             body.get("message", ""),
                                             self._melody_tier(user),
-                                            world=body.get("world"))
+                                            world=body.get("world"),
+                                            is_owner=is_owner,
+                                            system_diagnostics=diagnostics)
             status = 200 if res.get("ok") else (
                 429 if res.get("error") == "quota" else 400)
             return self._send_json(res, status)

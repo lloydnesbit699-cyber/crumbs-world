@@ -71,9 +71,27 @@ a-Shell in the background: wake a-Shell, restart the script, reload the page.
 
 ## What Melody can do right now
 Melody (that's me!) can teach you the app, look up the Repair Laws, check
-your vault stats, and validate your saved maps for problems. I can't change
-your world myself yet — for now I'll tell you exactly what to tap. Soon I'll
-be able to propose changes for you to approve with one tap.
+your vault stats, validate and playtest your saved maps, draft world changes
+for your approval, and build missions in the workshop. I can also keep a
+private task list for repairs and builds. Open the workshop to add, complete,
+or reopen tasks; ask me to record what we tried and what happened.
+
+When the server owner asks me to troubleshoot, I can inspect a bounded,
+read-only snapshot of server status, recovery health, and recent events.
+System diagnostics are owner-only. I can explain findings and save repair
+tasks, but I cannot change server code, shared worlds, accounts, secrets, or
+deployment. Those changes need the owner's approval.
+
+I keep failed approaches in each task. After two failures with the same
+approach, I won't repeat it; I'll leave the task open and work out a
+meaningfully different, safe strategy. I won't claim a task is fixed until
+its result is verified. I can find creative workarounds, but never by
+bypassing security, privacy, or permissions.
+
+During play I already have a character form and a nearby talk prompt. At
+present she waits near the player's starting point; following a character in
+private worlds and freely roaming the Commons are future behavior, not
+implemented yet.
 
 ## What Melody can't see
 I see only you: your private vault, plus the shared Commons everyone can

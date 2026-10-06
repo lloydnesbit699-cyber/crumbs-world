@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.55.0"
+APP_VERSION = "5.56.0"
 # v5.41: single source of truth for the map-size cap (was 64, hardcoded in
 # four places). 500x500 = 250k cells. The client additionally caps tilePx so
 # the full-map backing canvas never exceeds 4096px per side (see editor.html).
@@ -753,6 +753,134 @@ def _2fa_redeem(token):
     """Consume a challenge (call only after the code verified)."""
     with _2fa_lock:
         rec = _2fa_challenges.pop(token, None)
+    if not rec:
+        return None
+    username, exp = rec
+    return username if time.monotonic() < exp else None
+
+
+# -- v5.56: owner device registration --------------------------------------
+# Lloyd's call: the owner login is hard-coded to his devices. A correct
+# password alone is never enough — the request must also present a device
+# token cookie for a registered device. Devices enroll via one-time codes
+# issued from a registered device (or the write-key backdoor); the owner
+# lists/revokes them in the Users panel. The first owner login after this
+# ships auto-registers that device (the one-time "backdoor"); after that,
+# unregistered devices get a generic bad-login — never a hint about which
+# half (password vs device) failed.
+_DEVICE_COOKIE = "crumbs_dev"
+_DEVICE_DAYS = 365
+_ENROLL_TTL = 600  # one-time enrollment codes live 10 minutes
+_enroll_codes = {}  # sha256(code) -> (username, expires_monotonic)
+_enroll_lock = threading.Lock()
+
+
+def _device_token_hash(tok):
+    return hashlib.sha256(tok.encode("utf-8")).hexdigest()
+
+
+def _owner_username_of(users):
+    for name, rec in users.items():
+        if isinstance(rec, dict) and rec.get("is_owner"):
+            return name
+    return None
+
+
+def _owner_devices(users):
+    """Registered device records for the owner (list of dicts)."""
+    name = _owner_username_of(users)
+    rec = users.get(name) if name else None
+    devs = (rec or {}).get("devices")
+    return devs if isinstance(devs, list) else []
+
+
+def _device_token_ok(users, token):
+    """Constant-time check of a presented device token. Returns the device
+    record on success (refreshing last_seen), else None."""
+    if not token:
+        return None
+    want = _device_token_hash(token)
+    for dev in _owner_devices(users):
+        if not isinstance(dev, dict):
+            continue
+        if hmac.compare_digest(str(dev.get("token_hash", "")), want):
+            dev["last_seen"] = int(time.time())
+            _save_users(users)
+            return dev
+    return None
+
+
+def _device_label_from_ua(ua):
+    ua = (ua or "").lower()
+    if "iphone" in ua:
+        return "iPhone"
+    if "ipad" in ua:
+        return "iPad"
+    if "android" in ua:
+        return "Android"
+    if "macintosh" in ua or "mac os" in ua:
+        return "Mac"
+    if "windows" in ua:
+        return "Windows PC"
+    if "linux" in ua:
+        return "Linux"
+    return "Browser"
+
+
+def _register_device(users, username, label=None):
+    """Enroll a new device for the owner. Returns (record, raw_token) —
+    the raw token is shown once; only its hash is stored."""
+    name = _owner_username_of(users)
+    rec = users.get(name) if name else None
+    if not isinstance(rec, dict) or name != username:
+        return None, None
+    raw = secrets.token_urlsafe(32)
+    dev = {"id": secrets.token_hex(8),
+           "label": (label or "").strip()[:40] or "Device",
+           "token_hash": _device_token_hash(raw),
+           "created": int(time.time()),
+           "last_seen": int(time.time())}
+    devs = rec.get("devices")
+    if not isinstance(devs, list):
+        devs = rec["devices"] = []
+    devs.append(dev)
+    _save_users(users)
+    return dev, raw
+
+
+def _device_cookie_value(raw_token):
+    return (f"{_DEVICE_COOKIE}={raw_token}"
+            f"; HttpOnly; Path=/; SameSite=Lax; Max-Age={_DEVICE_DAYS * 86400}")
+
+
+def _enroll_issue(username):
+    """Mint a one-time enrollment code for username. Returns the plaintext
+    code (shown once); only its hash is kept, 10-minute TTL."""
+    alphabet = "abcdefghjkmnpqrstuvwxyz23456789"  # no look-alikes
+    code = "".join(secrets.choice(alphabet) for _ in range(8))
+    with _enroll_lock:
+        _enroll_codes[_device_token_hash(code)] = (
+            username, time.monotonic() + _ENROLL_TTL)
+    return code
+
+
+def _enroll_peek(code):
+    h = _device_token_hash(str(code or "").strip().lower())
+    with _enroll_lock:
+        rec = _enroll_codes.get(h)
+        if not rec:
+            return None
+        username, exp = rec
+        if time.monotonic() > exp:
+            del _enroll_codes[h]
+            return None
+        return username
+
+
+def _enroll_redeem(code):
+    h = _device_token_hash(str(code or "").strip().lower())
+    with _enroll_lock:
+        rec = _enroll_codes.pop(h, None)
     if not rec:
         return None
     username, exp = rec
@@ -6395,7 +6523,7 @@ def _recover_startup():
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "CrumbsHUD/1.9"
-    _outgoing_cookie = None  # v5.27: Set-Cookie queued by _issue_session etc.
+    _outgoing_cookies = []  # v5.27: Set-Cookie values queued by _issue_session etc.; v5.56: may also carry the device cookie
 
     def log_message(self, *a):  # keep the console quiet
         pass
@@ -6418,8 +6546,13 @@ class Handler(BaseHTTPRequestHandler):
     def _issue_session(self, username):
         users = _load_users()
         rec = users.get(username) or {}
-        self._outgoing_cookie = _session_cookie_value(
-            username, int(rec.get("token_version", 0)))
+        self._outgoing_cookies.append(_session_cookie_value(
+            username, int(rec.get("token_version", 0))))
+
+    def _queue_device_cookie(self, raw_token):
+        # v5.56: device identity rides its own long-lived cookie next to
+        # the session cookie.
+        self._outgoing_cookies.append(_device_cookie_value(raw_token))
 
     def _clear_session(self):
         # v5.27: logout kills the token server-side too — bump token_version
@@ -6432,7 +6565,7 @@ class Handler(BaseHTTPRequestHandler):
             if rec is not None:
                 rec["token_version"] = int(rec.get("token_version", 0)) + 1
                 _save_users(users)
-        self._outgoing_cookie = _CLEAR_COOKIE
+        self._outgoing_cookies.append(_CLEAR_COOKIE)
 
     # -- v5.30: 2FA code check ----------------------------------------------
     # Accepts a current TOTP code, or burns one single-use recovery code.
@@ -6457,6 +6590,8 @@ class Handler(BaseHTTPRequestHandler):
         # v5.27: logout kills the token server-side too — bump token_version
         # so a copied cookie can't survive the logout. (This ends every
         # session for the user, which is the safe meaning of "log out".)
+        # NOTE: unreachable dead copy of _clear_session's tail (kept for
+        # history); the live one is above.
         me = self._session_user()
         if me:
             users = _load_users()
@@ -6464,7 +6599,7 @@ class Handler(BaseHTTPRequestHandler):
             if rec is not None:
                 rec["token_version"] = int(rec.get("token_version", 0)) + 1
                 _save_users(users)
-        self._outgoing_cookie = _CLEAR_COOKIE
+        self._outgoing_cookies.append(_CLEAR_COOKIE)
 
     def _is_owner_session(self):
         u = self._session_user()
@@ -6822,9 +6957,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
-        if self._outgoing_cookie:  # v5.27: login / sliding refresh / logout
-            self.send_header("Set-Cookie", self._outgoing_cookie)
-            self._outgoing_cookie = None
+        for c in self._outgoing_cookies:  # v5.27: login / sliding refresh / logout; v5.56: may also carry the device cookie
+            self.send_header("Set-Cookie", c)
+        self._outgoing_cookies = []
         self.end_headers()
         self.wfile.write(body)
 
@@ -6931,7 +7066,7 @@ class Handler(BaseHTTPRequestHandler):
         if not _rate_ok("GET", self._client_ip()):
             return self._send_json({"ok": False, "error": "slow down"}, 429)
         path = urlparse(self.path).path
-        self._outgoing_cookie = None
+        self._outgoing_cookies = []
         # v5.28: Melody's endpoints skip the vault lock — the agent is
         # fully file-based (per-user melody/ dir, no game globals), so
         # serializing it would stall the server through every brain call
@@ -7079,6 +7214,20 @@ class Handler(BaseHTTPRequestHandler):
                 {"username": n, "created": (r or {}).get("created"),
                  "is_owner": bool((r or {}).get("is_owner"))}
                 for n, r in sorted(users.items())]})
+        elif path == "/api/auth/devices":
+            # v5.56: owner-only registered-device list. Token hashes never
+            # leave the server; "this_device" marks the caller's device.
+            if not self._is_owner_session() and not self._write_key_ok():
+                return self._send_json({"ok": False, "error": "owner only"}, 403)
+            users = _load_users()
+            presented = self._get_cookie(_DEVICE_COOKIE)
+            mine = _device_token_hash(presented) if presented else ""
+            self._send_json({"ok": True, "devices": [
+                {"id": d.get("id"), "label": d.get("label"),
+                 "created": d.get("created"), "last_seen": d.get("last_seen"),
+                 "this_device": bool(mine) and hmac.compare_digest(
+                     str(d.get("token_hash", "")), mine)}
+                for d in _owner_devices(users) if isinstance(d, dict)]})
         elif path == "/api/map":
             self._send_json(_map_state())
         elif path == "/api/semantic/pools":
@@ -7525,7 +7674,7 @@ class Handler(BaseHTTPRequestHandler):
         if not _rate_ok("POST", self._client_ip()):
             return self._send_json({"ok": False, "error": "slow down"}, 429)
         path = urlparse(self.path).path
-        self._outgoing_cookie = None
+        self._outgoing_cookies = []
         # v5.28: Melody's endpoints skip the vault lock (see do_GET note) —
         # the agent never touches game globals, and a brain call can take
         # seconds. Auth is still checked inside the handler.
@@ -7586,6 +7735,27 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": False, "error": "bad login",
                                         "tries_left": tries_left}, 401)
             os.makedirs(_user_vault_dir(username), exist_ok=True)
+            if rec.get("is_owner"):
+                # v5.56: owner login is device-gated. A correct password
+                # alone is never enough — the request must also present a
+                # registered device token. Generic failure either way:
+                # never reveal whether the password or the device failed.
+                devices = _owner_devices(users)
+                if not devices:
+                    # Bootstrap: the first owner login enrolls this device
+                    # (the one-time "backdoor"); strict after that.
+                    dev, raw = _register_device(
+                        users, username,
+                        _device_label_from_ua(self.headers.get("User-Agent")))
+                    self._queue_device_cookie(raw)
+                    _log_event(f"{username} enrolled first device "
+                               f"({dev['label']})")
+                elif not _device_token_ok(users,
+                                          self._get_cookie(_DEVICE_COOKIE)):
+                    _log_event(f"{username} blocked: password ok, "
+                               "unregistered device")
+                    return self._send_json({"ok": False, "error": "bad login",
+                                            "tries_left": tries_left}, 401)
             # v5.30: 2FA is optional per user. Password right but 2FA on?
             # No session yet — the client trades the challenge for one.
             if rec.get("totp_enabled"):
@@ -7874,6 +8044,87 @@ class Handler(BaseHTTPRequestHandler):
                                     "world": rec.get("world", "private"),
                                     "email": rec.get("email", ""),
                                     "totp_enabled": bool(rec.get("totp_enabled"))})
+
+        # ---- v5.56: owner device registration -------------------------------
+        if path == "/api/auth/device/enroll-code":
+            # Owner-only, from a registered device (or the write-key
+            # backdoor): mint a one-time 10-minute code that enrolls a new
+            # device via /api/auth/device/register.
+            me = self._session_user()
+            users = _load_users()
+            rec = users.get(me) if me else None
+            via_key = not me and self._write_key_ok()
+            owner_name = _owner_username_of(users)
+            if not owner_name or not (
+                    (rec and rec.get("is_owner")) or via_key):
+                return self._send_json({"ok": False, "error": "owner only"},
+                                       403)
+            if me and _owner_devices(users) and not _device_token_ok(
+                    users, self._get_cookie(_DEVICE_COOKIE)):
+                return self._send_json(
+                    {"ok": False,
+                     "error": "use a registered device"}, 403)
+            code = _enroll_issue(owner_name)
+            _log_event(f"{me or 'write-key'} issued a device enrollment code")
+            return self._send_json({"ok": True, "code": code,
+                                    "expires_in": _ENROLL_TTL})
+
+        if path == "/api/auth/device/register":
+            # {username, password, code, label?}: enroll THIS device.
+            # Verifies the one-time code AND the owner password, then sets
+            # the device cookie and logs in.
+            allowed, tries_left, retry_after = _login_rate(self._client_ip())
+            if not allowed:
+                return self._send_json({"ok": False, "error": "slow down",
+                                        "retry_after": retry_after}, 429)
+            username = str(body.get("username") or "").strip().lower()
+            password = str(body.get("password") or "")
+            code = str(body.get("code") or "")
+            label = str(body.get("label") or "")
+            code_user = _enroll_peek(code)
+            users = _load_users()
+            rec = users.get(username)
+            ok = (code_user == username and isinstance(rec, dict)
+                  and bool(rec.get("is_owner"))
+                  and _verify_password(password, rec))
+            if not ok:
+                _hash_password(password, _new_salt())  # dummy work
+                return self._send_json({"ok": False, "error": "bad login",
+                                        "tries_left": tries_left}, 401)
+            _enroll_redeem(code)  # single-use: burn only after pw verified
+            dev, raw = _register_device(
+                users, username,
+                label or _device_label_from_ua(self.headers.get("User-Agent")))
+            self._queue_device_cookie(raw)
+            os.makedirs(_user_vault_dir(username), exist_ok=True)
+            self._issue_session(username)
+            _log_event(f"{username} registered device '{dev['label']}'")
+            return self._send_json({"ok": True, "username": username,
+                                    "device": dev["id"], "label": dev["label"]})
+
+        if path == "/api/auth/device/revoke":
+            # {device_id}: owner-only. Removes the device and bumps
+            # token_version so every session dies — the owner re-logs in
+            # from a still-registered device.
+            me = self._session_user()
+            users = _load_users()
+            rec = users.get(me) if me else None
+            if not (rec and rec.get("is_owner")):
+                return self._send_json({"ok": False, "error": "owner only"},
+                                       403)
+            did = str(body.get("device_id") or "")
+            devs = _owner_devices(users)
+            kept = [d for d in devs
+                    if isinstance(d, dict) and d.get("id") != did]
+            if len(kept) == len(devs):
+                return self._send_json({"ok": False, "error": "no such device"},
+                                       404)
+            rec["devices"] = kept
+            rec["token_version"] = int(rec.get("token_version", 0)) + 1
+            _save_users(users)
+            self._issue_session(me)  # this request's session stays alive
+            _log_event(f"{me} revoked device {did} ({len(kept)} left)")
+            return self._send_json({"ok": True, "devices_left": len(kept)})
 
         if path == "/api/auth/reset-password":
             users = _load_users()

@@ -576,6 +576,20 @@
     border-radius: 8px; font-size: 12px; padding: 6px 9px; }
   .u-danger { color: #ff8a8a; border-color: #5a2a2a; }
   .users-loading { color: #888; font-size: 13px; padding: 12px 2px; }
+  /* v5.56: owner device registration */
+  .login-linkbtn { background: none; border: none; color: #8fd0ff; font-size: 12px;
+    text-decoration: underline; cursor: pointer; padding: 2px 0; }
+  #dev-err { color: #ff7a7a; font-size: 13px; min-height: 18px; margin-top: 8px; }
+  #dev-go { width: 100%; margin-top: 10px; padding: 11px; border: 0; border-radius: 8px;
+    background: linear-gradient(90deg,#ff5a5a,#ffd75f); color: #14141c;
+    font-weight: bold; font-size: 15px; }
+  .dev-section { border-top: 1px solid #26262e; margin-top: 10px; padding-top: 10px; }
+  .dev-section h3 { color: #ffd75f; font-size: 14px; margin: 0 0 6px; }
+  .dev-hint { color: #777; font-size: 11px; margin-bottom: 8px; }
+  .dev-code { font-size: 26px; letter-spacing: 6px; color: #ffd75f; text-align: center;
+    background: #0d0d12; border: 1px dashed #555; border-radius: 8px;
+    padding: 12px; margin: 8px 0; user-select: all; }
+  .dev-this { color: #8fd0ff; font-size: 11px; }
   #user-section { border-top: 1px solid #26262e; margin-top: 6px; padding-top: 8px; }
   #user-section .user-line { display: flex; align-items: center; gap: 8px;
     padding: 4px 12px 8px; }
@@ -1821,7 +1835,16 @@
       <button id="tfa-go">Verify</button>
       <div id="tfa-err"></div>
     </div>
+    <div id="pane-device" hidden>
+      <div class="login-sub">New device? Get a one-time code from a device that's already registered (Users panel), then register this one — username, password, and the code.</div>
+      <input id="dev-code" type="text" placeholder="one-time code" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="12">
+      <input id="dev-label" type="text" placeholder="device name (e.g. Lloyd's iPhone)" autocomplete="off" maxlength="40">
+      <button id="dev-go">Register this device</button>
+      <button id="dev-back" class="login-demo-btn">Back</button>
+      <div id="dev-err"></div>
+    </div>
     <div class="login-hint">Two-factor auth is optional — add it at signup or later in Setup.</div>
+    <div class="login-hint"><button id="login-newdevice" class="login-linkbtn">new device? register it here</button></div>
     <button id="login-demo" class="login-demo-btn">&#10024; Try Melody — free demo</button>
   </div>
 </div>
@@ -1845,6 +1868,17 @@
       <div id="nu-err"></div>
     </div>
     <div id="users-list"></div>
+    <!-- v5.56: owner device registration — the owner login only works from these devices -->
+    <div class="dev-section">
+      <h3>&#x1F4F1; Registered devices</h3>
+      <div class="dev-hint">Owner sign-in works only from these devices. Lose one? Revoke it here.</div>
+      <div id="devices-list"></div>
+      <button id="dev-enroll-btn" class="u-btn">Enroll new device</button>
+      <div id="dev-code-wrap" hidden>
+        <div class="dev-hint">One-time code — good for 10 minutes. Enter it on the new device under "new device? register it here".</div>
+        <div id="dev-code-out" class="dev-code"></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -2844,6 +2878,41 @@ async function doLogin() {
 $("login-go").onclick = doLogin;
 $("login-user").addEventListener("keydown", e => { if (e.key === "Enter") $("login-pass").focus(); });
 $("login-pass").addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
+// ---- v5.56: owner device registration ------------------------------------
+$("login-newdevice").onclick = () => {
+  $("pane-login").hidden = true;
+  $("pane-device").hidden = false;
+  $("dev-err").textContent = "";
+  setTimeout(() => $("dev-code").focus(), 50);
+};
+$("dev-back").onclick = () => {
+  $("pane-device").hidden = true;
+  $("pane-login").hidden = false;
+};
+async function doDeviceRegister() {
+  const u = $("login-user").value.trim().toLowerCase();
+  const p = $("login-pass").value;
+  const code = $("dev-code").value.trim().toLowerCase();
+  const label = $("dev-label").value.trim();
+  const err = $("dev-err");
+  err.textContent = "";
+  if (!u || !p) { err.textContent = "enter your username and password first"; return; }
+  if (!code) { err.textContent = "enter the one-time code"; return; }
+  try {
+    const r = await api("/api/auth/device/register",
+      { username: u, password: p, code: code, label: label });
+    if (!r.ok) {
+      err.textContent = r.error || "registration failed";
+      return;
+    }
+    toast("device registered" + (r.label ? " as " + r.label : ""));
+    location.reload();  // device cookie + session are set — lands logged in
+  } catch (e) {
+    err.textContent = (e && e.auth) ? "session issue — try again" : "can't reach the server";
+  }
+}
+$("dev-go").onclick = doDeviceRegister;
+$("dev-code").addEventListener("keydown", e => { if (e.key === "Enter") doDeviceRegister(); });
 $("btn-logout").onclick = async () => {
   try { await api("/api/auth/logout"); } catch (e) {}
   location.reload();  // the gate shows the login overlay on the way back in
@@ -2968,6 +3037,7 @@ function openUsers() {
   $("nu-err").textContent = "";
   $("users-overlay").classList.add("show");
   refreshUsers();
+  refreshDevices();
 }
 function closeUsers() { $("users-overlay").classList.remove("show"); }
 async function refreshUsers() {
@@ -3007,6 +3077,60 @@ async function refreshUsers() {
   if (!list.children.length)
     list.innerHTML = '<div class="users-loading">no users yet</div>';
 }
+// ---- v5.56: owner device registration ------------------------------------
+// The owner login only works from registered devices. Enroll a new one
+// with a one-time code minted here; revoke a lost one here.
+async function refreshDevices() {
+  const list = $("devices-list");
+  list.innerHTML = '<div class="users-loading">loading…</div>';
+  $("dev-code-wrap").hidden = true;
+  let r;
+  try { r = await api("/api/auth/devices"); }
+  catch (e) {
+    list.innerHTML = '<div class="users-loading">couldn\'t load devices</div>';
+    return;
+  }
+  if (!r.ok) {
+    list.innerHTML = '<div class="users-loading">' + esc(r.error || "couldn't load devices") + "</div>";
+    return;
+  }
+  list.innerHTML = "";
+  (r.devices || []).forEach(d => {
+    const row = document.createElement("div");
+    row.className = "u-row";
+    const seen = d.last_seen ? new Date(d.last_seen * 1000).toLocaleDateString() : "—";
+    const thisMark = d.this_device ? ' <span class="dev-this">← this device</span>' : "";
+    row.innerHTML = '<span class="u-name">' + esc(d.label || "Device") + thisMark + "</span>" +
+      '<span class="u-date">last seen ' + esc(seen) + '</span><span class="u-sp"></span>';
+    const rev = document.createElement("button");
+    rev.className = "u-btn u-danger"; rev.textContent = "Revoke";
+    rev.onclick = () => revokeDevice(d.id, d.label);
+    row.appendChild(rev);
+    list.appendChild(row);
+  });
+  if (!list.children.length)
+    list.innerHTML = '<div class="users-loading">no devices yet — your next owner login registers this one</div>';
+}
+async function enrollDevice() {
+  const wrap = $("dev-code-wrap"), out = $("dev-code-out");
+  wrap.hidden = true;
+  let r;
+  try { r = await api("/api/auth/device/enroll-code", {}); }
+  catch (e) { toast("couldn't reach the server"); return; }
+  if (!r.ok) { toast(r.error || "enroll failed"); return; }
+  out.textContent = r.code;
+  wrap.hidden = false;
+}
+async function revokeDevice(id, label) {
+  if (!confirm("Revoke '" + (label || "device") + "'? It will be signed out everywhere immediately. You can re-enroll it later.")) return;
+  try {
+    const r = await api("/api/auth/device/revoke", { device_id: id });
+    if (!r.ok) { toast(r.error || "revoke failed"); return; }
+    toast("device revoked");
+    refreshDevices();
+  } catch (e) { toast("revoke failed"); }
+}
+$("dev-enroll-btn").onclick = enrollDevice;
 async function createUser() {
   // same rules as the server: trim + lowercase, then the strict charset.
   // A created account works immediately — no approval, no pending state.

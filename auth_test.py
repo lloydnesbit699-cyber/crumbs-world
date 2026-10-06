@@ -279,5 +279,77 @@ check("non-list rejected", h._clean_pauses("nope", 1) is None)
 check("zero stays zero (walk on)",
       h._clean_pauses([{"secs": 0, "mode": "sleep"}], 1)[0]["secs"] == 0)
 
+print("== owner device registration (v5.56) ==")
+# Device helpers write users.json; point it at a temp dir so the real user
+# database is never touched (same pattern as the _create_user tests above).
+_tmpd = tempfile.mkdtemp(prefix="auth-devices-")
+_orig_users_file2 = h._USERS_FILE
+_orig_vaults_dir2 = h._vaults_dir
+h._USERS_FILE = os.path.join(_tmpd, "users.json")
+h._vaults_dir = lambda: os.path.join(_tmpd, "vaults")
+try:
+    ok, err = h._create_user("devowner", "s3cret!!", is_owner=True)
+    check("owner created", ok, err)
+    users = h._load_users()
+    check("no devices initially", h._owner_devices(users) == [])
+
+    # enrollment codes: issue -> peek -> redeem -> gone (single-use)
+    code = h._enroll_issue("devowner")
+    check("code is 8 chars, no look-alikes", len(code) == 8 and
+          all(c in "abcdefghjkmnpqrstuvwxyz23456789" for c in code), code)
+    check("peek returns the user", h._enroll_peek(code) == "devowner")
+    check("redeem returns the user", h._enroll_redeem(code) == "devowner")
+    check("redeemed code is dead", h._enroll_peek(code) is None)
+    check("bogus code peeks None", h._enroll_peek("zzzzzzzz") is None)
+    check("bogus code redeems None", h._enroll_redeem("zzzzzzzz") is None)
+
+    # registration: token validates, wrong token does not
+    dev, raw = h._register_device(users, "devowner", "Test iPhone")
+    check("register returns record + raw token",
+          isinstance(dev, dict) and isinstance(raw, str) and len(raw) >= 32)
+    check("label stored", dev.get("label") == "Test iPhone")
+    check("only the hash is stored",
+          dev.get("token_hash") == h._device_token_hash(raw) and
+          "token" not in str(dev.get("token_hash")))
+    users = h._load_users()
+    hit = h._device_token_ok(users, raw)
+    check("presented token validates",
+          isinstance(hit, dict) and hit.get("id") == dev.get("id"))
+    check("wrong token rejected", h._device_token_ok(users, "nope") is None)
+    check("empty token rejected", h._device_token_ok(users, "") is None)
+    check("device listed", len(h._owner_devices(h._load_users())) == 1)
+
+    # a second device enrolls independently; revoking is list surgery
+    dev2, raw2 = h._register_device(h._load_users(), "devowner", "PC")
+    users = h._load_users()
+    check("two devices", len(h._owner_devices(users)) == 2)
+    check("second token validates",
+          h._device_token_ok(users, raw2).get("id") == dev2.get("id"))
+    check("first still validates",
+          h._device_token_ok(users, raw).get("id") == dev.get("id"))
+
+    # non-owner accounts are never device-gated
+    ok2, err2 = h._create_user("devplayer", "s3cret!!")
+    check("player created", ok2, err2)
+    check("owner devices unchanged by player",
+          len(h._owner_devices(h._load_users())) == 2)
+
+    # UA labeling
+    check("iphone UA", h._device_label_from_ua(
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0)") == "iPhone")
+    check("windows UA", h._device_label_from_ua(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64)") == "Windows PC")
+    check("empty UA", h._device_label_from_ua("") == "Browser")
+
+    # cookie format
+    cv = h._device_cookie_value("tok123")
+    check("device cookie format",
+          "crumbs_dev=tok123" in cv and "HttpOnly" in cv and
+          "SameSite=Lax" in cv and "Max-Age=31536000" in cv, cv)
+finally:
+    h._USERS_FILE = _orig_users_file2
+    h._vaults_dir = _orig_vaults_dir2
+    shutil.rmtree(_tmpd, ignore_errors=True)
+
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

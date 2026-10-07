@@ -316,6 +316,28 @@
            transition: transform .22s ease-out; overscroll-behavior: contain;
            -webkit-overflow-scrolling: touch; }
   .sheet.open { transform: none; }
+  /* v5.58 (C-1): reader variant — max-legibility sheet for long reads.
+     Opt-in per sheet via the "reader" class. Contrast #f5f5f5 on #161616
+     is ~15:1, exceeding the 7:1 target. */
+  .sheet.reader { color: #f5f5f5; }
+  .sheet.reader .tray-head { font-size: 19px; color: #f5f5f5; }
+  .sheet.reader .lbl, .sheet.reader p, .sheet.reader li,
+  .sheet.reader #log-list { font-size: 17px; line-height: 1.5; }
+  .sheet.reader small, .sheet.reader .tray-hint, .sheet.reader .sec,
+  .sheet.reader .smeta { font-size: 14px; line-height: 1.5; color: #cfcfcf; }
+  /* v5.58 (C-2): reader pager — page dots + prev/next, 48px targets */
+  .rpager { display: flex; align-items: center; justify-content: center;
+    gap: 10px; padding: 10px 0 4px; }
+  .rpager .rprev, .rpager .rnext { min-width: 48px; min-height: 48px;
+    font-size: 22px; }
+  .rpager .rpagenum { font-size: 14px; color: #f5f5f5; white-space: nowrap; }
+  .rpager .rdots { display: flex; gap: 2px; overflow-x: auto; max-width: 40%; }
+  .rpager .rdot { width: 48px; height: 48px; min-width: 48px; padding: 0;
+    background: transparent; border: none; position: relative; flex: none; }
+  .rpager .rdot::after { content: ""; position: absolute; top: 50%; left: 50%;
+    width: 12px; height: 12px; transform: translate(-50%, -50%);
+    border-radius: 50%; background: #444; border: 1px solid #666; }
+  .rpager .rdot.on::after { background: #ffd75f; border-color: #ffd75f; }
   .sheet .grab { width: 40px; height: 4px; border-radius: 2px; background: #444;
                  margin: 0 auto 10px; }
   #load-list button { display: block; width: 100%; text-align: left;
@@ -1733,7 +1755,7 @@
   <div id="slots-list"></div>
 </div>
 
-<div id="sheet-log" class="sheet">
+<div id="sheet-log" class="sheet reader">
   <div class="grab"></div>
   <div class="tray-head">Server log <button id="btn-log-refresh" class="ghost">Refresh</button></div>
   <div id="log-list" class="loglist"></div>
@@ -1908,7 +1930,7 @@
   <div class="load-label" id="splash-label">Waking the server&hellip;</div>
 </div>
 
-<div id="sheet-rules" class="sheet">
+<div id="sheet-rules" class="sheet reader">
   <div class="grab"></div>
   <div class="tray-head">Rules — this build</div>
   <div class="tabs">
@@ -7690,6 +7712,9 @@ function rulesTab(which) {
   $("rules-tabbtn-game").classList.toggle("on", which === "game");
   $("rules-tab-play").hidden = which !== "play";
   $("rules-tab-game").hidden = which !== "game";
+  // v5.58 (C-2): re-page the newly visible tab panel
+  if (which === "play" && rulesPagerPlay) rulesPagerPlay.render();
+  if (which === "game" && rulesPagerGame) rulesPagerGame.render();
 }
 $("rules-tabbtn-play").onclick = () => rulesTab("play");
 $("rules-tabbtn-game").onclick = () => rulesTab("game");
@@ -11095,6 +11120,83 @@ function toggleOverlay(id) {
   }
   dodgeMelFab();   // v5.50: an open tray moves the Mel button clear of it
   dodgePlayFab();  // v5.50.8: same for the draggable Play button
+  // v5.58 (C-2): reader pagers re-render on open — content may have grown
+  if (typeof readerPagers !== "undefined") readerPagers.forEach(p => p.render());
+}
+
+// ---- v5.58 (C-2): reader pager --------------------------------------------
+// Paged navigation for long reader sheets (pilots: Log, Rules). The content's
+// child blocks are chunked into pages; the pager (‹ / "Page n of m" / dots /
+// ›) replaces momentum scroll, so the black-void scroll flash is gone by
+// construction on pilot sheets. Page turns never exit — ‹ Back still does.
+// Dots carry text aria-labels; the numeric label is never color-only (A-6).
+var readerPagers = [];
+var rulesPagerPlay = null, rulesPagerGame = null, logPager = null;
+function initReaderPager(sheetId, contentSel, perPage) {
+  const sheet = $(sheetId);
+  const content = sheet ? sheet.querySelector(contentSel) : null;
+  if (!sheet || !content) return null;
+  const pager = { sheetId, page: 0,
+    blocks() {
+      return Array.from(content.children).filter(k => !k.classList.contains("rpager"));
+    },
+    pages() {
+      const bs = pager.blocks(), out = [];
+      for (let i = 0; i < bs.length; i += perPage) out.push(bs.slice(i, i + perPage));
+      return out.length ? out : [[]];
+    },
+    render() {
+      const ps = pager.pages();
+      if (pager.page >= ps.length) pager.page = ps.length - 1;
+      if (pager.page < 0) pager.page = 0;
+      pager.blocks().forEach(k => { k.style.display = "none"; });
+      ps[pager.page].forEach(k => { k.style.display = ""; });
+      let nav = sheet.querySelector(":scope > .rpager");
+      if (!nav) {
+        nav = document.createElement("div");
+        nav.className = "rpager";
+        nav.setAttribute("role", "navigation");
+        nav.setAttribute("aria-label", "Sheet pages");
+        nav.innerHTML =
+          '<button type="button" class="rprev" aria-label="Previous page">‹</button>' +
+          '<span class="rpagenum" aria-live="polite"></span>' +
+          '<span class="rdots" aria-hidden="true"></span>' +
+          '<button type="button" class="rnext" aria-label="Next page">›</button>';
+        nav.querySelector(".rprev").onclick = e => { e.stopPropagation(); pager.page--; pager.render(); buzz(8); };
+        nav.querySelector(".rnext").onclick = e => { e.stopPropagation(); pager.page++; pager.render(); buzz(8); };
+        sheet.appendChild(nav);
+      }
+      nav.querySelector(".rpagenum").textContent = "Page " + (pager.page + 1) + " of " + ps.length;
+      const dots = nav.querySelector(".rdots");
+      dots.innerHTML = "";
+      if (ps.length > 1 && ps.length <= 12) {
+        ps.forEach((_, i) => {
+          const d = document.createElement("button");
+          d.type = "button";
+          d.className = "rdot" + (i === pager.page ? " on" : "");
+          d.setAttribute("aria-label", "Go to page " + (i + 1) + " of " + ps.length);
+          d.onclick = e => { e.stopPropagation(); pager.page = i; pager.render(); buzz(8); };
+          dots.appendChild(d);
+        });
+      }
+      const active = ps.length > 1;
+      nav.style.display = active ? "" : "none";
+      // paged sheets don't scroll — the pager IS the navigation
+      content.style.overflowY = active ? "hidden" : "";
+      sheet.style.overflowY = active ? "hidden" : "";
+    }
+  };
+  // live content (the log grows) re-pages without losing your place;
+  // render() only touches display styles, so this never loops.
+  new MutationObserver(() => pager.render()).observe(content, { childList: true });
+  readerPagers.push(pager);
+  pager.render();
+  return pager;
+}
+function initReaderPagers() {
+  logPager = initReaderPager("sheet-log", "#log-list", 8);
+  rulesPagerPlay = initReaderPager("sheet-rules", "#rules-tab-play", 6);
+  rulesPagerGame = initReaderPager("sheet-rules", "#rules-tab-game", 6);
 }
 // v5.20: Windows-style menu bar — each top label toggles its own dropdown
 document.querySelectorAll(".mtop").forEach(b => {
@@ -13377,6 +13479,7 @@ function initPanelSystem() {
   initSheetGrab();    // sheet chrome never moves — wire once, not per mount
   initPlayFab();
   initBudgetStrip();
+  initReaderPagers();   // v5.58 (C-2): paged navigation on pilot reader sheets
   document.querySelectorAll("#layout-seg button").forEach(b => {
     b.onclick = () => setPanelLayout(b.dataset.layout);
   });

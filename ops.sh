@@ -297,6 +297,10 @@ do_repair() {
   do_stop
   do_backup  # law of three: every destructive git move gets a backup first
   git reset --hard "origin/$BRANCH" || die "reset failed — fix git state first"
+  # 2026-10-07: reset --hard does NOT clear a stale CHERRY_PICK_HEAD left by
+  # a failed cherry-pick. --quit ends the cherry-pick while keeping the
+  # just-reset tree exactly as it is (unlike --abort, which would move HEAD).
+  git cherry-pick --quit 2>/dev/null || true
   unstage_secrets
   vault_verify "$vsnap"
   say "now at: $(git log --oneline -1)"

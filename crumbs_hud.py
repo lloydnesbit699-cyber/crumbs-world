@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.59.0"
+APP_VERSION = "5.60.0"
 # v5.41: single source of truth for the map-size cap (was 64, hardcoded in
 # four places). 500x500 = 250k cells. The client additionally caps tilePx so
 # the full-map backing canvas never exceeds 4096px per side (see editor.html).
@@ -6618,7 +6618,9 @@ class Handler(BaseHTTPRequestHandler):
         key_ok = self._write_key_ok()
         # /api/auth/* manage their own gates (login must work keyless);
         # login, me, health never 401.
-        if path.startswith("/api/auth/") or path in ("/api/health",):
+        if path.startswith("/api/auth/") or path in ("/api/health",
+                                                "/manifest.webmanifest",
+                                                "/service-worker.js"):
             return True
         if not user and not key_ok:
             self._send_json({"ok": False, "error": "login required"}, 401)
@@ -7184,6 +7186,31 @@ class Handler(BaseHTTPRequestHandler):
             # cache headers, so it can keep serving a stale editor.html after
             # an update. 180KB over localhost — always fetch it fresh.
             self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+        elif path == "/manifest.webmanifest":
+            try:
+                with open(os.path.join(SCRIPT_DIR, "manifest.webmanifest"), "rb") as f:
+                    body = f.read()
+            except FileNotFoundError:
+                return self._send_json({"ok": False, "error": "manifest not found"}, 404)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/manifest+json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(body)
+        elif path == "/service-worker.js":
+            try:
+                with open(os.path.join(SCRIPT_DIR, "service-worker.js"), "rb") as f:
+                    body = f.read()
+            except FileNotFoundError:
+                return self._send_json({"ok": False, "error": "service worker not found"}, 404)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/javascript; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Service-Worker-Allowed", "/")
             self.end_headers()
             self.wfile.write(body)
         elif path == "/api/health":

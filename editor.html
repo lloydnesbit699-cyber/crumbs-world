@@ -2,7 +2,13 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#111111">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Crumbs World">
+<link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon-512.png">
 <link rel="apple-touch-icon" href="/icon-512.png">
 <title>Crumbs HUD — Tile Painter</title>
@@ -14537,5 +14543,13 @@ async function deleteMission(id) {
 <!-- v5.50: she walks into the dungeon — the talk chip appears in Play mode
      when you're standing near her in the world -->
 <button id="mel-talk" hidden>💬 Talk to Mel</button>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/service-worker.js", { scope: "/" })
+      .catch(error => console.warn("Crumbs service worker registration failed:", error));
+  });
+}
+</script>
 </body>
 </html>

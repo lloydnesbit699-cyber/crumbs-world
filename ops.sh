@@ -42,6 +42,12 @@
 #                                  of the right next actions (stash, update,
 #                                  commit, repair…).
 #
+# Re-exec guard: Lloyd runs things with `sh` out of habit and `sh` is dash,
+# which chokes on bash-isms (arrays, [[ ]], etc.). This must stay the first
+# executable statement — dash parses incrementally, so the exec fires before
+# it ever reaches the bash-only lines below.
+if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
+
 set -u
 
 PORT="${PORT:-5000}"

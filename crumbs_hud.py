@@ -156,6 +156,11 @@ except ImportError:
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
 APP_VERSION = "5.60.0"
+# v5.61: tester-shell feature flag — ENVIRONMENT variable only (Lloyd's
+# 2026-10-07 decision), default OFF. Controls presentation only, never
+# permissions. Stamped into editor.html as %%TESTER_SHELL%% ("1"/"0");
+# /classic always serves the classic HUD for regression testing.
+TESTER_SHELL = os.environ.get("CRUMBS_TESTER_SHELL", "0") == "1"
 # v5.41: single source of truth for the map-size cap (was 64, hardcoded in
 # four places). 500x500 = 250k cells. The client additionally caps tilePx so
 # the full-map backing canvas never exceeds 4096px per side (see editor.html).
@@ -7165,29 +7170,42 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _serve_editor(self, shell_on):
+        # v5.61: serve editor.html with build stamps applied. shell_on
+        # controls only the %%TESTER_SHELL%% stamp (presentation, never
+        # permissions).
+        try:
+            with open(HTML_PATH, "rb") as f:
+                body = f.read()
+        except FileNotFoundError:
+            self.send_response(500)
+            self.end_headers()
+            self.wfile.write(b"editor.html not found next to crumbs_hud.py")
+            return
+        # v5.22.6: the banner/splash version used to be hardcoded in the
+        # HTML and went stale on every bump. Stamp the real version here.
+        body = body.replace(b"%%CRUMBS_VERSION%%",
+                            APP_VERSION.encode("utf-8"))
+        # v5.61: tester-shell flag stamp. "1" = shell mode, "0" = classic.
+        body = body.replace(b"%%TESTER_SHELL%%",
+                            b"1" if shell_on else b"0")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        # v5.21.4: Safari heuristic-caches the page aggressively with no
+        # cache headers, so it can keep serving a stale editor.html after
+        # an update. 180KB over localhost — always fetch it fresh.
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
     def _do_GET_impl(self, path):
         if path == "/":
-            try:
-                with open(HTML_PATH, "rb") as f:
-                    body = f.read()
-            except FileNotFoundError:
-                self.send_response(500)
-                self.end_headers()
-                self.wfile.write(b"editor.html not found next to crumbs_hud.py")
-                return
-            # v5.22.6: the banner/splash version used to be hardcoded in the
-            # HTML and went stale on every bump. Stamp the real version here.
-            body = body.replace(b"%%CRUMBS_VERSION%%",
-                                APP_VERSION.encode("utf-8"))
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            # v5.21.4: Safari heuristic-caches the page aggressively with no
-            # cache headers, so it can keep serving a stale editor.html after
-            # an update. 180KB over localhost — always fetch it fresh.
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(body)
+            return self._serve_editor(TESTER_SHELL)
+        elif path == "/classic":
+            # v5.61: direct route to the existing HUD for regression
+            # testing. Not a URL secret — normal auth still gates everything.
+            return self._serve_editor(False)
         elif path == "/manifest.webmanifest":
             try:
                 with open(os.path.join(SCRIPT_DIR, "manifest.webmanifest"), "rb") as f:
@@ -7218,6 +7236,7 @@ class Handler(BaseHTTPRequestHandler):
             # to show the login overlay.
             self._send_json({"ok": True, "version": APP_VERSION,
                              "public_mode": PUBLIC_MODE,
+                             "tester_shell": TESTER_SHELL,
                              "instance": INSTANCE_ID})
         elif path == "/api/auth/me":
             # v5.27: no auth — reports the login state, never 401s.

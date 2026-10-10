@@ -12,6 +12,12 @@
 <link rel="icon" href="/icon-512.png">
 <link rel="apple-touch-icon" href="/icon-512.png">
 <title>Crumbs HUD — Tile Painter</title>
+<script>
+// v5.61 tester shell: the server stamps %%TESTER_SHELL%% as "1" (shell on)
+// or "0" (classic). Default OFF — the classic HUD boots unless the server
+// enables the shell via the CRUMBS_TESTER_SHELL environment variable.
+window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
+</script>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; padding: 0; background: #111; color: #eee;
@@ -1267,6 +1273,42 @@
   #height-legend span { display: block; line-height: 1.7; white-space: nowrap; }
   #height-legend i { display: inline-block; width: 12px; height: 12px;
                      border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+</style>
+<style id="shell-style">
+  /* ===== TESTER SHELL (v5.61+, Stage 1) =====
+     Presentation layer over the classic HUD. Spec: deep charcoal bg, warm
+     cream text, one Crumbs gold accent, 48px touch targets, 16px body /
+     14px secondary type floor, non-color selection signals, safe areas. */
+  #shell-root {
+    position: fixed; inset: 0; z-index: 500;
+    background: #141311; color: #f3ead6;
+    font-family: system-ui, -apple-system, sans-serif;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 16px; padding: max(24px, env(safe-area-inset-top))
+               max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom))
+               max(24px, env(safe-area-inset-left));
+    text-align: center;
+  }
+  #shell-root .shell-mark { font-size: 44px; line-height: 1; }
+  #shell-root h1 { font-size: 28px; margin: 0; color: #f3ead6; font-weight: 700; }
+  #shell-root .shell-stage {
+    font-size: 14px; color: #141311; background: #c9973f;
+    border-radius: 999px; padding: 4px 14px; font-weight: 700;
+    letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  #shell-root p { font-size: 16px; line-height: 1.5; color: #d8cdb4; margin: 0; max-width: 34em; }
+  #shell-root .shell-btn {
+    min-height: 48px; min-width: 48px; padding: 12px 28px;
+    font-size: 17px; font-weight: 700; color: #141311;
+    background: #c9973f; border: 2px solid #c9973f; border-radius: 12px;
+    cursor: pointer;
+  }
+  #shell-root .shell-btn:active { background: #a87f33; }
+  #shell-root .shell-note { font-size: 14px; color: #8f8672; }
+  #shell-root .shell-note a { color: #c9973f; }
+  @media (prefers-reduced-motion: reduce) {
+    #shell-root { animation: none; }
+  }
 </style>
 </head>
 <body>
@@ -14096,8 +14138,53 @@ async function placeRoomPreset(kind) {
         " placed — it's all editable, and ↩ undoes it in one tap");
 }
 
+// ================= TESTER SHELL (v5.61+, Stage 1) =================
+// Presentation layer over the classic HUD — not a rewrite. The shell owns
+// the boot flow when the server enables it (window.CRUMBS_TESTER_SHELL);
+// the classic HUD stays fully working at /classic and behind Creator Tools.
+// Spec: Crumbs-World-Tester-Shell-Crumb.txt (15 screens, state model, a11y).
+window.CrumbsShell = {
+  // Spec state model. mode: simple | creator | play
+  // destination: home | build | world | play | menu
+  // welcome: "not completed" | completed
+  // drawer: closed | half | full ; save: idle|saving|saved|error|disconnected|recovered
+  state: { mode: "simple", destination: "home",
+           welcome: "not completed", drawer: "closed", save: "idle" },
+  // Device-local PRESENTATION prefs only — never permissions, never secrets.
+  prefs: { welcomeCompleted: false, reduceMotion: false,
+           textSize: "normal", highContrast: false },
+};
+// Stage 1: shell mode exists and is observable. Later stages replace this
+// screen with Account Entry / First-Light Welcome / World Home.
+function shellBoot() {
+  document.documentElement.setAttribute("data-shell-mode", "simple");
+  var spl = document.getElementById("splash");
+  if (spl) spl.classList.add("gone");  // classic splash must not cover the shell
+  var root = document.createElement("div");
+  root.id = "shell-root";
+  root.setAttribute("role", "main");
+  root.setAttribute("aria-label", "Crumbs World tester shell");
+  root.innerHTML =
+    '<div class="shell-mark" aria-hidden="true">\u25FC</div>' +
+    "<h1>Crumbs World</h1>" +
+    '<span class="shell-stage">Tester Shell \u00B7 Stage 1</span>' +
+    "<p>The tester shell is switched on. The new tester experience is " +
+    "being built in stages \u2014 the full classic workshop is one tap away, " +
+    "unchanged.</p>" +
+    '<button class="shell-btn" id="shell-open-classic">Open classic HUD</button>' +
+    '<div class="shell-note">v%%CRUMBS_VERSION%% \u00B7 tester build \u00B7 ' +
+    '<a href="/classic">direct classic route</a></div>';
+  document.body.appendChild(root);
+  document.getElementById("shell-open-classic").onclick = function () {
+    location.href = "/classic";
+  };
+}
+
 (async function init() {
   try {
+    // v5.61 tester shell: when enabled, the shell owns boot; the classic
+    // HUD below is untouched and reachable at /classic.
+    if (window.CRUMBS_TESTER_SHELL) { shellBoot(); return; }
     // v5.27: public mode parks on the login overlay until the user logs
     // in; local mode skips the gate and boots straight in.
     if (!(await authGate())) return;

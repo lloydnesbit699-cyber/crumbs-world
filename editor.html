@@ -1309,6 +1309,293 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   @media (prefers-reduced-motion: reduce) {
     #shell-root { animation: none; }
   }
+
+  /* ===== TESTER SHELL (v5.61+, Stage 2: Account Entry, Welcome, World Home)
+     Screens 01-03 of the spec. Type floor 16px body / 14px secondary,
+     48px touch targets, non-color selection signals, safe areas,
+     visible focus, reduced-motion alternatives. */
+  #shell-root .sh-screen {
+    width: 100%; min-height: 100%; display: flex; flex-direction: column;
+    text-align: left; position: relative;
+  }
+  #shell-root .sh-scroll {
+    flex: 1; width: 100%; overflow-y: auto; -webkit-overflow-scrolling: touch;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  #shell-root .sh-wrap { width: 100%; max-width: 520px; margin: 0 auto; }
+  #shell-root :focus-visible {
+    outline: 3px solid #c9973f; outline-offset: 2px; border-radius: 8px;
+  }
+  /* One-time entrance; never loops, never blocks input. */
+  @keyframes sh-rise {
+    from { opacity: 0; transform: scale(0.97) translateY(10px); }
+    to { opacity: 1; transform: none; }
+  }
+  #shell-root .sh-enter { animation: sh-rise 0.45s ease-out 1; }
+  @media (prefers-reduced-motion: reduce) {
+    #shell-root .sh-enter { animation: none; }
+  }
+  html.sh-reduce-motion #shell-root .sh-enter,
+  html.sh-reduce-motion #shell-root * {
+    animation: none !important; transition: none !important;
+  }
+  /* Shared controls */
+  #shell-root .sh-btn-primary {
+    display: block; width: 100%; min-height: 52px; padding: 13px 28px;
+    font-size: 17px; font-weight: 700; color: #141311;
+    background: #c9973f; border: 2px solid #c9973f; border-radius: 12px;
+    cursor: pointer; margin-top: 12px;
+  }
+  #shell-root .sh-btn-primary:active { background: #a87f33; border-color: #a87f33; }
+  #shell-root .sh-btn-primary:disabled { opacity: 0.55; cursor: default; }
+  #shell-root .sh-btn-secondary {
+    display: block; width: 100%; min-height: 52px; padding: 13px 28px;
+    font-size: 17px; font-weight: 600; color: #f3ead6;
+    background: transparent; border: 2px solid #6b6252; border-radius: 12px;
+    cursor: pointer; margin-top: 12px;
+  }
+  #shell-root .sh-btn-secondary:active { border-color: #c9973f; }
+  #shell-root .sh-linkbtn {
+    background: none; border: 0; padding: 12px; min-height: 48px;
+    color: #c9973f; font-size: 16px; text-decoration: underline; cursor: pointer;
+  }
+  #shell-root .sh-card {
+    background: #1e1c18; border: 1px solid #3a352b; border-radius: 16px;
+    padding: 20px; width: 100%;
+  }
+  #shell-root .sh-hint { font-size: 14px; line-height: 1.5; color: #8f8672; margin: 10px 0 0; }
+  #shell-root .sh-foot {
+    width: 100%; max-width: 520px; margin: 18px auto 0; text-align: center;
+  }
+  #shell-root .sh-foot p { font-size: 14px; line-height: 1.55; color: #8f8672; margin: 0 0 8px; }
+  #shell-root .sh-foot-quiet p { font-size: 13px; color: #6f6858; }
+  /* Pixel-world scene: quiet, static, decorative only. */
+  #shell-root .sh-scene {
+    position: absolute; inset: 0; overflow: hidden; pointer-events: none;
+    border-radius: inherit;
+    background:
+      radial-gradient(2px 2px at 18% 22%, rgba(243,234,214,0.85) 60%, transparent 61%),
+      radial-gradient(2px 2px at 34% 12%, rgba(243,234,214,0.5) 60%, transparent 61%),
+      radial-gradient(2px 2px at 63% 26%, rgba(201,151,63,0.9) 60%, transparent 61%),
+      radial-gradient(3px 3px at 78% 10%, rgba(243,234,214,0.7) 60%, transparent 61%),
+      radial-gradient(2px 2px at 88% 34%, rgba(243,234,214,0.45) 60%, transparent 61%),
+      radial-gradient(2px 2px at 8% 44%, rgba(201,151,63,0.6) 60%, transparent 61%),
+      linear-gradient(#0e0d0b 0 58%, #1b1913 58% 74%, #12110d 74% 100%);
+  }
+  #shell-root .sh-scene::after {
+    content: ""; position: absolute; left: 12%; right: 12%; top: 58%; height: 14px;
+    background:
+      linear-gradient(90deg, #2c2a22 0 14px, transparent 14px 20px,
+                      #2c2a22 20px 44px, transparent 44px 52px,
+                      #2c2a22 52px 66px, transparent 66px 76px,
+                      #2c2a22 76px 104px, transparent 104px 118px,
+                      #2c2a22 118px 132px, transparent 132px 150px);
+    opacity: 0.9;
+  }
+  /* ---- Screen 01: Account Entry ---- */
+  #shell-root .sh-brand {
+    position: relative; overflow: hidden; border-radius: 16px;
+    border: 1px solid #3a352b; min-height: 168px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 6px; padding: 28px 20px; text-align: center; margin-bottom: 18px;
+  }
+  #shell-root .sh-brand .sh-mark { font-size: 40px; line-height: 1; color: #c9973f; position: relative; }
+  #shell-root .sh-brand h1 { font-size: 30px; margin: 0; color: #f3ead6; position: relative; }
+  #shell-root .sh-brand .sh-tag { font-size: 14px; color: #d8cdb4; position: relative; margin: 0; }
+  #shell-root .sh-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  #shell-root .sh-tabs button {
+    flex: 1; min-height: 48px; padding: 10px; font-size: 16px; font-weight: 600;
+    color: #d8cdb4; background: transparent; border: 2px solid #3a352b;
+    border-radius: 12px; cursor: pointer;
+  }
+  /* Selected tab: thicker gold border + underline + bold — never color alone. */
+  #shell-root .sh-tabs button[aria-selected="true"] {
+    color: #f3ead6; border: 3px solid #c9973f; font-weight: 700;
+    text-decoration: underline; text-underline-offset: 4px; padding: 9px 10px;
+  }
+  #shell-root .sh-field { margin: 0 0 14px; }
+  #shell-root .sh-field label {
+    display: block; font-size: 16px; font-weight: 600; color: #f3ead6; margin-bottom: 6px;
+  }
+  #shell-root .sh-field input {
+    display: block; width: 100%; min-height: 52px; padding: 12px 14px;
+    font-size: 16px; color: #f3ead6; background: #141311;
+    border: 2px solid #3a352b; border-radius: 10px;
+  }
+  #shell-root .sh-field input:focus { border-color: #c9973f; outline: none; }
+  #shell-root .sh-field input[aria-invalid="true"] { border-color: #ff9a9a; border-width: 3px; }
+  #shell-root .sh-err {
+    display: flex; gap: 8px; align-items: flex-start;
+    font-size: 14px; line-height: 1.45; color: #ffb3b3; margin-top: 6px;
+  }
+  #shell-root .sh-err .sh-err-icon { flex: none; }
+  #shell-root .sh-err-summary {
+    border: 2px solid #ff9a9a; border-radius: 10px; padding: 12px 14px;
+    font-size: 15px; line-height: 1.5; color: #ffd9d9; background: #241a1a;
+    margin-bottom: 14px;
+  }
+  /* ---- Screen 02: First-Light Welcome ---- */
+  #shell-root .sh-welcome { justify-content: center; }
+  #shell-root .sh-welcome-inner {
+    position: relative; width: 100%; max-width: 520px; margin: auto;
+    display: flex; flex-direction: column; align-items: center; text-align: center;
+    gap: 10px; padding: 24px 8px;
+  }
+  #shell-root .sh-welcome-inner .sh-mark { font-size: 56px; line-height: 1; color: #c9973f; }
+  #shell-root .sh-welcome-inner h1 { font-size: 34px; margin: 0; color: #f3ead6; }
+  #shell-root .sh-promise { font-size: 17px; color: #d8cdb4; margin: 0 0 12px; }
+  #shell-root .sh-welcome-enter { max-width: 340px; margin-left: auto; margin-right: auto; }
+  /* ---- Accessibility dialog ---- */
+  #shell-root .sh-scrim {
+    position: fixed; inset: 0; z-index: 600; background: rgba(0,0,0,0.6);
+    display: flex; align-items: flex-end; justify-content: center;
+    padding: max(16px, env(safe-area-inset-bottom)) 16px max(16px, env(safe-area-inset-bottom));
+  }
+  @media (min-width: 700px) { #shell-root .sh-scrim { align-items: center; } }
+  #shell-root .sh-dialog {
+    background: #1e1c18; border: 2px solid #3a352b; border-radius: 16px;
+    padding: 22px; width: 100%; max-width: 440px; max-height: 85vh; overflow-y: auto;
+  }
+  #shell-root .sh-dialog h2 { font-size: 22px; margin: 0 0 6px; color: #f3ead6; }
+  #shell-root .sh-dialog .sh-sub { font-size: 14px; color: #8f8672; margin: 0 0 14px; }
+  #shell-root .sh-check {
+    display: flex; gap: 12px; align-items: center; min-height: 52px;
+    font-size: 16px; color: #f3ead6; padding: 6px 0; cursor: pointer;
+  }
+  #shell-root .sh-check input { width: 26px; height: 26px; flex: none; accent-color: #c9973f; }
+  #shell-root .sh-seg-label { font-size: 16px; font-weight: 600; color: #f3ead6; margin: 14px 0 8px; }
+  #shell-root .sh-seg { display: flex; gap: 8px; }
+  #shell-root .sh-seg button {
+    flex: 1; min-height: 52px; font-size: 16px; font-weight: 600;
+    color: #d8cdb4; background: transparent; border: 2px solid #3a352b;
+    border-radius: 12px; cursor: pointer;
+  }
+  #shell-root .sh-seg button[aria-pressed="true"] {
+    color: #f3ead6; border: 3px solid #c9973f; font-weight: 700;
+  }
+  #shell-root .sh-seg button[aria-pressed="true"]::after { content: " \2713"; }
+  /* ---- Screen 03: World Home ---- */
+  #shell-root .sh-topbar {
+    width: 100%; display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 2px 14px;
+  }
+  #shell-root .sh-topbar .sh-title { font-size: 22px; font-weight: 700; color: #f3ead6; margin: 0; }
+  #shell-root .sh-menu-btn {
+    min-width: 48px; min-height: 48px; padding: 10px 14px;
+    font-size: 18px; color: #f3ead6; background: #1e1c18;
+    border: 2px solid #3a352b; border-radius: 12px; cursor: pointer;
+  }
+  #shell-root .sh-hero { margin-bottom: 16px; overflow: hidden; padding: 0; }
+  #shell-root .sh-hero-body { padding: 18px 20px 20px; }
+  #shell-root .sh-eyebrow {
+    font-size: 14px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    color: #c9973f; margin: 0 0 6px;
+  }
+  #shell-root .sh-hero h2 { font-size: 24px; margin: 0 0 4px; color: #f3ead6; }
+  #shell-root .sh-hero .sh-sub { font-size: 15px; color: #d8cdb4; margin: 0 0 6px; }
+  #shell-root .sh-hero-actions { display: flex; gap: 10px; }
+  #shell-root .sh-hero-actions .sh-btn-primary,
+  #shell-root .sh-hero-actions .sh-btn-secondary { margin-top: 10px; }
+  /* Highlighted Continue hero: thicker border + check badge — never color alone. */
+  #shell-root .sh-hero-continue { border: 3px solid #c9973f; padding: 0; }
+  #shell-root .sh-hero-continue .sh-hero-body { padding: 17px 19px 19px; }
+  #shell-root .sh-continue-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 14px; font-weight: 700; color: #141311; background: #c9973f;
+    border-radius: 999px; padding: 4px 12px; margin-bottom: 8px;
+  }
+  #shell-root .sh-preview {
+    width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block;
+    background: #141311; border-bottom: 1px solid #3a352b;
+  }
+  #shell-root .sh-preview-fallback {
+    width: 100%; aspect-ratio: 16 / 9; display: flex; align-items: center;
+    justify-content: center; flex-direction: column; gap: 6px;
+    background: linear-gradient(135deg, #1b1913 0%, #242118 60%, #1b1913 100%);
+    border-bottom: 1px solid #3a352b; color: #c9973f;
+  }
+  #shell-root .sh-preview-fallback .sh-mark { font-size: 34px; line-height: 1; }
+  #shell-root .sh-preview-fallback span { font-size: 14px; color: #8f8672; }
+  #shell-root .sh-world-meta {
+    display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center;
+    font-size: 14px; color: #8f8672; margin: 8px 0 0;
+  }
+  #shell-root .sh-status {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 14px; font-weight: 600; color: #d8cdb4;
+  }
+  #shell-root .sh-status .sh-dot {
+    width: 10px; height: 10px; border-radius: 50%; background: #7fb069; flex: none;
+  }
+  #shell-root .sh-status.sh-warn .sh-dot { background: #e0a63f; border-radius: 2px; }
+  #shell-root .sh-grid { display: grid; gap: 12px; grid-template-columns: 1fr; }
+  @media (min-width: 700px) { #shell-root .sh-grid { grid-template-columns: 1fr 1fr; } }
+  #shell-root .sh-action-card {
+    display: flex; gap: 14px; align-items: center; width: 100%;
+    min-height: 84px; padding: 16px 18px; text-align: left;
+    background: #1e1c18; border: 2px solid #3a352b; border-radius: 16px;
+    cursor: pointer; color: #f3ead6;
+  }
+  #shell-root .sh-action-card:active { border-color: #c9973f; }
+  #shell-root .sh-action-card .sh-ic {
+    flex: none; width: 52px; height: 52px; border-radius: 12px;
+    background: #141311; border: 1px solid #3a352b;
+    display: flex; align-items: center; justify-content: center; font-size: 26px;
+  }
+  #shell-root .sh-action-card b { display: block; font-size: 17px; }
+  #shell-root .sh-action-card small { display: block; font-size: 14px; color: #8f8672; margin-top: 2px; }
+  #shell-root .sh-action-card .sh-go { margin-left: auto; font-size: 22px; color: #c9973f; flex: none; }
+  /* ---- Menu sheet ---- */
+  #shell-root .sh-menu-sheet {
+    background: #1e1c18; border: 2px solid #3a352b; border-radius: 16px 16px 0 0;
+    padding: 12px 18px max(20px, env(safe-area-inset-bottom));
+    width: 100%; max-width: 520px;
+  }
+  #shell-root .sh-menu-sheet .sh-grab {
+    width: 44px; height: 5px; border-radius: 3px; background: #6b6252; margin: 4px auto 12px;
+  }
+  #shell-root .sh-menu-user { font-size: 16px; font-weight: 700; color: #f3ead6; margin: 0 0 2px; }
+  #shell-root .sh-menu-sub { font-size: 14px; color: #8f8672; margin: 0 0 10px; }
+  #shell-root .sh-menu-item {
+    display: flex; align-items: center; gap: 12px; width: 100%;
+    min-height: 52px; padding: 12px 6px; font-size: 16px; color: #f3ead6;
+    background: none; border: 0; border-top: 1px solid #2c2a22; cursor: pointer; text-align: left;
+  }
+  #shell-root .sh-menu-item .sh-mi { width: 28px; text-align: center; flex: none; }
+  /* ---- Loading / error ---- */
+  #shell-root .sh-loading, #shell-root .sh-error { align-items: center; justify-content: center; text-align: center; }
+  #shell-root .sh-loading .sh-mark, #shell-root .sh-error .sh-mark {
+    font-size: 48px; line-height: 1; color: #c9973f; margin-bottom: 8px;
+  }
+  #shell-root .sh-loading p, #shell-root .sh-error p {
+    font-size: 16px; color: #d8cdb4; margin: 6px 0 0; max-width: 30em;
+  }
+  #shell-root .sh-error h2 { font-size: 24px; color: #f3ead6; margin: 0; }
+  #shell-root .sh-error .sh-btn-primary { max-width: 320px; margin-left: auto; margin-right: auto; }
+  /* ---- Text-size + high-contrast prefs ---- */
+  html.sh-text-large #shell-root { font-size: 18px; }
+  html.sh-text-large #shell-root p,
+  html.sh-text-large #shell-root .sh-hint,
+  html.sh-text-large #shell-root .sh-foot p,
+  html.sh-text-large #shell-root .sh-world-meta,
+  html.sh-text-large #shell-root .sh-status,
+  html.sh-text-large #shell-root .sh-action-card small,
+  html.sh-text-large #shell-root .sh-err { font-size: 16px; }
+  html.sh-text-large #shell-root .sh-field label,
+  html.sh-text-large #shell-root .sh-tabs button,
+  html.sh-text-large #shell-root .sh-linkbtn,
+  html.sh-text-large #shell-root .sh-menu-item { font-size: 18px; }
+  html.sh-high-contrast #shell-root { background: #000; color: #fff; }
+  html.sh-high-contrast #shell-root .sh-card,
+  html.sh-high-contrast #shell-root .sh-dialog,
+  html.sh-high-contrast #shell-root .sh-action-card,
+  html.sh-high-contrast #shell-root .sh-menu-sheet { background: #0a0a0a; border-color: #f3ead6; }
+  html.sh-high-contrast #shell-root p,
+  html.sh-high-contrast #shell-root .sh-hint,
+  html.sh-high-contrast #shell-root .sh-foot p,
+  html.sh-high-contrast #shell-root .sh-world-meta,
+  html.sh-high-contrast #shell-root .sh-action-card small { color: #e8e2d2; }
+  html.sh-high-contrast #shell-root .sh-field input { border-color: #f3ead6; }
 </style>
 </head>
 <body>
@@ -14138,11 +14425,14 @@ async function placeRoomPreset(kind) {
         " placed — it's all editable, and ↩ undoes it in one tap");
 }
 
-// ================= TESTER SHELL (v5.61+, Stage 1) =================
+// ================= TESTER SHELL (v5.61+, Stage 2) =================
 // Presentation layer over the classic HUD — not a rewrite. The shell owns
 // the boot flow when the server enables it (window.CRUMBS_TESTER_SHELL);
 // the classic HUD stays fully working at /classic and behind Creator Tools.
 // Spec: Crumbs-World-Tester-Shell-Crumb.txt (15 screens, state model, a11y).
+// Stage 2: Account Entry, First-Light Welcome, World Home. Auth is delegated
+// to the existing doLogin()/doSignup() — the shell only re-presents them;
+// no auth, vault, or save behavior changes.
 window.CrumbsShell = {
   // Spec state model. mode: simple | creator | play
   // destination: home | build | world | play | menu
@@ -14154,30 +14444,535 @@ window.CrumbsShell = {
   prefs: { welcomeCompleted: false, reduceMotion: false,
            textSize: "normal", highContrast: false },
 };
-// Stage 1: shell mode exists and is observable. Later stages replace this
-// screen with Account Entry / First-Light Welcome / World Home.
-function shellBoot() {
+// ---- Stage 2: device-local presentation prefs (localStorage) ----
+// PRESENTATION ONLY — never permissions, never secrets, never credentials.
+var SHELL_PREFS_KEY = "crumbs.shell.prefs.v1";
+function shellLoadPrefs() {
+  try {
+    var raw = localStorage.getItem(SHELL_PREFS_KEY);
+    if (!raw) return;
+    var p = JSON.parse(raw), cur = window.CrumbsShell.prefs;
+    if (typeof p.welcomeCompleted === "boolean") cur.welcomeCompleted = p.welcomeCompleted;
+    if (typeof p.reduceMotion === "boolean") cur.reduceMotion = p.reduceMotion;
+    if (p.textSize === "large" || p.textSize === "normal") cur.textSize = p.textSize;
+    if (typeof p.highContrast === "boolean") cur.highContrast = p.highContrast;
+  } catch (e) {}
+}
+function shellSavePrefs() {
+  try { localStorage.setItem(SHELL_PREFS_KEY, JSON.stringify(window.CrumbsShell.prefs)); }
+  catch (e) {}
+}
+function shellApplyPrefs() {
+  var p = window.CrumbsShell.prefs, de = document.documentElement;
+  de.classList.toggle("sh-reduce-motion", !!p.reduceMotion);
+  de.classList.toggle("sh-text-large", p.textSize === "large");
+  de.classList.toggle("sh-high-contrast", !!p.highContrast);
+  window.CrumbsShell.state.welcome = p.welcomeCompleted ? "completed" : "not completed";
+}
+
+// ---- Stage 2: screen plumbing ----
+function shellRootEl() {
+  var root = document.getElementById("shell-root");
+  if (!root) {
+    root = document.createElement("div");
+    root.id = "shell-root";
+    document.body.appendChild(root);
+  }
+  return root;
+}
+function shellShow(html, label) {
+  var root = shellRootEl();
+  root.style.display = "";
+  root.setAttribute("role", "main");
+  root.setAttribute("aria-label", label || "Crumbs World");
+  root.innerHTML = html;
+  return root;
+}
+function shellLoadingScreen(text) {
+  shellShow(
+    '<div class="sh-screen sh-loading"><div class="sh-wrap">' +
+    '<div class="sh-mark" aria-hidden="true">\u25FC</div>' +
+    '<p role="status">' + text + "</p></div></div>",
+    "Loading");
+}
+function shellErrorScreen(title, body, retryLabel, onRetry) {
+  var root = shellShow(
+    '<div class="sh-screen sh-error"><div class="sh-wrap">' +
+    '<div class="sh-mark" aria-hidden="true">\u25FC</div>' +
+    "<h2></h2><p></p>" +
+    '<button class="sh-btn-primary" id="sh-err-retry"></button>' +
+    "</div></div>",
+    "Something went wrong");
+  root.querySelector("h2").textContent = title;
+  root.querySelector("p").textContent = body;
+  var b = root.querySelector("#sh-err-retry");
+  b.textContent = retryLabel || "Try again";
+  b.onclick = onRetry;
+  b.focus();
+}
+
+// ---- Stage 2, Screen 01: Account Entry ----
+// Restyled presentation only. Signup/login still run through the existing
+// doSignup()/doLogin(): values are copied into the classic fields first and
+// window._loginResolve is pointed at the shell, so the existing
+// loginComplete() resolves the shell's wait instead of reloading the page.
+var _shellAuthTab = "signup";
+function shellField(id, label, type, placeholder, attrs) {
+  var a = "";
+  if (attrs) for (var k in attrs) a += " " + k + '="' + attrs[k] + '"';
+  return '<div class="sh-field"><label for="' + id + '">' + label + "</label>" +
+    '<input id="' + id + '" type="' + type + '" placeholder="' + placeholder + '"' + a +
+    ' aria-describedby="' + id + '-err">' +
+    '<div class="sh-err" id="' + id + '-err" hidden>' +
+    '<span class="sh-err-icon" aria-hidden="true">\u26A0</span><span></span></div></div>';
+}
+function shellShowAccount() {
+  window.CrumbsShell.state.destination = "home";
+  _shellAuthTab = "signup";
+  shellShow(
+  '<div class="sh-screen"><div class="sh-scroll"><div class="sh-wrap">' +
+    '<div class="sh-brand"><div class="sh-scene" aria-hidden="true"></div>' +
+      '<div class="sh-mark" aria-hidden="true">\u25FC</div>' +
+      "<h1>Crumbs World</h1>" +
+      '<p class="sh-tag">Build it. Explore it. Bring it to life.</p>' +
+    "</div>" +
+    '<div class="sh-card sh-enter" role="form" aria-label="Your account">' +
+      '<div class="sh-err-summary" id="sh-auth-summary" role="alert" hidden></div>' +
+      '<div class="sh-tabs" role="tablist" aria-label="Account">' +
+        '<button id="sh-tab-signup" role="tab" aria-selected="true" aria-controls="sh-pane-signup">Create Account</button>' +
+        '<button id="sh-tab-login" role="tab" aria-selected="false" aria-controls="sh-pane-login">Sign In</button>' +
+      "</div>" +
+      '<div id="sh-pane-signup" role="tabpanel" aria-labelledby="sh-tab-signup">' +
+        shellField("sh-su-user", "Username", "text", "pick-a-name",
+          { autocomplete: "username", autocapitalize: "none", autocorrect: "off" }) +
+        shellField("sh-su-email", "Email", "email", "you@example.com",
+          { autocomplete: "email", autocapitalize: "none", autocorrect: "off" }) +
+        shellField("sh-su-pass", "Password", "password", "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
+          { autocomplete: "new-password" }) +
+        shellField("sh-su-phone", "Phone (optional)", "tel", "(optional)",
+          { autocomplete: "tel", autocapitalize: "none", autocorrect: "off" }) +
+        '<p class="sh-hint">Use a unique test password \u2014 not an important personal password.</p>' +
+        '<button class="sh-btn-primary" id="sh-su-go">Enter Crumbs World</button>' +
+      "</div>" +
+      '<div id="sh-pane-login" role="tabpanel" aria-labelledby="sh-tab-login" hidden>' +
+        shellField("sh-login-user", "Username", "text", "your username",
+          { autocomplete: "username", autocapitalize: "none", autocorrect: "off" }) +
+        shellField("sh-login-pass", "Password", "password", "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
+          { autocomplete: "current-password" }) +
+        '<button class="sh-btn-primary" id="sh-login-go">Sign In</button>' +
+      "</div>" +
+    "</div>" +
+    '<div class="sh-foot"><p>Your worlds stay private to your account. ' +
+      "New here? Creating an account takes a few seconds \u2014 pick any username you like.</p></div>" +
+  "</div></div></div>",
+  "Crumbs World \u2014 your account");
+  $("sh-tab-signup").onclick = function () { shellAuthTab("signup"); };
+  $("sh-tab-login").onclick = function () { shellAuthTab("login"); };
+  $("sh-su-go").onclick = function () { shellSubmitAuth("signup"); };
+  $("sh-login-go").onclick = function () { shellSubmitAuth("login"); };
+  var enterSubmits = function (kind) {
+    return function (e) { if (e.key === "Enter") { e.preventDefault(); shellSubmitAuth(kind); } };
+  };
+  ["sh-su-user", "sh-su-email", "sh-su-pass", "sh-su-phone"].forEach(function (id) {
+    $(id).addEventListener("keydown", enterSubmits("signup"));
+  });
+  ["sh-login-user", "sh-login-pass"].forEach(function (id) {
+    $(id).addEventListener("keydown", enterSubmits("login"));
+  });
+  setTimeout(function () { var f = $("sh-su-user"); if (f) f.focus(); }, 60);
+}
+function shellAuthTab(which) {
+  _shellAuthTab = which;
+  var su = which === "signup";
+  $("sh-tab-signup").setAttribute("aria-selected", su ? "true" : "false");
+  $("sh-tab-login").setAttribute("aria-selected", su ? "false" : "true");
+  $("sh-pane-signup").hidden = !su;
+  $("sh-pane-login").hidden = su;
+  shellClearAuthErrors();
+}
+function shellClearAuthErrors() {
+  var sum = $("sh-auth-summary");
+  if (sum) { sum.hidden = true; sum.textContent = ""; }
+  ["sh-su-user", "sh-su-email", "sh-su-pass", "sh-su-phone",
+   "sh-login-user", "sh-login-pass"].forEach(function (id) {
+    var e = document.getElementById(id + "-err"), f = document.getElementById(id);
+    if (e) { e.hidden = true; e.querySelector("span:last-child").textContent = ""; }
+    if (f) f.setAttribute("aria-invalid", "false");
+  });
+}
+function shellFieldError(inputId, msg) {
+  var f = document.getElementById(inputId), e = document.getElementById(inputId + "-err");
+  if (f) f.setAttribute("aria-invalid", "true");
+  if (e) { e.hidden = false; e.querySelector("span:last-child").textContent = msg; }
+}
+function shellSummaryError(msg) {
+  var sum = $("sh-auth-summary");
+  if (sum) { sum.hidden = false; sum.textContent = msg; }
+}
+function shellMapAuthError(kind, msg) {
+  var m = String(msg).toLowerCase();
+  var idPre = kind === "signup" ? "sh-su" : "sh-login";
+  var field = null;
+  if (/user ?name/.test(m)) field = idPre + "-user";
+  else if (/email/.test(m)) field = idPre + "-email";
+  else if (/password/.test(m)) field = idPre + "-pass";
+  else if (/phone/.test(m)) field = idPre + "-phone";
+  if (field && document.getElementById(field)) {
+    shellFieldError(field, msg);
+    shellSummaryError(msg);
+  } else {
+    shellSummaryError(msg);
+  }
+}
+async function shellSubmitAuth(kind) {
+  shellClearAuthErrors();
+  var btn = document.getElementById(kind === "signup" ? "sh-su-go" : "sh-login-go");
+  var label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "One moment\u2026";
+  var isNew = kind === "signup";
+  if (isNew) {
+    $("su-user").value = $("sh-su-user").value;
+    $("su-email").value = $("sh-su-email").value;
+    $("su-pass").value = $("sh-su-pass").value;
+    $("su-phone").value = $("sh-su-phone").value;
+  } else {
+    $("login-user").value = $("sh-login-user").value;
+    $("login-pass").value = $("sh-login-pass").value;
+  }
+  var authed = false;
+  window._loginResolve = function () { authed = true; };
+  try {
+    if (isNew) await doSignup(); else await doLogin();
+  } finally {
+    window._loginResolve = null;
+  }
+  if (authed && ME) { shellAuthComplete(isNew); return; }
+  // A 2FA step opened inside the classic overlay: hand off to the existing,
+  // tested 2FA panes rather than re-implementing them in the shell.
+  if (!$("pane-2fa").hidden || !$("pane-signup-2fa").hidden) {
+    shellShowClassicLogin(!$("pane-signup-2fa").hidden);
+    return;
+  }
+  btn.disabled = false;
+  btn.textContent = label;
+  var msg = (isNew ? $("su-err").textContent : $("login-err").textContent) ||
+            "Something went wrong. Please try again.";
+  shellMapAuthError(kind, msg);
+}
+// 2FA fallback: the classic overlay (with its tested panes) covers the
+// shell until the existing loginComplete() routes back into the shell flow.
+function shellShowClassicLogin(isNew) {
+  var root = document.getElementById("shell-root");
+  if (root) root.style.display = "none";
+  window._loginResolve = function () {
+    window._loginResolve = null;
+    $("login-overlay").classList.remove("show");
+    shellAuthComplete(isNew);
+  };
+  $("login-overlay").classList.add("show");
+}
+function shellAuthComplete(isNew) {
+  // ME was set by the existing loginComplete(); the shell only routes.
+  if (isNew || !window.CrumbsShell.prefs.welcomeCompleted) shellShowWelcome();
+  else shellShowHome();
+}
+
+// ---- Stage 2, Screen 02: First-Light Welcome ----
+function shellShowWelcome() {
+  window.CrumbsShell.state.destination = "home";
+  shellShow(
+  '<div class="sh-screen sh-welcome"><div class="sh-scene" aria-hidden="true"></div>' +
+    '<div class="sh-welcome-inner sh-enter">' +
+      '<div class="sh-mark" aria-hidden="true">\u25FC</div>' +
+      "<h1>Crumbs World</h1>" +
+      '<p class="sh-promise">Build it. Explore it. Bring it to life.</p>' +
+      '<button class="sh-btn-primary sh-welcome-enter" id="sh-welcome-enter">Enter Crumbs World</button>' +
+      '<button class="sh-linkbtn" id="sh-a11y-open">Accessibility and Display Options</button>' +
+    "</div>" +
+    '<div class="sh-foot sh-foot-quiet"><p>v%%CRUMBS_VERSION%% \u00B7 tester build</p></div>' +
+  "</div>",
+  "Welcome to Crumbs World");
+  $("sh-welcome-enter").onclick = function () {
+    window.CrumbsShell.prefs.welcomeCompleted = true;
+    shellSavePrefs();
+    shellApplyPrefs();
+    shellShowHome();
+  };
+  $("sh-a11y-open").onclick = function () { shellOpenA11y($("sh-a11y-open")); };
+}
+var _a11yReturnFocus = null;
+function shellOpenA11y(returnTo) {
+  _a11yReturnFocus = returnTo || null;
+  var root = shellRootEl(), p = window.CrumbsShell.prefs;
+  var wrap = document.createElement("div");
+  wrap.id = "sh-a11y-wrap";
+  wrap.innerHTML =
+  '<div class="sh-scrim" id="sh-a11y-scrim"><div class="sh-dialog" role="dialog" ' +
+    'aria-modal="true" aria-labelledby="sh-a11y-h">' +
+    "<h2 id=\"sh-a11y-h\">Accessibility and Display Options</h2>" +
+    '<p class="sh-sub">Set these before you enter. Everything here is saved on this device.</p>' +
+    '<label class="sh-check"><input type="checkbox" id="sh-opt-motion"' +
+      (p.reduceMotion ? " checked" : "") + "> Reduce motion</label>" +
+    '<div class="sh-seg-label" id="sh-ts-label">Text size</div>' +
+    '<div class="sh-seg" role="group" aria-labelledby="sh-ts-label">' +
+      '<button id="sh-opt-text-normal" aria-pressed="' + (p.textSize !== "large") + '">Normal</button>' +
+      '<button id="sh-opt-text-large" aria-pressed="' + (p.textSize === "large") + '">Large</button>' +
+    "</div>" +
+    '<label class="sh-check"><input type="checkbox" id="sh-opt-contrast"' +
+      (p.highContrast ? " checked" : "") + "> High contrast</label>" +
+    '<p class="sh-hint">Chosen options always show more than color \u2014 ' +
+      "look for the \u2713 and the thicker border.</p>" +
+    '<button class="sh-btn-primary" id="sh-a11y-done">Done</button>' +
+  "</div></div>";
+  root.appendChild(wrap);
+  var seg = function (large) {
+    window.CrumbsShell.prefs.textSize = large ? "large" : "normal";
+    $("sh-opt-text-normal").setAttribute("aria-pressed", String(!large));
+    $("sh-opt-text-large").setAttribute("aria-pressed", String(large));
+  };
+  $("sh-opt-text-normal").onclick = function () { seg(false); };
+  $("sh-opt-text-large").onclick = function () { seg(true); };
+  $("sh-a11y-scrim").onclick = function (e) {
+    if (e.target.id === "sh-a11y-scrim") shellCloseA11y();
+  };
+  $("sh-a11y-done").onclick = shellCloseA11y;
+  document.addEventListener("keydown", shellA11yKeys);
+  $("sh-a11y-done").focus();
+}
+function shellA11yKeys(e) { if (e.key === "Escape") shellCloseA11y(); }
+function shellCloseA11y() {
+  var p = window.CrumbsShell.prefs;
+  var mo = document.getElementById("sh-opt-motion");
+  var hc = document.getElementById("sh-opt-contrast");
+  if (mo) p.reduceMotion = mo.checked;
+  if (hc) p.highContrast = hc.checked;
+  shellSavePrefs();
+  shellApplyPrefs();
+  var wrap = document.getElementById("sh-a11y-wrap");
+  if (wrap) wrap.remove();
+  document.removeEventListener("keydown", shellA11yKeys);
+  if (_a11yReturnFocus && _a11yReturnFocus.focus) _a11yReturnFocus.focus();
+  _a11yReturnFocus = null;
+}
+
+// ---- Stage 2, Screen 03: World Home ----
+function shellRelTime(ts) {
+  if (!ts) return "Not opened yet";
+  var s = Math.floor(Date.now() / 1000) - ts;
+  if (s < 60) return "Opened just now";
+  if (s < 3600) {
+    var m = Math.floor(s / 60);
+    return "Opened " + m + " minute" + (m === 1 ? "" : "s") + " ago";
+  }
+  if (s < 86400) {
+    var h = Math.floor(s / 3600);
+    return "Opened " + h + " hour" + (h === 1 ? "" : "s") + " ago";
+  }
+  if (s < 86400 * 7) {
+    var d = Math.floor(s / 86400);
+    return "Opened " + d + " day" + (d === 1 ? "" : "s") + " ago";
+  }
+  return "Opened " + new Date(ts * 1000).toLocaleDateString([], {
+    month: "short", day: "numeric", year: "numeric" });
+}
+function shellWorldStatus(mp) {
+  // Honest signal from data the server already provides: a map it could
+  // parse (dims present) is Ready to Play; otherwise Needs Attention.
+  // Icon + text — never color alone.
+  if (mp.width && mp.height)
+    return '<span class="sh-status"><span class="sh-dot" aria-hidden="true"></span>' +
+      '<span aria-hidden="true">\u2713</span> Ready to Play</span>';
+  return '<span class="sh-status sh-warn"><span class="sh-dot" aria-hidden="true"></span>' +
+    '<span aria-hidden="true">\u26A0</span> Needs Attention</span>';
+}
+function shellPreviewImg(file) {
+  return '<img class="sh-preview" alt="" src="/api/map/thumb?file=' +
+    encodeURIComponent(file) + '" ' +
+    'onerror="this.hidden=true;this.nextElementSibling.hidden=false">' +
+    '<div class="sh-preview-fallback" hidden>' +
+    '<div class="sh-mark" aria-hidden="true">\u25FC</div><span>Crumbs World</span></div>';
+}
+function shellActionCard(id, icon, title, sub) {
+  return '<button class="sh-action-card" id="' + id + '">' +
+    '<span class="sh-ic" aria-hidden="true">' + icon + "</span>" +
+    '<span><b>' + title + "</b><small>" + sub + "</small></span>" +
+    '<span class="sh-go" aria-hidden="true">\u2192</span></button>';
+}
+// Stage 2 routing: the full canvas/create/play flows land in Stages 4-7.
+// Until then every world action opens the existing workshop at /classic,
+// which already loads the tester's vault and world.
+function shellGoClassic() { location.href = "/classic"; }
+async function shellShowHome() {
+  window.CrumbsShell.state.destination = "home";
+  shellLoadingScreen("Opening your worlds\u2026");
+  var maps = [];
+  try {
+    var m = await api("/api/maps");
+    maps = (m && m.maps) || [];
+  } catch (e) {
+    if (e && e.auth) {
+      $("login-overlay").classList.remove("show");  // keep the shell's own entry
+      shellShowAccount();
+      return;
+    }
+    shellErrorScreen("Couldn't load your worlds",
+      "Your worlds are safe \u2014 we just couldn't reach them right now.",
+      "Try again", shellShowHome);
+    return;
+  }
+  maps.sort(function (a, b) { return (b.modified || 0) - (a.modified || 0); });
+  var root = shellShow(
+  '<div class="sh-screen"><div class="sh-scroll"><div class="sh-wrap">' +
+    '<div class="sh-topbar"><p class="sh-title">Crumbs World</p>' +
+      '<button class="sh-menu-btn" id="sh-menu-open" aria-label="Menu" aria-haspopup="dialog">\u2630</button></div>' +
+    '<div id="sh-home-body"></div>' +
+  "</div></div></div>",
+  "Crumbs World \u2014 home");
+  $("sh-menu-open").onclick = function () { shellOpenMenu($("sh-menu-open")); };
+  var body = $("sh-home-body"), html = "";
+  if (maps.length) {
+    var top = maps[0];
+    html +=
+    '<div class="sh-card sh-hero sh-hero-continue sh-enter">' +
+      shellPreviewImg(top.file) +
+      '<div class="sh-hero-body">' +
+        '<span class="sh-continue-badge"><span aria-hidden="true">\u2713</span> Continue</span>' +
+        "<h2></h2>" +
+        '<p class="sh-sub">' + shellRelTime(top.modified) + "</p>" +
+        '<div class="sh-world-meta">' + shellWorldStatus(top) + "</div>" +
+        '<div class="sh-hero-actions">' +
+          '<button class="sh-btn-primary" id="sh-continue">Continue</button>' +
+          '<button class="sh-btn-secondary" id="sh-play">Play</button>' +
+        "</div>" +
+      "</div>" +
+    "</div>";
+  } else {
+    // Empty-account state: the page must not look empty.
+    html +=
+    '<div class="sh-card sh-hero sh-enter">' +
+      '<div class="sh-hero-body">' +
+        '<p class="sh-eyebrow">Welcome in</p>' +
+        "<h2>Create Your First World</h2>" +
+        '<p class="sh-sub">Start small. You can change everything later.</p>' +
+        '<button class="sh-btn-primary" id="sh-create-first">Create a World</button>' +
+      "</div>" +
+    "</div>";
+  }
+  // No "Try a Starter World" card in Stage 2: the starter beginnings are not
+  // wired to a shell create flow yet (Stage 4), and the spec forbids
+  // advertising unavailable features.
+  html +=
+  '<div class="sh-grid">' +
+    shellActionCard("sh-create", "+", "Create a World", "Start something new") +
+    shellActionCard("sh-myworlds", "\u25A6", "My Worlds", "Browse everything you've made") +
+  "</div>";
+  body.innerHTML = html;
+  if (maps.length) {
+    body.querySelector(".sh-hero h2").textContent = "Continue " + friendlyName(top.file);
+    $("sh-continue").onclick = shellGoClassic;
+    $("sh-play").onclick = shellGoClassic;
+  } else {
+    $("sh-create-first").onclick = shellGoClassic;
+  }
+  $("sh-create").onclick = shellGoClassic;
+  $("sh-myworlds").onclick = shellGoClassic;
+}
+var _menuReturnFocus = null;
+function shellOpenMenu(returnTo) {
+  _menuReturnFocus = returnTo || null;
+  var root = shellRootEl();
+  var who = (ME && ME.username) ? ME.username : "This device";
+  var sub = (ME && ME.username) ? "Tester account" : "Local session";
+  var wrap = document.createElement("div");
+  wrap.id = "sh-menu-wrap";
+  wrap.innerHTML =
+  '<div class="sh-scrim" id="sh-menu-scrim"><div class="sh-menu-sheet" role="dialog" ' +
+    'aria-modal="true" aria-label="Menu">' +
+    '<div class="sh-grab" aria-hidden="true"></div>' +
+    '<p class="sh-menu-user"></p><p class="sh-menu-sub">' + sub + "</p>" +
+    '<button class="sh-menu-item" id="sh-mi-classic"><span class="sh-mi" aria-hidden="true">\uD83D\uDD27</span> Open classic workshop</button>' +
+    '<button class="sh-menu-item" id="sh-mi-about"><span class="sh-mi" aria-hidden="true">?</span> About this build</button>' +
+    '<button class="sh-menu-item" id="sh-mi-signout"><span class="sh-mi" aria-hidden="true">\u2192</span> Sign out</button>' +
+    '<button class="sh-menu-item" id="sh-mi-close"><span class="sh-mi" aria-hidden="true">\u2715</span> Close</button>' +
+  "</div></div>";
+  root.appendChild(wrap);
+  root.querySelector(".sh-menu-user").textContent = who;
+  $("sh-mi-classic").onclick = shellGoClassic;
+  $("sh-mi-about").onclick = shellMenuAbout;
+  $("sh-mi-signout").onclick = shellSignOut;
+  $("sh-mi-close").onclick = shellCloseMenu;
+  $("sh-menu-scrim").onclick = function (e) {
+    if (e.target.id === "sh-menu-scrim") shellCloseMenu();
+  };
+  document.addEventListener("keydown", shellMenuKeys);
+  $("sh-mi-close").focus();
+}
+function shellMenuKeys(e) { if (e.key === "Escape") shellCloseMenu(); }
+function shellCloseMenu() {
+  var wrap = document.getElementById("sh-menu-wrap");
+  if (wrap) wrap.remove();
+  document.removeEventListener("keydown", shellMenuKeys);
+  if (_menuReturnFocus && _menuReturnFocus.focus) _menuReturnFocus.focus();
+  _menuReturnFocus = null;
+}
+function shellMenuAbout() {
+  var sheet = document.querySelector("#sh-menu-wrap .sh-menu-sheet");
+  if (!sheet) return;
+  sheet.innerHTML =
+    '<div class="sh-grab" aria-hidden="true"></div>' +
+    '<p class="sh-menu-user">About this build</p>' +
+    '<p class="sh-menu-sub">Crumbs World v%%CRUMBS_VERSION%% \u00B7 tester build \u00B7 shell stage 2</p>' +
+    '<p class="sh-menu-sub">Your worlds and account live on the server. ' +
+      "This device only keeps display choices like text size.</p>" +
+    '<button class="sh-menu-item" id="sh-mi-back"><span class="sh-mi" aria-hidden="true">\u2190</span> Back</button>';
+  $("sh-mi-back").onclick = function () {
+    var rt = _menuReturnFocus;
+    shellCloseMenu();
+    shellOpenMenu(rt);
+  };
+  $("sh-mi-back").focus();
+}
+async function shellSignOut() {
+  // POST (with a body) — the server only implements /api/auth/logout under
+  // POST; a bodyless GET answers "not found" and the session survives.
+  try { await api("/api/auth/logout", {}); } catch (e) {}
+  location.reload();  // boot re-runs: logged out -> Account Entry
+}
+
+// ---- Stage 2: boot ----
+// The shell owns boot when the server enables it. Classic init() below is
+// untouched; /classic always boots the classic HUD.
+async function shellBoot() {
   document.documentElement.setAttribute("data-shell-mode", "simple");
   var spl = document.getElementById("splash");
   if (spl) spl.classList.add("gone");  // classic splash must not cover the shell
-  var root = document.createElement("div");
-  root.id = "shell-root";
-  root.setAttribute("role", "main");
-  root.setAttribute("aria-label", "Crumbs World tester shell");
-  root.innerHTML =
-    '<div class="shell-mark" aria-hidden="true">\u25FC</div>' +
-    "<h1>Crumbs World</h1>" +
-    '<span class="shell-stage">Tester Shell \u00B7 Stage 1</span>' +
-    "<p>The tester shell is switched on. The new tester experience is " +
-    "being built in stages \u2014 the full classic workshop is one tap away, " +
-    "unchanged.</p>" +
-    '<button class="shell-btn" id="shell-open-classic">Open classic HUD</button>' +
-    '<div class="shell-note">v%%CRUMBS_VERSION%% \u00B7 tester build \u00B7 ' +
-    '<a href="/classic">direct classic route</a></div>';
-  document.body.appendChild(root);
-  document.getElementById("shell-open-classic").onclick = function () {
-    location.href = "/classic";
-  };
+  shellLoadPrefs();
+  shellApplyPrefs();
+  shellLoadingScreen("Opening Crumbs World\u2026");
+  var me = null;
+  try {
+    me = await api("/api/auth/me");
+  } catch (e) {
+    shellErrorScreen("Can't reach the server",
+      "Nothing you've made is at risk \u2014 the server just isn't answering right now.",
+      "Try again", shellBoot);
+    return;
+  }
+  PUBLIC_MODE = !!me.public_mode;
+  var loggedIn = !!(me.logged_in && me.username);
+  if (loggedIn) {
+    ME = { username: me.username, is_owner: me.is_owner, world: me.world || "private",
+           email: me.email || "", totp_enabled: !!me.totp_enabled };
+    updateUserMenu();
+  }
+  // Local (non-public) mode has no login — same as the classic boot path.
+  if (loggedIn || !PUBLIC_MODE) {
+    if (window.CrumbsShell.prefs.welcomeCompleted) shellShowHome();
+    else shellShowWelcome();
+  } else {
+    shellShowAccount();
+  }
 }
 
 (async function init() {

@@ -1045,6 +1045,22 @@ def _load_users():
 
 
 def _save_users(users):
+    # v5.61.0: PR safety — Lloyd's call. Keep timestamped backups of users.json
+    # so playtester profiles survive a wipe/reset. Retain the 10 most recent.
+    import time, glob
+    if os.path.exists(_USERS_FILE):
+        ts = time.strftime("%Y%m%d-%H%M%S")
+        bak = _USERS_FILE + "." + ts + ".bak"
+        try:
+            import shutil
+            shutil.copy2(_USERS_FILE, bak)
+            # prune old backups, keep 10
+            baks = sorted(glob.glob(_USERS_FILE + ".*.bak"))
+            for old in baks[:-10]:
+                try: os.remove(old)
+                except OSError: pass
+        except OSError:
+            pass
     tmp = _USERS_FILE + ".tmp"
     with open(tmp, "w") as f:
         json.dump(users, f, indent=1)

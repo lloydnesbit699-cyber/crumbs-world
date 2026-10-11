@@ -1,0 +1,60 @@
+# Example Caddy config for the public Cortana relay
+# Works well on AntiX or any small public-facing Linux box.
+# This config is deliberately strict: only approved routes are proxied.
+
+{
+  email admin@example.com
+}
+
+play.example.com {
+  encode gzip
+
+  # Serve the app shell and public assets
+  handle / {
+    reverse_proxy harley.internal:8778
+  }
+
+  handle /classic {
+    reverse_proxy harley.internal:8778
+  }
+
+  handle /manifest.webmanifest {
+    reverse_proxy harley.internal:8778
+  }
+
+  handle /service-worker.js {
+    reverse_proxy harley.internal:8778
+  }
+
+  handle /api/health {
+    reverse_proxy harley.internal:8778
+  }
+
+  handle /api/auth/me {
+    reverse_proxy harley.internal:8778
+  }
+
+  handle /api/auth/login {
+    reverse_proxy harley.internal:8778
+  }
+
+  handle /api/auth/logout {
+    reverse_proxy harley.internal:8778
+  }
+
+  # Optional: allow only safe reads; otherwise deny all unknown routes.
+  @blocked {
+    not path / /classic /manifest.webmanifest /service-worker.js /api/health /api/auth/me /api/auth/login /api/auth/logout
+  }
+
+  respond @blocked 403 {
+    body "Cortana is a public relay; write or stateful requests must go to Harley."
+    close
+  }
+
+  # Default catch-all: do not proxy stateful traffic.
+  respond 403 {
+    body "Cortana is read-only by policy."
+    close
+  }
+}

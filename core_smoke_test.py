@@ -237,8 +237,32 @@ def t_pil_paths():
 check("Pillow paths: slice/detect/transform/thumbnail", t_pil_paths)
 
 
+def t_upgrade_trust_detection():
+    import crumbs_hud as hud
+    assert hud._upgrade_trust_state("5.60.0", "5.60.0")["status"] == "ok"
+    assert hud._upgrade_trust_state("5.60.0", "5.60.1")["status"] == "disk_newer"
+    assert hud._upgrade_trust_state("5.60.1", "5.60.0")["status"] == "running_newer"
+
+
+check("upgrade trust detects stale or mismatched builds", t_upgrade_trust_detection)
+
+
+def t_harley_cortana_role_split():
+    import crumbs_hud as hud
+    assert hud._normalize_server_role("harley") == "harley"
+    assert hud._normalize_server_role("relay") == "cortana"
+    assert hud._normalize_server_role("cortana") == "cortana"
+    assert hud._normalize_server_role("server") == "harley"
+    assert hud._relay_allowed("/api/health") is True
+    assert hud._relay_allowed("/api/map") is False
+
+
+check("Harley/Cortana split enforces authority boundaries", t_harley_cortana_role_split)
+
+
 print()
 passed = sum(1 for _, ok, _ in results if ok)
 total = len(results)
 print(f"{passed}/{total} checks passed")
-sys.exit(0 if passed == total else 1)
+if __name__ == "__main__":
+    sys.exit(0 if passed == total else 1)

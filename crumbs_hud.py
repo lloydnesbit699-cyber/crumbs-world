@@ -181,6 +181,28 @@ EXPORT_MAX_DIM = 4096
 # version) instead of mistaking the old process — still answering during
 # the restart gap — for "back". This kills the stuck-between-commits state.
 INSTANCE_ID = uuid.uuid4().hex
+SERVER_ROLE = os.environ.get("CRUMBS_SERVER_ROLE", "harley").strip().lower()
+
+
+def _normalize_server_role(value):
+    """Map user inputs like "server", "relay", and "harley" to the one
+    authoritative model: Harley owns state, Cortana is the public relay.
+    """
+    aliases = {
+        "harley": "harley",
+        "server": "harley",
+        "authoritative": "harley",
+        "game": "harley",
+        "cortana": "cortana",
+        "relay": "cortana",
+        "proxy": "cortana",
+        "gateway": "cortana",
+        "frontdoor": "cortana",
+    }
+    return aliases.get(str(value or "").strip().lower(), "harley")
+
+
+SERVER_ROLE = _normalize_server_role(SERVER_ROLE)
 
 # ---- v5.18: in-app self-update -------------------------------------------------
 # Lloyd's rule: updates overwrite the old files in place — no more downloading a
@@ -320,6 +342,40 @@ def _update_disk_version():
         return None
 
 
+def _upgrade_trust_state(running_version=None, disk_version=None):
+    """Fail closed when the running build and the on-disk build disagree.
+
+    The app must not silently serve a stale build after an upgrade or a partial
+    file swap. If the disk says a newer version is installed, the running server
+    must refuse to start until restarted into the new files. If the disk says an
+    older version, the code is ahead of the on-disk files and the server should
+    refuse to serve until the mismatch is resolved.
+    """
+    running_version = str(running_version or APP_VERSION)
+    disk_version = disk_version if disk_version is not None else _update_disk_version()
+    if disk_version is None:
+        return {"status": "disk_unreadable",
+                "running": running_version,
+                "disk": None,
+                "message": "could not read the on-disk APP_VERSION; refusing to start"}
+    run_v = _ver_tuple(running_version)
+    disk_v = _ver_tuple(disk_version)
+    if disk_v > run_v:
+        return {"status": "disk_newer",
+                "running": running_version,
+                "disk": disk_version,
+                "message": f"on-disk files are newer ({disk_version}) than the running server ({running_version}) — restart required"}
+    if disk_v < run_v:
+        return {"status": "running_newer",
+                "running": running_version,
+                "disk": disk_version,
+                "message": f"running code is newer ({running_version}) than the on-disk files ({disk_version}) — unsafe to serve"}
+    return {"status": "ok",
+            "running": running_version,
+            "disk": disk_version,
+            "message": "version trust checks out"}
+
+
 def _validate_art_blob(n, b):
     # v5.25: shared art-blob sanity — JSON must parse, images must carry
     # their magic bytes. Used by the installer and the boot backfill.
@@ -439,6 +495,41 @@ def _ver_tuple(v):
         return tuple(int(x) for x in str(v).split("."))
     except ValueError:
         return (0,)
+
+
+def _relay_allowed(path):
+    """Public relay routes are only the read-only, non-authority endpoints.
+    Harley owns the real game state; Cortana is the front door, never the
+    authority or a direct bypass around per-user vault policy.
+    """
+    if not path or not isinstance(path, str):
+        return False
+    safe = {
+        "/",
+        "/classic",
+        "/manifest.webmanifest",
+        "/service-worker.js",
+        "/api/health",
+        "/api/auth/me",
+        "/api/auth/login",
+        "/api/auth/logout",
+        "/api/auth/status",
+        "/api/auth/public",
+    }
+    return path in safe or path.startswith("/api/thumb/") \
+        or path.startswith("/api/melody-trueform/")
+
+
+def _relay_role_policy(path):
+    """Return a simple decision object for the public relay model."""
+    allowed = _relay_allowed(path)
+    return {
+        "role": SERVER_ROLE,
+        "path": path,
+        "allowed": allowed,
+        "authority": SERVER_ROLE == "harley",
+        "reason": None if allowed else "relay is read-only for public-facing routes",
+    }
 
 
 def _update_changelog(current, limit=5):
@@ -7091,6 +7182,12 @@ class Handler(BaseHTTPRequestHandler):
         # page can paint her portrait + sprite before and after login.
         if path.startswith("/api/melody-trueform/"):
             return self._do_GET_impl(path)
+        # v5.61: Cortana relay is read-only — stateful paths get a 403 here.
+        # (kept after the static-art exemptions above: public art stays public)
+        if SERVER_ROLE == "cortana" and not _relay_allowed(path):
+            return self._send_json({"ok": False,
+                                    "error": "Cortana relay is read-only; use Harley for stateful requests"},
+                                   403)
         # v5.29: thumbnails are vault-scoped but never serialize the expensive
         # work (Repair Laws 16/17/18 — see _snapshot_tile_art). Auth is
         # still checked; the handler activates the caller's vault under the
@@ -7761,6 +7858,10 @@ class Handler(BaseHTTPRequestHandler):
         # seconds. Auth is still checked inside the handler.
         if path.startswith("/api/melody/"):
             return self._do_melody_impl(path, is_post=True)
+        if SERVER_ROLE == "cortana" and not _relay_allowed(path):
+            return self._send_json({"ok": False,
+                                    "error": "Cortana relay is read-only; use Harley for stateful requests"},
+                                   403)
         # v5.27: public mode serializes /api/* on the vault lock — one
         # request's globals can never bleed into another's.
         if PUBLIC_MODE and path.startswith("/api/"):
@@ -11083,6 +11184,12 @@ def _probe_running_hud():
 
 if __name__ == "__main__":
     args = sys.argv[1:]
+    trust = _upgrade_trust_state()
+    if trust["status"] != "ok":
+        print(f"[hud] upgrade trust check failed: {trust['message']}")
+        print(f"  running: v{trust['running']} | disk: v{trust['disk']}")
+        print("  Refusing to start a stale or mismatched build.")
+        raise SystemExit(2)
     _recover_startup()
     _install_lifecycle_markers()  # Phase 3B: AFTER startup read the old evidence
     public = "--public" in args  # v1.9: serve the Wi-Fi network

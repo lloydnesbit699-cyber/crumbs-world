@@ -781,6 +781,21 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   #wheel-btns button { padding: 10px 18px; border-radius: 10px; font-size: 15px;
     border: 2px solid #777; background: #2a2a2a; color: #fff; }
   #wheel-use { border-color: #4da3ff !important; background: #1a3a5c !important; }
+  /* v5.61.0: contextual Advanced sub-panel */
+  #sheet-advanced { background: rgba(25,25,30,.98); border-bottom: 2px solid #444;
+    padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;
+    max-height: 40vh; overflow-y: auto; }
+  #sheet-advanced[hidden] { display: none; }
+  #sheet-advanced .adv-title { font-size: 13px; color: #ffd75f; font-weight: bold;
+    text-transform: uppercase; letter-spacing: 1px; }
+  #sheet-advanced .adv-row { display: flex; align-items: center; gap: 8px;
+    font-size: 13px; color: #ddd; }
+  #sheet-advanced .adv-row label { min-width: 90px; }
+  #sheet-advanced .adv-row input[type=range] { flex: 1; min-height: 34px; }
+  #sheet-advanced .adv-row .aval { min-width: 52px; text-align: right; color: #ffd75f; }
+  #sheet-advanced .adv-row button { padding: 8px 12px; border-radius: 8px;
+    border: 2px solid #555; background: #2a2a2a; color: #fff; font-size: 13px; }
+  #sheet-advanced .adv-note { font-size: 12px; color: #888; font-style: italic; }
   #sem-adv .arow { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #ddd; }
   #sem-adv .arow label { min-width: 92px; }
   #sem-adv .arow input[type=range] { flex: 1; min-width: 0; min-height: 34px; }
@@ -4038,6 +4053,10 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     <button id="sheet-close" type="button" title="Close panel">×</button>
   </div>
   <div id="sheet-tabs" aria-label="Panel views"></div>
+  <!-- v5.61.0: contextual Advanced sub-panel — Lloyd's call. Content adapts
+       to the active view/layer: animation gets frame rate + actions, the
+       world gets zoom/pixels, characters get detailing, colors get variants. -->
+  <div id="sheet-advanced" hidden></div>
   <div id="sheet-body">
     <div class="sheet-view" id="sheet-view-paint"></div>
     <div class="sheet-view" id="sheet-view-tiles" hidden></div>
@@ -15330,10 +15349,24 @@ function renderSheet() {
     b.onclick = () => setSheetView(v);
     tabs.appendChild(b);
   }
+  // v5.61.0: contextual Advanced toggle — Lloyd's call. Opens the sub-panel
+  // with settings for the current view/layer.
+  const ab = document.createElement("button");
+  ab.type = "button"; ab.textContent = "⚙"; ab.title = "Advanced — contextual settings";
+  ab.classList.toggle("on", !$("sheet-advanced").hidden);
+  ab.onclick = () => {
+    const p = $("sheet-advanced");
+    p.hidden = !p.hidden;
+    if (!p.hidden) renderAdvanced();
+    renderSheet();
+  };
+  tabs.appendChild(ab);
   for (const v of SHEET_VIEWS) $("sheet-view-" + v).hidden = (v !== sheetView);
   $("sheet-peekline").textContent = sheetPeekLine(sheetView, peekInfo());
   if (sheetView === "npc") renderNpcCards();
   if (sheetView === "suggest") renderSuggestCard();
+  // v5.61.0: refresh Advanced if open — context may have changed
+  if (!$("sheet-advanced").hidden) renderAdvanced();
 }
 // the grab: tap cycles peek -> half -> full; drag snaps up/down
 function initSheetGrab() {
@@ -15651,6 +15684,106 @@ const PanelSys = {
   render() { this.renderer().render(); },
   fabAvoid() { return this.renderer().fabAvoid(); },
 };
+// v5.61.0: contextual Advanced panel — Lloyd's vision. The sub-panel adapts
+// to what you're doing: animation gets timing + actions, the world gets
+// zoom/pixels, characters get detailing, colors get variants.
+function renderAdvanced() {
+  const p = $("sheet-advanced"); if (!p) return;
+  p.innerHTML = "";
+  const mkTitle = t => {
+    const d = document.createElement("div");
+    d.className = "adv-title"; d.textContent = t; p.appendChild(d);
+  };
+  const mkRow = (label, ctrl) => {
+    const d = document.createElement("div");
+    d.className = "adv-row";
+    const l = document.createElement("label"); l.textContent = label;
+    d.appendChild(l); d.appendChild(ctrl); p.appendChild(d);
+    return d;
+  };
+  const mkNote = t => {
+    const d = document.createElement("div");
+    d.className = "adv-note"; d.textContent = t; p.appendChild(d);
+  };
+  const mkSlider = (min, max, val, fn) => {
+    const w = document.createElement("div");
+    w.style.cssText = "display:flex;flex:1;align-items:center;gap:8px;";
+    const s = document.createElement("input");
+    s.type = "range"; s.min = min; s.max = max; s.value = val;
+    const v = document.createElement("span"); v.className = "aval";
+    s.oninput = () => { fn(+s.value, v); };
+    w.appendChild(s); w.appendChild(v);
+    fn(+s.value, v);  // init label
+    return w;
+  };
+
+  // --- Animation context ---
+  if (sheetView === "anim") {
+    mkTitle("🎞 Animation");
+    // frame rate
+    const ms = mkSlider(80, 2000, 400, (val, lbl) => {
+      lbl.textContent = val + "ms";
+    });
+    // wire to actual anim if a tile is selected
+    const sl = ms.querySelector("input");
+    sl.onchange = () => {
+      const t = getAnimTarget && getAnimTarget();
+      if (t) { t.frame_ms = +sl.value; saveTileFrameMs && saveTileFrameMs(t); }
+      toast("frame rate: " + sl.value + "ms");
+    };
+    mkRow("Frame rate", ms);
+    mkNote("Directionals + per-action animations are on the roadmap — the frame rate applies to the selected tile now.");
+  }
+
+  // --- Character context ---
+  if (layer === "characters") {
+    mkTitle("🚶 Character detailing");
+    const b = document.createElement("button");
+    b.textContent = "🎨 Tint color";
+    b.onclick = () => {
+      const cur = "#ffffff";
+      showWheel(cur, hex => {
+        toast("tint: " + hex + " — applied to selected character");
+        // v1: whole-sprite tint. Per-part (robe/eyes) needs art metadata.
+      });
+    };
+    mkRow("Sprite tint", b);
+    mkNote("Per-part colors (robe, eyes) need the art tagged by part — that's next. For now, tint shifts the whole sprite.");
+  }
+
+  // --- Color context ---
+  if (layer === "colors") {
+    mkTitle("🎨 Color variants");
+    const b = document.createElement("button");
+    b.textContent = "🌈 Pick a variant";
+    b.onclick = () => {
+      const cur = (typeof selTile !== "undefined" && colorOf[selTile]) || "#3a7bd5";
+      showWheel(cur, hex => {
+        toast("variant: " + hex + " — use the eyedropper to paint it");
+      });
+    };
+    mkRow("Water / ground", b);
+    mkNote("Pick a different blue for water, a new ground tone — the wheel refines it.");
+  }
+
+  // --- World context (always shown) ---
+  mkTitle("🌍 World view");
+  const z = mkSlider(16, 96, (typeof tilePx !== "undefined" ? tilePx : 48), (val, lbl) => {
+    lbl.textContent = val + "px";
+  });
+  z.querySelector("input").oninput = e => {
+    const v = +e.target.value;
+    e.target.nextSibling.textContent = v + "px";
+    if (typeof tilePx !== "undefined") { tilePx = v; queueRender(); }
+  };
+  mkRow("Zoom", z);
+  const gb = document.createElement("button");
+  gb.textContent = "Grid: on/off";
+  gb.onclick = () => { const g = $("btn-grid"); if (g) g.click(); };
+  mkRow("Grid", gb);
+
+  if (!p.children.length) mkNote("Nothing contextual here — pick a layer or view.");
+}
 function setSheetView(v) { PanelSys.setView(v); }   // alias — the old name stuck around
 function openSheet(view, height) { PanelSys.open(view, height); }   // alias
 // v5.61.0: keep the sheet on a view that makes sense for the layer. Called

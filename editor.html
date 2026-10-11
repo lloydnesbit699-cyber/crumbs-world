@@ -6844,6 +6844,31 @@ function setBrushTool(t, skipModal) {
     try { PanelSys.open("tiles"); } catch (e) {}
     toast("tap ＋, then palette tiles, to build the mix");
   }
+  // v5.61.0: Lloyd's call — the eyedropper opens the color wheel immediately.
+  // No more "select tool, then tap map". The wheel has a From-map button.
+  if (t === "eyedropper" && typeof showWheel === "function") {
+    const cur = (typeof selTile !== "undefined" && typeof colorOf !== "undefined"
+                 && colorOf[selTile]) || "#3a7bd5";
+    // defer one tick so the tool UI settles before the popup
+    setTimeout(() => {
+      if (brushTool !== "eyedropper") return;  // user switched already
+      showWheel(cur, (pickedHex) => {
+        const [pr, pg_, pb] = hexToRgb(pickedHex);
+        let best = null, bestD = 1e9;
+        for (const tt of (typeof palette !== "undefined" ? palette : [])) {
+          const c = tt.color || "#000000";
+          const [r, g, b] = hexToRgb(c);
+          const d = (r - pr) ** 2 + (g - pg_) ** 2 + (b - pb) ** 2;
+          if (d < bestD) { bestD = d; best = tt.id; }
+        }
+        if (best != null && typeof selectTile === "function") {
+          selectTile(best);
+          toast("color picked: " + pickedHex);
+        }
+        setBrushTool(lastBrush);
+      });
+    }, 50);
+  }
 }
 
 // ---- v5.47: the one bottom sheet — pure state machine ----------------------------
@@ -7255,7 +7280,8 @@ function floodFillStroke(cell) {
   toast("filled " + n + " tiles" + (r.truncated ? " (area capped at 100k)" : ""));
 }
 // ---- color wheel (v5.61.0: Lloyd's call — eyedropper refinement) ---------------
-const wheel = { h: 0, s: 1, v: 1, picked: "#000000", onPick: null };
+const wheel = { h: 0, s: 1, v: 1, picked: "#000000", onPick: null, fromMap: null };
+let wheelPickingFromMap = false;   // v5.61.0: wheel hidden, next map tap picks
 function hsvToRgb(h, s, v) {
   h = ((h % 360) + 360) % 360;
   const c = v * s, x = c * (1 - Math.abs(((h / 60) % 2) - 1)), m = v - c;
@@ -7366,7 +7392,14 @@ function initWheel() {
     hideWheel();
     if (cb) cb(hex);
   };
-  $("wheel-cancel").onclick = hideWheel;
+  $("wheel-cancel").onclick = () => { wheelPickingFromMap = false; hideWheel(); };
+  // v5.61.0: pick from map — hide wheel, next map tap grabs the color
+  $("wheel-frommap").onclick = () => {
+    wheelPickingFromMap = true;
+    wheel.fromMap = wheel.onPick;   // stash the callback
+    $("wheel-pop").hidden = true;
+    toast("tap the map to pick a color");
+  };
   $("wheel-pop").addEventListener("pointerdown", e => {
     if (e.target.id === "wheel-pop") hideWheel();
   });
@@ -7379,15 +7412,19 @@ function eyedropperTap(cell) {
     selCollide = (coll[cell.y] && coll[cell.y][cell.x]) ? 1 : 0;
     document.querySelectorAll("#collide-palette .sw").forEach(x =>
       x.classList.toggle("sel", +x.dataset.cv === selCollide));
-  } else if (layer === "colors") {
-    // v5.61.0: on the colors layer the eyedropper picks a COLOR — show
-    // Lloyd's color wheel so he can refine it before painting.
+  } else if (layer === "colors" || wheelPickingFromMap) {
+    // v5.61.0: on the colors layer (or picking from map via the wheel) the
+    // eyedropper picks a COLOR — show Lloyd's color wheel to refine it.
     const g = tiles;
     let v = g[cell.y] ? g[cell.y][cell.x] : null;
     if (v && typeof v === "object") v = v.tid;
     const hex = (v != null && v !== "natural") ? (colorOf[v] || "#888888") : "#888888";
     if (v == null || v === "natural") { toast("nothing to pick there"); return; }
+    const cb = wheelPickingFromMap ? wheel.fromMap : null;
+    wheelPickingFromMap = false;
+    // v5.61.0: ensure swatches paint — set after popup is visible
     showWheel(hex, (pickedHex) => {
+      if (cb) { cb(pickedHex); return; }
       // find the closest palette color to the refined pick
       const [pr, pg_, pb] = hexToRgb(pickedHex);
       let best = null, bestD = 1e9;
@@ -7402,6 +7439,11 @@ function eyedropperTap(cell) {
         toast("color picked: " + pickedHex);
       }
       setBrushTool(lastBrush);
+    });
+    // v5.61.0: force swatch repaint after the popup is visible
+    requestAnimationFrame(() => {
+      $("wheel-picked").style.background = hex;
+      drawWheel();
     });
     return;  // wheel handles the brush handoff
   } else {
@@ -19603,11 +19645,12 @@ if ("serviceWorker" in navigator) {
     <div id="wheel-title">🎨 Pick a color</div>
     <canvas id="wheel-cv" width="280" height="280"></canvas>
     <div id="wheel-swatches">
-      <div class="wsw"><span>Picked</span><div id="wheel-picked"></div></div>
-      <div class="wsw"><span>New</span><div id="wheel-new"></div></div>
+      <div class="wsw"><span>From map</span><div id="wheel-picked"></div></div>
+      <div class="wsw"><span>Your color</span><div id="wheel-new"></div></div>
     </div>
     <div id="wheel-hex">#000000</div>
     <div id="wheel-btns">
+      <button id="wheel-frommap" type="button">🎯 From map</button>
       <button id="wheel-use" type="button">Use this color</button>
       <button id="wheel-cancel" type="button">Cancel</button>
     </div>

@@ -10654,8 +10654,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": False,
                                         "error": "name taken"}, 409)
             try:
-                w = max(4, min(MAP_MAX, int(body.get("width", 25))))
-                h = max(4, min(MAP_MAX, int(body.get("height", 15))))
+                # v5.61.0: Lloyd's call — starter maps default to 500x500.
+                # Big worlds from the first tap.
+                w = max(4, min(MAP_MAX, int(body.get("width", 500))))
+                h = max(4, min(MAP_MAX, int(body.get("height", 500))))
             except (TypeError, ValueError):
                 return self._send_json({"ok": False,
                                         "error": "width/height ints required"},

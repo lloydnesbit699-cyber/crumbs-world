@@ -117,6 +117,24 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   #anim-magic-sw button { width: 34px; min-height: 34px; border-radius: 50%;
                           border: 2px solid #444; padding: 0; flex: none; }
   #anim-magic-sw button.on { border-color: #ffd75f; }
+  /* v5.61: palette swap rows — phone-first, fat-finger friendly */
+  #palswap-wrap { padding: 4px 12px; display: flex; flex-direction: column; gap: 8px; }
+  #palswap-rows { display: flex; flex-direction: column; gap: 6px; }
+  .ps-row { display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,.04);
+            border-radius: 10px; padding: 6px 8px; }
+  .ps-chip { width: 40px; height: 40px; border-radius: 8px; border: 2px solid #666;
+             flex: none; }
+  .ps-to { width: 40px; height: 40px; border-radius: 8px; border: 2px dashed #888;
+           flex: none; cursor: pointer; }
+  .ps-name { flex: 1; min-width: 0; background: #222; color: #eee; border: 1px solid #555;
+             border-radius: 8px; padding: 8px; font-size: 14px; }
+  .ps-count { font-size: 11px; color: #888; flex: none; min-width: 34px; text-align: right; }
+  .ps-del { flex: none; background: none; border: none; font-size: 18px; padding: 6px;
+            cursor: pointer; }
+  #palswap-btns { display: flex; gap: 8px; }
+  #palswap-btns button { flex: 1; padding: 10px; border-radius: 10px; font-size: 14px;
+    border: 2px solid #666; background: #2a2a2a; color: #fff; }
+  #palswap-analyze { border-color: #4da3ff !important; }
   #m-anim button:disabled, #m-anim input:disabled { opacity: 0.35; }
   /* v5.43: beginner preset cards — fat-finger tap targets, live previews */
   #anim-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
@@ -699,6 +717,20 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   /* v5.51.1: dim the grid toggle when the grid is off, so the state reads
      at a glance. */
   #zoom-cluster #btn-grid.off { opacity: .45; }
+  /* v5.61.0: minimap — bottom-left, zoom cluster owns bottom-right */
+  #minimap { position: fixed; left: 10px;
+             bottom: calc(10px + env(safe-area-inset-bottom));
+             z-index: 30; width: 120px; height: 120px;
+             border: 2px solid #555; border-radius: 12px; overflow: hidden;
+             background: #111; box-shadow: 0 2px 12px rgba(0,0,0,.5); }
+  #minimap-cv { display: block; width: 120px; height: 120px; touch-action: none;
+                cursor: crosshair; }
+  #minimap-toggle { position: absolute; top: 4px; right: 4px;
+                    width: 44px; height: 44px; min-width: 44px; min-height: 44px;
+                    border-radius: 50%; padding: 0; font-size: 18px;
+                    background: rgba(42,42,42,.92); border: 2px solid #777;
+                    color: #ffd75f; }
+  #minimap-toggle.static { color: #888; }
 
   /* v5.45: the brush bar — phone-first painting keeps exactly 4 tools
      visible: Stamp (hero), Paint, Erase, and ••• More. Long-press ••• for
@@ -801,6 +833,18 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   #sheet-advanced .adv-row button { padding: 8px 12px; border-radius: 8px;
     border: 2px solid #555; background: #2a2a2a; color: #fff; font-size: 13px; }
   #sheet-advanced .adv-note { font-size: 12px; color: #888; font-style: italic; }
+  /* v5.61.0: rig editor */
+  #rig-dirs { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; }
+  .rig-dir-row { display: flex; align-items: center; gap: 6px; font-size: 13px;
+    background: rgba(255,255,255,.04); border-radius: 8px; padding: 6px 8px; }
+  .rig-dir-row .rd-lbl { min-width: 64px; color: #ffd75f; }
+  .rig-dir-row input[type=number] { width: 52px; font-size: 14px; padding: 4px;
+    border-radius: 6px; border: 1px solid #555; background: #222; color: #fff; }
+  .rig-dir-row input[type=range] { flex: 1; min-height: 30px; }
+  .rig-dir-row .rd-ms { min-width: 52px; text-align: right; color: #ffd75f; font-size: 12px; }
+  #rig-preview-cv { border: 2px solid #555; border-radius: 8px;
+    image-rendering: pixelated; background: #111; }
+  #rig-actions .on { border-color: #4da3ff; }
   #sem-adv .arow { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #ddd; }
   #sem-adv .arow label { min-width: 92px; }
   #sem-adv .arow input[type=range] { flex: 1; min-width: 0; min-height: 34px; }
@@ -1120,6 +1164,47 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   #sheet-grid canvas { width: 40px; height: 40px; image-rendering: pixelated;
       background: #222; border-radius: 4px; border: 2px solid transparent; }
   #sheet-grid canvas.sel { border-color: #4da3ff; }
+  /* v5.61.0: Asset Manager — Lloyd's call. Robust <img>-based grid, no
+     canvas stacking. Mobile-first at 390px. */
+  #sheet-view-assets { padding: 8px; }
+  #assets-toolbar { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+  #assets-toolbar input[type="search"] { flex: 1 1 120px; min-height: 40px;
+    font-size: 14px; padding: 8px 10px; border-radius: 8px;
+    border: 2px solid #555; background: #222; color: #fff; }
+  #assets-toolbar select { min-height: 40px; font-size: 14px; padding: 8px;
+    border-radius: 8px; border: 2px solid #555; background: #222; color: #fff; }
+  #assets-import-btn { min-height: 40px; padding: 8px 14px; font-size: 14px;
+    border-radius: 8px; border: 2px solid #4da3ff; background: #1a3a5c; color: #fff; }
+  #assets-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+    gap: 8px; max-height: 46vh; overflow-y: auto; padding: 4px; }
+  .asset-card { background: #222; border: 2px solid #444; border-radius: 10px;
+    padding: 6px; display: flex; flex-direction: column; align-items: center;
+    gap: 4px; position: relative; }
+  .asset-card img { width: 64px; height: 64px; image-rendering: pixelated;
+    border-radius: 6px; background: #111; object-fit: contain; }
+  .asset-card .aname { font-size: 11px; color: #ddd; text-align: center;
+    word-break: break-word; max-height: 28px; overflow: hidden; }
+  .asset-card .ameta { font-size: 10px; color: #888; text-align: center; }
+  .asset-card .adel { position: absolute; top: 2px; right: 2px; width: 28px; height: 28px;
+    border-radius: 50%; border: 2px solid #a33; background: #422; color: #f88;
+    font-size: 14px; line-height: 1; padding: 0; }
+  .asset-card .aframes { position: absolute; top: 2px; left: 2px; font-size: 10px;
+    background: #1a3a5c; color: #8cf; border-radius: 6px; padding: 2px 6px; }
+  #assets-drop { border: 2px dashed #555; border-radius: 10px; padding: 20px;
+    text-align: center; color: #888; font-size: 14px; margin-bottom: 8px; }
+  #assets-drop.over { border-color: #4da3ff; background: #1a2a3a; color: #8cf; }
+  #assets-preview { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 8px;
+    background: #1a1a1a; border: 2px solid #4da3ff; border-radius: 10px; padding: 10px; }
+  #assets-preview img { width: 96px; height: 96px; image-rendering: pixelated;
+    border-radius: 8px; background: #111; object-fit: contain; flex-shrink: 0; }
+  #assets-preview .aform { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+  #assets-preview input, #assets-preview select { min-height: 36px; font-size: 14px;
+    padding: 6px 8px; border-radius: 8px; border: 2px solid #555;
+    background: #222; color: #fff; width: 100%; box-sizing: border-box; }
+  #assets-preview .arow { display: flex; gap: 6px; }
+  #assets-preview .arow button { flex: 1; min-height: 40px; font-size: 14px;
+    border-radius: 8px; border: 2px solid #555; background: #2a2a2a; color: #fff; }
+  #assets-preview #assets-doimport { border-color: #4da3ff; background: #1a3a5c; }
   #sheet-selinfo { font-size: 12px; color: #999; margin-bottom: 6px; }
   #sheet-roles { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
   #sheet-roles button { flex: 1 1 28%; margin: 0; padding: 8px 4px; font-size: 12px; }
@@ -1284,7 +1369,8 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   body.panels-hidden #dpad, body.panels-hidden #meters, body.panels-hidden #btn-fire,
   body.panels-hidden #pack-btn, body.panels-hidden #mission-hud, body.panels-hidden #gear-hud,
   body.panels-hidden #height-legend, body.panels-hidden #dbg,
-  body.panels-hidden #melody-dock, body.panels-hidden #melody-fab { display: none !important; }
+  body.panels-hidden #melody-dock, body.panels-hidden #melody-fab,
+  body.panels-hidden #minimap { display: none !important; }
   #dpad button { font-size: 18px; padding: 0; min-height: 0; margin: 0;
                  background: rgba(28,28,38,.85); border-radius: 10px; touch-action: none; }
   #dpad button:active { background: #4da3ff; }
@@ -3334,6 +3420,19 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     <div class="anim-tags" id="anim-state">
       <button data-s="idle" class="on"><span class="te">🌿</span><span class="tl">Idle</span><span class="tc"></span></button><button data-s="walk"><span class="te">🚶</span><span class="tl">Walk</span><span class="tc"></span></button><button data-s="sleep"><span class="te">😴</span><span class="tl">Sleep</span><span class="tc"></span></button><button data-s="talk"><span class="te">💬</span><span class="tl">Talk</span><span class="tc"></span></button><button data-s="hurt"><span class="te">💥</span><span class="tl">Hurt</span><span class="tc"></span></button><button data-s="magic"><span class="te">✨</span><span class="tl">Magic</span><span class="tc"></span></button>
     </div>
+    <!-- v5.61.0: character rig — actions → directions → frame clips.
+         Which frames play when he walks left vs idles facing down. -->
+    <div class="menu-note"><b>Rig</b> — actions & facing. Pick an action, set each direction's frames.</div>
+    <div id="rig-actions" class="anim-tags"></div>
+    <div id="rig-dirs"></div>
+    <div id="rig-preview-wrap" hidden>
+      <div class="menu-note"><b>Preview</b> — <span id="rig-preview-label"></span></div>
+      <canvas id="rig-preview-cv" width="96" height="96"></canvas>
+      <div class="fe-btns">
+        <button id="rig-preview-play">▶ play</button>
+        <button id="rig-preview-stop">⏹ stop</button>
+      </div>
+    </div>
     <!-- v5.44: the filmstrip — Aseprite-style, phone-first. Horizontal cards
          with per-frame timing badges, scrubber, duplicate/delete, onion
          skinning. Everything here edits the shared anim record. -->
@@ -3375,6 +3474,17 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     <div class="anim-field"><span class="al">hue</span><input id="anim-hue" type="range" min="-180" max="180" step="5" value="0"><span class="av" id="anim-hue-val">0°</span></div>
     <div class="anim-field"><span class="al">saturation</span><input id="anim-sat" type="range" min="0" max="200" step="5" value="100"><span class="av" id="anim-sat-val">100%</span></div>
     <div class="anim-field"><span class="al">brightness</span><input id="anim-bri" type="range" min="0" max="200" step="5" value="100"><span class="av" id="anim-bri-val">100%</span></div>
+    <!-- v5.61: palette swap — recolor him slot by slot (robe, eyes, trim)
+         without touching the art. Retro palette-swap on RGB sprites. -->
+    <div class="menu-note"><b>Palette swap</b> — his colors, your call. Analyze, name the parts, repaint.</div>
+    <div id="palswap-wrap">
+      <div id="palswap-empty" class="menu-note">Tap <b>🔍 Analyze</b> to read his colors.</div>
+      <div id="palswap-rows"></div>
+      <div id="palswap-btns">
+        <button id="palswap-analyze" type="button">🔍 Analyze colors</button>
+        <button id="palswap-clear" type="button" hidden>↺ Clear swaps</button>
+      </div>
+    </div>
     <div class="menu-note"><b>Feel</b> — how strong the motion reads</div>
     <div class="anim-field"><span class="al">intensity</span><input id="anim-amp" type="range" min="0" max="100" step="1" value="70"><span class="av" id="anim-amp-val">70</span></div>
     <div class="menu-note"><b>Action</b> — a little stage business</div>
@@ -4004,6 +4114,13 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   <button id="btn-pan" title="Pan the map instead of painting">Move</button>
 </div>
 
+<!-- v5.61.0: dynamic minimap with static toggle — Lloyd's call. Bottom-left
+     (zoom cluster owns bottom-right). Tap to jump, toggle for live/static. -->
+<div id="minimap" aria-label="Minimap — tap to jump">
+  <canvas id="minimap-cv" width="120" height="120"></canvas>
+  <button id="minimap-toggle" title="Toggle live/static minimap" aria-label="Toggle live or static minimap">⏸</button>
+</div>
+
 <!-- v5.45: the brush bar — exactly 4 tools visible. Stamp is the hero
      (default); ••• opens the more-tools sheet (tap or long-press). -->
 <div id="brush-bar" aria-label="Brush tools">
@@ -4071,6 +4188,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     <div class="sheet-view" id="sheet-view-anim" hidden></div>
     <div class="sheet-view" id="sheet-view-npc" hidden></div>
     <div class="sheet-view" id="sheet-view-suggest" hidden></div>
+    <div class="sheet-view" id="sheet-view-assets" hidden></div>
   </div>
 </div>
 <!-- v5.47: always-visible Play — one button, always on screen. Tap to
@@ -4280,6 +4398,91 @@ function visibleTiles() {
     x1: Math.min(W - 1, Math.ceil((stage.clientWidth - ox) / tilePx) + 1),
     y1: Math.min(H - 1, Math.ceil((stage.clientHeight - oy) / tilePx) + 1)
   };
+}
+ // ---- v5.61.0: dynamic minimap with static toggle — Lloyd's call ---------------
+let minimapMode = "dynamic";   // "dynamic" (live, throttled) or "static" (frozen)
+let minimapLastDraw = 0;
+const MINIMAP_SIZE = 120;
+const MINIMAP_THROTTLE = 500;  // ms between live updates (500x500-safe)
+let minimapOff = null;         // offscreen canvas for the sampled map image
+function minimapTileColor(id) {
+  if (id == null || id === "natural") return [26, 26, 26];
+  const c = (typeof colorOf !== "undefined" && colorOf[id]) || "#222222";
+  let hex = String(c).replace("#", "");
+  if (hex.length === 3) hex = hex.split("").map(x => x + x).join("");
+  const n = parseInt(hex, 16);
+  if (isNaN(n)) return [34, 34, 34];
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+function renderMinimap(force) {
+  const cv = $("minimap-cv");
+  if (!cv || !W || !H || !tiles.length) return;
+  const now = performance.now();
+  if (minimapMode === "static" && !force) return;
+  if (!force && now - minimapLastDraw < MINIMAP_THROTTLE) return;
+  minimapLastDraw = now;
+  if (!minimapOff) {
+    minimapOff = document.createElement("canvas");
+    minimapOff.width = MINIMAP_SIZE; minimapOff.height = MINIMAP_SIZE;
+  }
+  const octx = minimapOff.getContext("2d");
+  const img = octx.createImageData(MINIMAP_SIZE, MINIMAP_SIZE);
+  const data = img.data;
+  for (let py = 0; py < MINIMAP_SIZE; py++) {
+    const ty = Math.min(H - 1, Math.floor(py * H / MINIMAP_SIZE));
+    const row = tiles[ty];
+    if (!row) continue;
+    for (let px = 0; px < MINIMAP_SIZE; px++) {
+      const tx = Math.min(W - 1, Math.floor(px * W / MINIMAP_SIZE));
+      let v = row[tx];
+      if (v && typeof v === "object") v = v.tid;
+      const cc = minimapTileColor(v);
+      const i = (py * MINIMAP_SIZE + px) * 4;
+      data[i] = cc[0]; data[i+1] = cc[1]; data[i+2] = cc[2]; data[i+3] = 255;
+    }
+  }
+  octx.putImageData(img, 0, 0);
+  const ctx = cv.getContext("2d");
+  ctx.clearRect(0, 0, MINIMAP_SIZE, MINIMAP_SIZE);
+  ctx.drawImage(minimapOff, 0, 0);
+  try {
+    const vt = visibleTiles();
+    const x0 = vt.x0 * MINIMAP_SIZE / W, y0 = vt.y0 * MINIMAP_SIZE / H;
+    const x1 = (vt.x1 + 1) * MINIMAP_SIZE / W, y1 = (vt.y1 + 1) * MINIMAP_SIZE / H;
+    ctx.strokeStyle = "#ffd75f"; ctx.lineWidth = 2;
+    ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+  } catch (e) {}
+}
+function minimapJump(clientX, clientY) {
+  const cv = $("minimap-cv");
+  if (!cv || !W || !H) return;
+  const r = cv.getBoundingClientRect();
+  const px = (clientX - r.left) * (MINIMAP_SIZE / r.width);
+  const py = (clientY - r.top) * (MINIMAP_SIZE / r.height);
+  const tx = Math.max(0, Math.min(W - 1, Math.floor(px * W / MINIMAP_SIZE)));
+  const ty = Math.max(0, Math.min(H - 1, Math.floor(py * H / MINIMAP_SIZE)));
+  panX = (W / 2 - tx) * tilePx;
+  panY = (H / 2 - ty) * tilePx;
+  clampPan(); queueRender();
+  renderMinimap(true);
+}
+function initMinimap() {
+  const cv = $("minimap-cv");
+  if (!cv) return;
+  const tg = $("minimap-toggle");
+  if (tg) tg.onclick = (e) => {
+    e.stopPropagation();
+    minimapMode = minimapMode === "dynamic" ? "static" : "dynamic";
+    tg.textContent = minimapMode === "dynamic" ? "⏸" : "▶";
+    tg.classList.toggle("static", minimapMode === "static");
+    tg.title = minimapMode === "dynamic" ? "Pause live minimap" : "Resume live minimap";
+    if (minimapMode === "dynamic") renderMinimap(true);
+    toast("minimap: " + minimapMode);
+  };
+  cv.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    minimapJump(e.clientX, e.clientY);
+  });
 }
 function zoomAt(clientX, clientY, newPx) {
   newPx = Math.max(8, Math.min(maxTilePx(), newPx));
@@ -5523,6 +5726,19 @@ function stateTileImage(id, state) {
   }
   return tileFrameImage(id);
 }
+// v5.61.0: rig-aware image — resolves action+direction through the character
+// rig to a frame index. Falls back to stateTileImage when no rig applies.
+function rigTileImage(id, action, direction, now) {
+  const ct = customById[id];
+  if (ct && ct.rig && ct.rig.actions) {
+    const fr = ensureFrames(ct);
+    if (!fr || !fr.length) return null;
+    const idx = Math.min(rigFrameIdx(ct, action, direction, now), fr.length - 1);
+    const im = fr[idx];
+    return (im && im.complete && im.naturalWidth) ? im : null;
+  }
+  return stateTileImage(id, action);
+}
 // v5.43: any visible motion on this tile — legacy fx OR a state record
 // with a non-still state. Drives the map overdraw set.
 function tileHasMotion(id) {
@@ -5577,6 +5793,9 @@ function setNpcState(n, st, now) {
 // it with a synthetic parameter set.
 function drawFxTile(g, id, im, dx, dy, dw, dh, now, state, blend) {
   const t = customById[id];
+  // v5.61: palette swap — a recolored character draws his swapped sprite
+  // everywhere (map, NPCs, tray preview all come through here). Cached.
+  if (t && t.palswap) im = palSwapApply(id, im);
   if (!tileFx(id) && !(t && t.anim)) { g.drawImage(im, dx, dy, dw, dh); return; }
   if (now === undefined) now = performance.now();
   let p = stateParams(t, state || "idle");
@@ -6418,7 +6637,8 @@ function render() {
     }
   });
   npcsReal.forEach(n => {
-    const im = tileFrameImage(n.tile_id); if (!im) return;
+    // v5.61.0: rig-aware — placed characters show their idle/down clip
+    const im = rigTileImage(n.tile_id, "idle", "down"); if (!im) return;
     drawFxTile(ctx, n.tile_id, im, n.x * tilePx, n.y * tilePx, tilePx, tilePx);
     ctx.font = `${Math.max(10, Math.round(tilePx * 0.26))}px sans-serif`;
     const w = ctx.measureText(n.name).width, nx = n.x * tilePx + tilePx / 2 - w / 2 - 3;
@@ -6576,6 +6796,7 @@ function render() {
   if (playMode && worldWeather !== "clear") drawWeather();  // v4.1: the sky performs
   if (clipCaption) drawClipCaption();   // v5.53: auto-clip subtitles — her words on the film
   layout();   // v2.2: re-center + apply pan offset after every draw
+  if (typeof renderMinimap === "function") renderMinimap();  // v5.61.0: throttled live minimap
 }
 
 // ---- painting -------------------------------------------------------------
@@ -6882,19 +7103,20 @@ function setBrushTool(t, skipModal) {
 // extracts this block and drives it with fake selection states.
 // -- end v5.47 sheet state machine marker above; code below --
 const SHEET_HEIGHTS = ["peek", "half", "full"];
-const SHEET_VIEWS = ["paint", "tiles", "inspect", "anim", "npc", "suggest"];
+const SHEET_VIEWS = ["paint", "tiles", "inspect", "anim", "npc", "suggest", "assets"];
 const SHEET_TITLES = { paint: "🎨 Paint", tiles: "🧱 Tiles", inspect: "🔍 Inspect",
-  anim: "🎞 Animate", npc: "🚶 Patrol", suggest: "💡 Melody suggests" };
+  anim: "🎞 Animate", npc: "🚶 Patrol", suggest: "💡 Melody suggests",
+  assets: "🗂 Assets" };
 // v5.61.0: layer-aware sheet — Lloyd's call. The sheet only shows views that
 // make sense for the active map layer, cutting the overcrowded feeling. The
 // Tiles/Objects/Characters layers get the art views; Colors and Collision
 // are data layers, so they get the lean set.
 const SHEET_VIEWS_BY_LAYER = {
-  tiles:      ["paint", "tiles", "inspect", "anim", "suggest"],
-  colors:     ["paint", "inspect", "suggest"],
-  objects:    ["paint", "tiles", "inspect", "anim", "suggest"],
-  characters: ["paint", "tiles", "inspect", "anim", "npc", "suggest"],
-  collision:  ["paint", "inspect", "suggest"],
+  tiles:      ["paint", "tiles", "inspect", "anim", "assets", "suggest"],
+  colors:     ["paint", "inspect", "assets", "suggest"],
+  objects:    ["paint", "tiles", "inspect", "anim", "assets", "suggest"],
+  characters: ["paint", "tiles", "inspect", "anim", "npc", "assets", "suggest"],
+  collision:  ["paint", "inspect", "assets", "suggest"],
 };
 function sheetViewsForLayer(l) {
   return SHEET_VIEWS_BY_LAYER[l] || SHEET_VIEWS.slice();
@@ -7416,6 +7638,126 @@ function initWheel() {
   $("wheel-pop").addEventListener("pointerdown", e => {
     if (e.target.id === "wheel-pop") hideWheel();
   });
+}
+
+// ---- palette swap (v5.61: Lloyd's call — recolor characters slot by slot) ----
+// Retro palette-swap adapted for RGB sprites: the "palette" is extracted by
+// clustering the sprite's actual pixels. Each cluster becomes a named slot
+// (Robe, Eyes, …); the user picks a replacement color per slot on the wheel.
+// At draw time pixels near a slot's original color are remapped. Cached.
+const PALS = { THRESH: 34,   // cluster radius (euclidean RGB) for extraction
+               MATCH: 30,    // remap radius at draw time
+               MAX: 12 };    // slots shown
+const palSwapCache = {};     // "tid:json(slots)" -> canvas
+function palHex(r, g, b) {
+  return "#" + [r, g, b].map(v => Math.max(0, Math.min(255, Math.round(v)))
+    .toString(16).padStart(2, "0")).join("");
+}
+function palDist(a, b) {   // a, b: [r,g,b]
+  const dr = a[0] - b[0], dg = a[1] - b[1], db = a[2] - b[2];
+  return Math.sqrt(dr * dr + dg * dg + db * db);
+}
+// draw the tile's first frame to an offscreen canvas; null if art missing
+function palTileCanvas(tid) {
+  const t = (typeof customById !== "undefined") ? customById[tid] : null;
+  if (!t) return null;
+  const fr = (typeof ensureFrames === "function") ? ensureFrames(t) : null;
+  const im = fr && fr[0];
+  if (!im || !im.complete || !im.naturalWidth) return null;
+  const cv = document.createElement("canvas");
+  cv.width = im.naturalWidth; cv.height = im.naturalHeight;
+  cv.getContext("2d").drawImage(im, 0, 0);
+  return cv;
+}
+// cluster the sprite's opaque pixels into up to PALS.MAX colors
+function extractPalette(tid) {
+  const cv = palTileCanvas(tid);
+  if (!cv) return null;
+  const g = cv.getContext("2d");
+  let d;
+  try { d = g.getImageData(0, 0, cv.width, cv.height); }
+  catch (e) { return null; }   // tainted canvas — can't read
+  const px = d.data, clusters = [];
+  const step = Math.max(1, Math.floor((cv.width * cv.height) / 4000));  // sample big art
+  for (let i = 0; i < px.length; i += 4 * step) {
+    if (px[i + 3] < 24) continue;   // transparent
+    const c = [px[i], px[i + 1], px[i + 2]];
+    let best = null, bd = 1e9;
+    for (const cl of clusters) {
+      const dd = palDist(c, cl.rgb);
+      if (dd < bd) { bd = dd; best = cl; }
+    }
+    if (best && bd <= PALS.THRESH) {
+      best.n++;
+      // running mean keeps the centroid honest
+      best.rgb[0] += (c[0] - best.rgb[0]) / best.n;
+      best.rgb[1] += (c[1] - best.rgb[1]) / best.n;
+      best.rgb[2] += (c[2] - best.rgb[2]) / best.n;
+    } else if (clusters.length < 64) {
+      clusters.push({ rgb: [c[0], c[1], c[2]], n: 1 });
+    }
+  }
+  clusters.sort((a, b) => b.n - a.n);
+  return clusters.slice(0, PALS.MAX).map(cl => ({
+    hex: palHex(cl.rgb[0], cl.rgb[1], cl.rgb[2]),
+    rgb: [Math.round(cl.rgb[0]), Math.round(cl.rgb[1]), Math.round(cl.rgb[2])],
+    count: cl.n,
+  }));
+}
+// hue-based slot name suggestions — the user renames freely
+function suggestSlotName(hex) {
+  const [r, g, b] = hexToRgb(hex);
+  const [h, s, v] = rgbToHsv(r, g, b);
+  if (s < 0.18) {
+    if (v < 0.22) return "Outline";
+    if (v > 0.82) return "Highlight";
+    return "Shade";
+  }
+  if ((h < 18 || h >= 342)) return "Trim";
+  if (h < 48) return (s < 0.62 ? "Skin" : "Trim");
+  if (h < 75) return "Detail";
+  if (h < 168) return "Detail";
+  if (h < 262) return "Robe";
+  return "Robe";   // purples read as cloth too
+}
+// the remapped sprite, cached. Returns `im` untouched when nothing to do.
+function palSwapApply(tid, im) {
+  const t = (typeof customById !== "undefined") ? customById[tid] : null;
+  const ps = t && t.palswap;
+  if (!ps || !ps.slots || !ps.slots.length) return im;
+  if (!im || !im.naturalWidth) return im;
+  const key = tid + ":" + JSON.stringify(ps.slots);
+  if (t._psKey === key && t._psCanvas) return t._psCanvas;
+  const cv = document.createElement("canvas");
+  cv.width = im.naturalWidth; cv.height = im.naturalHeight;
+  const g = cv.getContext("2d");
+  g.drawImage(im, 0, 0);
+  let d;
+  try { d = g.getImageData(0, 0, cv.width, cv.height); }
+  catch (e) { return im; }
+  const px = d.data;
+  const slots = ps.slots.map(s => ({
+    rgb: hexToRgb(s.from), to: hexToRgb(s.to),
+  }));
+  for (let i = 0; i < px.length; i += 4) {
+    if (px[i + 3] < 24) continue;
+    const c = [px[i], px[i + 1], px[i + 2]];
+    let best = null, bd = 1e9;
+    for (const s of slots) {
+      const dd = palDist(c, s.rgb);
+      if (dd < bd) { bd = dd; best = s; }
+    }
+    if (best && bd <= PALS.MATCH) {
+      px[i] = best.to[0]; px[i + 1] = best.to[1]; px[i + 2] = best.to[2];
+    }
+  }
+  g.putImageData(d, 0, 0);
+  t._psKey = key; t._psCanvas = cv;
+  return cv;
+}
+function palSwapInvalidate(tid) {
+  const t = (typeof customById !== "undefined") ? customById[tid] : null;
+  if (t) { t._psKey = null; t._psCanvas = null; }
 }
 
 function eyedropperTap(cell) {
@@ -10526,8 +10868,10 @@ function npcTick(dt) {
 }
 function drawNpc(n) {
   // v5.43: the walker's current animation state picks his frame + motion
+  // v5.61.0: the rig resolves action+direction — facing follows movement.
   const st = n.animState || "walk";
-  const im = n.away ? npcSilhouette(n.tile_id) : stateTileImage(n.tile_id, st);
+  const dir = rigDirFor(n);
+  const im = n.away ? npcSilhouette(n.tile_id) : rigTileImage(n.tile_id, st, dir);
   const px = n.x * tilePx, py = n.y * tilePx;   // v5.50: up early — her marker needs it too
   // v5.50: Melody's marker — purple glow ring, 💜 overhead, her name on a
   // pill. Drawn even when her body tile is missing: she's herself regardless.
@@ -11855,6 +12199,69 @@ function ensureAnim(t) {
   if (!t.anim || typeof t.anim !== "object" || !t.anim.states)
     t.anim = { v: 1, default: "idle", states: {}, transitions: {} };
   return t.anim;
+}
+// ---- v5.61.0: character animation rig --------------------------------------
+// Actions -> directions -> frame clips. The game engine thinks in actions
+// ("he's walking"); the rig resolves action+direction to a frame list.
+// Frame indices reference the tile's shared frame strip (like Aseprite tags).
+// Migration: tiles with frames but no rig get a single "idle" action with all
+// four directions sharing the full strip — existing tiles keep working.
+const RIG_DIRS = ["down", "up", "left", "right"];
+const RIG_DIR_LABEL = { down: "⬇ down", up: "⬆ up", left: "⬅ left", right: "➡ right" };
+function ensureRig(t) {
+  if (!t.rig || typeof t.rig !== "object" || !t.rig.actions || typeof t.rig.actions !== "object") {
+    const n = Math.max(1, t.frames | 0 || 1);
+    const all = [];
+    for (let i = 0; i < n; i++) all.push(i);
+    let ms = 400;
+    try {
+      const st = t.anim && t.anim.states;
+      const idle = st && (st.idle || st[Object.keys(st)[0]]);
+      if (idle && idle.frame_ms) ms = idle.frame_ms;
+      else if (t.frame_ms) ms = t.frame_ms;
+    } catch (e) {}
+    ms = Math.max(80, Math.min(2000, +ms || 400));
+    const clip = () => ({ frames: all.slice(), frame_ms: ms });
+    const dirs = {};
+    RIG_DIRS.forEach(d => dirs[d] = clip());
+    t.rig = { v: 1, actions: { idle: dirs }, default_action: "idle", default_direction: "down" };
+  }
+  // backfill: every action gets all four directions
+  Object.keys(t.rig.actions || {}).forEach(a => {
+    const act = t.rig.actions[a] || (t.rig.actions[a] = {});
+    RIG_DIRS.forEach(d => {
+      if (!act[d] || !Array.isArray(act[d].frames)) {
+        const sib = act[RIG_DIRS.find(x => act[x] && Array.isArray(act[x].frames))];
+        act[d] = sib ? { frames: sib.frames.slice(), frame_ms: sib.frame_ms } : { frames: [0], frame_ms: 400 };
+      }
+    });
+  });
+  return t.rig;
+}
+function rigClip(t, action, direction) {
+  if (!t) return null;
+  const rig = ensureRig(t);
+  const acts = rig.actions || {};
+  const act = acts[action] || acts[rig.default_action] || acts["idle"] || acts[Object.keys(acts)[0]];
+  if (!act) return null;
+  return act[direction] || act[rig.default_direction] || act["down"] || act[RIG_DIRS.find(d => act[d])] || null;
+}
+function rigFrameIdx(t, action, direction, now) {
+  const clip = rigClip(t, action, direction);
+  if (!clip || !clip.frames || !clip.frames.length) return 0;
+  const ms = Math.max(40, +clip.frame_ms || 400);
+  const tnow = (now != null) ? now : ((typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now());
+  return clip.frames[Math.floor(tnow / ms) % clip.frames.length];
+}
+// direction from an NPC's movement flags (flip = left/right, away = up)
+function rigDirFor(n) {
+  if (!n) return "down";
+  if (n.dir && RIG_DIRS.indexOf(n.dir) >= 0) return n.dir;
+  if (n.away) return "up";
+  if (n.flip) return "left";
+  // moving horizontally right, or standing: face right if last moved right, else down
+  if (n.lastDx != null) return n.lastDx < 0 ? "left" : (n.lastDx > 0 ? "right" : "down");
+  return "down";
 }
 function loadAnimTarget() {
   const t = animTargetTile();
@@ -15390,7 +15797,7 @@ function renderSheet() {
   mkN("›", "Forward (panel history)",
       () => PanelSys.fwd(), PanelSys.hix < PanelSys.hist.length - 1);
   const meta = [["paint", "🎨"], ["tiles", "🧱"], ["inspect", "🔍"], ["anim", "🎞"],
-                ["npc", "🚶"], ["suggest", "💡"]];
+                ["npc", "🚶"], ["assets", "🗂"], ["suggest", "💡"]];
   // v5.61.0: layer-aware tabs — only views relevant to the active layer.
   const allowed = sheetViewsForLayer(typeof layer !== "undefined" ? layer : null);
   for (const [v, g] of meta) {
@@ -15420,6 +15827,7 @@ function renderSheet() {
   $("sheet-peekline").textContent = sheetPeekLine(sheetView, peekInfo());
   if (sheetView === "npc") renderNpcCards();
   if (sheetView === "suggest") renderSuggestCard();
+  if (sheetView === "assets") renderAssets();
   // v5.61.0: refresh Advanced if open — context may have changed
   if (!$("sheet-advanced").hidden) renderAdvanced();
 }
@@ -15893,6 +16301,7 @@ function initPanelSystem() {
     PanelSys.layout = p.panelLayout;
   initSheetGrab();    // sheet chrome never moves — wire once, not per mount
   initWheel();        // v5.61.0: color wheel popup
+  initMinimap();      // v5.61.0: dynamic minimap with static toggle
   initPlayFab();
   initBudgetStrip();
   initReaderPagers();   // v5.58 (C-2): paged navigation on pilot reader sheets
@@ -16401,6 +16810,251 @@ function renderSuggestCard() {
   btns.appendChild(no);
   card.appendChild(btns);
   v.appendChild(card);
+}
+// ---- v5.61.0: Asset Manager — Lloyd's call ---------------------------------
+// Replaces the fragile sprite-sheet import flow with a proper asset browser.
+// Thumbnails use <img> tags (robust), never the canvas-stacking pattern.
+const assetState = { tiles: [], q: "", tag: "all", sort: "name", loaded: false };
+const ASSET_PRESETS = ["wall", "floor", "water", "door", "decor", "character"];
+async function loadAssets() {
+  try {
+    const r = await api("/api/custom-tiles");
+    assetState.tiles = (r.tiles || []).filter(t => !t.pack);  // customs only
+    assetState.loaded = true;
+  } catch (e) {
+    assetState.tiles = [];
+  }
+}
+function assetTags() {
+  const s = new Set();
+  assetState.tiles.forEach(t => { if (t.preset) s.add(t.preset); });
+  return ["all", ...Array.from(s).sort()];
+}
+function filteredAssets() {
+  let list = assetState.tiles.slice();
+  const q = assetState.q.trim().toLowerCase();
+  if (q) list = list.filter(t => (t.name || "").toLowerCase().includes(q) ||
+                                 (t.display || "").toLowerCase().includes(q));
+  if (assetState.tag !== "all") list = list.filter(t => t.preset === assetState.tag);
+  if (assetState.sort === "name") list.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  else if (assetState.sort === "frames") list.sort((a, b) => (b.frames || 1) - (a.frames || 1));
+  return list;
+}
+async function renderAssets() {
+  const v = $("sheet-view-assets");
+  if (!v) return;
+  v.innerHTML = "";
+  if (!assetState.loaded) {
+    v.textContent = "loading assets…";
+    await loadAssets();
+    if (!$("sheet-view-assets")) return;
+  }
+  // toolbar: search + tag filter + sort + import
+  const tb = document.createElement("div");
+  tb.id = "assets-toolbar";
+  const search = document.createElement("input");
+  search.type = "search"; search.placeholder = "🔍 search assets…";
+  search.value = assetState.q; search.setAttribute("aria-label", "search assets");
+  search.oninput = () => { assetState.q = search.value; renderAssetGrid(); };
+  tb.appendChild(search);
+  const tagSel = document.createElement("select");
+  tagSel.setAttribute("aria-label", "filter by tag");
+  assetTags().forEach(tg => {
+    const o = document.createElement("option");
+    o.value = tg; o.textContent = tg === "all" ? "all tags" : tg;
+    if (tg === assetState.tag) o.selected = true;
+    tagSel.appendChild(o);
+  });
+  tagSel.onchange = () => { assetState.tag = tagSel.value; renderAssetGrid(); };
+  tb.appendChild(tagSel);
+  const sortSel = document.createElement("select");
+  sortSel.setAttribute("aria-label", "sort assets");
+  [["name", "name A–Z"], ["frames", "most frames"]].forEach(([val, lbl]) => {
+    const o = document.createElement("option");
+    o.value = val; o.textContent = lbl;
+    if (val === assetState.sort) o.selected = true;
+    sortSel.appendChild(o);
+  });
+  sortSel.onchange = () => { assetState.sort = sortSel.value; renderAssetGrid(); };
+  tb.appendChild(sortSel);
+  const impBtn = document.createElement("button");
+  impBtn.id = "assets-import-btn"; impBtn.type = "button"; impBtn.textContent = "＋ Import";
+  impBtn.onclick = () => showAssetImport();
+  tb.appendChild(impBtn);
+  v.appendChild(tb);
+  // drop zone
+  const dz = document.createElement("div");
+  dz.id = "assets-drop";
+  dz.textContent = "drop PNGs here, or tap ＋ Import";
+  ["dragenter", "dragover"].forEach(ev => dz.addEventListener(ev, e => {
+    e.preventDefault(); dz.classList.add("over");
+  }));
+  ["dragleave", "drop"].forEach(ev => dz.addEventListener(ev, e => {
+    e.preventDefault(); dz.classList.remove("over");
+  }));
+  dz.addEventListener("drop", e => {
+    const files = Array.from(e.dataTransfer.files || []).filter(f => f.type.startsWith("image/"));
+    if (files.length) showAssetImport(files[0]);
+  });
+  v.appendChild(dz);
+  // import preview slot
+  const pv = document.createElement("div");
+  pv.id = "assets-import-slot";
+  v.appendChild(pv);
+  // grid
+  const grid = document.createElement("div");
+  grid.id = "assets-grid";
+  v.appendChild(grid);
+  renderAssetGrid();
+}
+function renderAssetGrid() {
+  const grid = $("assets-grid");
+  if (!grid) return;
+  grid.innerHTML = "";
+  const list = filteredAssets();
+  if (!list.length) {
+    grid.innerHTML = '<div style="color:#888;font-size:13px;grid-column:1/-1;text-align:center;padding:20px;">' +
+      (assetState.tiles.length ? "no assets match" : "no imported assets yet — tap ＋ Import") + "</div>";
+    return;
+  }
+  list.forEach(t => {
+    const card = document.createElement("div");
+    card.className = "asset-card";
+    // v5.61.0: <img> thumbnails — never canvas stacking.
+    const img = document.createElement("img");
+    img.src = "/api/thumb/" + t.id;
+    img.alt = t.name || "";
+    img.loading = "lazy";
+    img.onerror = () => { img.style.opacity = "0.3"; };
+    card.appendChild(img);
+    if ((t.frames || 1) > 1) {
+      const fb = document.createElement("div");
+      fb.className = "aframes"; fb.textContent = "🎞" + t.frames;
+      card.appendChild(fb);
+    }
+    const nm = document.createElement("div");
+    nm.className = "aname"; nm.textContent = t.display || t.name || ("#" + t.id);
+    card.appendChild(nm);
+    const meta = document.createElement("div");
+    meta.className = "ameta";
+    meta.textContent = (t.preset || "decor") + (t.scope === "shared" ? " · shared" : "");
+    card.appendChild(meta);
+    const del = document.createElement("button");
+    del.className = "adel"; del.type = "button"; del.textContent = "×";
+    del.title = "delete " + (t.name || "");
+    del.setAttribute("aria-label", "delete " + (t.name || "asset"));
+    del.onclick = async (e) => {
+      e.stopPropagation();
+      if (!confirm("Delete \"" + (t.display || t.name) + "\"? This can't be undone.")) return;
+      const r = await api("/api/custom/delete", { id: t.id });
+      if (r.ok) {
+        toast("deleted");
+        assetState.loaded = false;
+        renderAssets();
+        if (typeof buildPalette === "function") buildPalette();
+      } else {
+        toast(r.error || "couldn't delete");
+      }
+    };
+    card.appendChild(del);
+    // tap card = select as brush (if paintable)
+    card.onclick = () => {
+      if (typeof selectTile === "function") {
+        selectTile(t.id);
+        toast("selected: " + (t.display || t.name));
+      }
+    };
+    grid.appendChild(card);
+  });
+}
+// ---- asset import flow ----
+let assetImportFile = null;
+function showAssetImport(file) {
+  const slot = $("assets-import-slot");
+  if (!slot) return;
+  slot.innerHTML = "";
+  const doFile = (f) => {
+    if (!f || !f.type.startsWith("image/")) { toast("need an image file"); return; }
+    assetImportFile = f;
+    const rd = new FileReader();
+    rd.onload = () => buildAssetPreview(rd.result, f.name);
+    rd.readAsDataURL(f);
+  };
+  if (file) { doFile(file); return; }
+  const inp = document.createElement("input");
+  inp.type = "file"; inp.accept = "image/*";
+  inp.onchange = () => doFile(inp.files[0]);
+  inp.click();
+}
+function buildAssetPreview(dataUrl, fname) {
+  const slot = $("assets-import-slot");
+  if (!slot) return;
+  slot.innerHTML = "";
+  const wrap = document.createElement("div");
+  wrap.id = "assets-preview";
+  const img = document.createElement("img");
+  img.src = dataUrl; img.alt = "preview";
+  wrap.appendChild(img);
+  const form = document.createElement("div");
+  form.className = "aform";
+  const nameIn = document.createElement("input");
+  nameIn.placeholder = "name";
+  nameIn.maxLength = 24;
+  nameIn.value = (fname || "custom").replace(/\.[^.]+$/, "").slice(0, 24);
+  nameIn.setAttribute("aria-label", "asset name");
+  form.appendChild(nameIn);
+  const presetSel = document.createElement("select");
+  presetSel.setAttribute("aria-label", "asset preset");
+  ASSET_PRESETS.forEach(p => {
+    const o = document.createElement("option");
+    o.value = p; o.textContent = p;
+    presetSel.appendChild(o);
+  });
+  form.appendChild(presetSel);
+  const msIn = document.createElement("input");
+  msIn.type = "number"; msIn.min = 80; msIn.max = 2000; msIn.step = 40;
+  msIn.value = 400; msIn.title = "frame ms (for animation)";
+  msIn.setAttribute("aria-label", "frame milliseconds");
+  form.appendChild(msIn);
+  const row = document.createElement("div");
+  row.className = "arow";
+  const go = document.createElement("button");
+  go.id = "assets-doimport"; go.type = "button"; go.textContent = "Import";
+  go.onclick = async () => {
+    const nm = nameIn.value.trim() || "custom";
+    // slice the preview into a single frame (or keep as-is for autoslice)
+    const r = await api("/api/custom-tiles", {
+      name: nm,
+      preset: presetSel.value,
+      frame_ms: Math.max(80, Math.min(2000, +msIn.value || 400)),
+      frames: [dataUrl],
+    });
+    if (r.ok) {
+      toast("imported: " + (r.tile.display || r.tile.name));
+      slot.innerHTML = "";
+      assetState.loaded = false;
+      renderAssets();
+      if (typeof buildPalette === "function") buildPalette();
+    } else {
+      toast(r.error || "import failed");
+    }
+  };
+  const cx = document.createElement("button");
+  cx.type = "button"; cx.textContent = "Cancel"; cx.className = "ghost";
+  cx.onclick = () => { slot.innerHTML = ""; assetImportFile = null; };
+  row.appendChild(go); row.appendChild(cx);
+  form.appendChild(row);
+  wrap.appendChild(form);
+  slot.appendChild(wrap);
+  // show dimensions
+  const probe = new Image();
+  probe.onload = () => {
+    const d = document.createElement("div");
+    d.style.cssText = "font-size:11px;color:#888;";
+    d.textContent = probe.naturalWidth + "×" + probe.naturalHeight + "px";
+    form.insertBefore(d, form.firstChild);
+  };
+  probe.src = dataUrl;
 }
 async function acceptSuggestion() {
   const g = ghostSug;

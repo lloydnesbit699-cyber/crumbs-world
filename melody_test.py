@@ -450,4 +450,5 @@ check("bg tool: reachable via run_tool dispatcher", "Done" in res,
 shutil.rmtree(tmp6, ignore_errors=True)
 
 print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+if __name__ == "__main__":
+    sys.exit(1 if FAIL else 0)

@@ -352,4 +352,5 @@ finally:
     shutil.rmtree(_tmpd, ignore_errors=True)
 
 print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+if __name__ == "__main__":
+    sys.exit(1 if FAIL else 0)

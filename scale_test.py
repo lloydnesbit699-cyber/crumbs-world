@@ -124,4 +124,5 @@ else:
     check("export completes", dt < 60, f"{dt:.1f}s")
 
 print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+if __name__ == "__main__":
+    sys.exit(1 if FAIL else 0)

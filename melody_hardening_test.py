@@ -39,7 +39,7 @@ def fresh_dir():
 
 
 def remaining(tmp, user, tier="free"):
-    _, rem, _, _ = ma.quota_check(tmp, user, tier)
+    _, rem, _, _, _ = ma.quota_check(tmp, user, tier)
     return rem
 
 
@@ -243,4 +243,5 @@ ma.brain_chat = real_brain_chat
 shutil.rmtree(tmp, ignore_errors=True)
 
 print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+if __name__ == "__main__":
+    sys.exit(1 if FAIL else 0)

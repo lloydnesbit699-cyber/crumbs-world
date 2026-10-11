@@ -22,7 +22,6 @@ Stdlib only.
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import hashlib
 import hmac
 import json
@@ -32,6 +31,12 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, Iterator, Optional, Tuple
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows fallback
+    fcntl = None
+    import msvcrt
 
 
 CHECKPOINT_VERSION = 1
@@ -91,7 +96,11 @@ class CheckpointStore:
         """Reentrant exclusive lock guarding checkpoint + journal writes."""
         if self._lock_depth == 0:
             self._lock_fh = open(self.directory / ".lock", "a+b")
-            fcntl.flock(self._lock_fh.fileno(), fcntl.LOCK_EX)
+            if fcntl is not None:
+                fcntl.flock(self._lock_fh.fileno(), fcntl.LOCK_EX)
+            else:
+                self._lock_fh.seek(0)
+                msvcrt.locking(self._lock_fh.fileno(), msvcrt.LK_NBLCK, 1)
         self._lock_depth += 1
         try:
             yield
@@ -99,7 +108,10 @@ class CheckpointStore:
             self._lock_depth -= 1
             if self._lock_depth == 0 and self._lock_fh is not None:
                 try:
-                    fcntl.flock(self._lock_fh.fileno(), fcntl.LOCK_UN)
+                    if fcntl is not None:
+                        fcntl.flock(self._lock_fh.fileno(), fcntl.LOCK_UN)
+                    else:
+                        msvcrt.locking(self._lock_fh.fileno(), msvcrt.LK_UNLCK, 1)
                 finally:
                     self._lock_fh.close()
                     self._lock_fh = None

@@ -1887,6 +1887,65 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   html.sh-high-contrast #shell-root .sh-navbtn,
   html.sh-high-contrast #shell-root .sh-world-chip { border-color: #f3ead6; }
   html.sh-high-contrast #shell-root .sh-navbtn[aria-current="page"] { background: #0a0a0a; }
+  /* ===== TESTER SHELL (v5.61+, Stage 8: Creator Tools gateway + workshop) ===== */
+  /* Gateway: a full-screen framed TRANSITION. Tester-safe is a promise and
+     a state, not a color — the heading and copy mark the change of mode. */
+  #shell-root .sh-gateway {
+    position: fixed; inset: 0; z-index: 100;
+    background: #141311; overflow-y: auto; -webkit-overflow-scrolling: touch;
+    padding: max(24px, env(safe-area-inset-top)) 20px max(28px, env(safe-area-inset-bottom));
+  }
+  #shell-root .sh-gateway-card {
+    max-width: 560px; margin: 0 auto;
+    background: #1e1c18; border: 2px solid #c9973f; border-radius: 18px;
+    padding: 26px 22px;
+  }
+  #shell-root .sh-gateway-card h2 { font-size: 22px; margin: 0 0 8px; color: #f3ead6; }
+  #shell-root .sh-gateway-card .sh-gw-sub {
+    font-size: 16px; line-height: 1.55; color: #d8cdb4; margin: 0 0 14px;
+  }
+  #shell-root .sh-gateway-list { list-style: none; margin: 0 0 16px; padding: 0; }
+  #shell-root .sh-gateway-list li {
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 10px 2px; border-top: 1px solid #2c2a22;
+    font-size: 16px; color: #f3ead6;
+  }
+  #shell-root .sh-gateway-list .sh-mi {
+    font-size: 20px; width: 28px; text-align: center; flex: none;
+  }
+  #shell-root .sh-gateway-list b { font-size: 16px; }
+  #shell-root .sh-gateway-list small { display: block; font-size: 14px; color: #8f8672; }
+  #shell-root .sh-gateway-card .sh-btn-primary,
+  #shell-root .sh-gateway-card .sh-btn-secondary { width: 100%; min-height: 52px; margin-top: 10px; }
+  #shell-root .sh-gateway-note { font-size: 14px; color: #8f8672; margin: 12px 0 0; }
+  /* Creator workshop: full-screen overlay. The canvas iframe stays alive
+     underneath, so world/map/camera/tool/material survive untouched. */
+  #shell-root .sh-creator-screen {
+    position: fixed; inset: 0; z-index: 100;
+    display: flex; flex-direction: column; background: #0a0a0a;
+  }
+  #shell-root .sh-creator-bar {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 12px;
+    padding: max(10px, env(safe-area-inset-top)) 16px 10px;
+    background: #1e1c18; border-bottom: 2px solid #c9973f;
+  }
+  #shell-root .sh-creator-title {
+    font-size: 17px; font-weight: 700; color: #f3ead6; flex: 1;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #shell-root .sh-creator-bar .sh-btn-secondary { min-height: 48px; margin-top: 0; flex: none; }
+  #shell-root .sh-creator-wrap { flex: 1 1 auto; position: relative; min-height: 0; }
+  #shell-root .sh-creator-wrap iframe {
+    position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #0a0a0a;
+  }
+  #shell-root .sh-creator-loading {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 16px; color: #d8cdb4; background: #0a0a0a; text-align: center; padding: 20px;
+  }
+  html.sh-high-contrast #shell-root .sh-gateway-card { background: #0a0a0a; border-color: #f3ead6; }
+  html.sh-text-large #shell-root .sh-gateway-card .sh-gw-sub,
+  html.sh-text-large #shell-root .sh-gateway-list small,
+  html.sh-text-large #shell-root .sh-gateway-note { font-size: 16px; }
   /* ===== TESTER SHELL (v5.61+, Stage 5: Build Drawer) ===== */
   /* Bottom sheet on phones, side panel on wider screens. No scrim: the map
      stays interactive above/beside the drawer so placement taps land while
@@ -14991,16 +15050,17 @@ async function placeRoomPreset(kind) {
 // no auth, vault, or save behavior changes.
 window.CrumbsShell = {
   // Spec state model. mode: simple | creator | play
-  // destination: home | build | world | play | menu
+  // destination: home | build | world | play | menu | creator
   // welcome: "not completed" | completed
   // drawer: closed | half | full ; save: idle|saving|saved|error|disconnected|recovered
   state: { mode: "simple", destination: "home",
            welcome: "not completed", drawer: "closed", save: "idle" },
   // Device-local PRESENTATION prefs only — never permissions, never secrets.
   // coachDismissed: per-world first-entry coach card dismissal (Stage 4).
+  // creatorSeen: the Creator Tools introduction was shown and entered (Stage 8).
   prefs: { welcomeCompleted: false, reduceMotion: false,
            textSize: "normal", highContrast: false, coachDismissed: {},
-           buildRecents: [] },
+           buildRecents: [], creatorSeen: false },
   // Stage 4 working state (not part of the spec's state model): which world
   // file the canvas currently shows, so the nav can return to it.
   currentFile: null,
@@ -15025,6 +15085,9 @@ function shellLoadPrefs() {
     // Stage 5: recently placed item ids (most recent first, capped at 6).
     if (Array.isArray(p.buildRecents))
       cur.buildRecents = p.buildRecents.filter(function (x) { return typeof x === "string" || typeof x === "number"; }).slice(0, 6);
+    // Stage 8: the Creator Tools introduction was shown and entered — later
+    // entries skip the gateway (resettable from the Menu).
+    if (typeof p.creatorSeen === "boolean") cur.creatorSeen = p.creatorSeen;
   } catch (e) {}
 }
 function shellSavePrefs() {
@@ -15762,19 +15825,32 @@ function shellOpenMenu(returnTo) {
   var sub = (ME && ME.username) ? "Tester account" : "Local session";
   var wrap = document.createElement("div");
   wrap.id = "sh-menu-wrap";
+  // Stage 8: the "Show introduction again" row appears only after the
+  // Creator Tools gateway has been seen once — it resets the choice.
+  var gwResetRow = "";
+  if (window.CrumbsShell.prefs.creatorSeen)
+    gwResetRow = '<button class="sh-menu-item" id="sh-mi-gwreset"><span class="sh-mi" aria-hidden="true">\u21BA</span> Show Creator Tools introduction again</button>';
   wrap.innerHTML =
   '<div class="sh-scrim" id="sh-menu-scrim"><div class="sh-menu-sheet" role="dialog" ' +
     'aria-modal="true" aria-label="Menu">' +
     '<div class="sh-grab" aria-hidden="true"></div>' +
     '<p class="sh-menu-user"></p><p class="sh-menu-sub">' + sub + "</p>" +
-    '<button class="sh-menu-item" id="sh-mi-classic"><span class="sh-mi" aria-hidden="true">\uD83D\uDD27</span> Open classic workshop</button>' +
+    '<button class="sh-menu-item" id="sh-mi-creator"><span class="sh-mi" aria-hidden="true">\uD83D\uDEE0\uFE0F</span> Creator Tools</button>' +
     '<button class="sh-menu-item" id="sh-mi-about"><span class="sh-mi" aria-hidden="true">?</span> About this build</button>' +
     '<button class="sh-menu-item" id="sh-mi-signout"><span class="sh-mi" aria-hidden="true">\u2192</span> Sign out</button>' +
+    gwResetRow +
     '<button class="sh-menu-item" id="sh-mi-close"><span class="sh-mi" aria-hidden="true">\u2715</span> Close</button>' +
   "</div></div>";
   root.appendChild(wrap);
   root.querySelector(".sh-menu-user").textContent = who;
-  $("sh-mi-classic").onclick = shellGoClassic;
+  // Stage 8: Creator Tools opens through its gateway, not a raw /classic hop.
+  $("sh-mi-creator").onclick = function () { shellEnterCreator(); };
+  var gwreset = $("sh-mi-gwreset");
+  if (gwreset) gwreset.onclick = function () {
+    window.CrumbsShell.prefs.creatorSeen = false;
+    shellSavePrefs();
+    shellEnterCreator();  // pref cleared → the gateway shows again
+  };
   $("sh-mi-about").onclick = shellMenuAbout;
   $("sh-mi-signout").onclick = shellSignOut;
   $("sh-mi-close").onclick = shellCloseMenu;
@@ -15798,7 +15874,7 @@ function shellMenuAbout() {
   sheet.innerHTML =
     '<div class="sh-grab" aria-hidden="true"></div>' +
     '<p class="sh-menu-user">About this build</p>' +
-    '<p class="sh-menu-sub">Crumbs World v%%CRUMBS_VERSION%% \u00B7 tester build \u00B7 shell stage 3</p>' +
+    '<p class="sh-menu-sub">Crumbs World v%%CRUMBS_VERSION%% \u00B7 tester build \u00B7 shell stage 8</p>' +
     '<p class="sh-menu-sub">Your worlds and account live on the server. ' +
       "This device only keeps display choices like text size.</p>" +
     '<button class="sh-menu-item" id="sh-mi-back"><span class="sh-mi" aria-hidden="true">\u2190</span> Back</button>';
@@ -16312,8 +16388,7 @@ var SHELL_BUILD_MORE = [
   { id: "art", icon: "\uD83C\uDFA8", name: "Art", desc: "Tile art and imports" },
   { id: "animation", icon: "\uD83C\uDF9E\uFE0F", name: "Animation", desc: "Bring tiles to life" },
   { id: "suggestions", icon: "\uD83D\uDCA1", name: "Suggestions", desc: "Ideas and helpers" },
-  // STAGE-8: Creator Tools gets its proper gateway screen then; until then
-  // the full workshop is the honest destination.
+  // Stage 8: Creator Tools opens through its gateway screen.
   { id: "creator", icon: "\uD83D\uDEE0\uFE0F", name: "Creator Tools", desc: "The full workshop" }
 ];
 function shellBuildMoreInto(body) {
@@ -16330,7 +16405,12 @@ function shellBuildMoreInto(body) {
   var items = body.querySelectorAll(".sh-more-item");
   for (var k = 0; k < items.length; k++) (function (el, idx) {
     el.querySelector("b").textContent = SHELL_BUILD_MORE[idx].name;
-    el.onclick = function () { location.href = "/classic"; };
+    // Stage 8: Creator Tools opens through its gateway; the other modules
+    // bridge straight to the full workshop — the honest destination.
+    if (SHELL_BUILD_MORE[idx].id === "creator")
+      el.onclick = function () { shellEnterCreator(); };
+    else
+      el.onclick = function () { location.href = "/classic"; };
   })(items[k], k);
 }
 
@@ -16388,7 +16468,7 @@ function shellMapTapped() {
 // Build Drawer (bottom half-height on phones, side panel on wide screens).
 // Every row drives REAL endpoints — /api/status, /api/maps, /api/portals,
 // /api/validate, /api/rules, /api/game-rules. Advanced editing stays in
-// Creator Tools (/classic, STAGE-8). Nothing is faked: a row with no real
+// Creator Tools (Stage 8 gateway). Nothing is faked: a row with no real
 // backend behind it does not appear.
 var _worldReturnFocus = null;
 var _worldView = "home";
@@ -16727,6 +16807,224 @@ async function shellFinishExitPlay() {
   shellToast("Back to building.");
 }
 
+// ---- Stage 8, Screen 12: Creator Tools gateway + workshop ----
+// The gateway is a framed TRANSITION, not a color change: a full-screen
+// screen that names the mode change, lists what lives inside, and offers
+// Enter / Stay. Tester-safe is a promise and a state, not a color — the
+// gateway never implies the tester did something dangerous by opening it.
+// The workshop itself is the REAL classic HUD framed in an overlay iframe
+// (/classic, full — never rebuilt, never trimmed). The canvas iframe stays
+// alive underneath the overlay, so world/map/camera/tool/material survive
+// untouched; Return to Simple View only removes the overlay and reopens
+// whichever drawer was open. prefs.creatorSeen (device-local): the first
+// entry shows the gateway, later entries go straight in; the Menu offers
+// "Show Creator Tools introduction again" to reset it.
+var _creatorReturn = null;       // {destination, buildView, worldView}
+var _creatorReturnFocus = null;
+
+var SHELL_CREATOR_MODULES = [
+  { icon: "🔍", name: "Details", desc: "Inspect anything in your world up close" },
+  { icon: "🌀", name: "Portals", desc: "Link maps together and place portals" },
+  { icon: "📜", name: "Rules", desc: "Game rules and logic, fully editable" },
+  { icon: "🎨", name: "Art", desc: "Tile art and imports" },
+  { icon: "🎞️", name: "Animation", desc: "Bring tiles to life" },
+  { icon: "💡", name: "Suggestions", desc: "Ideas and helpers" }
+];
+
+// Single entry point — replaces every STAGE-8 marker (Build Drawer More →
+// Creator Tools, World Drawer Add Portal, World Drawer rule editing, and
+// Menu → Creator Tools).
+async function shellEnterCreator() {
+  var st = window.CrumbsShell.state;
+  if (st.mode === "play") return;    // advanced access never appears in Play
+  if (st.mode === "creator") return; // already in the workshop
+  shellCloseMenu();
+  var cur = window.CrumbsShell.currentFile;
+  if (!cur) { shellShowHome(); return; }
+  if (!$("sh-canvas-frame")) shellShowCanvas(cur);
+  var fw = shellFrameWin();
+  if (!(fw && typeof fw.shellDirtyState === "function")) {
+    shellToast("The world isn't responding — try again.");
+    return;
+  }
+  // Unsaved changes: prompt save-first (the Stage 7 save-verification
+  // pattern), never silently carry dirt into the workshop.
+  if (fw.shellDirtyState()) { shellShowCreatorSaveCard(); return; }
+  shellCreatorGatewayOrOpen();
+}
+
+function shellCreatorGatewayOrOpen() {
+  if (window.CrumbsShell.prefs.creatorSeen) shellOpenCreator();
+  else shellShowCreatorGateway();
+}
+
+// Save-first card for entering Creator Tools with unsaved changes. Same card
+// language as the Play Entry card; the save-verify pattern mirrors Stage 7.
+function shellShowCreatorSaveCard() {
+  var old = $("sh-creator-save");
+  if (old) old.remove();
+  var card = document.createElement("div");
+  card.id = "sh-creator-save";
+  card.className = "sh-play-card";
+  card.setAttribute("role", "dialog");
+  card.setAttribute("aria-label", "Unsaved changes");
+  card.innerHTML =
+    "<h2>Unsaved changes</h2>" +
+    '<p class="sh-play-world"></p>' +
+    '<p class="sh-play-status sh-warn">You have unsaved changes. Save them before opening Creator Tools?</p>' +
+    '<p class="sh-play-err" id="sh-creator-save-err" hidden></p>' +
+    '<button type="button" class="sh-btn-primary" id="sh-cs-save">Save &amp; Continue</button>' +
+    '<button type="button" class="sh-btn-secondary" id="sh-cs-skip">Continue without saving</button>' +
+    '<button type="button" class="sh-btn-secondary" id="sh-cs-back">Back</button>';
+  var scr = document.querySelector(".sh-canvas-screen");
+  (scr || shellRootEl()).appendChild(card);
+  card.querySelector(".sh-play-world").textContent = friendlyName(window.CrumbsShell.currentFile || "");
+  $("sh-cs-back").onclick = function () { card.remove(); };
+  $("sh-cs-skip").onclick = function () { card.remove(); shellCreatorGatewayOrOpen(); };
+  $("sh-cs-save").onclick = async function () {
+    var btn = $("sh-cs-save"), err = $("sh-creator-save-err");
+    btn.disabled = true;
+    var fw = shellFrameWin();
+    var ok = fw ? await fw.shellDoSave() : false;
+    // pollStatus flips dirtyFlag from the server truth; give it a beat.
+    await new Promise(function (r) { setTimeout(r, 1200); });
+    var stillDirty = fw && fw.shellDirtyState ? !!fw.shellDirtyState() : true;
+    if (ok && !stillDirty) { card.remove(); shellCreatorGatewayOrOpen(); }
+    else {
+      btn.disabled = false;
+      if (err) {
+        err.hidden = false;
+        err.textContent = "Save didn't finish — check your connection and try again.";
+      }
+    }
+  };
+  $("sh-cs-save").focus();
+}
+
+// The gateway: full-screen, explicit, inviting. First entry only.
+function shellShowCreatorGateway() {
+  var old = $("sh-creator-gateway");
+  if (old) old.remove();
+  _creatorReturnFocus = document.activeElement;
+  var g = document.createElement("div");
+  g.id = "sh-creator-gateway";
+  g.className = "sh-gateway";
+  g.setAttribute("role", "dialog");
+  g.setAttribute("aria-label", "Creator Tools");
+  var items = "";
+  for (var i = 0; i < SHELL_CREATOR_MODULES.length; i++) {
+    items += '<li><span class="sh-mi" aria-hidden="true">' + SHELL_CREATOR_MODULES[i].icon + "</span>" +
+      "<span><b></b><small></small></span></li>";
+  }
+  g.innerHTML =
+    '<div class="sh-gateway-card">' +
+    "<h2>Creator Tools \u2014 the full workshop</h2>" +
+    '<p class="sh-gw-sub">Advanced editing, recovery, system, and detailed world controls live here. ' +
+      "Your current world will remain open.</p>" +
+    '<ul class="sh-gateway-list">' + items + "</ul>" +
+    '<button type="button" class="sh-btn-primary" id="sh-gw-enter">Enter Creator Tools</button>' +
+    '<button type="button" class="sh-btn-secondary" id="sh-gw-stay">Stay in Simple View</button>' +
+    "<p class=\"sh-gateway-note\">You\u2019ll only see this introduction once on this device.</p>" +
+    "</div>";
+  var lis = g.querySelectorAll(".sh-gateway-list li");
+  for (var j = 0; j < lis.length && j < SHELL_CREATOR_MODULES.length; j++) {
+    lis[j].querySelector("b").textContent = SHELL_CREATOR_MODULES[j].name;
+    lis[j].querySelector("small").textContent = SHELL_CREATOR_MODULES[j].desc;
+  }
+  shellRootEl().appendChild(g);
+  $("sh-gw-stay").onclick = function () { shellCloseCreatorGateway(); };
+  $("sh-gw-enter").onclick = function () {
+    window.CrumbsShell.prefs.creatorSeen = true;
+    shellSavePrefs();
+    shellCloseCreatorGateway();
+    shellOpenCreator();
+  };
+  document.addEventListener("keydown", shellGatewayKeys);
+  $("sh-gw-enter").focus();
+}
+function shellGatewayKeys(e) { if (e.key === "Escape") shellCloseCreatorGateway(); }
+function shellCloseCreatorGateway() {
+  var g = $("sh-creator-gateway");
+  if (g) g.remove();
+  document.removeEventListener("keydown", shellGatewayKeys);
+  if (_creatorReturnFocus && _creatorReturnFocus.focus) _creatorReturnFocus.focus();
+  _creatorReturnFocus = null;
+}
+
+// The workshop: the real classic HUD in a full-screen overlay iframe. The
+// canvas iframe is never unloaded, so there is no state to snapshot and no
+// restore logic that can get it wrong — Return to Simple View just removes
+// the overlay and reopens whichever drawer was open.
+function shellOpenCreator() {
+  var st = window.CrumbsShell.state;
+  if (st.mode === "creator") return;
+  _creatorReturn = {
+    destination: st.destination,
+    buildView: $("sh-build-drawer") ? _buildView : null,
+    worldView: $("sh-world-drawer") ? _worldView : null
+  };
+  _creatorReturnFocus = document.activeElement;
+  shellCloseBuildDrawer();
+  shellCloseWorldDrawer();
+  var c = $("sh-coach");
+  if (c) c.hidden = true;
+  st.mode = "creator";
+  st.destination = "creator";
+  shellNavSetActive("creator");  // no nav destination matches; clears selection
+  var old = $("sh-creator-screen");
+  if (old) old.remove();
+  var scr = document.createElement("div");
+  scr.id = "sh-creator-screen";
+  scr.className = "sh-creator-screen";
+  scr.setAttribute("role", "region");
+  scr.setAttribute("aria-label", "Creator Tools workshop");
+  scr.innerHTML =
+    '<div class="sh-creator-bar">' +
+      '<span class="sh-creator-title">Creator Tools</span>' +
+      '<button type="button" class="sh-btn-secondary" id="sh-return-simple">Return to Simple View</button>' +
+    "</div>" +
+    '<div class="sh-creator-wrap">' +
+      '<div class="sh-creator-loading" role="status">Opening the full workshop\u2026</div>' +
+      '<iframe id="sh-creator-frame" title="Creator Tools workshop" src="/classic"></iframe>' +
+    "</div>";
+  shellRootEl().appendChild(scr);
+  var fr = $("sh-creator-frame"), done = false;
+  fr.addEventListener("load", function () {
+    if (done) return; done = true;
+    var l = scr.querySelector(".sh-creator-loading");
+    if (l) l.style.display = "none";
+  });
+  // If the frame never loads (offline), the loading text stays as the honest
+  // state — role=status, not a spinner that lies.
+  $("sh-return-simple").onclick = shellExitCreator;
+  document.addEventListener("keydown", shellCreatorKeys);
+  $("sh-return-simple").focus();
+}
+function shellCreatorKeys(e) { if (e.key === "Escape") shellExitCreator(); }
+function shellExitCreator() {
+  var st = window.CrumbsShell.state;
+  if (st.mode !== "creator") return;
+  var scr = $("sh-creator-screen");
+  if (scr) scr.remove();
+  document.removeEventListener("keydown", shellCreatorKeys);
+  st.mode = "simple";
+  var rt = _creatorReturn || {};
+  var dest = (rt.destination && rt.destination !== "creator") ? rt.destination : "build";
+  st.destination = dest;
+  shellNavSetActive(dest);
+  // The canvas iframe was never unloaded: world, map, camera, tool, and
+  // material are exactly as left. The drawer helpers skip the canvas rebuild
+  // when the frame already exists, so reopening loses nothing.
+  if (rt.buildView) shellOpenBuildDrawer(rt.buildView);
+  else if (rt.worldView) shellOpenWorldDrawer(rt.worldView);
+  _creatorReturn = null;
+  if (_creatorReturnFocus && _creatorReturnFocus.focus) {
+    try { _creatorReturnFocus.focus(); } catch (e) {}
+  }
+  _creatorReturnFocus = null;
+  shellToast("Back to Simple View.");
+}
+
 var SHELL_WORLD_TITLES = { home: "World", map: "World Map", portals: "Portals",
   check: "World Check", rules: "Rules" };
 function shellWorldShow(view) {
@@ -16871,8 +17169,8 @@ async function shellWorldPortalsInto(body) {
   var labels = body.querySelectorAll(".sh-w-row .sh-wr-meta b");
   for (var j = 0; j < labels.length && j < list.length; j++)
     labels[j].textContent = list[j].label || "Portal";
-  // STAGE-8: portal placement is a map-tap flow — Creator Tools owns it.
-  $("sh-w-port-add").onclick = function () { location.href = "/classic"; };
+  // Stage 8: portal placement is a map-tap flow — it lives in Creator Tools.
+  $("sh-w-port-add").onclick = function () { shellEnterCreator(); };
 }
 
 // ---- World Check: friendly validation of the OPEN map. /api/validate only
@@ -16942,7 +17240,7 @@ async function shellWorldCheckRun() {
 }
 
 // ---- Rules: the real per-map game rules, simplified. Editing stays in
-// Creator Tools (STAGE-8).
+// Creator Tools (Stage 8 gateway).
 async function shellWorldRulesInto(body) {
   var rules = null, grules = [];
   try {
@@ -16983,8 +17281,8 @@ async function shellWorldRulesInto(body) {
   h += '<div class="sh-build-row"><button type="button" class="sh-btn-secondary" id="sh-w-rules-edit">Change in Creator Tools</button></div>' +
     '<p class="sh-build-hint">Rule editing lives in the full workshop for now.</p>';
   body.innerHTML = h;
-  // STAGE-8: rule editing is a workshop flow — Creator Tools owns it.
-  $("sh-w-rules-edit").onclick = function () { location.href = "/classic"; };
+  // Stage 8: rule editing is a workshop flow — it lives in Creator Tools.
+  $("sh-w-rules-edit").onclick = function () { shellEnterCreator(); };
 }
 
 // ---- Stage 2: boot ----

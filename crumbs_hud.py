@@ -4054,7 +4054,7 @@ def _validate_map():
     return issues
 
 _NON_MAPS = {"custom_tiles.json", "sprite_library.json", "shared_library.json",
-             "hud_patrols.json"}
+             "hud_patrols.json", "users.json"}
 
 def _safe_name(name):
     """Basename-only map filenames; no path traversal."""

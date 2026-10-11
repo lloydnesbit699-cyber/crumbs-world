@@ -8759,7 +8759,15 @@ class Handler(BaseHTTPRequestHandler):
                                         "error": "settings object required"},
                                        400)
             merged = dict(world.semantic_settings or {})
-            merged.update(patch)
+            # v5.61.0: deep-merge styles — a patch for one look (wall) must
+            # not wipe the others (floor, water). Lloyd's bug report.
+            for k, v in patch.items():
+                if k == "styles" and isinstance(v, dict):
+                    cur = dict(merged.get("styles") or {})
+                    cur.update(v)
+                    merged[k] = cur
+                else:
+                    merged[k] = v
             new_settings = core.sanitize_semantic_settings(merged)
 
             def _do_settings():

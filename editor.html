@@ -4021,7 +4021,9 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   </div>
   <div id="sem-palette"></div>
   <div class="arow" style="gap:8px;justify-content:center">
-    <button id="sem-mode" title="Simple or Advanced painting face">👶 Simple</button>
+    <!-- v5.61.0: the Simple/Advanced mode toggle is gone — Lloyd's call. It
+         only hid the helpful hints, which was backwards. Hints always show;
+         the ⚙ Advanced button opens the real settings panel. -->
     <button id="sem-adv-toggle" hidden>⚙ Advanced</button>
   </div>
   <div id="sem-adv" hidden>
@@ -4182,9 +4184,8 @@ let semPools = { floor: [], wall: [], water: [], decor: [] };
 let semNames = {};
 let semSettings = null, semSeed = 0;
 let logicalLayer = "ground";
-let semMode = "beginner";   // v5.46: the painting dock's face — plain words
-try { semMode = localStorage.getItem("crumbs.semMode") || "beginner"; } catch (e) {}
-if (semMode !== "advanced") semMode = "beginner";
+let semMode = "beginner";   // v5.61.0: the Simple/Advanced toggle is gone —
+  // hints always show. The ⚙ button opens the real Advanced panel.
 let semBrush = null;    // armed meaning: "floor" | "wall" | "water" | "erase"
 let collBrush = null;   // armed collision paint: "walk" | "block" | "hazard"
 const COLL_MODES = { walk: [false, false], block: [true, false], hazard: [true, true] };
@@ -6040,7 +6041,7 @@ for (let y = av.y0; y <= av.y1; y++)
     drawSemCellOverlay(semGrid, x, y, W, H, 1);
 // v5.46: hazard tint — always on but subtle; loud on the FX layer.
 if (hazGrid.length === H && hazGrid[0] && hazGrid[0].length === W) {
-  const loud = semMode === "beginner" && logicalLayer === "fx";
+  const loud = logicalLayer === "fx";
   for (let y = av.y0; y <= av.y1; y++) {
     const row = hazGrid[y]; if (!row) continue;
     for (let x = av.x0; x <= av.x1; x++) {
@@ -6076,11 +6077,6 @@ const SEM_LAYER_DEFS = {
                       ["block", "🔴", "Blocked", "heroes can't pass"],
                       ["hazard", "⚠️", "Hazard", "hurts + blocks"]] },
 };
-function setSemMode(m) {
-  semMode = (m === "advanced") ? "advanced" : "beginner";
-  try { localStorage.setItem("crumbs.semMode", semMode); } catch (e) {}
-  renderSemDock();
-}
 function semTileLabel(id) {
   if (id === "mixed") return "Mixed (auto)";
   const nm = (semNames && semNames[id]) || ("#" + id);
@@ -6115,7 +6111,7 @@ function armMeaning(t) {
     setBrushTool("stamp");   // meaning needs a shape brush, not the eraser
   renderSemDock(); queueRender();
   const lbl = t === "erase" ? "clear meaning" : t;
-  toast(semMode === "beginner" ? "painting " + lbl + " — drag on the map" : "meaning brush: " + lbl);
+  toast("painting " + lbl + " — drag on the map");
 }
 function armColl(m) {
   if (!COLL_MODES[m]) return;
@@ -6125,7 +6121,7 @@ function armColl(m) {
     setBrushTool("stamp");
   renderSemDock(); queueRender();
   const lbl = m === "walk" ? "walkable" : m === "block" ? "blocked" : "hazard";
-  toast(semMode === "beginner" ? "painting " + lbl + " ground — drag on the map" : "collision brush: " + lbl);
+  toast("painting " + lbl + " ground — drag on the map");
 }
 function disarmMeaning(silent) {
   if (!semBrush && !collBrush) return;
@@ -6142,7 +6138,7 @@ function renderSemDock() {
     const btn = document.createElement("button");
     if (on) btn.classList.add("on");
     btn.innerHTML = "<span>" + b[1] + "</span> " + b[2] +
-      (semMode === "beginner" ? "<span class=\"phint\">" + b[3] + "</span>" : "");
+      "<span class=\"phint\">" + b[3] + "</span>";
     btn.title = b[2] + " — " + b[3];
     btn.onclick = () => {
       if (key === "walk" || key === "block" || key === "hazard") armColl(key);
@@ -6221,10 +6217,6 @@ function initSemDock() {
     const adv = $("sem-adv"); adv.hidden = !adv.hidden;
     tg.textContent = adv.hidden ? "⚙ Advanced" : "⚙ Hide";
   };
-  const md = $("sem-mode");
-  const syncModeBtn = () => { if (md) md.textContent = semMode === "advanced" ? "🛠 Advanced" : "👶 Simple"; };
-  if (md) md.onclick = () => { setSemMode(semMode === "advanced" ? "beginner" : "advanced"); syncModeBtn(); };
-  syncModeBtn();
   const sh = $("sem-shadow"), dv = $("sem-decor");
   if (sh) sh.oninput = () => { $("sem-shadow-val").textContent = sh.value + "%"; };
   if (dv) dv.oninput = () => { $("sem-decor-val").textContent = dv.value + "%"; };

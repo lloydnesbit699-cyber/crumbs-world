@@ -525,6 +525,10 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     padding: 8px 10px; background: #1d1d28; border-bottom: 1px solid #2a2a38; }
   #melody-title { color: #ffd75f; font-weight: bold; font-size: 14px; flex: 1; }
   #melody-dot { font-size: 12px; }  /* v5.29.2: bootloader status dot */
+  /* v5.61: her true form in the talk dialog — portrait in the dock header */
+  #melody-portrait { width: 38px; height: 38px; border-radius: 50%;
+    object-fit: cover; border: 2px solid #a678ff; flex: none;
+    box-shadow: 0 0 10px rgba(166,120,255,.5); }
   #melody-quota { color: #888; font-size: 11px; }
   #melody-head button { background: none; border: none; color: #aaa;
     font-size: 16px; cursor: pointer; padding: 2px 6px; }
@@ -10210,6 +10214,9 @@ function npcTick(dt) {
   const now = (typeof performance !== "undefined" && performance.now)
     ? performance.now() : Date.now();
   let moved = false, resting = false;
+  // v5.61: her true-form sprite animates (orb-glow frames + hover) — she
+  // needs frames even though she never walks a patrol loop.
+  const melodyLive = npcs.some(n => n.melody);
   npcs.forEach(n => {
     if (!n.loop.length) return;
     // v5.40: stop pauses — the timer runs on the wall clock, so a pause
@@ -10252,6 +10259,7 @@ function npcTick(dt) {
   });
   if (moved) queueRender();   // v5.3: batched with the frame
   else if (resting) queueRender();   // v5.40: the 💤 bob needs frames too
+  else if (melodyLive && typeof melodySpriteReady === "function" && melodySpriteReady()) queueRender();   // v5.61: her glow + hover
 }
 function drawNpc(n) {
   // v5.43: the walker's current animation state picks his frame + motion
@@ -10278,6 +10286,33 @@ function drawNpc(n) {
     ctx.fillStyle = "#e3c6ff";
     ctx.fillText("Melody", cx, by + fs / 2 + 3);
     ctx.restore();
+  }
+  // v5.61: her true form on the map — animated sprite (orb-glow frames +
+  // gentle hover), never a borrowed tile. Falls back to the old body tile
+  // only while her art is still arriving.
+  if (n.melody && melodySpriteReady()) {
+    const fr = melodySpriteFrames[Math.floor(Date.now() / 280) % 4];
+    const sw2 = tilePx * 1.15, sh2 = sw2 * (fr.naturalHeight / fr.naturalWidth);
+    const bob = Math.sin(Date.now() / 650) * tilePx * 0.05;
+    const dx2 = px + (tilePx - sw2) / 2, dy2 = py + tilePx - sh2 + bob;
+    ctx.fillStyle = "rgba(0,0,0,0.30)";
+    ctx.beginPath();
+    ctx.ellipse(px + tilePx / 2, py + tilePx * 0.92, tilePx * 0.30, tilePx * 0.11, 0, 0, Math.PI * 2);
+    ctx.fill();
+    const aura = ctx.createRadialGradient(px + tilePx / 2, py + tilePx / 2, 2,
+      px + tilePx / 2, py + tilePx / 2, tilePx * 0.9);
+    aura.addColorStop(0, "rgba(166,120,255,0.20)");
+    aura.addColorStop(1, "rgba(166,120,255,0)");
+    ctx.fillStyle = aura;
+    ctx.fillRect(px - tilePx * 0.4, py - tilePx * 0.4, tilePx * 1.8, tilePx * 1.8);
+    ctx.drawImage(fr, dx2, dy2, sw2, sh2);
+    // her ring sits above the sprite — the tall figure would hide it
+    ctx.strokeStyle = "rgba(190,120,255,0.9)";
+    ctx.lineWidth = Math.max(2, tilePx / 16);
+    ctx.beginPath();
+    ctx.arc(px + tilePx / 2, py + tilePx / 2, tilePx * 0.46, 0, Math.PI * 2);
+    ctx.stroke();
+    return;
   }
   if (!im) return;
   const sz = n.size || 1.0;   // v5.29: walkers keep their build size
@@ -10372,6 +10407,36 @@ function fireWalkerInteract(n) {
 // the same dock. Chat-only in the world: Law 18 holds, she never touches
 // the map from play mode, and pockets have their own cast (she stays home).
 let melodyNpc = null, melodyGreeted = false, melodyHomeMap = null;
+
+// v5.61: Melody's true form — her confirmed portrait + animated map sprite,
+// derived from her own true-form art (platinum hair, knowledge-orb, dark
+// circuit-woven gown). EXCLUSIVITY LOCK: these assets are never tiles. They
+// live outside every tile registry, and melodyLockTiles() strips them from
+// the palette, sprite list, and custom tiles if they ever show up there —
+// so her design can never be picked from the palette or spawned by players.
+const MELODY_TRUEFORM_PREFIX = "melody_trueform_";
+const MELODY_TRUEFORM_FILES = ["melody_trueform_portrait.png",
+  "melody_trueform_f0.png", "melody_trueform_f1.png",
+  "melody_trueform_f2.png", "melody_trueform_f3.png"];
+function melodyLockedAsset(name) {
+  return typeof name === "string" &&
+    name.toLowerCase().indexOf(MELODY_TRUEFORM_PREFIX) === 0;
+}
+function melodyLockTiles(tiles) {
+  return (tiles || []).filter(t => !melodyLockedAsset(t.name) &&
+    !melodyLockedAsset(t.id) && !melodyLockedAsset(t.art));
+}
+// her animated map sprite — 4 orb-glow frames, cycled at draw time
+const melodySpriteFrames = [];
+MELODY_TRUEFORM_FILES.slice(1).forEach(f => {
+  const im = new Image();
+  im.src = "/api/melody-trueform/" + f;
+  melodySpriteFrames.push(im);
+});
+function melodySpriteReady() {
+  return melodySpriteFrames.length === 4 &&
+    melodySpriteFrames.every(im => im.complete && im.naturalWidth > 0);
+}
 
 function melodyBodyTile() {
   // what she looks like standing there — a tile with "melody" in its name
@@ -10711,7 +10776,7 @@ function ensureFrames(t) {
 }
 async function loadCustomTiles() {
   const r = await api("/api/custom-tiles");
-  customTiles = r.tiles || [];
+  customTiles = melodyLockTiles(r.tiles);   // v5.61: exclusivity lock
   customById = {}; customFrames = {};
   // v5.29: a fresh registry fetch clears the failure ledger too — art that
   // arrived since the last load gets its thumbnails back instead of a "?".
@@ -13339,6 +13404,11 @@ $("menu-update").onclick = async () => {
       const artNames = ["shared_library.json", "shared_library/starter_pack.png",
         "sprite_library.json", "asset_library/hero_hood.png",
         "asset_library/logo_rata.png", "asset_library/portrait_apple.jpg",
+        "asset_library/melody_trueform_portrait.png",
+        "asset_library/melody_trueform_f0.png",
+        "asset_library/melody_trueform_f1.png",
+        "asset_library/melody_trueform_f2.png",
+        "asset_library/melody_trueform_f3.png",
         "asset_library/palette.json", "asset_library/palette_strip.png",
         "asset_library/tile_band_horizontal.png", "asset_library/tile_band_vertical.png",
         "asset_library/tile_fade_horizontal.png", "asset_library/tile_fade_vertical.png"];
@@ -18770,10 +18840,10 @@ async function shellBoot() {
     initSemDock();          // v5.46: the meaning-painting dock (wiring only)
     try { await loadSemantic(); } catch (e) {}   // pools + rules + seed
     const p = await api("/api/palette");
-    palette = p.tiles;
+    palette = melodyLockTiles(p.tiles);   // v5.61: exclusivity lock
     splashStep(42, "Loading tiles\u2026");
     const s = await api("/api/sprites");
-    spriteTiles = s.tiles;
+    spriteTiles = melodyLockTiles(s.tiles);   // v5.61: exclusivity lock
     spriteTiles.forEach(t => {
       const im = new Image();
       im.onload = () => { markBaseDirty(); render(); renderSelCard(); };   // v5.1: card thumb too; v5.3: invalidate cached base
@@ -19152,6 +19222,8 @@ async function deleteMission(id) {
 <button id="melody-fab" hidden title="Ask Melody">Mel</button>
 <div id="melody-dock" hidden>
   <div id="melody-head">
+    <!-- v5.61: her true form — confirmed portrait in the talk dialog -->
+    <img id="melody-portrait" src="/api/melody-trueform/melody_trueform_portrait.png" alt="Melody" title="Melody">
     <span id="melody-dot" title="Melody is getting ready&#8230;">&#128993;</span>
     <span id="melody-title">Melody</span>
     <span id="melody-quota"></span>

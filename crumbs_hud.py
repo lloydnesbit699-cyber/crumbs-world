@@ -211,6 +211,11 @@ UPDATE_ART_FILES = [
     "asset_library/hero_hood.png",
     "asset_library/logo_rata.png",
     "asset_library/portrait_apple.jpg",
+    "asset_library/melody_trueform_portrait.png",
+    "asset_library/melody_trueform_f0.png",
+    "asset_library/melody_trueform_f1.png",
+    "asset_library/melody_trueform_f2.png",
+    "asset_library/melody_trueform_f3.png",
     "asset_library/palette.json",
     "asset_library/palette_strip.png",
     "asset_library/tile_band_horizontal.png",
@@ -7080,6 +7085,11 @@ class Handler(BaseHTTPRequestHandler):
         # (Repair Law 17). Auth is still checked inside the handler.
         if path.startswith("/api/melody/"):
             return self._do_melody_impl(path, is_post=False)
+        # v5.61: her true-form art is static game art (like the app icon),
+        # not vault data — serve it without the public-mode auth gate so the
+        # page can paint her portrait + sprite before and after login.
+        if path.startswith("/api/melody-trueform/"):
+            return self._do_GET_impl(path)
         # v5.29: thumbnails are vault-scoped but never serialize the expensive
         # work (Repair Laws 16/17/18 — see _snapshot_tile_art). Auth is
         # still checked; the handler activates the caller's vault under the
@@ -7705,6 +7715,27 @@ class Handler(BaseHTTPRequestHandler):
                     data = f.read()
             except OSError:
                 return self._send_json({"ok": False, "error": "no icon yet"}, 404)
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "max-age=3600")
+            self.end_headers()
+            self.wfile.write(data)
+        elif path.startswith("/api/melody-trueform/"):
+            # v5.61: Melody's true-form art — her confirmed portrait + the
+            # animated map-sprite frames. Whitelisted filenames only (no path
+            # traversal); served for display, never registered as tiles.
+            name = path.rsplit("/", 1)[-1]
+            if name not in ("melody_trueform_portrait.png",
+                            "melody_trueform_f0.png", "melody_trueform_f1.png",
+                            "melody_trueform_f2.png", "melody_trueform_f3.png"):
+                return self._send_json({"ok": False, "error": "not found"}, 404)
+            try:
+                with open(os.path.join(SCRIPT_DIR, "asset_library", name), "rb") as f:
+                    data = f.read()
+            except OSError:
+                return self._send_json(
+                    {"ok": False, "error": "art not installed yet — run Check for updates"}, 404)
             self.send_response(200)
             self.send_header("Content-Type", "image/png")
             self.send_header("Content-Length", str(len(data)))

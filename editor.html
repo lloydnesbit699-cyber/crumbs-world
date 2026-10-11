@@ -1930,6 +1930,110 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   html.sh-text-large #shell-root .sh-build-card small,
   html.sh-text-large #shell-root .sh-build-hint,
   html.sh-text-large #shell-root .sh-place-card .sh-pc-meta small { font-size: 16px; }
+
+  /* ---- v5.61 Stage 6: World Drawer (same chrome as the Build Drawer) ---- */
+  #shell-root .sh-world-drawer {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 70;
+    max-height: 58%; display: flex; flex-direction: column;
+    background: #1e1c18; border-top: 2px solid #3a352b;
+    border-radius: 16px 16px 0 0;
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+    box-shadow: 0 -8px 32px rgba(0,0,0,0.55);
+    animation: sh-world-in 0.25s ease-out;
+  }
+  @keyframes sh-world-in {
+    from { transform: translateY(40px); opacity: 0.4; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+  @media (min-width: 720px) {
+    #shell-root .sh-world-drawer {
+      left: auto; top: 0; right: 0; bottom: 0; width: 400px; max-height: none;
+      border-top: 0; border-left: 2px solid #3a352b; border-radius: 16px 0 0 16px;
+      animation-name: sh-world-in-side;
+    }
+    @keyframes sh-world-in-side {
+      from { transform: translateX(40px); opacity: 0.4; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+  }
+  #shell-root .sh-world-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 14px 10px; border-bottom: 1px solid #2c2a22; flex: none;
+  }
+  #shell-root .sh-world-grab {
+    width: 44px; height: 5px; border-radius: 3px; background: #6b6252;
+    margin: 0 auto; position: absolute; top: 6px; left: 0; right: 0;
+  }
+  #shell-root .sh-world-back {
+    min-width: 48px; min-height: 48px; padding: 8px 12px; font-size: 18px;
+    color: #f3ead6; background: none; border: 0; cursor: pointer; flex: none;
+  }
+  #shell-root .sh-world-title { font-size: 18px; font-weight: 700; color: #f3ead6; margin: 0; flex: 1; }
+  #shell-root .sh-world-close {
+    min-width: 48px; min-height: 48px; font-size: 20px; color: #f3ead6;
+    background: #2c2a22; border: 2px solid #3a352b; border-radius: 12px; cursor: pointer; flex: none;
+  }
+  #shell-root .sh-world-body { overflow-y: auto; padding: 12px 14px 16px; -webkit-overflow-scrolling: touch; }
+  #shell-root .sh-world-status {
+    padding: 12px 14px; margin-bottom: 12px;
+    background: #26241f; border: 2px solid #3a352b; border-radius: 12px;
+  }
+  #shell-root .sh-ws-name { font-size: 18px; font-weight: 700; color: #f3ead6; margin-bottom: 6px; }
+  #shell-root .sh-ws-line { display: flex; align-items: center; gap: 8px; font-size: 15px; color: #f3ead6; margin-top: 4px; }
+  #shell-root .sh-ws-line.dim { color: #8f8672; font-size: 14px; }
+  #shell-root .sh-ws-line.ok span:first-child { color: #7fc97f; }
+  #shell-root .sh-ws-line.warn span:first-child { color: #c9973f; }
+  #shell-root .sh-ws-line.err span:first-child { color: #d96a6a; }
+  #shell-root .sh-world-view { width: 100%; margin-bottom: 4px; }
+  #shell-root .sh-more-item .sh-wr-meta { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
+  #shell-root .sh-more-item .sh-wr-meta b { font-size: 16px; font-weight: 600; color: #f3ead6; }
+  #shell-root .sh-more-item .sh-wr-meta small { font-size: 14px; color: #8f8672; }
+  #shell-root .sh-w-row {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    padding: 10px 12px; margin-bottom: 8px;
+    background: #26241f; border: 2px solid #3a352b; border-radius: 12px;
+    color: #f3ead6; font-size: 16px; text-align: left;
+  }
+  #shell-root .sh-w-row .sh-mi { font-size: 22px; flex: none; width: 32px; text-align: center; }
+  #shell-root .sh-w-row .sh-wr-meta b { display: block; font-size: 16px; }
+  #shell-root .sh-w-row .sh-wr-meta small { font-size: 14px; color: #8f8672; }
+  #shell-root .sh-world-mapcard {
+    background: #26241f; border: 2px solid #3a352b; border-radius: 12px;
+    overflow: hidden; margin-bottom: 10px;
+  }
+  #shell-root .sh-world-mapcard img { display: block; width: 100%; max-height: 220px; object-fit: cover; image-rendering: pixelated; background: #141311; }
+  #shell-root .sh-world-mapcard .sh-wm-meta { padding: 10px 12px; }
+  #shell-root .sh-world-mapcard .sh-wm-meta b { display: block; font-size: 16px; color: #f3ead6; }
+  #shell-root .sh-world-mapcard .sh-wm-meta small { font-size: 14px; color: #8f8672; }
+  #shell-root .sh-check-item {
+    display: flex; gap: 10px; padding: 12px;
+    background: #26241f; border: 2px solid #3a352b; border-radius: 12px;
+    margin-bottom: 8px;
+  }
+  #shell-root .sh-check-item.error { border-color: #d96a6a; }
+  #shell-root .sh-check-item.warn { border-color: #c9973f; }
+  #shell-root .sh-check-item .sh-ci-ico { font-size: 22px; flex: none; }
+  #shell-root .sh-check-item.error .sh-ci-ico { color: #d96a6a; }
+  #shell-root .sh-check-item.warn .sh-ci-ico { color: #c9973f; }
+  #shell-root .sh-check-item b { display: block; font-size: 16px; color: #f3ead6; margin-bottom: 4px; }
+  #shell-root .sh-check-item p { font-size: 14px; color: #cfc6b0; margin: 4px 0 0; }
+  #shell-root .sh-check-clean {
+    display: flex; align-items: center; gap: 10px; padding: 14px;
+    background: #1f2a1f; border: 2px solid #7fc97f; border-radius: 12px;
+    font-size: 16px; font-weight: 600; color: #f3ead6;
+  }
+  #shell-root .sh-check-clean span:first-child { color: #7fc97f; font-size: 22px; }
+  @media (prefers-reduced-motion: reduce) {
+    #shell-root .sh-world-drawer { animation: none; }
+  }
+  html.sh-high-contrast #shell-root .sh-world-drawer,
+  html.sh-high-contrast #shell-root .sh-world-status,
+  html.sh-high-contrast #shell-root .sh-w-row,
+  html.sh-high-contrast #shell-root .sh-check-item,
+  html.sh-high-contrast #shell-root .sh-world-mapcard { background: #0a0a0a; border-color: #f3ead6; }
+  html.sh-text-large #shell-root .sh-more-item .sh-wr-meta small,
+  html.sh-text-large #shell-root .sh-w-row .sh-wr-meta small,
+  html.sh-text-large #shell-root .sh-ws-line.dim { font-size: 16px; }
 </style>
 </head>
 <body>
@@ -15654,27 +15758,34 @@ function shellWireNav(root) {
     b.onclick = function () { shellNavGo(b.getAttribute("data-nav")); };
   })(btns[i]);
 }
-// STAGE-6: world -> open the World Drawer over the canvas (no navigation).
+// STAGE-6: world -> the World Drawer over the canvas (no navigation).
 // STAGE-7: play -> Play Entry card, then the Play transition.
-// Stage 5: Build opens the Build Drawer over the canvas. Tapping Build while
-// the drawer is open closes it (toggle). World opens the My Worlds library,
-// and Play uses the workshop until its entry lands.
+// Build opens the Build Drawer over the canvas; World opens the World
+// Drawer. Tapping either while its drawer is open closes it (toggle).
+// Play uses the workshop until its entry lands.
 function shellNavGo(dest) {
   var st = window.CrumbsShell.state;
   if (dest === "build") {
     if ($("sh-build-drawer")) { shellCloseBuildDrawer(); return; }
+    shellCloseWorldDrawer();
     var f = window.CrumbsShell.currentFile;
     if (!f) { shellShowHome(); return; }
     if (st.destination !== "build" || !$("sh-canvas-frame")) shellShowCanvas(f);
     shellOpenBuildDrawer("home");
     return;
   }
+  if (dest === "world") {
+    if ($("sh-world-drawer")) { shellCloseWorldDrawer(); return; }
+    var f2 = window.CrumbsShell.currentFile;
+    if (!f2) { shellShowHome(); return; }
+    shellOpenWorldDrawer("home");
+    return;
+  }
   if (st.destination === dest) return;
   st.destination = dest;
   shellCloseBuildDrawer();
-  if (dest === "world") {
-    shellShowWorlds();
-  } else if (dest === "play") {
+  shellCloseWorldDrawer();
+  if (dest === "play") {
     location.href = "/classic";  // STAGE-7: replace with Play Entry
   }
 }
@@ -15771,6 +15882,7 @@ function shellFrameReady() {
 
 function shellOpenBuildDrawer(view) {
   shellCloseMenu();  // one drawer at a time
+  shellCloseWorldDrawer();
   var st = window.CrumbsShell.state;
   if (st.destination !== "build" || !$("sh-canvas-frame")) {
     var f = window.CrumbsShell.currentFile;
@@ -15796,6 +15908,7 @@ function shellOpenBuildDrawer(view) {
     "</div>" +
     '<div class="sh-build-body" id="sh-build-body"></div>';
   shellRootEl().appendChild(wrap);
+  shellDrawerParkAboveNav(wrap);
   $("sh-build-back").onclick = function () { shellBuildShow("home"); };
   $("sh-build-close").onclick = shellCloseBuildDrawer;
   document.addEventListener("keydown", shellBuildKeys);
@@ -16170,10 +16283,361 @@ function shellBuildConfirm(label) {
 
 // ---- Outside-tap: called by the iframe on a confirmed map tap ----
 function shellMapTapped() {
+  // The World Drawer never arms tools, so a bare map tap always closes it.
+  if ($("sh-world-drawer")) { shellCloseWorldDrawer(); return; }
   if (!$("sh-build-drawer")) return;
   // A tap while this drawer session has a tool armed is work, not dismissal.
   // A bare tap (nothing armed since the drawer opened) closes the drawer.
   if (!_buildSessionArmed) shellCloseBuildDrawer();
+}
+
+// ---- Stage 6, Screen 08: World Drawer ----
+// World-level actions, no building tools mixed in. Same drawer chrome as the
+// Build Drawer (bottom half-height on phones, side panel on wide screens).
+// Every row drives REAL endpoints — /api/status, /api/maps, /api/portals,
+// /api/validate, /api/rules, /api/game-rules. Advanced editing stays in
+// Creator Tools (/classic, STAGE-8). Nothing is faked: a row with no real
+// backend behind it does not appear.
+var _worldReturnFocus = null;
+var _worldView = "home";
+
+function shellNavSetActive(dest) {
+  // The bottom nav renders once with the canvas; keep its selected state
+  // honest when a drawer changes the destination without re-rendering.
+  var btns = document.querySelectorAll("#shell-root [data-nav]");
+  for (var i = 0; i < btns.length; i++) {
+    if (btns[i].getAttribute("data-nav") === dest) btns[i].setAttribute("aria-current", "page");
+    else btns[i].removeAttribute("aria-current");
+  }
+}
+
+function shellDrawerParkAboveNav(wrap) {
+  // Phone bottom-sheet mode only. The spec's nav is persistent and the
+  // nav-toggle in shellNavGo needs it tappable, so park the drawer just
+  // above the bottom nav instead of covering it. Desktop keeps the
+  // full-height side panel (media query), where the nav stays clear.
+  try {
+    if (window.matchMedia("(min-width: 720px)").matches) return;
+    var nb = document.querySelector("#shell-root .sh-bottomnav");
+    if (!nb || !wrap) return;
+    var r = nb.getBoundingClientRect();
+    if (r && r.height > 0) wrap.style.bottom = Math.ceil(r.height) + "px";
+  } catch (e) {}
+}
+
+function shellOpenWorldDrawer(view) {
+  shellCloseMenu();
+  shellCloseBuildDrawer();  // one drawer at a time
+  // The drawer lives over the canvas. If the frame is already up, leave it
+  // alone — re-rendering would reload the map. Otherwise get to the canvas.
+  if (!$("sh-canvas-frame")) {
+    var f = window.CrumbsShell.currentFile;
+    if (!f) { shellShowHome(); return; }
+    shellShowCanvas(f);
+  }
+  if ($("sh-world-drawer")) { if (view) shellWorldShow(view); return; }
+  _worldReturnFocus = document.activeElement;
+  window.CrumbsShell.state.drawer = "half";
+  window.CrumbsShell.state.destination = "world";
+  shellNavSetActive("world");
+  var wrap = document.createElement("div");
+  wrap.id = "sh-world-drawer";
+  wrap.className = "sh-world-drawer";
+  wrap.setAttribute("role", "dialog");
+  wrap.setAttribute("aria-modal", "false");
+  wrap.setAttribute("aria-label", "World");
+  wrap.innerHTML =
+    '<div class="sh-world-head">' +
+      '<div class="sh-world-grab" aria-hidden="true"></div>' +
+      '<button type="button" class="sh-world-back" id="sh-world-back" aria-label="Back">\u2039</button>' +
+      '<h2 class="sh-world-title" id="sh-world-title">World</h2>' +
+      '<button type="button" class="sh-world-close" id="sh-world-close" aria-label="Close world panel">\u00D7</button>' +
+    "</div>" +
+    '<div class="sh-world-body" id="sh-world-body"></div>';
+  shellRootEl().appendChild(wrap);
+  shellDrawerParkAboveNav(wrap);
+  $("sh-world-back").onclick = function () { shellWorldShow("home"); };
+  $("sh-world-close").onclick = shellCloseWorldDrawer;
+  document.addEventListener("keydown", shellWorldKeys);
+  shellWorldShow(view || "home");
+  $("sh-world-close").focus();
+}
+function shellWorldKeys(e) { if (e.key === "Escape") shellCloseWorldDrawer(); }
+function shellCloseWorldDrawer() {
+  var d = $("sh-world-drawer");
+  if (!d) return;
+  if (d.parentNode) d.parentNode.removeChild(d);
+  document.removeEventListener("keydown", shellWorldKeys);
+  // The drawer only ever opens over the canvas, so closing lands on Canvas
+  // Home: destination "build", nav highlight to match.
+  window.CrumbsShell.state.drawer = "closed";
+  window.CrumbsShell.state.destination = "build";
+  shellNavSetActive("build");
+  _worldView = "home";
+  if (_worldReturnFocus && _worldReturnFocus.focus) {
+    try { _worldReturnFocus.focus(); } catch (e) {}
+  }
+  _worldReturnFocus = null;
+}
+
+var SHELL_WORLD_TITLES = { home: "World", map: "World Map", portals: "Portals",
+  check: "World Check", rules: "Rules" };
+function shellWorldShow(view) {
+  _worldView = view;
+  var t = $("sh-world-title");
+  if (t) t.textContent = SHELL_WORLD_TITLES[view] || "World";
+  var back = $("sh-world-back");
+  if (back) back.style.visibility = (view === "home") ? "hidden" : "visible";
+  var body = $("sh-world-body");
+  if (!body) return;
+  body.innerHTML = '<div class="sh-build-empty">Loading\u2026</div>';
+  body.scrollTop = 0;
+  if (view === "home") shellWorldHomeInto(body);
+  else if (view === "map") shellWorldMapInto(body);
+  else if (view === "portals") shellWorldPortalsInto(body);
+  else if (view === "check") shellWorldCheckInto(body);
+  else if (view === "rules") shellWorldRulesInto(body);
+  else shellWorldHomeInto(body);
+}
+
+function shellWorldRow(view, icon, label, sub) {
+  return '<button type="button" class="sh-more-item" data-wview="' + view + '">' +
+    '<span class="sh-mi" aria-hidden="true">' + icon + "</span>" +
+    '<span class="sh-wr-meta"><b>' + esc(label) + "</b><small>" + esc(sub) + "</small></span>" +
+    '<span class="sh-go" aria-hidden="true">\u203A</span></button>';
+}
+function shellWorldWireRows(body) {
+  var rows = body.querySelectorAll("[data-wview]");
+  for (var i = 0; i < rows.length; i++) (function (r) {
+    r.onclick = function () {
+      var v = r.getAttribute("data-wview");
+      // My Worlds is the full Stage 3 library screen, not a drawer view.
+      if (v === "worlds") { shellCloseWorldDrawer(); shellShowWorlds(); return; }
+      shellWorldShow(v);
+    };
+  })(rows[i]);
+}
+
+// ---- World Drawer home: status summary + five world-level rows ----
+async function shellWorldHomeInto(body) {
+  var file = window.CrumbsShell.currentFile, name = friendlyName(file) || "World";
+  var saveIco = "\u2026", saveTxt = "Checking save state\u2026", saveCls = "";
+  var counts = [];
+  try {
+    var s = await api("/api/status");
+    if (s && s.dirty) { saveIco = "\u270E"; saveTxt = "Unsaved changes"; saveCls = "warn"; }
+    else { saveIco = "\u2713"; saveTxt = (s && s.last_save) ? "Saved" : "No changes yet"; saveCls = "ok"; }
+  } catch (e) { saveIco = "\u26A0"; saveTxt = "Connection lost \u2014 changes may not be saved"; saveCls = "err"; }
+  try {
+    var m = await api("/api/maps");
+    var n = (m && m.maps) ? m.maps.length : 0;
+    counts.push(n === 1 ? "1 world" : n + " worlds");
+  } catch (e) {}
+  try {
+    var p = await api("/api/portals");
+    var pn = (p && p.portals) ? Object.keys(p.portals).length : 0;
+    counts.push(pn === 1 ? "1 portal" : pn + " portals");
+  } catch (e) {}
+  body.innerHTML =
+    '<div class="sh-world-status">' +
+      '<div class="sh-ws-name"></div>' +
+      '<div class="sh-ws-line ' + saveCls + '"><span aria-hidden="true">' + saveIco + "</span><span>" + esc(saveTxt) + "</span></div>" +
+      (counts.length ? '<div class="sh-ws-line dim"><span>' + esc(counts.join(" \u00B7 ")) + "</span></div>" : "") +
+    "</div>" +
+    '<button type="button" class="sh-btn-primary sh-world-view" id="sh-w-viewworld">View World</button>' +
+    '<div class="sh-build-section-title">This world</div>' +
+    shellWorldRow("worlds", "\u25C9", "My Worlds", "All your worlds") +
+    shellWorldRow("map", "\uD83D\uDDFA\uFE0F", "World Map", "The map you're standing in") +
+    shellWorldRow("portals", "\uD83D\uDEAA", "Portals", "Doorways to other places") +
+    shellWorldRow("check", "\u2713", "World Check", "Is everything in order?") +
+    shellWorldRow("rules", "\u2699\uFE0F", "Rules", "How this world plays");
+  body.querySelector(".sh-ws-name").textContent = name;
+  $("sh-w-viewworld").onclick = shellCloseWorldDrawer;
+  shellWorldWireRows(body);
+}
+
+// ---- World Map: the honest single map. Worlds ARE map files in this
+// build — there is no multi-map world object — so this shows the one map
+// you're standing in, with its real details.
+async function shellWorldMapInto(body) {
+  var file = window.CrumbsShell.currentFile, name = friendlyName(file) || "World";
+  var info = null;
+  try {
+    var m = await api("/api/maps");
+    var maps = (m && m.maps) || [];
+    for (var i = 0; i < maps.length; i++)
+      if (maps[i].file === file) { info = maps[i]; break; }
+  } catch (e) {}
+  if (!info) {
+    body.innerHTML = '<div class="sh-build-empty">Couldn\'t load this world\'s details. Check the connection and try again.</div>' +
+      '<div class="sh-build-row"><button type="button" class="sh-btn-secondary" id="sh-w-map-retry">Retry</button></div>';
+    $("sh-w-map-retry").onclick = function () { shellWorldShow("map"); };
+    return;
+  }
+  var dims = (info.width && info.height) ? info.width + " \u00D7 " + info.height + " tiles" : "Size unknown";
+  var mod = "";
+  if (info.modified) {
+    try { mod = " \u00B7 updated " + new Date(info.modified * 1000).toLocaleDateString([], { month: "short", day: "numeric" }); }
+    catch (e) {}
+  }
+  body.innerHTML =
+    '<div class="sh-world-mapcard">' +
+      '<img src="/api/map/thumb?file=' + encodeURIComponent(file) + '" alt="Map preview" ' +
+        'onerror="this.style.display=\'none\'">' +
+      '<div class="sh-wm-meta"><b></b><small>' + esc(dims + mod) + "</small></div>" +
+    "</div>" +
+    '<p class="sh-build-hint">Each world is a single map \u2014 this is the one you\'re standing in.</p>' +
+    '<div class="sh-build-row"><button type="button" class="sh-btn-primary" id="sh-w-map-view">View World</button></div>';
+  body.querySelector(".sh-wm-meta b").textContent = name;
+  $("sh-w-map-view").onclick = shellCloseWorldDrawer;
+}
+
+// ---- Portals: the real portal list for the open map. Adding a portal
+// means picking its cell on the map, so that stays in Creator Tools.
+async function shellWorldPortalsInto(body) {
+  var list = [], failed = false;
+  try {
+    var p = await api("/api/portals");
+    var po = (p && p.portals) || {};
+    for (var k in po) list.push(po[k]);
+  } catch (e) { failed = true; }
+  if (failed) {
+    body.innerHTML = '<div class="sh-build-empty">Couldn\'t load portals. Check the connection and try again.</div>' +
+      '<div class="sh-build-row"><button type="button" class="sh-btn-secondary" id="sh-w-port-retry">Retry</button></div>';
+    $("sh-w-port-retry").onclick = function () { shellWorldShow("portals"); };
+    return;
+  }
+  var h = "";
+  if (!list.length) {
+    h = '<div class="sh-build-empty">No portals here yet.<br>Portals are doorways you step through to reach pocket maps.</div>';
+  } else {
+    for (var i = 0; i < list.length; i++) {
+      var pt = list[i] || {};
+      var tgt = pt.target ? friendlyName(pt.target) : "a pocket map";
+      h += '<div class="sh-w-row"><span class="sh-mi" aria-hidden="true">\uD83D\uDEAA</span>' +
+        '<span class="sh-wr-meta"><b></b><small>' + esc("to " + tgt + " \u00B7 at (" + pt.x + ", " + pt.y + ")") + "</small></span></div>";
+    }
+  }
+  h += '<div class="sh-build-row"><button type="button" class="sh-btn-secondary" id="sh-w-port-add">Add Portal in Creator Tools</button></div>' +
+    '<p class="sh-build-hint">Adding a portal means picking its spot on the map \u2014 that lives in the full workshop for now.</p>';
+  body.innerHTML = h;
+  var labels = body.querySelectorAll(".sh-w-row .sh-wr-meta b");
+  for (var j = 0; j < labels.length && j < list.length; j++)
+    labels[j].textContent = list[j].label || "Portal";
+  // STAGE-8: portal placement is a map-tap flow — Creator Tools owns it.
+  $("sh-w-port-add").onclick = function () { location.href = "/classic"; };
+}
+
+// ---- World Check: friendly validation of the OPEN map. /api/validate only
+// checks the currently open map, so the UI says so honestly. Categories
+// (Errors/Warnings) appear only when the data has them.
+var SHELL_CHECK_KINDS = {
+  bad_layers: { sev: "error", title: "The map's data is damaged",
+    why: "The game can't read a map whose layers are the wrong shape.",
+    next: "Re-save the map to repair it." },
+  no_spawn: { sev: "error", title: "No starting point",
+    why: "The hero needs a walkable tile to appear on when you press Play.",
+    next: "Paint a walkable tile, then set it as the spawn in Creator Tools." },
+  unreachable: { sev: "warn", title: "{n} floor tiles can't be reached",
+    why: "Those parts of the world are cut off from the starting point.",
+    next: "Connect them with walkable tiles, or paint over them." },
+  bad_tile: { sev: "error", title: "{n} tiles the game doesn't recognize",
+    why: "Those cells can't be drawn.",
+    next: "Repaint them with tiles from the palette." }
+};
+function shellWorldCheckInto(body) {
+  var name = friendlyName(window.CrumbsShell.currentFile) || "this world";
+  body.innerHTML =
+    '<p class="sh-build-hint" style="margin-top:0">Checks <b></b>\u2019s open map for problems \u2014 a missing start, cut-off areas, broken tiles.</p>' +
+    '<div class="sh-build-row" style="margin-top:12px"><button type="button" class="sh-btn-primary" id="sh-w-check-run">Run World Check</button></div>' +
+    '<div id="sh-w-check-out" style="margin-top:12px"></div>';
+  body.querySelector(".sh-build-hint b").textContent = name;
+  $("sh-w-check-run").onclick = function () { shellWorldCheckRun(); };
+}
+async function shellWorldCheckRun() {
+  var out = $("sh-w-check-out");
+  if (!out) return;
+  out.innerHTML = '<div class="sh-build-empty">Checking\u2026</div>';
+  var issues = null;
+  try {
+    // NOTE: /api/validate is POST-only on the server (do_POST). A GET 404s
+    // with a JSON body, which would falsely render as "clean" — always POST.
+    var r = await api("/api/validate", {});
+    issues = (r && r.ok && r.issues) || [];
+  } catch (e) {
+    out.innerHTML = '<div class="sh-build-empty">Couldn\'t run the check. Check the connection and try again.</div>';
+    return;
+  }
+  if (!issues.length) {
+    out.innerHTML = '<div class="sh-check-clean"><span aria-hidden="true">\u2713</span><span>Your world is ready for this check.</span></div>';
+    return;
+  }
+  var errs = [], warns = [];
+  for (var i = 0; i < issues.length; i++) {
+    var k = SHELL_CHECK_KINDS[issues[i].kind] ||
+      { sev: "warn", title: issues[i].msg || "Something needs attention",
+        why: "", next: "Open Creator Tools for details." };
+    var nm = (issues[i].msg || "").match(/(\d[\d,]*)/);
+    var title = k.title.replace("{n}", nm ? nm[1] : "?");
+    var h = '<div class="sh-check-item ' + (k.sev === "error" ? "error" : "warn") + '">' +
+      '<span class="sh-ci-ico" aria-hidden="true">' + (k.sev === "error" ? "\u26A0" : "\u2139") + "</span>" +
+      '<div><b></b>' +
+      (k.why ? "<p>Why it matters: " + esc(k.why) + "</p>" : "") +
+      "<p>Next step: " + esc(k.next) + "</p></div></div>";
+    (k.sev === "error" ? errs : warns).push({ h: h, t: title });
+  }
+  var html = "";
+  if (errs.length) html += '<div class="sh-build-section-title">Errors</div>' + errs.map(function (e) { return e.h; }).join("");
+  if (warns.length) html += '<div class="sh-build-section-title">Warnings</div>' + warns.map(function (e) { return e.h; }).join("");
+  out.innerHTML = html;
+  var bs = out.querySelectorAll(".sh-check-item b"), all = errs.concat(warns);
+  for (var j = 0; j < bs.length && j < all.length; j++) bs[j].textContent = all[j].t;
+}
+
+// ---- Rules: the real per-map game rules, simplified. Editing stays in
+// Creator Tools (STAGE-8).
+async function shellWorldRulesInto(body) {
+  var rules = null, grules = [];
+  try {
+    var r = await api("/api/rules");
+    if (r && r.ok) rules = r.rules || {};
+  } catch (e) {}
+  try {
+    var g = await api("/api/game-rules");
+    if (g && g.ok && g.rules) grules = g.rules;
+  } catch (e) {}
+  if (!rules && !grules.length) {
+    body.innerHTML = '<div class="sh-build-empty">Couldn\'t load the rules. Check the connection and try again.</div>' +
+      '<div class="sh-build-row"><button type="button" class="sh-btn-secondary" id="sh-w-rules-retry">Retry</button></div>';
+    $("sh-w-rules-retry").onclick = function () { shellWorldShow("rules"); };
+    return;
+  }
+  var rows = [];
+  if (rules) {
+    var wm = rules.walk_ms;
+    rows.push(["\uD83D\uDEB6", "Walk speed",
+      wm === 90 ? "Fast" : wm === 220 ? "Slow" : wm === 140 ? "Normal" : wm + "ms per step"]);
+    rows.push(["\uD83C\uDF0A", "Water slowdown", "\u00D7" + rules.swim_mult + " slower in water"]);
+    rows.push(["\uD83D\uDC7B", "Walk through walls", rules.ghost ? "On" : "Off"]);
+    rows.push(["\uD83D\uDCF1", "On-screen controls in Play", rules.touch ? "On" : "Off"]);
+    var hn = (rules.hero_tiles || []).length;
+    rows.push(["\uD83E\uDDD1", "Hero", hn ? (hn === 1 ? "1 chosen" : hn + " chosen") : "None chosen yet"]);
+  }
+  var kinds = {};
+  for (var i = 0; i < grules.length; i++) kinds[grules[i].kind] = (kinds[grules[i].kind] || 0) + 1;
+  var kNames = { goal: "Goals", hazard: "Hazards", keydoor: "Keys & doors", message: "Messages" };
+  for (var k in kNames)
+    if (kinds[k]) rows.push(["\uD83C\uDFAF", kNames[k], kinds[k] + " active"]);
+  var h = '<div class="sh-build-section-title">How this world plays</div>';
+  for (var j = 0; j < rows.length; j++) {
+    h += '<div class="sh-w-row"><span class="sh-mi" aria-hidden="true">' + rows[j][0] + "</span>" +
+      '<span class="sh-wr-meta"><b>' + esc(rows[j][1]) + "</b><small>" + esc(rows[j][2]) + "</small></span></div>";
+  }
+  h += '<div class="sh-build-row"><button type="button" class="sh-btn-secondary" id="sh-w-rules-edit">Change in Creator Tools</button></div>' +
+    '<p class="sh-build-hint">Rule editing lives in the full workshop for now.</p>';
+  body.innerHTML = h;
+  // STAGE-8: rule editing is a workshop flow — Creator Tools owns it.
+  $("sh-w-rules-edit").onclick = function () { location.href = "/classic"; };
 }
 
 // ---- Stage 2: boot ----

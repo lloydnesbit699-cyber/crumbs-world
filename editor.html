@@ -256,6 +256,18 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
      identically at every zoom level, no browser scroll quirks */
   #stage { position: fixed; top: 48px; left: 0; right: 0; bottom: 0; overflow: hidden;
            background: #0a0a0a; touch-action: none; }
+  /* v5.61 Stage 4: shell-frame trim — /classic?shellframe=1 is the tester
+     shell's Canvas Home view. Hides workshop chrome so the map fills the
+     viewport; pan/zoom/edit internals are untouched. Additive only: the
+     default classic layout is unchanged. */
+  html[data-shellframe="1"] #topbar,
+  html[data-shellframe="1"] #server-banner,
+  html[data-shellframe="1"] .menu-drop,
+  html[data-shellframe="1"] #panel-ui-btn,
+  html[data-shellframe="1"] #panel-sheet,
+  html[data-shellframe="1"] .edge-tab,
+  html[data-shellframe="1"] .tray { display: none !important; }
+  html[data-shellframe="1"] #stage { top: 0; }
   canvas { position: absolute; left: 0; top: 0; display: block; touch-action: none;
            image-rendering: pixelated; will-change: transform; }
 
@@ -1697,6 +1709,76 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   html.sh-high-contrast #shell-root .sh-world-card .sh-sub,
   html.sh-high-contrast #shell-root .sh-world-new small { color: #e8e2d2; }
   html.sh-high-contrast #shell-root .sh-btn-danger { border-color: #ff9a9a; }
+
+  /* ===== TESTER SHELL (v5.61+, Stage 4: Canvas Home + persistent nav)
+     Screen 06. Full-bleed canvas screen: world chip + Menu up top, the
+     framed map (/classic?shellframe=1) filling the middle, persistent
+     Build/World/Play nav above the safe area. First-entry coach card. */
+  #shell-root .sh-canvas-screen {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    display: flex; flex-direction: column; text-align: left;
+  }
+  #shell-root .sh-canvas-topbar {
+    flex: 0 0 auto; z-index: 3;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: max(10px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 10px max(16px, env(safe-area-inset-left));
+    background: rgba(20, 19, 17, 0.94); border-bottom: 1px solid #3a352b;
+  }
+  #shell-root .sh-world-chip {
+    font-size: 16px; font-weight: 700; color: #f3ead6;
+    background: #1e1c18; border: 1px solid #3a352b; border-radius: 999px;
+    padding: 10px 18px; max-width: 62vw; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  #shell-root .sh-canvas-wrap { flex: 1 1 auto; position: relative; min-height: 0; background: #0a0a0a; }
+  #shell-root .sh-canvas-wrap iframe {
+    position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #0a0a0a;
+  }
+  /* Persistent primary nav: icon + label, 48px+ targets, selected state uses
+     raised shape + thicker border + label emphasis — never color alone. */
+  #shell-root .sh-bottomnav {
+    flex: 0 0 auto; z-index: 3; display: flex; gap: 8px;
+    background: #1e1c18; border-top: 1px solid #3a352b;
+    padding: 8px max(16px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  }
+  #shell-root .sh-navbtn {
+    flex: 1; min-height: 60px; padding: 8px 6px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    background: transparent; border: 2px solid transparent; border-radius: 14px;
+    color: #d8cdb4; font-size: 14px; font-weight: 600; cursor: pointer;
+    font-family: inherit;
+  }
+  #shell-root .sh-navbtn .sh-nav-ic { font-size: 22px; line-height: 1; }
+  #shell-root .sh-navbtn[aria-current="page"] {
+    color: #f3ead6; background: #2b2822; border: 3px solid #c9973f; font-weight: 700;
+    padding: 7px 5px;
+  }
+  #shell-root .sh-navbtn[aria-current="page"] .sh-nav-ic { transform: scale(1.12); }
+  /* Computer: same three destinations, same labels and order — centered bar. */
+  @media (min-width: 760px) {
+    #shell-root .sh-bottomnav { justify-content: center; }
+    #shell-root .sh-navbtn { flex: 0 1 200px; flex-direction: row; gap: 10px; font-size: 16px; }
+  }
+  /* First-entry coach card: overlays the canvas above the nav. */
+  #shell-root .sh-coach {
+    position: absolute; z-index: 4;
+    left: 16px; right: 16px; bottom: 96px; margin: 0 auto; max-width: 480px;
+    background: #1e1c18; border: 2px solid #c9973f; border-radius: 16px;
+    padding: 20px 20px 16px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  }
+  #shell-root .sh-coach h2 { font-size: 20px; margin: 0 0 6px; color: #f3ead6; padding-right: 40px; }
+  #shell-root .sh-coach p { font-size: 16px; line-height: 1.5; color: #d8cdb4; margin: 0 0 4px; }
+  #shell-root .sh-coach-x {
+    position: absolute; top: 8px; right: 8px; min-width: 48px; min-height: 48px;
+    background: transparent; border: 2px solid #3a352b; border-radius: 12px;
+    color: #f3ead6; font-size: 20px; cursor: pointer;
+  }
+  #shell-root .sh-coach-actions { display: flex; gap: 10px; margin-top: 10px; }
+  #shell-root .sh-coach-actions .sh-btn-secondary { margin-top: 0; min-height: 52px; }
+  html.sh-reduce-motion #shell-root .sh-coach { box-shadow: none; }
+  html.sh-high-contrast #shell-root .sh-navbtn,
+  html.sh-high-contrast #shell-root .sh-world-chip { border-color: #f3ead6; }
+  html.sh-high-contrast #shell-root .sh-navbtn[aria-current="page"] { background: #0a0a0a; }
 </style>
 </head>
 <body>
@@ -14544,8 +14626,12 @@ window.CrumbsShell = {
   state: { mode: "simple", destination: "home",
            welcome: "not completed", drawer: "closed", save: "idle" },
   // Device-local PRESENTATION prefs only — never permissions, never secrets.
+  // coachDismissed: per-world first-entry coach card dismissal (Stage 4).
   prefs: { welcomeCompleted: false, reduceMotion: false,
-           textSize: "normal", highContrast: false },
+           textSize: "normal", highContrast: false, coachDismissed: {} },
+  // Stage 4 working state (not part of the spec's state model): which world
+  // file the canvas currently shows, so the nav can return to it.
+  currentFile: null,
 };
 // ---- Stage 2: device-local presentation prefs (localStorage) ----
 // PRESENTATION ONLY — never permissions, never secrets, never credentials.
@@ -14559,6 +14645,11 @@ function shellLoadPrefs() {
     if (typeof p.reduceMotion === "boolean") cur.reduceMotion = p.reduceMotion;
     if (p.textSize === "large" || p.textSize === "normal") cur.textSize = p.textSize;
     if (typeof p.highContrast === "boolean") cur.highContrast = p.highContrast;
+    // Stage 4: per-world coach-card dismissal map { "<file>": true }.
+    if (p.coachDismissed && typeof p.coachDismissed === "object") {
+      for (var k in p.coachDismissed)
+        if (p.coachDismissed[k] === true) cur.coachDismissed[k] = true;
+    }
   } catch (e) {}
 }
 function shellSavePrefs() {
@@ -14973,7 +15064,9 @@ async function shellShowHome() {
   body.innerHTML = html;
   if (maps.length) {
     body.querySelector(".sh-hero h2").textContent = "Continue " + friendlyName(top.file);
-    $("sh-continue").onclick = shellGoClassic;
+    // Stage 4: Continue opens the shell's Canvas Home (framed map). Play
+    // uses the workshop until the Play Entry lands (STAGE-7).
+    $("sh-continue").onclick = function () { shellShowCanvas(top.file); };
     $("sh-play").onclick = shellGoClassic;
   } else {
     $("sh-create-first").onclick = shellGoClassic;
@@ -15041,7 +15134,8 @@ function shellRenderWorldCards() {
     card.querySelector("h3").textContent = nm;
     var more = card.querySelector('[data-act="more"]');
     more.setAttribute("aria-label", "More actions for " + nm);
-    card.querySelector('[data-act="open"]').onclick = shellGoClassic;
+    card.querySelector('[data-act="open"]').onclick = function () { shellShowCanvas(mp.file); };
+    // STAGE-7: Play routes to the workshop until the Play Entry lands.
     card.querySelector('[data-act="play"]').onclick = shellGoClassic;
     more.onclick = function () {
       if (document.getElementById("sh-overflow-menu") && _ovReturnFocus === more)
@@ -15051,7 +15145,9 @@ function shellRenderWorldCards() {
   })(cards[c], c);
 }
 async function shellShowWorlds() {
-  window.CrumbsShell.state.destination = "worlds";
+  // Stage 4: destination follows the spec's state model ("world"). The
+  // persistent Build/World/Play nav lives on this screen too.
+  window.CrumbsShell.state.destination = "world";
   shellLoadingScreen("Opening your worlds\u2026");
   try {
     var m = await api("/api/maps");
@@ -15079,10 +15175,11 @@ async function shellShowWorlds() {
     "</div>" +
     '<div id="sh-worlds-search-slot"></div>' +
     '<div class="sh-worlds-grid" id="sh-worlds-grid"></div>' +
-  "</div></div></div>",
+  "</div></div>" + shellBottomNav("world") + "</div>",
   "My Worlds");
   $("sh-worlds-back").onclick = shellShowHome;
   $("sh-worlds-menu").onclick = function () { shellOpenMenu($("sh-worlds-menu")); };
+  shellWireNav(root);
   // Search appears only when the library is big enough to need it.
   if (_worldsAll.length >= 8) {
     $("sh-worlds-search-slot").innerHTML =
@@ -15345,6 +15442,124 @@ async function shellSignOut() {
   location.reload();  // boot re-runs: logged out -> Account Entry
 }
 
+// ---- Stage 4, Screen 06: Canvas Home + persistent Build/World/Play nav ----
+// The canvas reuses the existing map renderer: the shell frames /classic in
+// shellframe trim mode (data-shellframe CSS in the main <style>). No map
+// engine code is duplicated or rewritten here. Pan/zoom/edit internals are
+// the real classic ones; the shell only provides the frame.
+function shellCurrentUser() {
+  return (typeof ME !== "undefined" && ME && ME.username) ? ME.username : "local";
+}
+function shellRememberCanvasFile(file) {
+  // The classic boot restores this key (restoreLastMap), so the framed
+  // /classic opens the same world the tester picked in the shell.
+  try { localStorage.setItem("crumbs.lastMap." + shellCurrentUser(), file); }
+  catch (e) {}
+}
+function shellNavBtn(dest, icon, label, active) {
+  return '<button type="button" class="sh-navbtn" data-nav="' + dest + '"' +
+    (active ? ' aria-current="page"' : "") + ">" +
+    '<span class="sh-nav-ic" aria-hidden="true">' + icon + "</span>" +
+    "<span>" + label + "</span></button>";
+}
+function shellBottomNav(active) {
+  return '<nav class="sh-bottomnav" aria-label="Primary">' +
+    shellNavBtn("build", "&#9874;", "Build", active === "build") +
+    shellNavBtn("world", "&#9689;", "World", active === "world") +
+    shellNavBtn("play", "&#9654;", "Play", active === "play") +
+    "</nav>";
+}
+function shellWireNav(root) {
+  var btns = root.querySelectorAll("[data-nav]");
+  for (var i = 0; i < btns.length; i++) (function (b) {
+    b.onclick = function () { shellNavGo(b.getAttribute("data-nav")); };
+  })(btns[i]);
+}
+// STAGE-5: build -> open the Build Drawer over the canvas (no navigation).
+// STAGE-6: world -> open the World Drawer over the canvas (no navigation).
+// STAGE-7: play -> Play Entry card, then the Play transition.
+// Stage 4: the drawers and Play Entry are not built yet. Build returns to
+// the canvas for the current world, World opens the My Worlds library, and
+// Play uses the workshop until its entry lands. Tapping the active
+// destination is a no-op (standard tab behavior).
+function shellNavGo(dest) {
+  var st = window.CrumbsShell.state;
+  if (st.destination === dest) return;
+  st.destination = dest;
+  if (dest === "build") {
+    var f = window.CrumbsShell.currentFile;
+    if (f) shellShowCanvas(f); else shellShowHome();
+  } else if (dest === "world") {
+    shellShowWorlds();
+  } else if (dest === "play") {
+    location.href = "/classic";  // STAGE-7: replace with Play Entry
+  }
+}
+// ---- Stage 4: first-entry coach card (per-world dismissal, device-local) ----
+function shellCoachDismissed(file) {
+  var d = window.CrumbsShell.prefs.coachDismissed;
+  return !!(d && d[file]);
+}
+function shellDismissCoach(file) {
+  var p = window.CrumbsShell.prefs;
+  if (!p.coachDismissed) p.coachDismissed = {};
+  p.coachDismissed[file] = true;
+  shellSavePrefs();
+  var c = $("sh-coach");
+  if (c) c.hidden = true;
+}
+function shellShowCanvas(file) {
+  window.CrumbsShell.state.destination = "build";
+  window.CrumbsShell.state.mode = "simple";
+  window.CrumbsShell.currentFile = file;
+  shellRememberCanvasFile(file);
+  var coach = "";
+  if (!shellCoachDismissed(file)) {
+    coach =
+    '<div class="sh-coach" id="sh-coach" role="dialog" aria-label="Getting started">' +
+      '<button type="button" class="sh-coach-x" id="sh-coach-x" aria-label="Dismiss">\u00D7</button>' +
+      "<h2>Your world is ready.</h2>" +
+      "<p>Paint the ground, place something, or press Play to explore.</p>" +
+      '<div class="sh-coach-actions">' +
+        '<button type="button" class="sh-btn-secondary" id="sh-coach-paint">Paint</button>' +
+        '<button type="button" class="sh-btn-secondary" id="sh-coach-place">Place</button>' +
+        '<button type="button" class="sh-btn-secondary" id="sh-coach-play">Play</button>' +
+      "</div>" +
+    "</div>";
+  }
+  var root = shellShow(
+    '<div class="sh-screen sh-canvas-screen">' +
+      '<div class="sh-canvas-topbar">' +
+        '<span class="sh-world-chip" id="sh-canvas-chip"></span>' +
+        '<button type="button" class="sh-menu-btn" id="sh-canvas-menu" aria-label="Menu" aria-haspopup="dialog">\u2630</button>' +
+      "</div>" +
+      '<div class="sh-canvas-wrap">' +
+        '<iframe id="sh-canvas-frame" title="World map" src="/classic?shellframe=1"></iframe>' +
+      "</div>" +
+      shellBottomNav("build") +
+      coach +
+    "</div>",
+    "Canvas");
+  $("sh-canvas-chip").textContent = friendlyName(file);
+  $("sh-canvas-menu").onclick = function () { shellOpenMenu($("sh-canvas-menu")); };
+  shellWireNav(root);
+  if (!shellCoachDismissed(file)) {
+    // STAGE-5: Paint/Place open the Build Drawer. Until then the workshop
+    // (which has the real paint and place tools) is the honest destination.
+    $("sh-coach-paint").onclick = function () {
+      shellDismissCoach(file); location.href = "/classic";
+    };
+    $("sh-coach-place").onclick = function () {
+      shellDismissCoach(file); location.href = "/classic";
+    };
+    // STAGE-7: replace with the Play Entry card.
+    $("sh-coach-play").onclick = function () {
+      shellDismissCoach(file); location.href = "/classic";
+    };
+    $("sh-coach-x").onclick = function () { shellDismissCoach(file); };
+  }
+}
+
 // ---- Stage 2: boot ----
 // The shell owns boot when the server enables it. Classic init() below is
 // untouched; /classic always boots the classic HUD.
@@ -15385,6 +15600,13 @@ async function shellBoot() {
     // v5.61 tester shell: when enabled, the shell owns boot; the classic
     // HUD below is untouched and reachable at /classic.
     if (window.CRUMBS_TESTER_SHELL) { shellBoot(); return; }
+    // v5.61 Stage 4: shell-frame trim — /classic?shellframe=1 hides the
+    // workshop chrome for the shell's Canvas Home iframe. Additive only;
+    // the default classic boot is unchanged.
+    try {
+      if (new URLSearchParams(location.search).get("shellframe") === "1")
+        document.documentElement.dataset.shellframe = "1";
+    } catch (e) {}
     // v5.27: public mode parks on the login overlay until the user logs
     // in; local mode skips the gate and boots straight in.
     if (!(await authGate())) return;

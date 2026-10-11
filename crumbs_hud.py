@@ -1706,6 +1706,8 @@ def _custom_public(entry):
             "frames": len(entry["files"]), "frame_ms": entry["frame_ms"],
             # v5.37: animator FX (color/action/magic) — absent when all-default
             "fx": entry.get("fx"),
+            # v5.61: palette swap — per-character recolor slots
+            "palswap": entry.get("palswap"),
             # v5.43: animation states (Rive-style) — shared by beginner and
             # advanced; absent on tiles made before states existed.
             "anim": entry.get("anim")}
@@ -1802,6 +1804,34 @@ def _clean_fx(raw):
               "act": "none", "magic": None}:
         return None
     return fx
+
+
+def _clean_palswap(raw):
+    # v5.61: palette swap for character recoloring — {v, slots:[{name, from, to}]}.
+    # Guardrails: max 12 slots, names <= 24 chars, strict #rrggbb hexes.
+    # No-op slots (from == to) are dropped; an empty result means "no swaps".
+    if not isinstance(raw, dict):
+        return None
+    slots = raw.get("slots")
+    if not isinstance(slots, list):
+        return None
+    clean = []
+    for s in slots[:12]:
+        if not isinstance(s, dict):
+            continue
+        name = str(s.get("name", "")).strip()[:24] or "Color"
+        frm = str(s.get("from", "")).strip().lower()
+        to = str(s.get("to", "")).strip().lower()
+        if not re.fullmatch(r"#[0-9a-f]{6}", frm):
+            continue
+        if not re.fullmatch(r"#[0-9a-f]{6}", to):
+            continue
+        if frm == to:
+            continue
+        clean.append({"name": name, "from": frm, "to": to})
+    if not clean:
+        return None
+    return {"v": 1, "slots": clean}
 
 
 def _clean_pauses(raw, n_stops):
@@ -2469,6 +2499,64 @@ def _clean_anim(raw, n_frames=None):
         if tr:
             out["transitions"] = tr
     return out
+
+
+RIG_DIRS = ("down", "up", "left", "right")
+
+def _clean_rig(raw, n_frames=None):
+    """v5.61.0: character rig -> {v, actions: {name: {dir: {frames, frame_ms}}},
+    default_action, default_direction}. Frame indices are clamped to the strip.
+    Returns None when nothing usable survives."""
+    if not isinstance(raw, dict):
+        return None
+    araw = raw.get("actions")
+    if not isinstance(araw, dict):
+        return None
+    actions = {}
+    for aname, adir in araw.items():
+        if not isinstance(aname, str) or not aname.strip():
+            continue
+        aname = aname.strip()[:24]
+        if not isinstance(adir, dict):
+            continue
+        dirs = {}
+        for d in RIG_DIRS:
+            c = adir.get(d)
+            if not isinstance(c, dict):
+                continue
+            fr = c.get("frames")
+            if not isinstance(fr, list):
+                continue
+            frames = []
+            for f in fr:
+                try:
+                    fi = int(f)
+                except (TypeError, ValueError):
+                    continue
+                if fi < 0:
+                    continue
+                if n_frames and fi >= n_frames:
+                    continue
+                frames.append(fi)
+            if not frames:
+                continue
+            try:
+                ms = int(c.get("frame_ms", 400))
+            except (TypeError, ValueError):
+                ms = 400
+            dirs[d] = {"frames": frames, "frame_ms": max(40, min(2000, ms))}
+        if dirs:
+            actions[aname] = dirs
+    if not actions:
+        return None
+    default_action = raw.get("default_action")
+    if default_action not in actions:
+        default_action = "idle" if "idle" in actions else sorted(actions)[0]
+    default_direction = raw.get("default_direction")
+    if default_direction not in RIG_DIRS:
+        default_direction = "down"
+    return {"v": 1, "actions": actions, "default_action": default_action,
+            "default_direction": default_direction}
 
 
 def _shift_hue(img, degrees):
@@ -9733,6 +9821,22 @@ class Handler(BaseHTTPRequestHandler):
                     entry["anim"] = clean_a
                 else:
                     entry.pop("anim", None)
+            # v5.61.0: character rig — actions -> directions -> frame clips.
+            if "rig" in body:
+                clean_r = _clean_rig(body.get("rig"),
+                                     len(entry.get("files") or []))
+                if clean_r:
+                    entry["rig"] = clean_r
+                else:
+                    entry.pop("rig", None)
+            # v5.61: palette swap — per-character recolor slots. Sanitized
+            # like fx/anim; absent when no slot actually changes a color.
+            if "palswap" in body:
+                clean_p = _clean_palswap(body.get("palswap"))
+                if clean_p:
+                    entry["palswap"] = clean_p
+                else:
+                    entry.pop("palswap", None)
             t = assets.tiles.get(tid)
             if t is not None:
                 t["name"] = entry["name"]

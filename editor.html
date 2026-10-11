@@ -12268,7 +12268,8 @@ function loadAnimTarget() {
   const ok = !!t;
   ["anim-ms", "anim-hue", "anim-sat", "anim-bri", "anim-amp", "anim-clear",
    "anim-tween", "film-play", "film-scrub", "film-onion",
-   "fe-ms", "fe-tint", "fe-left", "fe-right", "fe-hue", "fe-sat", "fe-bri"
+   "fe-ms", "fe-tint", "fe-left", "fe-right", "fe-hue", "fe-sat", "fe-bri",
+   "palswap-analyze"
   ].forEach(id => {
     $(id).disabled = !ok;
   });
@@ -12277,7 +12278,7 @@ function loadAnimTarget() {
   });
   if (!t) {
     $("anim-target").innerHTML = "Select an <b>imported tile</b> in the Tiles tray first — then dress him up here.";
-    renderAnimTags(); loadFilmstrip();
+    renderAnimTags(); loadFilmstrip(); renderPalSwap();
     return;
   }
   const p = stateParams(t, animEditState);
@@ -12299,7 +12300,219 @@ function loadAnimTarget() {
   document.querySelectorAll("#anim-magic-sw button").forEach(b =>
     b.classList.toggle("on", (b.dataset.c || null) === p.magic));
   $("anim-ms").disabled = !(t.frames > 1);   // timing only matters when he moves
-  renderAnimTags(); loadFilmstrip();
+  renderAnimTags(); loadFilmstrip(); renderPalSwap(); renderRigEditor();
+}
+// ---- character rig editor (v5.61.0) ---------------------------------------
+// Actions -> directions -> frame clips. The editor lives in the anim panel's
+// Rig section. Changes save debounced through animPush (same as anim FX).
+let rigEditAction = null;
+let rigPreviewTimer = null;
+let rigPreviewDir = "down";
+function rigEditorTile() { return animTargetTile(); }
+function renderRigEditor() {
+  const t = rigEditorTile();
+  const actsBox = $("rig-actions"), dirsBox = $("rig-dirs"), prevWrap = $("rig-preview-wrap");
+  if (!actsBox) return;
+  actsBox.innerHTML = ""; dirsBox.innerHTML = "";
+  if (prevWrap) prevWrap.hidden = true;
+  rigStopPreview();
+  if (!t) return;
+  const rig = ensureRig(t);
+  const names = Object.keys(rig.actions || {});
+  if (!rigEditAction || !rig.actions[rigEditAction]) {
+    rigEditAction = rig.default_action && rig.actions[rig.default_action]
+      ? rig.default_action : (names[0] || "idle");
+  }
+  // action chips
+  names.forEach(a => {
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = a;
+    b.classList.toggle("on", a === rigEditAction);
+    b.onclick = () => { rigEditAction = a; rigStopPreview(); renderRigEditor(); };
+    b.ondblclick = () => {
+      if (names.length <= 1) { toast("keep at least one action"); return; }
+      if (!confirm("Delete action '" + a + "'?")) return;
+      delete rig.actions[a];
+      if (rig.default_action === a) rig.default_action = Object.keys(rig.actions)[0];
+      rigEditAction = rig.default_action;
+      animPush(); renderRigEditor();
+    };
+    b.title = a + " — double-click to delete";
+    actsBox.appendChild(b);
+  });
+  const add = document.createElement("button");
+  add.type = "button"; add.textContent = "+ Add";
+  add.onclick = () => {
+    const name = prompt("Action name (idle, walk, attack…):", "") || "";
+    const clean = name.trim().toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 24);
+    if (!clean) return;
+    if (rig.actions[clean]) { toast("already have '" + clean + "'"); return; }
+    const src = rig.actions[rigEditAction] || {};
+    const dirs = {};
+    RIG_DIRS.forEach(d => {
+      const s = src[d] || { frames: [0], frame_ms: 400 };
+      dirs[d] = { frames: s.frames.slice(), frame_ms: s.frame_ms };
+    });
+    rig.actions[clean] = dirs;
+    rigEditAction = clean;
+    animPush(); renderRigEditor();
+  };
+  actsBox.appendChild(add);
+  // direction rows for the selected action
+  const act = rig.actions[rigEditAction];
+  if (!act) return;
+  const nFrames = Math.max(1, t.frames | 0 || 1);
+  RIG_DIRS.forEach(d => {
+    const clip = act[d] || (act[d] = { frames: [0], frame_ms: 400 });
+    const row = document.createElement("div");
+    row.className = "rig-dir-row";
+    const lbl = document.createElement("span");
+    lbl.className = "rd-lbl"; lbl.textContent = RIG_DIR_LABEL[d];
+    row.appendChild(lbl);
+    const fs = clip.frames.length ? Math.min.apply(null, clip.frames) : 0;
+    const fe = clip.frames.length ? Math.max.apply(null, clip.frames) : 0;
+    const mkNum = (val, title) => {
+      const inp = document.createElement("input");
+      inp.type = "number"; inp.min = 0; inp.max = nFrames - 1; inp.value = val;
+      inp.title = title; inp.setAttribute("aria-label", title);
+      return inp;
+    };
+    const sInp = mkNum(fs, "first frame"), eInp = mkNum(fe, "last frame");
+    const applyRange = () => {
+      let s = Math.max(0, Math.min(nFrames - 1, +sInp.value | 0));
+      let e = Math.max(0, Math.min(nFrames - 1, +eInp.value | 0));
+      if (e < s) e = s;
+      sInp.value = s; eInp.value = e;
+      const arr = [];
+      for (let i = s; i <= e; i++) arr.push(i);
+      clip.frames = arr;
+      animPush();
+    };
+    sInp.onchange = applyRange; eInp.onchange = applyRange;
+    row.appendChild(sInp);
+    const dash = document.createElement("span"); dash.textContent = "–"; row.appendChild(dash);
+    row.appendChild(eInp);
+    const sl = document.createElement("input");
+    sl.type = "range"; sl.min = 40; sl.max = 2000; sl.step = 10;
+    sl.value = clip.frame_ms || 400;
+    const val = document.createElement("span");
+    val.className = "rd-ms"; val.textContent = (clip.frame_ms || 400) + "ms";
+    sl.oninput = () => {
+      clip.frame_ms = +sl.value;
+      val.textContent = sl.value + "ms";
+    };
+    sl.onchange = () => animPush();
+    row.appendChild(sl); row.appendChild(val);
+    dirsBox.appendChild(row);
+  });
+  if (prevWrap) {
+    prevWrap.hidden = false;
+    $("rig-preview-label").textContent = rigEditAction + " — tap a direction to preview it";
+    renderRigPreviewButtons();
+  }
+}
+function renderRigPreviewButtons() {
+  let picker = $("rig-preview-dirs");
+  if (!picker) {
+    picker = document.createElement("div");
+    picker.id = "rig-preview-dirs";
+    picker.className = "anim-tags";
+    picker.style.margin = "6px 0";
+    $("rig-preview-wrap").insertBefore(picker, $("rig-preview-cv"));
+  }
+  picker.innerHTML = "";
+  RIG_DIRS.forEach(d => {
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = RIG_DIR_LABEL[d];
+    b.classList.toggle("on", d === rigPreviewDir);
+    b.onclick = () => { rigPreviewDir = d; rigStopPreview(); renderRigPreviewButtons(); rigPlayPreview(); };
+    picker.appendChild(b);
+  });
+}
+function rigPlayPreview() {
+  const t = rigEditorTile(); if (!t) return;
+  rigStopPreview();
+  const cv = $("rig-preview-cv"); if (!cv) return;
+  const ctx = cv.getContext("2d");
+  const fr = ensureFrames(t);
+  if (!fr || !fr.length) return;
+  const draw = () => {
+    const idx = rigFrameIdx(t, rigEditAction, rigPreviewDir);
+    const im = fr[Math.min(idx, fr.length - 1)];
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.imageSmoothingEnabled = false;
+    if (im && im.complete && im.naturalWidth) {
+      ctx.drawImage(im, 0, 0, cv.width, cv.height);
+    }
+    const clip = rigClip(t, rigEditAction, rigPreviewDir);
+    const ms = (clip && clip.frame_ms) || 400;
+    rigPreviewTimer = setTimeout(draw, ms);
+  };
+  draw();
+}
+function rigStopPreview() {
+  if (rigPreviewTimer) { clearTimeout(rigPreviewTimer); rigPreviewTimer = null; }
+}
+// ---- palette swap UI (v5.61) -----------------------------------------------
+// The slot editor lives in the anim panel's Palette swap section. Analyze
+// reads the sprite's colors; each row names a slot and picks its new color
+// on the wheel. Changes preview instantly and save debounced like anim FX.
+function palSwapTile() { return animTargetTile(); }
+function renderPalSwap() {
+  const wrap = $("palswap-rows"), empty = $("palswap-empty"),
+        clearB = $("palswap-clear");
+  if (!wrap) return;
+  const t = palSwapTile();
+  wrap.innerHTML = "";
+  if (!t) {
+    if (empty) { empty.hidden = false;
+      empty.innerHTML = "Select an <b>imported tile</b> first."; }
+    if (clearB) clearB.hidden = true;
+    return;
+  }
+  const ps = t.palswap, slots = (ps && ps.slots) || [];
+  if (empty) empty.hidden = slots.length > 0;
+  if (clearB) clearB.hidden = !slots.length;
+  slots.forEach((s, i) => {
+    const row = document.createElement("div");
+    row.className = "ps-row";
+    const chip = document.createElement("div");
+    chip.className = "ps-chip"; chip.style.background = s.from;
+    chip.title = "original: " + s.from;
+    const nm = document.createElement("input");
+    nm.className = "ps-name"; nm.value = s.name || ("Color " + (i + 1));
+    nm.maxLength = 24; nm.placeholder = "slot name";
+    nm.onchange = () => { s.name = nm.value.trim().slice(0, 24) || ("Color " + (i + 1)); palSwapPush(); };
+    const to = document.createElement("div");
+    to.className = "ps-to"; to.style.background = s.to; to.title = "tap to pick a new color";
+    to.onclick = () => showWheel(s.to, hex => {
+      s.to = hex; to.style.background = hex;
+      palSwapInvalidate(t.id); queueRender(); previewTick(true); palSwapPush();
+    });
+    const del = document.createElement("button");
+    del.className = "ps-del"; del.textContent = "✕"; del.title = "remove this slot";
+    del.onclick = () => {
+      t.palswap.slots.splice(i, 1);
+      if (!t.palswap.slots.length) delete t.palswap;
+      palSwapInvalidate(t.id); renderPalSwap(); queueRender(); previewTick(true); palSwapPush();
+    };
+    row.appendChild(chip); row.appendChild(nm); row.appendChild(to); row.appendChild(del);
+    wrap.appendChild(row);
+  });
+}
+let palSwapSaveT = null;
+function palSwapPush() {
+  const t = palSwapTile(); if (!t) return;
+  palSwapInvalidate(t.id);
+  queueRender(); previewTick(true);
+  clearTimeout(palSwapSaveT);
+  palSwapSaveT = setTimeout(async () => {
+    const body = { id: t.id, palswap: t.palswap || null };
+    const r = await api("/api/custom/update", body);
+    if (!r.ok) { toast("couldn't save palette: " + (r.error || "unknown")); return; }
+    if (r.tile && r.tile.palswap) t.palswap = r.tile.palswap;
+    else if (r.tile) delete t.palswap;
+  }, 700);
 }
 // changes hit the tile instantly (map + preview) and save themselves, debounced
 let animSaveT = null;
@@ -12311,6 +12524,7 @@ function animPush() {
     const body = { id: t.id, frame_ms: t.frame_ms };
     body.fx = t.fx || null;   // null erases server-side
     body.anim = t.anim || null;   // v5.43: the shared state record
+    body.rig = t.rig || null;   // v5.61.0: the character rig
     const r = await api("/api/custom/update", body);
     if (!r.ok) toast("couldn't save FX: " + (r.error || "unknown"));
     else if (r.tile && r.tile.anim) t.anim = r.tile.anim;
@@ -12380,6 +12594,32 @@ $("anim-clear").onclick = () => {
   const t = animTargetTile(); if (!t) return;
   t.fx = null; t.anim = null; delete appliedPreset[t.id];
   loadAnimTarget(); animPush(); toast("FX cleared");
+};
+// ---- v5.61: palette swap wiring --------------------------------------------
+$("palswap-analyze").onclick = () => {
+  const t = palSwapTile();
+  if (!t) { toast("select an imported tile first"); return; }
+  const cols = extractPalette(t.id);
+  if (!cols) { toast("couldn't read his colors — art still loading?"); return; }
+  if (!cols.length) { toast("no solid colors found"); return; }
+  // merge: keep existing slots for colors still present, add new ones
+  const old = (t.palswap && t.palswap.slots) || [];
+  const slots = cols.map((c, i) => {
+    const keep = old.find(s => s.from === c.hex);
+    if (keep) return keep;
+    return { name: suggestSlotName(c.hex), from: c.hex, to: c.hex };
+  });
+  t.palswap = { v: 1, slots };
+  palSwapInvalidate(t.id);
+  renderPalSwap(); queueRender(); previewTick(true);
+  toast(cols.length + " colors — name them, then tap a dashed chip to repaint");
+};
+$("palswap-clear").onclick = () => {
+  const t = palSwapTile(); if (!t) return;
+  delete t.palswap;
+  palSwapInvalidate(t.id);
+  renderPalSwap(); queueRender(); previewTick(true); palSwapPush();
+  toast("palette restored");
 };
 // ---- v5.44: the filmstrip --------------------------------------------------
 // Aseprite-style, phone-first: horizontal cards, per-frame timing badges,
@@ -12496,6 +12736,9 @@ $("film-play").onclick = () => {
   filmPlaying = !filmPlaying;
   updateFilmPlayBtn();
 };
+// v5.61.0: rig preview transport
+$("rig-preview-play").onclick = () => rigPlayPreview();
+$("rig-preview-stop").onclick = () => rigStopPreview();
 $("film-scrub").oninput = e => {
   filmPos = +e.target.value;
   filmPlaying = false; updateFilmPlayBtn();
@@ -15876,6 +16119,7 @@ const PANEL_MODULES = [
   { id: "inspect", icon: "🔍", tray: "right" },
   { id: "anim",    icon: "🎞", tray: "right" },
   { id: "npc",     icon: "🚶", tray: "right" },
+  { id: "assets",  icon: "🗂", tray: "right" },
   { id: "suggest", icon: "💡", tray: "right" },
 ];
 function panelRoot(id) {
@@ -16982,8 +17226,9 @@ function showAssetImport(file) {
   };
   if (file) { doFile(file); return; }
   const inp = document.createElement("input");
-  inp.type = "file"; inp.accept = "image/*";
-  inp.onchange = () => doFile(inp.files[0]);
+  inp.type = "file"; inp.accept = "image/*"; inp.style.display = "none";
+  inp.onchange = () => { doFile(inp.files[0]); inp.remove(); };
+  document.body.appendChild(inp);
   inp.click();
 }
 function buildAssetPreview(dataUrl, fname) {

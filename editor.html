@@ -284,6 +284,12 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   @media (prefers-reduced-motion: reduce) {
     html[data-shellframe="1"] .shell-pulse { animation: none; opacity: 0; }
   }
+  /* v5.61 Stage 7: shell owns the Play flow — the classic FAB would duplicate
+     the shell's Play/Exit Play controls, so it stays hidden in the frame.
+     D-pad buttons get 48px touch targets in the frame (the shell's a11y bar);
+     the classic HUD outside the frame is untouched. */
+  html[data-shellframe="1"] #btn-play-fab { display: none !important; }
+  html[data-shellframe="1"] #dpad button { min-width: 48px; min-height: 48px; font-size: 22px; }
   canvas { position: absolute; left: 0; top: 0; display: block; touch-action: none;
            image-rendering: pixelated; will-change: transform; }
 
@@ -1792,6 +1798,92 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   #shell-root .sh-coach-actions { display: flex; gap: 10px; margin-top: 10px; }
   #shell-root .sh-coach-actions .sh-btn-secondary { margin-top: 0; min-height: 52px; }
   html.sh-reduce-motion #shell-root .sh-coach { box-shadow: none; }
+  /* ===== TESTER SHELL (v5.61+, Stage 7: Play Entry + Play Mode) ===== */
+  /* Play Entry card: compact dialog over the canvas. Same card language as
+     the coach card — charcoal, gold border, 48px controls. */
+  #shell-root .sh-play-card {
+    position: absolute; z-index: 6;
+    left: 16px; right: 16px; bottom: 96px; margin: 0 auto; max-width: 480px;
+    background: #1e1c18; border: 2px solid #c9973f; border-radius: 16px;
+    padding: 20px 20px 16px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  }
+  #shell-root .sh-play-card h2 { font-size: 20px; margin: 0 0 8px; color: #f3ead6; }
+  #shell-root .sh-play-card .sh-preview,
+  #shell-root .sh-play-card .sh-preview-fallback {
+    width: 100%; height: 120px; object-fit: cover; border-radius: 12px;
+    margin-bottom: 10px; border: 1px solid #3a352b;
+  }
+  #shell-root .sh-play-world { font-size: 16px; color: #f3ead6; margin: 0 0 4px; font-weight: 600; }
+  #shell-root .sh-play-status { font-size: 14px; color: #d8cdb4; margin: 0 0 12px; }
+  #shell-root .sh-play-status.sh-warn { color: #f0b429; }
+  #shell-root .sh-play-card .sh-btn-primary,
+  #shell-root .sh-play-card .sh-btn-secondary { width: 100%; margin-top: 8px; min-height: 52px; }
+  #shell-root .sh-play-card .sh-play-err {
+    font-size: 14px; color: #f0b429; margin: 8px 0 0;
+  }
+  #shell-root .sh-play-card .sh-play-err[hidden] { display: none; }
+  /* Explore label: the rewarding beat of the Play transition. Fades out;
+     reduced-motion shows it statically and briefly instead. */
+  #shell-root .sh-explore-label {
+    position: absolute; z-index: 7; left: 0; right: 0; top: 38%;
+    text-align: center; font-size: 34px; font-weight: 700; color: #f3ead6;
+    text-shadow: 0 2px 18px rgba(0, 0, 0, 0.85); pointer-events: none;
+    animation: sh-explore-fade 1.6s ease-out forwards;
+  }
+  @keyframes sh-explore-fade {
+    0% { opacity: 0; transform: scale(0.92); }
+    18% { opacity: 1; transform: scale(1); }
+    70% { opacity: 1; }
+    100% { opacity: 0; transform: scale(1.04); }
+  }
+  html.sh-reduce-motion #shell-root .sh-explore-label { animation: none; }
+  /* Playing state: editor chrome recedes. Bottom nav fades out (not display:
+     none instantly, so the transition reads), topbar swaps to the play bar. */
+  #shell-root .sh-canvas-screen.sh-playing .sh-bottomnav {
+    opacity: 0; pointer-events: none; transition: opacity 0.25s ease;
+  }
+  html.sh-reduce-motion #shell-root .sh-canvas-screen.sh-playing .sh-bottomnav { transition: none; }
+  #shell-root .sh-canvas-screen.sh-playing .sh-canvas-wrap { top: 0; }
+  #shell-root .sh-playbar {
+    position: absolute; z-index: 5; top: 0; left: 0; right: 0;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
+    background: linear-gradient(to bottom, rgba(10, 9, 7, 0.85), transparent);
+    pointer-events: none;
+  }
+  #shell-root .sh-playbar > * { pointer-events: auto; }
+  #shell-root .sh-play-world-mini {
+    font-size: 14px; color: #d8cdb4; background: rgba(20, 18, 15, 0.8);
+    border: 1px solid #3a352b; border-radius: 999px; padding: 8px 14px;
+    max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #shell-root .sh-exit-play {
+    min-width: 48px; min-height: 48px; padding: 10px 18px;
+    background: rgba(20, 18, 15, 0.88); color: #f3ead6;
+    border: 2px solid #6b6252; border-radius: 999px; font-size: 16px; font-weight: 600;
+    cursor: pointer;
+  }
+  #shell-root .sh-exit-play:active { border-color: #c9973f; }
+  /* Map-focus beat of the Play transition: a gentle settle on the canvas. */
+  #shell-root .sh-canvas-screen.sh-play-focus .sh-canvas-wrap {
+    animation: sh-play-focus 0.9s ease-out;
+  }
+  @keyframes sh-play-focus {
+    0% { transform: scale(1.035); } 100% { transform: scale(1); }
+  }
+  html.sh-reduce-motion #shell-root .sh-canvas-screen.sh-play-focus .sh-canvas-wrap { animation: none; }
+  /* Exit confirmation: small centered dialog, same card language. */
+  #shell-root .sh-play-confirm {
+    position: absolute; z-index: 8;
+    left: 16px; right: 16px; top: 30%; margin: 0 auto; max-width: 420px;
+    background: #1e1c18; border: 2px solid #c9973f; border-radius: 16px;
+    padding: 20px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  }
+  #shell-root .sh-play-confirm h2 { font-size: 18px; margin: 0 0 8px; color: #f3ead6; }
+  #shell-root .sh-play-confirm p { font-size: 16px; color: #d8cdb4; margin: 0 0 12px; }
+  #shell-root .sh-play-confirm .sh-confirm-actions { display: flex; gap: 10px; }
+  #shell-root .sh-play-confirm .sh-btn-primary,
+  #shell-root .sh-play-confirm .sh-btn-secondary { flex: 1; min-height: 52px; margin-top: 0; }
   html.sh-high-contrast #shell-root .sh-navbtn,
   html.sh-high-contrast #shell-root .sh-world-chip { border-color: #f3ead6; }
   html.sh-high-contrast #shell-root .sh-navbtn[aria-current="page"] { background: #0a0a0a; }
@@ -15347,10 +15439,10 @@ async function shellShowHome() {
   body.innerHTML = html;
   if (maps.length) {
     body.querySelector(".sh-hero h2").textContent = "Continue " + friendlyName(top.file);
-    // Stage 4: Continue opens the shell's Canvas Home (framed map). Play
-    // uses the workshop until the Play Entry lands (STAGE-7).
+    // Stage 4: Continue opens the shell's Canvas Home (framed map).
+    // Stage 7: Play opens the shell's Play Entry / Play Mode flow.
     $("sh-continue").onclick = function () { shellShowCanvas(top.file); };
-    $("sh-play").onclick = shellGoClassic;
+    $("sh-play").onclick = function () { shellEnterPlay(top.file); };
   } else {
     $("sh-create-first").onclick = shellGoClassic;
   }
@@ -15418,8 +15510,7 @@ function shellRenderWorldCards() {
     var more = card.querySelector('[data-act="more"]');
     more.setAttribute("aria-label", "More actions for " + nm);
     card.querySelector('[data-act="open"]').onclick = function () { shellShowCanvas(mp.file); };
-    // STAGE-7: Play routes to the workshop until the Play Entry lands.
-    card.querySelector('[data-act="play"]').onclick = shellGoClassic;
+    card.querySelector('[data-act="play"]').onclick = function () { shellEnterPlay(mp.file); };
     more.onclick = function () {
       if (document.getElementById("sh-overflow-menu") && _ovReturnFocus === more)
         shellCloseOverflow();
@@ -15759,10 +15850,10 @@ function shellWireNav(root) {
   })(btns[i]);
 }
 // STAGE-6: world -> the World Drawer over the canvas (no navigation).
-// STAGE-7: play -> Play Entry card, then the Play transition.
+// STAGE-7: play -> the Play Entry card (when preparation is needed) or the
+// Play transition straight into the framed classic play mode.
 // Build opens the Build Drawer over the canvas; World opens the World
 // Drawer. Tapping either while its drawer is open closes it (toggle).
-// Play uses the workshop until its entry lands.
 function shellNavGo(dest) {
   var st = window.CrumbsShell.state;
   if (dest === "build") {
@@ -15786,7 +15877,8 @@ function shellNavGo(dest) {
   shellCloseBuildDrawer();
   shellCloseWorldDrawer();
   if (dest === "play") {
-    location.href = "/classic";  // STAGE-7: replace with Play Entry
+    shellEnterPlay();
+    return;
   }
 }
 // ---- Stage 4: first-entry coach card (per-world dismissal, device-local) ----
@@ -15845,9 +15937,9 @@ function shellShowCanvas(file) {
     $("sh-coach-place").onclick = function () {
       shellDismissCoach(file); shellOpenBuildDrawer("place");
     };
-    // STAGE-7: replace with the Play Entry card.
+    // Stage 7: Play opens the shell's Play Entry / Play Mode flow.
     $("sh-coach-play").onclick = function () {
-      shellDismissCoach(file); location.href = "/classic";
+      shellDismissCoach(file); shellEnterPlay();
     };
     $("sh-coach-x").onclick = function () { shellDismissCoach(file); };
   }
@@ -16380,6 +16472,261 @@ function shellCloseWorldDrawer() {
   _worldReturnFocus = null;
 }
 
+// ---- Stage 7: Play Entry + Play Mode (Screens 09 + 10) ----
+// The shell frames the REAL classic play mode (togglePlay in the canvas
+// iframe) — no duplication. Flow: shellEnterPlay (single entry point) ->
+// dirty? Play Entry card : direct shellBeginPlay -> shellExitPlay.
+// State model: mode "play", destination "play"; exit restores Canvas Home.
+var _playReturnDest = "build";
+
+function shellPlayBridge() {
+  var f = document.getElementById("sh-canvas-frame");
+  var fw = f && f.contentWindow;
+  return (fw && typeof fw.shellStartPlay === "function") ? fw : null;
+}
+function shellWaitPlayBridge(timeoutMs) {
+  // The framed classic boots async (a few seconds on first canvas open).
+  return new Promise(function (resolve) {
+    var waited = 0, step = 250, max = timeoutMs || 20000;
+    (function tick() {
+      if (shellPlayBridge()) { resolve(true); return; }
+      waited += step;
+      if (waited >= max) { resolve(false); return; }
+      setTimeout(tick, step);
+    })();
+  });
+}
+
+// Single entry point — replaces every STAGE-7 marker (World Home hero,
+// My Worlds cards, bottom-nav Play, coach Play).
+async function shellEnterPlay(file) {
+  var st = window.CrumbsShell.state;
+  if (st.mode === "play") return;  // already playing
+  if (file) {
+    window.CrumbsShell.currentFile = file;
+    shellRememberCanvasFile(file);
+  }
+  var cur = window.CrumbsShell.currentFile;
+  if (!cur) { shellShowHome(); return; }
+  // The play flow frames the canvas. Build it if it isn't up yet.
+  if (!$("sh-canvas-frame")) shellShowCanvas(cur);
+  var ready = await shellWaitPlayBridge(20000);
+  if (!ready) {
+    shellToast("The world isn't responding — try again.");
+    return;
+  }
+  var fw = shellPlayBridge();
+  var dirty = fw && fw.shellDirtyState ? !!fw.shellDirtyState() : false;
+  if (dirty) {
+    // Preparation required: unsaved changes. The Play Entry card handles it.
+    shellShowPlayCard(cur, true);
+    return;
+  }
+  // Nothing to prepare: straight into the Play transition.
+  shellBeginPlay();
+}
+
+function shellShowPlayCard(file, dirty) {
+  var old = $("sh-play-card");
+  if (old) old.remove();
+  var card = document.createElement("div");
+  card.id = "sh-play-card";
+  card.className = "sh-play-card";
+  card.setAttribute("role", "dialog");
+  card.setAttribute("aria-label", "Ready to explore?");
+  var statusHtml, actionsHtml;
+  if (dirty) {
+    // Honest status: never claim "saved" when the server says dirty.
+    statusHtml = '<p class="sh-play-status sh-warn">You have unsaved changes.</p>';
+    actionsHtml =
+      '<button type="button" class="sh-btn-primary" id="sh-play-save">Save &amp; Play</button>' +
+      '<button type="button" class="sh-btn-secondary" id="sh-play-go">Play This World</button>' +
+      '<button type="button" class="sh-btn-secondary" id="sh-play-back">Back</button>';
+  } else {
+    // Safety net only — shellEnterPlay skips the card when clean.
+    statusHtml = '<p class="sh-play-status">Progress is saved.</p>';
+    actionsHtml =
+      '<button type="button" class="sh-btn-primary" id="sh-play-go">Play This World</button>' +
+      '<button type="button" class="sh-btn-secondary" id="sh-play-back">Back</button>';
+  }
+  // No Play Settings button: the classic play mode exposes no settings, and
+  // the spec forbids advertising what doesn't exist.
+  card.innerHTML =
+    "<h2>Ready to explore?</h2>" +
+    shellPreviewImg(file) +
+    '<p class="sh-play-world"></p>' +
+    statusHtml +
+    '<p class="sh-play-err" id="sh-play-err" hidden></p>' +
+    actionsHtml;
+  var scr = document.querySelector(".sh-canvas-screen");
+  (scr || shellRootEl()).appendChild(card);
+  card.querySelector(".sh-play-world").textContent = friendlyName(file);
+  $("sh-play-go").onclick = function () { card.remove(); shellBeginPlay(); };
+  $("sh-play-back").onclick = function () { card.remove(); };
+  var saveBtn = $("sh-play-save");
+  if (saveBtn) saveBtn.onclick = async function () {
+    saveBtn.disabled = true;
+    var err = $("sh-play-err");
+    var fw = shellPlayBridge();
+    var ok = fw ? await fw.shellDoSave() : false;
+    // pollStatus flips dirtyFlag from the server truth; give it a beat.
+    await new Promise(function (r) { setTimeout(r, 1200); });
+    var stillDirty = fw && fw.shellDirtyState ? !!fw.shellDirtyState() : true;
+    if (ok && !stillDirty) { card.remove(); shellBeginPlay(); }
+    else {
+      saveBtn.disabled = false;
+      if (err) {
+        err.hidden = false;
+        err.textContent = "Save didn't finish — check your connection and try again.";
+      }
+    }
+  };
+  var primary = card.querySelector(".sh-btn-primary");
+  if (primary) primary.focus();
+}
+
+function shellSetPlaying(on) {
+  var scr = document.querySelector(".sh-canvas-screen");
+  if (!scr) return;
+  if (on) {
+    scr.classList.add("sh-playing");
+    var tb = scr.querySelector(".sh-canvas-topbar");
+    if (tb) tb.style.display = "none";
+    if (!scr.querySelector(".sh-playbar")) {
+      var pb = document.createElement("div");
+      pb.className = "sh-playbar";
+      var nm = document.createElement("span");
+      nm.className = "sh-play-world-mini";
+      nm.textContent = friendlyName(window.CrumbsShell.currentFile || "");
+      var ex = document.createElement("button");
+      ex.type = "button";
+      ex.className = "sh-exit-play";
+      ex.id = "sh-exit-play";
+      ex.textContent = "Exit Play";
+      ex.setAttribute("aria-label", "Exit Play and return to building");
+      ex.onclick = shellExitPlay;
+      pb.appendChild(nm);
+      pb.appendChild(ex);
+      scr.appendChild(pb);
+    }
+  } else {
+    scr.classList.remove("sh-playing");
+    var tb2 = scr.querySelector(".sh-canvas-topbar");
+    if (tb2) tb2.style.display = "";
+    var pb2 = scr.querySelector(".sh-playbar");
+    if (pb2 && pb2.parentNode) pb2.parentNode.removeChild(pb2);
+  }
+}
+
+function shellShowExploreLabel() {
+  var scr = document.querySelector(".sh-canvas-screen");
+  if (!scr) return;
+  var old = scr.querySelector(".sh-explore-label");
+  if (old) old.remove();
+  var el = document.createElement("div");
+  el.className = "sh-explore-label";
+  el.textContent = "Explore";
+  el.setAttribute("aria-hidden", "true");
+  scr.appendChild(el);
+  var reduce = !!window.CrumbsShell.prefs.reduceMotion;
+  setTimeout(function () {
+    if (el.parentNode) el.parentNode.removeChild(el);
+  }, reduce ? 1200 : 1700);
+  if (reduce) shellToast("Explore — you're playing now.");
+}
+
+async function shellBeginPlay() {
+  var st = window.CrumbsShell.state;
+  _playReturnDest = "build";  // exit always lands on Canvas Home per the spec
+  // Editor controls recede: drawers, menu, coach.
+  shellCloseBuildDrawer();
+  shellCloseWorldDrawer();
+  shellCloseMenu();
+  var c = $("sh-coach");
+  if (c) c.hidden = true;
+  st.mode = "play";
+  st.destination = "play";
+  shellNavSetActive("play");
+  var reduce = !!window.CrumbsShell.prefs.reduceMotion;
+  // Map-focus beat, then the Explore moment, then the real play controls.
+  var scr = document.querySelector(".sh-canvas-screen");
+  if (scr && !reduce) {
+    scr.classList.add("sh-play-focus");
+    setTimeout(function () { scr.classList.remove("sh-play-focus"); }, 1000);
+  }
+  shellSetPlaying(true);
+  shellShowExploreLabel();
+  if (!reduce) await new Promise(function (r) { setTimeout(r, 650); });
+  else await new Promise(function (r) { setTimeout(r, 150); });
+  var fw = shellPlayBridge();
+  var ok = fw ? await fw.shellStartPlay() : false;
+  if (!ok) {
+    shellSetPlaying(false);
+    st.mode = "simple";
+    st.destination = _playReturnDest;
+    shellNavSetActive(_playReturnDest);
+    shellToast("Couldn't start Play mode — try again.");
+    return false;
+  }
+  return true;
+}
+
+function shellShowPlayConfirm(title, body, okLabel, cancelLabel, onOk) {
+  var old = $("sh-play-confirm");
+  if (old) old.remove();
+  var d = document.createElement("div");
+  d.id = "sh-play-confirm";
+  d.className = "sh-play-confirm";
+  d.setAttribute("role", "dialog");
+  d.setAttribute("aria-label", title);
+  d.innerHTML = "<h2></h2><p></p>" +
+    '<div class="sh-confirm-actions">' +
+    '<button type="button" class="sh-btn-primary" id="sh-pc-ok"></button>' +
+    '<button type="button" class="sh-btn-secondary" id="sh-pc-cancel"></button>' +
+    "</div>";
+  d.querySelector("h2").textContent = title;
+  d.querySelector("p").textContent = body;
+  d.querySelector("#sh-pc-ok").textContent = okLabel;
+  d.querySelector("#sh-pc-cancel").textContent = cancelLabel;
+  var scr = document.querySelector(".sh-canvas-screen");
+  (scr || shellRootEl()).appendChild(d);
+  d.querySelector("#sh-pc-ok").onclick = function () { d.remove(); onOk(); };
+  d.querySelector("#sh-pc-cancel").onclick = function () { d.remove(); };
+  d.querySelector("#sh-pc-ok").focus();
+}
+
+async function shellExitPlay() {
+  var st = window.CrumbsShell.state;
+  if (st.mode !== "play") return;
+  var fw = shellPlayBridge();
+  // Confirmation ONLY when play left unsaved work (e.g. a build-break paint).
+  var dirty = fw && fw.shellDirtyState ? !!fw.shellDirtyState() : false;
+  if (dirty) {
+    shellShowPlayConfirm(
+      "Exit Play?",
+      "You have unsaved changes from this session. Exit without saving them?",
+      "Exit Play", "Stay",
+      function () { shellFinishExitPlay(); });
+    return;
+  }
+  shellFinishExitPlay();
+}
+
+async function shellFinishExitPlay() {
+  var st = window.CrumbsShell.state;
+  var fw = shellPlayBridge();
+  // The classic stop path restores camera + selection exactly (v5.47) and
+  // brings the panels back; the shell just re-shows its own chrome.
+  if (fw) await fw.shellStopPlay();
+  shellSetPlaying(false);
+  st.mode = "simple";
+  st.destination = _playReturnDest || "build";
+  shellNavSetActive(st.destination);
+  if (!$("sh-canvas-frame") && window.CrumbsShell.currentFile)
+    shellShowCanvas(window.CrumbsShell.currentFile);
+  shellToast("Back to building.");
+}
+
 var SHELL_WORLD_TITLES = { home: "World", map: "World Map", portals: "Portals",
   check: "World Check", rules: "Rules" };
 function shellWorldShow(view) {
@@ -16736,6 +17083,26 @@ async function shellBoot() {
         itemPlace = null; npcPlace = false;
         if (typeof syncNpcPlaceBtn === "function") syncNpcPlaceBtn();
       } catch (e) {}
+    };
+    // v5.61 Stage 7: shell play bridge. The parent shell frames the real
+    // classic play mode (togglePlay) — no duplication. dirtyFlag is the
+    // server-truth save state (pollStatus); doSave is the real save path.
+    window.shellPlayState = function () {
+      try { return !!playMode; } catch (e) { return false; }
+    };
+    window.shellDirtyState = function () {
+      try { return !!dirtyFlag; } catch (e) { return false; }
+    };
+    window.shellStartPlay = async function () {
+      try { if (!playMode) await togglePlay(); return !!playMode; }
+      catch (e) { return false; }
+    };
+    window.shellStopPlay = async function () {
+      try { if (playMode) await togglePlay(); return !playMode; }
+      catch (e) { return false; }
+    };
+    window.shellDoSave = async function () {
+      try { await doSave(); return true; } catch (e) { return false; }
     };
     // v5.27: public mode parks on the login overlay until the user logs
     // in; local mode skips the gate and boots straight in.

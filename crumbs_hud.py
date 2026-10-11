@@ -10080,6 +10080,7 @@ class Handler(BaseHTTPRequestHandler):
             ok = world.save(_vpath(name),
                             schema=SCHEMA_VERSION)  # v5.16: stamp the schema
             if ok:
+                _save_state["dirty"] = False  # v5.61: manual save clears dirty
                 _save_rules(name)  # v3.7
                 _save_missions(name)  # v5.12: Melody's missions ride along
                 _checkpoint_save()  # v5.21.x: checkpoint rides alongside the save

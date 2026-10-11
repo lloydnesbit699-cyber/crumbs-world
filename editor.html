@@ -17084,14 +17084,18 @@ function filteredAssets() {
   else if (assetState.sort === "frames") list.sort((a, b) => (b.frames || 1) - (a.frames || 1));
   return list;
 }
+let assetRenderToken = 0;
 async function renderAssets() {
   const v = $("sheet-view-assets");
   if (!v) return;
+  const myToken = ++assetRenderToken;
   v.innerHTML = "";
   if (!assetState.loaded) {
     v.textContent = "loading assets…";
     await loadAssets();
+    if (myToken !== assetRenderToken) return;  // superseded
     if (!$("sheet-view-assets")) return;
+    v.innerHTML = "";  // clear the loading text
   }
   // toolbar: search + tag filter + sort + import
   const tb = document.createElement("div");

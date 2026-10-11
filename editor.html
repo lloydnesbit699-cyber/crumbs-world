@@ -7397,7 +7397,15 @@ function initWheel() {
     hideWheel();
     if (cb) cb(hex);
   };
-  $("wheel-cancel").onclick = () => { wheelPickingFromMap = false; hideWheel(); };
+  $("wheel-cancel").onclick = () => {
+    wheelPickingFromMap = false;
+    hideWheel();
+    // v5.61.0: cancel hands the brush back — Lloyd's bug. Otherwise the
+    // eyedropper stays armed and the next map tap reopens the wheel.
+    if (typeof setBrushTool === "function" && typeof lastBrush !== "undefined") {
+      setBrushTool(lastBrush);
+    }
+  };
   // v5.61.0: pick from map — hide wheel, next map tap grabs the color
   $("wheel-frommap").onclick = () => {
     wheelPickingFromMap = true;
@@ -7424,7 +7432,15 @@ function eyedropperTap(cell) {
     let v = g[cell.y] ? g[cell.y][cell.x] : null;
     if (v && typeof v === "object") v = v.tid;
     const hex = (v != null && v !== "natural") ? (colorOf[v] || "#888888") : "#888888";
-    if (v == null || v === "natural") { toast("nothing to pick there"); return; }
+    if (v == null || v === "natural") {
+      toast("nothing to pick there");
+      wheelPickingFromMap = false;
+      // v5.61.0: hand the brush back — don't leave the eyedropper armed
+      if (typeof setBrushTool === "function" && typeof lastBrush !== "undefined") {
+        setBrushTool(lastBrush);
+      }
+      return;
+    }
     const cb = wheelPickingFromMap ? wheel.fromMap : null;
     wheelPickingFromMap = false;
     // v5.61.0: ensure swatches paint — set after popup is visible

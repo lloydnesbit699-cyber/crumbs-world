@@ -768,7 +768,12 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   #wheel-pop[hidden] { display: none; }
   #wheel-card { background: #1e1e1e; border: 2px solid #555; border-radius: 16px;
     padding: 16px; display: flex; flex-direction: column; align-items: center;
-    gap: 10px; max-width: 92vw; }
+    gap: 10px; max-width: 92vw; position: relative; overflow: hidden; }
+  /* v5.61.0: shield logo watermark — Lloyd's call */
+  #wheel-card::before { content: ""; position: absolute; inset: 0;
+    background: url("/splash-logo-cw.jpg") center/contain no-repeat;
+    opacity: 0.08; pointer-events: none; }
+  #wheel-card > * { position: relative; z-index: 1; }
   #wheel-title { font-size: 16px; color: #ffd75f; font-weight: bold; }
   #wheel-cv { border-radius: 50%; touch-action: none; cursor: crosshair; }
   #wheel-swatches { display: flex; gap: 16px; }

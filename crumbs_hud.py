@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.60.0"
+APP_VERSION = "5.61.0"
 # v5.61: tester-shell feature flag — ENVIRONMENT variable only (Lloyd's
 # 2026-10-07 decision), default OFF. Controls presentation only, never
 # permissions. Stamped into editor.html as %%TESTER_SHELL%% ("1"/"0");

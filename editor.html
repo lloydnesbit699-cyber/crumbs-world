@@ -1402,7 +1402,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     width: 100%; max-width: 520px; margin: 18px auto 0; text-align: center;
   }
   #shell-root .sh-foot p { font-size: 14px; line-height: 1.55; color: #8f8672; margin: 0 0 8px; }
-  #shell-root .sh-foot-quiet p { font-size: 13px; color: #6f6858; }
+  #shell-root .sh-foot-quiet p { font-size: 14px; color: #6f6858; }
   /* Pixel-world scene: quiet, static, decorative only. */
   #shell-root .sh-scene {
     position: absolute; inset: 0; overflow: hidden; pointer-events: none;
@@ -1743,13 +1743,13 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   #shell-root .sh-canvas-topbar {
     flex: 0 0 auto; z-index: 3;
     display: flex; align-items: center; justify-content: space-between; gap: 12px;
-    padding: max(10px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 10px max(16px, env(safe-area-inset-left));
+    padding: max(6px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 6px max(16px, env(safe-area-inset-left));
     background: rgba(20, 19, 17, 0.94); border-bottom: 1px solid #3a352b;
   }
   #shell-root .sh-world-chip {
     font-size: 16px; font-weight: 700; color: #f3ead6;
     background: #1e1c18; border: 1px solid #3a352b; border-radius: 999px;
-    padding: 10px 18px; max-width: 62vw; overflow: hidden;
+    padding: 8px 16px; max-width: 62vw; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap;
   }
   #shell-root .sh-canvas-wrap { flex: 1 1 auto; position: relative; min-height: 0; background: #0a0a0a; }
@@ -1761,10 +1761,10 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   #shell-root .sh-bottomnav {
     flex: 0 0 auto; z-index: 3; display: flex; gap: 8px;
     background: #1e1c18; border-top: 1px solid #3a352b;
-    padding: 8px max(16px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    padding: 4px max(16px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
   }
   #shell-root .sh-navbtn {
-    flex: 1; min-height: 60px; padding: 8px 6px;
+    flex: 1; height: 56px; padding: 6px 6px;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
     background: transparent; border: 2px solid transparent; border-radius: 14px;
     color: #d8cdb4; font-size: 14px; font-weight: 600; cursor: pointer;
@@ -1773,9 +1773,8 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   #shell-root .sh-navbtn .sh-nav-ic { font-size: 22px; line-height: 1; }
   #shell-root .sh-navbtn[aria-current="page"] {
     color: #f3ead6; background: #2b2822; border: 3px solid #c9973f; font-weight: 700;
-    padding: 7px 5px;
+    padding: 5px 5px;
   }
-  #shell-root .sh-navbtn[aria-current="page"] .sh-nav-ic { transform: scale(1.12); }
   /* Computer: same three destinations, same labels and order — centered bar. */
   @media (min-width: 760px) {
     #shell-root .sh-bottomnav { justify-content: center; }
@@ -2032,7 +2031,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   #shell-root .sh-place-card img { width: 40px; height: 40px; image-rendering: pixelated; border-radius: 8px; background: #141311; flex: none; }
   #shell-root .sh-place-card .sh-pc-meta { min-width: 0; }
   #shell-root .sh-place-card .sh-pc-meta b { display: block; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #shell-root .sh-place-card .sh-pc-meta small { font-size: 13px; color: #8f8672; }
+  #shell-root .sh-place-card .sh-pc-meta small { font-size: 14px; color: #8f8672; }
   #shell-root .sh-place-card[aria-pressed="true"] { border-color: #c9973f; border-width: 3px; box-shadow: 0 0 0 1px #c9973f; }
   #shell-root .sh-place-card .sh-pc-check { margin-left: auto; color: #c9973f; font-size: 20px; font-weight: 700; flex: none; }
   #shell-root .sh-arm-banner {
@@ -2185,6 +2184,929 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   html.sh-text-large #shell-root .sh-more-item .sh-wr-meta small,
   html.sh-text-large #shell-root .sh-w-row .sh-wr-meta small,
   html.sh-text-large #shell-root .sh-ws-line.dim { font-size: 16px; }
+
+  /* ===== Stage 9: light appearance (html.sh-light) =====
+     Generated from the shell CSS above with the dark palette mapped to
+     light. Higher specificity than the base rules, so it wins. */
+  /* ===== TESTER SHELL (v5.61+, Stage 1) =====
+     Presentation layer over the classic HUD. Spec: deep charcoal bg, warm
+     cream text, one Crumbs gold accent, 48px touch targets, 16px body /
+     14px secondary type floor, non-color selection signals, safe areas. */
+  html.sh-light #shell-root{
+    position: fixed; inset: 0; z-index: 500;
+    background: #ece5d2; color: #2b2517;
+    font-family: system-ui, -apple-system, sans-serif;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 16px; padding: max(24px, env(safe-area-inset-top))
+               max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom))
+               max(24px, env(safe-area-inset-left));
+    text-align: center;
+  }
+  html.sh-light #shell-root .shell-mark{ font-size: 44px; line-height: 1; }
+  html.sh-light #shell-root h1{ font-size: 28px; margin: 0; color: #2b2517; font-weight: 700; }
+  html.sh-light #shell-root .shell-stage{
+    font-size: 14px; color: #ece5d2; background: #8a6520;
+    border-radius: 999px; padding: 4px 14px; font-weight: 700;
+    letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  html.sh-light #shell-root p{ font-size: 16px; line-height: 1.5; color: #4a4232; margin: 0; max-width: 34em; }
+  html.sh-light #shell-root .shell-btn{
+    min-height: 48px; min-width: 48px; padding: 12px 28px;
+    font-size: 17px; font-weight: 700; color: #ece5d2;
+    background: #8a6520; border: 2px solid #8a6520; border-radius: 12px;
+    cursor: pointer;
+  }
+  html.sh-light #shell-root .shell-btn:active{ background: #75571c; }
+  html.sh-light #shell-root .shell-note{ font-size: 14px; color: #6a6050; }
+  html.sh-light #shell-root .shell-note a{ color: #8a6520; }
+  @media (prefers-reduced-motion: reduce) {
+    html.sh-light #shell-root{ animation: none; }
+  }
+
+  /* ===== TESTER SHELL (v5.61+, Stage 2: Account Entry, Welcome, World Home)
+     Screens 01-03 of the spec. Type floor 16px body / 14px secondary,
+     48px touch targets, non-color selection signals, safe areas,
+     visible focus, reduced-motion alternatives. */
+  html.sh-light #shell-root .sh-screen{
+    width: 100%; min-height: 100%; display: flex; flex-direction: column;
+    text-align: left; position: relative;
+  }
+  html.sh-light #shell-root .sh-scroll{
+    flex: 1; width: 100%; overflow-y: auto; -webkit-overflow-scrolling: touch;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  html.sh-light #shell-root .sh-wrap{ width: 100%; max-width: 520px; margin: 0 auto; }
+  html.sh-light #shell-root :focus-visible{
+    outline: 3px solid #8a6520; outline-offset: 2px; border-radius: 8px;
+  }
+  /* One-time entrance; never loops, never blocks input. */
+  @keyframes sh-rise {
+    from { opacity: 0; transform: scale(0.97) translateY(10px); }
+    to { opacity: 1; transform: none; }
+  }
+  html.sh-light #shell-root .sh-enter{ animation: sh-rise 0.45s ease-out 1; }
+  @media (prefers-reduced-motion: reduce) {
+    html.sh-light #shell-root .sh-enter{ animation: none; }
+  }
+  html.sh-light.sh-reduce-motion #shell-root .sh-enter, 
+  html.sh-light.sh-reduce-motion #shell-root *{
+    animation: none !important; transition: none !important;
+  }
+  /* Shared controls */
+  html.sh-light #shell-root .sh-btn-primary{
+    display: block; width: 100%; min-height: 52px; padding: 13px 28px;
+    font-size: 17px; font-weight: 700; color: #ece5d2;
+    background: #8a6520; border: 2px solid #8a6520; border-radius: 12px;
+    cursor: pointer; margin-top: 12px;
+  }
+  html.sh-light #shell-root .sh-btn-primary:active{ background: #75571c; border-color: #75571c; }
+  html.sh-light #shell-root .sh-btn-primary:disabled{ opacity: 0.55; cursor: default; }
+  html.sh-light #shell-root .sh-btn-secondary{
+    display: block; width: 100%; min-height: 52px; padding: 13px 28px;
+    font-size: 17px; font-weight: 600; color: #2b2517;
+    background: transparent; border: 2px solid #5d5546; border-radius: 12px;
+    cursor: pointer; margin-top: 12px;
+  }
+  html.sh-light #shell-root .sh-btn-secondary:active{ border-color: #8a6520; }
+  html.sh-light #shell-root .sh-linkbtn{
+    background: none; border: 0; padding: 12px; min-height: 48px;
+    color: #8a6520; font-size: 16px; text-decoration: underline; cursor: pointer;
+  }
+  html.sh-light #shell-root .sh-card{
+    background: #fbf7ec; border: 1px solid #c6b897; border-radius: 16px;
+    padding: 20px; width: 100%;
+  }
+  html.sh-light #shell-root .sh-hint{ font-size: 14px; line-height: 1.5; color: #6a6050; margin: 10px 0 0; }
+  html.sh-light #shell-root .sh-foot{
+    width: 100%; max-width: 520px; margin: 18px auto 0; text-align: center;
+  }
+  html.sh-light #shell-root .sh-foot p{ font-size: 14px; line-height: 1.55; color: #6a6050; margin: 0 0 8px; }
+  html.sh-light #shell-root .sh-foot-quiet p{ font-size: 14px; color: #5d5546; }
+  /* Pixel-world scene: quiet, static, decorative only. */
+  html.sh-light #shell-root .sh-scene{
+    position: absolute; inset: 0; overflow: hidden; pointer-events: none;
+    border-radius: inherit;
+    background:
+      radial-gradient(2px 2px at 18% 22%, rgba(43,37,23,0.85) 60%, transparent 61%),
+      radial-gradient(2px 2px at 34% 12%, rgba(43,37,23,0.5) 60%, transparent 61%),
+      radial-gradient(2px 2px at 63% 26%, rgba(138,101,32,0.9) 60%, transparent 61%),
+      radial-gradient(3px 3px at 78% 10%, rgba(43,37,23,0.7) 60%, transparent 61%),
+      radial-gradient(2px 2px at 88% 34%, rgba(43,37,23,0.45) 60%, transparent 61%),
+      radial-gradient(2px 2px at 8% 44%, rgba(138,101,32,0.6) 60%, transparent 61%),
+      linear-gradient(#ece5d2 0 58%, #e4dac2 58% 74%, #ece5d2 74% 100%);
+  }
+  html.sh-light #shell-root .sh-scene::after{
+    content: ""; position: absolute; left: 12%; right: 12%; top: 58%; height: 14px;
+    background:
+      linear-gradient(90deg, #d9cfb6 0 14px, transparent 14px 20px,
+                      #d9cfb6 20px 44px, transparent 44px 52px,
+                      #d9cfb6 52px 66px, transparent 66px 76px,
+                      #d9cfb6 76px 104px, transparent 104px 118px,
+                      #d9cfb6 118px 132px, transparent 132px 150px);
+    opacity: 0.9;
+  }
+  /* ---- Screen 01: Account Entry ---- */
+  html.sh-light #shell-root .sh-brand{
+    position: relative; overflow: hidden; border-radius: 16px;
+    border: 1px solid #c6b897; min-height: 168px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 6px; padding: 28px 20px; text-align: center; margin-bottom: 18px;
+  }
+  html.sh-light #shell-root .sh-brand .sh-mark{ font-size: 40px; line-height: 1; color: #8a6520; position: relative; }
+  html.sh-light #shell-root .sh-brand h1{ font-size: 30px; margin: 0; color: #2b2517; position: relative; }
+  html.sh-light #shell-root .sh-brand .sh-tag{ font-size: 14px; color: #4a4232; position: relative; margin: 0; }
+  html.sh-light #shell-root .sh-tabs{ display: flex; gap: 8px; margin-bottom: 16px; }
+  html.sh-light #shell-root .sh-tabs button{
+    flex: 1; min-height: 48px; padding: 10px; font-size: 16px; font-weight: 600;
+    color: #4a4232; background: transparent; border: 2px solid #c6b897;
+    border-radius: 12px; cursor: pointer;
+  }
+  /* Selected tab: thicker gold border + underline + bold — never color alone. */
+  html.sh-light #shell-root .sh-tabs button[aria-selected="true"]{
+    color: #2b2517; border: 3px solid #8a6520; font-weight: 700;
+    text-decoration: underline; text-underline-offset: 4px; padding: 9px 10px;
+  }
+  html.sh-light #shell-root .sh-field{ margin: 0 0 14px; }
+  html.sh-light #shell-root .sh-field label{
+    display: block; font-size: 16px; font-weight: 600; color: #2b2517; margin-bottom: 6px;
+  }
+  html.sh-light #shell-root .sh-field input{
+    display: block; width: 100%; min-height: 52px; padding: 12px 14px;
+    font-size: 16px; color: #2b2517; background: #ece5d2;
+    border: 2px solid #c6b897; border-radius: 10px;
+  }
+  html.sh-light #shell-root .sh-field input:focus{ border-color: #8a6520; outline: none; }
+  html.sh-light #shell-root .sh-field input[aria-invalid="true"]{ border-color: #c14a4a; border-width: 3px; }
+  html.sh-light #shell-root .sh-err{
+    display: flex; gap: 8px; align-items: flex-start;
+    font-size: 14px; line-height: 1.45; color: #f6d9d9; margin-top: 6px;
+  }
+  html.sh-light #shell-root .sh-err .sh-err-icon{ flex: none; }
+  html.sh-light #shell-root .sh-err-summary{
+    border: 2px solid #c14a4a; border-radius: 10px; padding: 12px 14px;
+    font-size: 15px; line-height: 1.5; color: #f9e4e4; background: #f9e8e8;
+    margin-bottom: 14px;
+  }
+  /* ---- Screen 02: First-Light Welcome ---- */
+  html.sh-light #shell-root .sh-welcome{ justify-content: center; }
+  html.sh-light #shell-root .sh-welcome-inner{
+    position: relative; width: 100%; max-width: 520px; margin: auto;
+    display: flex; flex-direction: column; align-items: center; text-align: center;
+    gap: 10px; padding: 24px 8px;
+  }
+  html.sh-light #shell-root .sh-welcome-inner .sh-mark{ font-size: 56px; line-height: 1; color: #8a6520; }
+  html.sh-light #shell-root .sh-welcome-inner h1{ font-size: 34px; margin: 0; color: #2b2517; }
+  html.sh-light #shell-root .sh-promise{ font-size: 17px; color: #4a4232; margin: 0 0 12px; }
+  html.sh-light #shell-root .sh-welcome-enter{ max-width: 340px; margin-left: auto; margin-right: auto; }
+  /* ---- Accessibility dialog ---- */
+  html.sh-light #shell-root .sh-scrim{
+    position: fixed; inset: 0; z-index: 600; background: rgba(0,0,0,0.6);
+    display: flex; align-items: flex-end; justify-content: center;
+    padding: max(16px, env(safe-area-inset-bottom)) 16px max(16px, env(safe-area-inset-bottom));
+  }
+  @media (min-width: 700px) { #shell-root .sh-scrim { align-items: center; } }
+  html.sh-light #shell-root .sh-dialog{
+    background: #fbf7ec; border: 2px solid #c6b897; border-radius: 16px;
+    padding: 22px; width: 100%; max-width: 440px; max-height: 85vh; overflow-y: auto;
+  }
+  html.sh-light #shell-root .sh-dialog h2{ font-size: 22px; margin: 0 0 6px; color: #2b2517; }
+  html.sh-light #shell-root .sh-dialog .sh-sub{ font-size: 14px; color: #6a6050; margin: 0 0 14px; }
+  html.sh-light #shell-root .sh-check{
+    display: flex; gap: 12px; align-items: center; min-height: 52px;
+    font-size: 16px; color: #2b2517; padding: 6px 0; cursor: pointer;
+  }
+  html.sh-light #shell-root .sh-check input{ width: 26px; height: 26px; flex: none; accent-color: #8a6520; }
+  html.sh-light #shell-root .sh-seg-label{ font-size: 16px; font-weight: 600; color: #2b2517; margin: 14px 0 8px; }
+  html.sh-light #shell-root .sh-seg{ display: flex; gap: 8px; }
+  html.sh-light #shell-root .sh-seg button{
+    flex: 1; min-height: 52px; font-size: 16px; font-weight: 600;
+    color: #4a4232; background: transparent; border: 2px solid #c6b897;
+    border-radius: 12px; cursor: pointer;
+  }
+  html.sh-light #shell-root .sh-seg button[aria-pressed="true"]{
+    color: #2b2517; border: 3px solid #8a6520; font-weight: 700;
+  }
+  html.sh-light #shell-root .sh-seg button[aria-pressed="true"]::after{ content: " \2713"; }
+  /* ---- Screen 03: World Home ---- */
+  html.sh-light #shell-root .sh-topbar{
+    width: 100%; display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 2px 14px;
+  }
+  html.sh-light #shell-root .sh-topbar .sh-title{ font-size: 22px; font-weight: 700; color: #2b2517; margin: 0; }
+  html.sh-light #shell-root .sh-menu-btn{
+    min-width: 48px; min-height: 48px; padding: 10px 14px;
+    font-size: 18px; color: #2b2517; background: #fbf7ec;
+    border: 2px solid #c6b897; border-radius: 12px; cursor: pointer;
+  }
+  html.sh-light #shell-root .sh-hero{ margin-bottom: 16px; overflow: hidden; padding: 0; }
+  html.sh-light #shell-root .sh-hero-body{ padding: 18px 20px 20px; }
+  html.sh-light #shell-root .sh-eyebrow{
+    font-size: 14px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    color: #8a6520; margin: 0 0 6px;
+  }
+  html.sh-light #shell-root .sh-hero h2{ font-size: 24px; margin: 0 0 4px; color: #2b2517; }
+  html.sh-light #shell-root .sh-hero .sh-sub{ font-size: 15px; color: #4a4232; margin: 0 0 6px; }
+  html.sh-light #shell-root .sh-hero-actions{ display: flex; gap: 10px; }
+  html.sh-light #shell-root .sh-hero-actions .sh-btn-primary, 
+  html.sh-light #shell-root .sh-hero-actions .sh-btn-secondary{ margin-top: 10px; }
+  /* Highlighted Continue hero: thicker border + check badge — never color alone. */
+  html.sh-light #shell-root .sh-hero-continue{ border: 3px solid #8a6520; padding: 0; }
+  html.sh-light #shell-root .sh-hero-continue .sh-hero-body{ padding: 17px 19px 19px; }
+  html.sh-light #shell-root .sh-continue-badge{
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 14px; font-weight: 700; color: #ece5d2; background: #8a6520;
+    border-radius: 999px; padding: 4px 12px; margin-bottom: 8px;
+  }
+  html.sh-light #shell-root .sh-preview{
+    width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block;
+    background: #ece5d2; border-bottom: 1px solid #c6b897;
+  }
+  html.sh-light #shell-root .sh-preview-fallback{
+    width: 100%; aspect-ratio: 16 / 9; display: flex; align-items: center;
+    justify-content: center; flex-direction: column; gap: 6px;
+    background: linear-gradient(135deg, #e4dac2 0%, #eee7d3 60%, #e4dac2 100%);
+    border-bottom: 1px solid #c6b897; color: #8a6520;
+  }
+  html.sh-light #shell-root .sh-preview-fallback .sh-mark{ font-size: 34px; line-height: 1; }
+  html.sh-light #shell-root .sh-preview-fallback span{ font-size: 14px; color: #6a6050; }
+  html.sh-light #shell-root .sh-world-meta{
+    display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center;
+    font-size: 14px; color: #6a6050; margin: 8px 0 0;
+  }
+  html.sh-light #shell-root .sh-status{
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 14px; font-weight: 600; color: #4a4232;
+  }
+  html.sh-light #shell-root .sh-status .sh-dot{
+    width: 10px; height: 10px; border-radius: 50%; background: #2f7d33; flex: none;
+  }
+  html.sh-light #shell-root .sh-status.sh-warn .sh-dot{ background: #8a6520; border-radius: 2px; }
+  html.sh-light #shell-root .sh-grid{ display: grid; gap: 12px; grid-template-columns: 1fr; }
+  @media (min-width: 700px) { #shell-root .sh-grid { grid-template-columns: 1fr 1fr; } }
+  html.sh-light #shell-root .sh-action-card{
+    display: flex; gap: 14px; align-items: center; width: 100%;
+    min-height: 84px; padding: 16px 18px; text-align: left;
+    background: #fbf7ec; border: 2px solid #c6b897; border-radius: 16px;
+    cursor: pointer; color: #2b2517;
+  }
+  html.sh-light #shell-root .sh-action-card:active{ border-color: #8a6520; }
+  html.sh-light #shell-root .sh-action-card .sh-ic{
+    flex: none; width: 52px; height: 52px; border-radius: 12px;
+    background: #ece5d2; border: 1px solid #c6b897;
+    display: flex; align-items: center; justify-content: center; font-size: 26px;
+  }
+  html.sh-light #shell-root .sh-action-card b{ display: block; font-size: 17px; }
+  html.sh-light #shell-root .sh-action-card small{ display: block; font-size: 14px; color: #6a6050; margin-top: 2px; }
+  html.sh-light #shell-root .sh-action-card .sh-go{ margin-left: auto; font-size: 22px; color: #8a6520; flex: none; }
+  /* ---- Menu sheet ---- */
+  html.sh-light #shell-root .sh-menu-sheet{
+    background: #fbf7ec; border: 2px solid #c6b897; border-radius: 16px 16px 0 0;
+    padding: 12px 18px max(20px, env(safe-area-inset-bottom));
+    width: 100%; max-width: 520px;
+  }
+  html.sh-light #shell-root .sh-menu-sheet .sh-grab{
+    width: 44px; height: 5px; border-radius: 3px; background: #5d5546; margin: 4px auto 12px;
+  }
+  html.sh-light #shell-root .sh-menu-user{ font-size: 16px; font-weight: 700; color: #2b2517; margin: 0 0 2px; }
+  html.sh-light #shell-root .sh-menu-sub{ font-size: 14px; color: #6a6050; margin: 0 0 10px; }
+  html.sh-light #shell-root .sh-menu-item{
+    display: flex; align-items: center; gap: 12px; width: 100%;
+    min-height: 52px; padding: 12px 6px; font-size: 16px; color: #2b2517;
+    background: none; border: 0; border-top: 1px solid #d9cfb6; cursor: pointer; text-align: left;
+  }
+  html.sh-light #shell-root .sh-menu-item .sh-mi{ width: 28px; text-align: center; flex: none; }
+  /* ---- Loading / error ---- */
+  html.sh-light #shell-root .sh-loading, html.sh-light #shell-root .sh-error{ align-items: center; justify-content: center; text-align: center; }
+  html.sh-light #shell-root .sh-loading .sh-mark, html.sh-light #shell-root .sh-error .sh-mark{
+    font-size: 48px; line-height: 1; color: #8a6520; margin-bottom: 8px;
+  }
+  html.sh-light #shell-root .sh-loading p, html.sh-light #shell-root .sh-error p{
+    font-size: 16px; color: #4a4232; margin: 6px 0 0; max-width: 30em;
+  }
+  html.sh-light #shell-root .sh-error h2{ font-size: 24px; color: #2b2517; margin: 0; }
+  html.sh-light #shell-root .sh-error .sh-btn-primary{ max-width: 320px; margin-left: auto; margin-right: auto; }
+  /* ---- Text-size + high-contrast prefs ---- */
+  html.sh-light.sh-text-large #shell-root{ font-size: 18px; }
+  html.sh-light.sh-text-large #shell-root p, 
+  html.sh-light.sh-text-large #shell-root .sh-hint, 
+  html.sh-light.sh-text-large #shell-root .sh-foot p, 
+  html.sh-light.sh-text-large #shell-root .sh-world-meta, 
+  html.sh-light.sh-text-large #shell-root .sh-status, 
+  html.sh-light.sh-text-large #shell-root .sh-action-card small, 
+  html.sh-light.sh-text-large #shell-root .sh-err{ font-size: 16px; }
+  html.sh-light.sh-text-large #shell-root .sh-field label, 
+  html.sh-light.sh-text-large #shell-root .sh-tabs button, 
+  html.sh-light.sh-text-large #shell-root .sh-linkbtn, 
+  html.sh-light.sh-text-large #shell-root .sh-menu-item{ font-size: 18px; }
+  /* ---- Screen 05: My Worlds (Stage 3) ---- */
+  html.sh-light #shell-root .sh-search{ margin: 0 0 14px; }
+  html.sh-light #shell-root .sh-search label{
+    display: block; font-size: 16px; font-weight: 600; color: #2b2517; margin-bottom: 6px;
+  }
+  html.sh-light #shell-root .sh-search input{
+    display: block; width: 100%; min-height: 52px; padding: 12px 14px;
+    font-size: 16px; color: #2b2517; background: #ece5d2;
+    border: 2px solid #c6b897; border-radius: 10px;
+  }
+  html.sh-light #shell-root .sh-search input:focus{ border-color: #8a6520; outline: none; }
+  html.sh-light #shell-root .sh-worlds-grid{
+    display: grid; gap: 14px; grid-template-columns: 1fr;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+  @media (min-width: 700px) {
+    html.sh-light #shell-root .sh-worlds-grid{ grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+  }
+  /* Create New World stays visible as the first card. */
+  html.sh-light #shell-root .sh-world-new{
+    width: 100%; min-height: 200px; padding: 26px 18px; cursor: pointer;
+    background: #fbf7ec; border: 2px dashed #5d5546; border-radius: 16px;
+    color: #2b2517; text-align: center;
+  }
+  html.sh-light #shell-root .sh-world-new:active{ border-color: #8a6520; }
+  html.sh-light #shell-root .sh-world-new .sh-ic{
+    display: block; font-size: 34px; line-height: 1; color: #8a6520; margin-bottom: 8px;
+  }
+  html.sh-light #shell-root .sh-world-new b{ display: block; font-size: 18px; }
+  html.sh-light #shell-root .sh-world-new small{ display: block; font-size: 14px; color: #6a6050; margin-top: 4px; }
+  html.sh-light #shell-root .sh-world-card{
+    background: #fbf7ec; border: 2px solid #c6b897; border-radius: 16px;
+    overflow: hidden; display: flex; flex-direction: column;
+  }
+  html.sh-light #shell-root .sh-world-body{
+    padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 4px;
+  }
+  html.sh-light #shell-root .sh-world-card h3{ font-size: 19px; margin: 0; color: #2b2517; }
+  html.sh-light #shell-root .sh-world-card .sh-sub{ font-size: 14px; color: #6a6050; margin: 0; }
+  html.sh-light #shell-root .sh-card-actions{ display: flex; gap: 10px; margin-top: 10px; align-items: stretch; }
+  html.sh-light #shell-root .sh-card-actions .sh-btn-primary, 
+  html.sh-light #shell-root .sh-card-actions .sh-btn-secondary{
+    margin-top: 0; flex: 1; min-height: 48px; padding: 10px 16px; font-size: 16px;
+  }
+  html.sh-light #shell-root .sh-icon-btn{
+    flex: none; min-width: 48px; min-height: 48px; padding: 10px;
+    font-size: 20px; line-height: 1; color: #2b2517; background: transparent;
+    border: 2px solid #c6b897; border-radius: 12px; cursor: pointer;
+  }
+  html.sh-light #shell-root .sh-overflow-wrap{ position: relative; flex: none; }
+  html.sh-light #shell-root .sh-overflow-menu{
+    position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 650;
+    background: #eee7d3; border: 2px solid #c6b897; border-radius: 12px;
+    min-width: 220px; padding: 6px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  }
+  html.sh-light #shell-root .sh-overflow-item{
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    min-height: 48px; padding: 10px 12px; font-size: 16px; color: #2b2517;
+    background: none; border: 0; border-radius: 8px; cursor: pointer; text-align: left;
+  }
+  html.sh-light #shell-root .sh-overflow-item:active{ background: #d9cfb6; }
+  html.sh-light #shell-root .sh-overflow-item.danger{ color: #f6d9d9; font-weight: 600; }
+  /* Destructive actions use clear warning language — never the gold primary. */
+  html.sh-light #shell-root .sh-btn-danger{
+    display: block; width: 100%; min-height: 52px; padding: 13px 28px;
+    font-size: 17px; font-weight: 700; color: #f9e4e4;
+    background: transparent; border: 2px solid #96401f; border-radius: 12px;
+    cursor: pointer; margin-top: 12px;
+  }
+  html.sh-light #shell-root .sh-btn-danger:disabled{ opacity: 0.55; cursor: default; }
+  html.sh-light #shell-root .sh-dialog .sh-danger-note{
+    font-size: 15px; line-height: 1.55; color: #f9e4e4; margin: 0 0 6px;
+  }
+  /* Toast: brief confirmation, never the only record of a destructive action. */
+  html.sh-light #shell-root .sh-toast{
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: max(24px, env(safe-area-inset-bottom)); z-index: 700;
+    background: #eee7d3; border: 2px solid #8a6520; border-radius: 12px;
+    color: #2b2517; font-size: 16px; line-height: 1.4; padding: 12px 18px;
+    max-width: 90vw; text-align: center;
+  }
+  html.sh-light.sh-text-large #shell-root .sh-world-card h3{ font-size: 21px; }
+  html.sh-light.sh-text-large #shell-root .sh-world-card .sh-sub, 
+  html.sh-light.sh-text-large #shell-root .sh-world-new small{ font-size: 16px; }
+  html.sh-light.sh-text-large #shell-root .sh-overflow-item, 
+  html.sh-light.sh-text-large #shell-root .sh-back-btn, 
+  html.sh-light.sh-text-large #shell-root .sh-search label{ font-size: 18px; }
+  /* ===== TESTER SHELL (v5.61+, Stage 4: Canvas Home + persistent nav)
+     Screen 06. Full-bleed canvas screen: world chip + Menu up top, the
+     framed map (/classic?shellframe=1) filling the middle, persistent
+     Build/World/Play nav above the safe area. First-entry coach card. */
+  html.sh-light #shell-root .sh-canvas-screen{
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    display: flex; flex-direction: column; text-align: left;
+  }
+  html.sh-light #shell-root .sh-canvas-topbar{
+    flex: 0 0 auto; z-index: 3;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: max(6px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 6px max(16px, env(safe-area-inset-left));
+    background: rgba(20, 19, 17, 0.94); border-bottom: 1px solid #c6b897;
+  }
+  html.sh-light #shell-root .sh-world-chip{
+    font-size: 16px; font-weight: 700; color: #2b2517;
+    background: #fbf7ec; border: 1px solid #c6b897; border-radius: 999px;
+    padding: 8px 16px; max-width: 62vw; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  html.sh-light #shell-root .sh-canvas-wrap{ flex: 1 1 auto; position: relative; min-height: 0; background: #f2ecdc; }
+  html.sh-light #shell-root .sh-canvas-wrap iframe{
+    position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #f2ecdc;
+  }
+  /* Persistent primary nav: icon + label, 48px+ targets, selected state uses
+     raised shape + thicker border + label emphasis — never color alone. */
+  html.sh-light #shell-root .sh-bottomnav{
+    flex: 0 0 auto; z-index: 3; display: flex; gap: 8px;
+    background: #fbf7ec; border-top: 1px solid #c6b897;
+    padding: 4px max(16px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  }
+  html.sh-light #shell-root .sh-navbtn{
+    flex: 1; height: 56px; padding: 6px 6px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    background: transparent; border: 2px solid transparent; border-radius: 14px;
+    color: #4a4232; font-size: 14px; font-weight: 600; cursor: pointer;
+    font-family: inherit;
+  }
+  html.sh-light #shell-root .sh-navbtn .sh-nav-ic{ font-size: 22px; line-height: 1; }
+  html.sh-light #shell-root .sh-navbtn[aria-current="page"]{
+    color: #2b2517; background: #e9e1cb; border: 3px solid #8a6520; font-weight: 700;
+    padding: 5px 5px;
+  }
+  /* Computer: same three destinations, same labels and order — centered bar. */
+  @media (min-width: 760px) {
+    html.sh-light #shell-root .sh-bottomnav{ justify-content: center; }
+    html.sh-light #shell-root .sh-navbtn{ flex: 0 1 200px; flex-direction: row; gap: 10px; font-size: 16px; }
+  }
+  /* First-entry coach card: overlays the canvas above the nav. */
+  html.sh-light #shell-root .sh-coach{
+    position: absolute; z-index: 4;
+    left: 16px; right: 16px; bottom: 96px; margin: 0 auto; max-width: 480px;
+    background: #fbf7ec; border: 2px solid #8a6520; border-radius: 16px;
+    padding: 20px 20px 16px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  }
+  html.sh-light #shell-root .sh-coach h2{ font-size: 20px; margin: 0 0 6px; color: #2b2517; padding-right: 40px; }
+  html.sh-light #shell-root .sh-coach p{ font-size: 16px; line-height: 1.5; color: #4a4232; margin: 0 0 4px; }
+  html.sh-light #shell-root .sh-coach-x{
+    position: absolute; top: 8px; right: 8px; min-width: 48px; min-height: 48px;
+    background: transparent; border: 2px solid #c6b897; border-radius: 12px;
+    color: #2b2517; font-size: 20px; cursor: pointer;
+  }
+  html.sh-light #shell-root .sh-coach-actions{ display: flex; gap: 10px; margin-top: 10px; }
+  html.sh-light #shell-root .sh-coach-actions .sh-btn-secondary{ margin-top: 0; min-height: 52px; }
+  html.sh-light.sh-reduce-motion #shell-root .sh-coach{ box-shadow: none; }
+  /* ===== TESTER SHELL (v5.61+, Stage 7: Play Entry + Play Mode) ===== */
+  /* Play Entry card: compact dialog over the canvas. Same card language as
+     the coach card — charcoal, gold border, 48px controls. */
+  html.sh-light #shell-root .sh-play-card{
+    position: absolute; z-index: 6;
+    left: 16px; right: 16px; bottom: 96px; margin: 0 auto; max-width: 480px;
+    background: #fbf7ec; border: 2px solid #8a6520; border-radius: 16px;
+    padding: 20px 20px 16px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  }
+  html.sh-light #shell-root .sh-play-card h2{ font-size: 20px; margin: 0 0 8px; color: #2b2517; }
+  html.sh-light #shell-root .sh-play-card .sh-preview, 
+  html.sh-light #shell-root .sh-play-card .sh-preview-fallback{
+    width: 100%; height: 120px; object-fit: cover; border-radius: 12px;
+    margin-bottom: 10px; border: 1px solid #c6b897;
+  }
+  html.sh-light #shell-root .sh-play-world{ font-size: 16px; color: #2b2517; margin: 0 0 4px; font-weight: 600; }
+  html.sh-light #shell-root .sh-play-status{ font-size: 14px; color: #4a4232; margin: 0 0 12px; }
+  html.sh-light #shell-root .sh-play-status.sh-warn{ color: #8a6520; }
+  html.sh-light #shell-root .sh-play-card .sh-btn-primary, 
+  html.sh-light #shell-root .sh-play-card .sh-btn-secondary{ width: 100%; margin-top: 8px; min-height: 52px; }
+  html.sh-light #shell-root .sh-play-card .sh-play-err{
+    font-size: 14px; color: #8a6520; margin: 8px 0 0;
+  }
+  html.sh-light #shell-root .sh-play-card .sh-play-err[hidden]{ display: none; }
+  /* Explore label: the rewarding beat of the Play transition. Fades out;
+     reduced-motion shows it statically and briefly instead. */
+  html.sh-light #shell-root .sh-explore-label{
+    position: absolute; z-index: 7; left: 0; right: 0; top: 38%;
+    text-align: center; font-size: 34px; font-weight: 700; color: #2b2517;
+    text-shadow: 0 2px 18px rgba(0, 0, 0, 0.85); pointer-events: none;
+    animation: sh-explore-fade 1.6s ease-out forwards;
+  }
+  @keyframes sh-explore-fade {
+    0% { opacity: 0; transform: scale(0.92); }
+    18% { opacity: 1; transform: scale(1); }
+    70% { opacity: 1; }
+    100% { opacity: 0; transform: scale(1.04); }
+  }
+  html.sh-light.sh-reduce-motion #shell-root .sh-explore-label{ animation: none; }
+  /* Playing state: editor chrome recedes. Bottom nav fades out (not display:
+     none instantly, so the transition reads), topbar swaps to the play bar. */
+  html.sh-light #shell-root .sh-canvas-screen.sh-playing .sh-bottomnav{
+    opacity: 0; pointer-events: none; transition: opacity 0.25s ease;
+  }
+  html.sh-light.sh-reduce-motion #shell-root .sh-canvas-screen.sh-playing .sh-bottomnav{ transition: none; }
+  html.sh-light #shell-root .sh-canvas-screen.sh-playing .sh-canvas-wrap{ top: 0; }
+  html.sh-light #shell-root .sh-playbar{
+    position: absolute; z-index: 5; top: 0; left: 0; right: 0;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
+    background: linear-gradient(to bottom, rgba(10, 9, 7, 0.85), transparent);
+    pointer-events: none;
+  }
+  html.sh-light #shell-root .sh-playbar > *{ pointer-events: auto; }
+  html.sh-light #shell-root .sh-play-world-mini{
+    font-size: 14px; color: #4a4232; background: rgba(20, 18, 15, 0.8);
+    border: 1px solid #c6b897; border-radius: 999px; padding: 8px 14px;
+    max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  html.sh-light #shell-root .sh-exit-play{
+    min-width: 48px; min-height: 48px; padding: 10px 18px;
+    background: rgba(20, 18, 15, 0.88); color: #2b2517;
+    border: 2px solid #5d5546; border-radius: 999px; font-size: 16px; font-weight: 600;
+    cursor: pointer;
+  }
+  html.sh-light #shell-root .sh-exit-play:active{ border-color: #8a6520; }
+  /* Map-focus beat of the Play transition: a gentle settle on the canvas. */
+  html.sh-light #shell-root .sh-canvas-screen.sh-play-focus .sh-canvas-wrap{
+    animation: sh-play-focus 0.9s ease-out;
+  }
+  @keyframes sh-play-focus {
+    0% { transform: scale(1.035); } 100% { transform: scale(1); }
+  }
+  html.sh-light.sh-reduce-motion #shell-root .sh-canvas-screen.sh-play-focus .sh-canvas-wrap{ animation: none; }
+  /* Exit confirmation: small centered dialog, same card language. */
+  html.sh-light #shell-root .sh-play-confirm{
+    position: absolute; z-index: 8;
+    left: 16px; right: 16px; top: 30%; margin: 0 auto; max-width: 420px;
+    background: #fbf7ec; border: 2px solid #8a6520; border-radius: 16px;
+    padding: 20px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  }
+  html.sh-light #shell-root .sh-play-confirm h2{ font-size: 18px; margin: 0 0 8px; color: #2b2517; }
+  html.sh-light #shell-root .sh-play-confirm p{ font-size: 16px; color: #4a4232; margin: 0 0 12px; }
+  html.sh-light #shell-root .sh-play-confirm .sh-confirm-actions{ display: flex; gap: 10px; }
+  html.sh-light #shell-root .sh-play-confirm .sh-btn-primary, 
+  html.sh-light #shell-root .sh-play-confirm .sh-btn-secondary{ flex: 1; min-height: 52px; margin-top: 0; }
+  /* ===== TESTER SHELL (v5.61+, Stage 8: Creator Tools gateway + workshop) ===== */
+  /* Gateway: a full-screen framed TRANSITION. Tester-safe is a promise and
+     a state, not a color — the heading and copy mark the change of mode. */
+  html.sh-light #shell-root .sh-gateway-card{
+    max-width: 560px; margin: 0 auto;
+    background: #fbf7ec; border: 2px solid #8a6520; border-radius: 18px;
+    padding: 26px 22px;
+  }
+  html.sh-light #shell-root .sh-gateway-card h2{ font-size: 22px; margin: 0 0 8px; color: #2b2517; }
+  html.sh-light #shell-root .sh-gateway-card .sh-gw-sub{
+    font-size: 16px; line-height: 1.55; color: #4a4232; margin: 0 0 14px;
+  }
+  html.sh-light #shell-root .sh-gateway-list{ list-style: none; margin: 0 0 16px; padding: 0; }
+  html.sh-light #shell-root .sh-gateway-list li{
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 10px 2px; border-top: 1px solid #d9cfb6;
+    font-size: 16px; color: #2b2517;
+  }
+  html.sh-light #shell-root .sh-gateway-list .sh-mi{
+    font-size: 20px; width: 28px; text-align: center; flex: none;
+  }
+  html.sh-light #shell-root .sh-gateway-list b{ font-size: 16px; }
+  html.sh-light #shell-root .sh-gateway-list small{ display: block; font-size: 14px; color: #6a6050; }
+  html.sh-light #shell-root .sh-gateway-card .sh-btn-primary, 
+  html.sh-light #shell-root .sh-gateway-card .sh-btn-secondary{ width: 100%; min-height: 52px; margin-top: 10px; }
+  html.sh-light #shell-root .sh-gateway-note{ font-size: 14px; color: #6a6050; margin: 12px 0 0; }
+  /* Creator workshop: full-screen overlay. The canvas iframe stays alive
+     underneath, so world/map/camera/tool/material survive untouched. */
+  html.sh-light #shell-root .sh-creator-screen{
+    position: fixed; inset: 0; z-index: 100;
+    display: flex; flex-direction: column; background: #f2ecdc;
+  }
+  html.sh-light #shell-root .sh-creator-bar{
+    flex: 0 0 auto; display: flex; align-items: center; gap: 12px;
+    padding: max(10px, env(safe-area-inset-top)) 16px 10px;
+    background: #fbf7ec; border-bottom: 2px solid #8a6520;
+  }
+  html.sh-light #shell-root .sh-creator-title{
+    font-size: 17px; font-weight: 700; color: #2b2517; flex: 1;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  html.sh-light #shell-root .sh-creator-bar .sh-btn-secondary{ min-height: 48px; margin-top: 0; flex: none; }
+  html.sh-light #shell-root .sh-creator-wrap{ flex: 1 1 auto; position: relative; min-height: 0; }
+  html.sh-light #shell-root .sh-creator-wrap iframe{
+    position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #f2ecdc;
+  }
+  html.sh-light #shell-root .sh-creator-loading{
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 16px; color: #4a4232; background: #f2ecdc; text-align: center; padding: 20px;
+  }
+  html.sh-light.sh-text-large #shell-root .sh-gateway-list small, 
+  html.sh-light.sh-text-large #shell-root .sh-gateway-note{ font-size: 16px; }
+  /* ===== TESTER SHELL (v5.61+, Stage 5: Build Drawer) ===== */
+  /* Bottom sheet on phones, side panel on wider screens. No scrim: the map
+     stays interactive above/beside the drawer so placement taps land while
+     the drawer is open. Tapping the map with no tool armed closes it. */
+  html.sh-light #shell-root .sh-build-drawer{
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 70;
+    max-height: 58%; display: flex; flex-direction: column;
+    background: #fbf7ec; border-top: 2px solid #c6b897;
+    border-radius: 16px 16px 0 0;
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+    box-shadow: 0 -8px 32px rgba(0,0,0,0.55);
+    animation: sh-build-in 0.25s ease-out;
+  }
+  @keyframes sh-build-in {
+    from { transform: translateY(40px); opacity: 0.4; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+  @media (min-width: 720px) {
+    html.sh-light #shell-root .sh-build-drawer{
+      left: auto; top: 0; right: 0; bottom: 0; width: 400px; max-height: none;
+      border-top: 0; border-left: 2px solid #c6b897; border-radius: 16px 0 0 16px;
+      animation-name: sh-build-in-side;
+    }
+    @keyframes sh-build-in-side {
+      from { transform: translateX(40px); opacity: 0.4; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+  }
+  html.sh-light #shell-root .sh-build-head{
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 14px 10px; border-bottom: 1px solid #d9cfb6; flex: none;
+  }
+  html.sh-light #shell-root .sh-build-grab{
+    width: 44px; height: 5px; border-radius: 3px; background: #5d5546;
+    margin: 0 auto; position: absolute; top: 6px; left: 0; right: 0;
+  }
+  html.sh-light #shell-root .sh-build-back{
+    min-width: 48px; min-height: 48px; padding: 8px 12px; font-size: 18px;
+    color: #2b2517; background: none; border: 0; cursor: pointer; flex: none;
+  }
+  html.sh-light #shell-root .sh-build-title{ font-size: 18px; font-weight: 700; color: #2b2517; margin: 0; flex: 1; }
+  html.sh-light #shell-root .sh-build-close{
+    min-width: 48px; min-height: 48px; font-size: 20px; color: #2b2517;
+    background: #d9cfb6; border: 2px solid #c6b897; border-radius: 12px; cursor: pointer; flex: none;
+  }
+  html.sh-light #shell-root .sh-build-body{ overflow-y: auto; padding: 12px 14px 16px; -webkit-overflow-scrolling: touch; }
+  html.sh-light #shell-root .sh-build-cards{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  html.sh-light #shell-root .sh-build-card{
+    display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+    min-height: 96px; padding: 14px; text-align: left;
+    background: #ffffff; border: 2px solid #c6b897; border-radius: 14px;
+    color: #2b2517; cursor: pointer; font-size: 16px;
+  }
+  html.sh-light #shell-root .sh-build-card .sh-bc-ico{ font-size: 30px; line-height: 1; }
+  html.sh-light #shell-root .sh-build-card b{ font-size: 17px; }
+  html.sh-light #shell-root .sh-build-card small{ font-size: 14px; color: #6a6050; }
+  html.sh-light #shell-root .sh-build-card:active{ border-color: #8a6520; }
+  html.sh-light #shell-root .sh-build-section-title{ font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #6a6050; margin: 14px 0 8px; }
+  html.sh-light #shell-root .sh-build-section-title:first-child{ margin-top: 0; }
+  html.sh-light #shell-root .sh-swatch-grid{ display: grid; grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); gap: 8px; }
+  html.sh-light #shell-root .sh-swatch{
+    aspect-ratio: 1; padding: 4px; background: #ece5d2;
+    border: 2px solid #c6b897; border-radius: 10px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; min-height: 56px;
+  }
+  html.sh-light #shell-root .sh-swatch img{ width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; border-radius: 6px; }
+  html.sh-light #shell-root .sh-swatch[aria-pressed="true"]{ border-color: #8a6520; border-width: 3px; box-shadow: 0 0 0 1px #8a6520; }
+  html.sh-light #shell-root .sh-swatch .sh-sw-name{ position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  html.sh-light #shell-root .sh-current-brush{
+    display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+    background: #ffffff; border: 2px solid #c6b897; border-radius: 12px; margin-bottom: 10px;
+  }
+  html.sh-light #shell-root .sh-current-brush img{ width: 44px; height: 44px; image-rendering: pixelated; border-radius: 8px; background: #ece5d2; }
+  html.sh-light #shell-root .sh-current-brush .sh-cb-meta b{ display: block; font-size: 16px; color: #2b2517; }
+  html.sh-light #shell-root .sh-current-brush .sh-cb-meta small{ font-size: 14px; color: #6a6050; }
+  html.sh-light #shell-root .sh-build-row{ display: flex; gap: 10px; margin-top: 10px; }
+  html.sh-light #shell-root .sh-build-row .sh-btn-secondary{ flex: 1; }
+  html.sh-light #shell-root .sh-place-grid{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  html.sh-light #shell-root .sh-place-card{
+    display: flex; align-items: center; gap: 10px; padding: 10px;
+    background: #ffffff; border: 2px solid #c6b897; border-radius: 12px;
+    color: #2b2517; cursor: pointer; font-size: 16px; text-align: left; min-height: 64px;
+  }
+  html.sh-light #shell-root .sh-place-card img{ width: 40px; height: 40px; image-rendering: pixelated; border-radius: 8px; background: #ece5d2; flex: none; }
+  html.sh-light #shell-root .sh-place-card .sh-pc-meta{ min-width: 0; }
+  html.sh-light #shell-root .sh-place-card .sh-pc-meta b{ display: block; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  html.sh-light #shell-root .sh-place-card .sh-pc-meta small{ font-size: 14px; color: #6a6050; }
+  html.sh-light #shell-root .sh-place-card[aria-pressed="true"]{ border-color: #8a6520; border-width: 3px; box-shadow: 0 0 0 1px #8a6520; }
+  html.sh-light #shell-root .sh-place-card .sh-pc-check{ margin-left: auto; color: #8a6520; font-size: 20px; font-weight: 700; flex: none; }
+  html.sh-light #shell-root .sh-arm-banner{
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 10px;
+    background: #f3ecd9; border: 2px solid #8a6520; border-radius: 12px;
+    font-size: 15px; color: #2b2517;
+  }
+  html.sh-light #shell-root .sh-arm-banner .sh-btn-secondary{ margin-left: auto; flex: none; min-height: 44px; }
+  html.sh-light #shell-root .sh-npc-row{
+    display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px;
+    background: #ffffff; border: 2px solid #c6b897; border-radius: 12px;
+    color: #2b2517; font-size: 16px; text-align: left; margin-bottom: 8px; min-height: 60px;
+  }
+  html.sh-light #shell-root .sh-npc-row img{ width: 40px; height: 40px; image-rendering: pixelated; border-radius: 8px; background: #ece5d2; flex: none; }
+  html.sh-light #shell-root .sh-npc-row .sh-npc-meta b{ display: block; font-size: 16px; }
+  html.sh-light #shell-root .sh-npc-row .sh-npc-meta small{ font-size: 14px; color: #6a6050; }
+  html.sh-light #shell-root .sh-more-item{
+    display: flex; align-items: center; gap: 12px; width: 100%;
+    min-height: 56px; padding: 12px 6px; font-size: 16px; color: #2b2517;
+    background: none; border: 0; border-top: 1px solid #d9cfb6; cursor: pointer; text-align: left;
+  }
+  html.sh-light #shell-root .sh-more-item .sh-mi{ width: 28px; text-align: center; flex: none; font-size: 20px; }
+  html.sh-light #shell-root .sh-more-item .sh-go{ margin-left: auto; color: #6a6050; flex: none; }
+  html.sh-light #shell-root .sh-build-confirm{
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: calc(70px + env(safe-area-inset-bottom)); z-index: 80;
+    display: flex; align-items: center; gap: 8px;
+    background: #f3ecd9; border: 2px solid #8a6520; border-radius: 999px;
+    color: #2b2517; font-size: 16px; font-weight: 600; padding: 10px 18px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    animation: sh-confirm-in 0.2s ease-out;
+  }
+  @keyframes sh-confirm-in { from { transform: translateX(-50%) translateY(8px); opacity: 0; } to { transform: translateX(-50%) translateY(0); opacity: 1; } }
+  html.sh-light #shell-root .sh-build-confirm .sh-cc-check{ color: #8a6520; font-size: 18px; }
+  html.sh-light #shell-root .sh-build-empty{ font-size: 15px; color: #6a6050; text-align: center; padding: 18px 10px; }
+  html.sh-light #shell-root .sh-build-hint{ font-size: 14px; color: #6a6050; margin: 8px 0 0; }
+  @media (prefers-reduced-motion: reduce) {
+    html.sh-light #shell-root .sh-build-drawer, html.sh-light #shell-root .sh-build-confirm{ animation: none; }
+  }
+  html.sh-light.sh-text-large #shell-root .sh-build-card small, 
+  html.sh-light.sh-text-large #shell-root .sh-build-hint, 
+  html.sh-light.sh-text-large #shell-root .sh-place-card .sh-pc-meta small{ font-size: 16px; }
+
+  /* ---- v5.61 Stage 6: World Drawer (same chrome as the Build Drawer) ---- */
+  html.sh-light #shell-root .sh-world-drawer{
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 70;
+    max-height: 58%; display: flex; flex-direction: column;
+    background: #fbf7ec; border-top: 2px solid #c6b897;
+    border-radius: 16px 16px 0 0;
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+    box-shadow: 0 -8px 32px rgba(0,0,0,0.55);
+    animation: sh-world-in 0.25s ease-out;
+  }
+  @keyframes sh-world-in {
+    from { transform: translateY(40px); opacity: 0.4; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+  @media (min-width: 720px) {
+    html.sh-light #shell-root .sh-world-drawer{
+      left: auto; top: 0; right: 0; bottom: 0; width: 400px; max-height: none;
+      border-top: 0; border-left: 2px solid #c6b897; border-radius: 16px 0 0 16px;
+      animation-name: sh-world-in-side;
+    }
+    @keyframes sh-world-in-side {
+      from { transform: translateX(40px); opacity: 0.4; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+  }
+  html.sh-light #shell-root .sh-world-head{
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 14px 10px; border-bottom: 1px solid #d9cfb6; flex: none;
+  }
+  html.sh-light #shell-root .sh-world-grab{
+    width: 44px; height: 5px; border-radius: 3px; background: #5d5546;
+    margin: 0 auto; position: absolute; top: 6px; left: 0; right: 0;
+  }
+  html.sh-light #shell-root .sh-world-back{
+    min-width: 48px; min-height: 48px; padding: 8px 12px; font-size: 18px;
+    color: #2b2517; background: none; border: 0; cursor: pointer; flex: none;
+  }
+  html.sh-light #shell-root .sh-world-title{ font-size: 18px; font-weight: 700; color: #2b2517; margin: 0; flex: 1; }
+  html.sh-light #shell-root .sh-world-close{
+    min-width: 48px; min-height: 48px; font-size: 20px; color: #2b2517;
+    background: #d9cfb6; border: 2px solid #c6b897; border-radius: 12px; cursor: pointer; flex: none;
+  }
+  html.sh-light #shell-root .sh-world-body{ overflow-y: auto; padding: 12px 14px 16px; -webkit-overflow-scrolling: touch; }
+  html.sh-light #shell-root .sh-world-status{
+    padding: 12px 14px; margin-bottom: 12px;
+    background: #ffffff; border: 2px solid #c6b897; border-radius: 12px;
+  }
+  html.sh-light #shell-root .sh-ws-name{ font-size: 18px; font-weight: 700; color: #2b2517; margin-bottom: 6px; }
+  html.sh-light #shell-root .sh-ws-line{ display: flex; align-items: center; gap: 8px; font-size: 15px; color: #2b2517; margin-top: 4px; }
+  html.sh-light #shell-root .sh-ws-line.dim{ color: #6a6050; font-size: 14px; }
+  html.sh-light #shell-root .sh-ws-line.ok span:first-child{ color: #2f7d33; }
+  html.sh-light #shell-root .sh-ws-line.warn span:first-child{ color: #8a6520; }
+  html.sh-light #shell-root .sh-ws-line.err span:first-child{ color: #b04a4a; }
+  html.sh-light #shell-root .sh-world-view{ width: 100%; margin-bottom: 4px; }
+  html.sh-light #shell-root .sh-more-item .sh-wr-meta{ display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
+  html.sh-light #shell-root .sh-more-item .sh-wr-meta b{ font-size: 16px; font-weight: 600; color: #2b2517; }
+  html.sh-light #shell-root .sh-more-item .sh-wr-meta small{ font-size: 14px; color: #6a6050; }
+  html.sh-light #shell-root .sh-w-row{
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    padding: 10px 12px; margin-bottom: 8px;
+    background: #ffffff; border: 2px solid #c6b897; border-radius: 12px;
+    color: #2b2517; font-size: 16px; text-align: left;
+  }
+  html.sh-light #shell-root .sh-w-row .sh-mi{ font-size: 22px; flex: none; width: 32px; text-align: center; }
+  html.sh-light #shell-root .sh-w-row .sh-wr-meta b{ display: block; font-size: 16px; }
+  html.sh-light #shell-root .sh-w-row .sh-wr-meta small{ font-size: 14px; color: #6a6050; }
+  html.sh-light #shell-root .sh-world-mapcard{
+    background: #ffffff; border: 2px solid #c6b897; border-radius: 12px;
+    overflow: hidden; margin-bottom: 10px;
+  }
+  html.sh-light #shell-root .sh-world-mapcard img{ display: block; width: 100%; max-height: 220px; object-fit: cover; image-rendering: pixelated; background: #ece5d2; }
+  html.sh-light #shell-root .sh-world-mapcard .sh-wm-meta{ padding: 10px 12px; }
+  html.sh-light #shell-root .sh-world-mapcard .sh-wm-meta b{ display: block; font-size: 16px; color: #2b2517; }
+  html.sh-light #shell-root .sh-world-mapcard .sh-wm-meta small{ font-size: 14px; color: #6a6050; }
+  html.sh-light #shell-root .sh-check-item{
+    display: flex; gap: 10px; padding: 12px;
+    background: #ffffff; border: 2px solid #c6b897; border-radius: 12px;
+    margin-bottom: 8px;
+  }
+  html.sh-light #shell-root .sh-check-item.error{ border-color: #b04a4a; }
+  html.sh-light #shell-root .sh-check-item.warn{ border-color: #8a6520; }
+  html.sh-light #shell-root .sh-check-item .sh-ci-ico{ font-size: 22px; flex: none; }
+  html.sh-light #shell-root .sh-check-item.error .sh-ci-ico{ color: #b04a4a; }
+  html.sh-light #shell-root .sh-check-item.warn .sh-ci-ico{ color: #8a6520; }
+  html.sh-light #shell-root .sh-check-item b{ display: block; font-size: 16px; color: #2b2517; margin-bottom: 4px; }
+  html.sh-light #shell-root .sh-check-item p{ font-size: 14px; color: #6a6050; margin: 4px 0 0; }
+  html.sh-light #shell-root .sh-check-clean{
+    display: flex; align-items: center; gap: 10px; padding: 14px;
+    background: #e6f0e6; border: 2px solid #2f7d33; border-radius: 12px;
+    font-size: 16px; font-weight: 600; color: #2b2517;
+  }
+  html.sh-light #shell-root .sh-check-clean span:first-child{ color: #2f7d33; font-size: 22px; }
+  @media (prefers-reduced-motion: reduce) {
+    html.sh-light #shell-root .sh-world-drawer{ animation: none; }
+  }
+  html.sh-light.sh-text-large #shell-root .sh-w-row .sh-wr-meta small, 
+  html.sh-light.sh-text-large #shell-root .sh-ws-line.dim{ font-size: 16px; }
+  /* ===== Stage 9: light + high-contrast combined =====
+     Strongest light scheme: near-black on white. Beats the generated light
+     rules by specificity (two classes on html). */
+  html.sh-light.sh-high-contrast #shell-root { background: #ffffff; color: #111111; }
+  html.sh-light.sh-high-contrast #shell-root p,
+  html.sh-light.sh-high-contrast #shell-root .sh-hint,
+  html.sh-light.sh-high-contrast #shell-root .sh-sub,
+  html.sh-light.sh-high-contrast #shell-root .sh-foot p,
+  html.sh-light.sh-high-contrast #shell-root .sh-world-meta,
+  html.sh-light.sh-high-contrast #shell-root .sh-status,
+  html.sh-light.sh-high-contrast #shell-root h1,
+  html.sh-light.sh-high-contrast #shell-root h2,
+  html.sh-light.sh-high-contrast #shell-root h3,
+  html.sh-light.sh-high-contrast #shell-root .sh-menu-user,
+  html.sh-light.sh-high-contrast #shell-root .sh-menu-sub,
+  html.sh-light.sh-high-contrast #shell-root .sh-build-hint,
+  html.sh-light.sh-high-contrast #shell-root .sh-build-empty { color: #111111; }
+  html.sh-light.sh-high-contrast #shell-root .sh-card,
+  html.sh-light.sh-high-contrast #shell-root .sh-dialog,
+  html.sh-light.sh-high-contrast #shell-root .sh-action-card,
+  html.sh-light.sh-high-contrast #shell-root .sh-menu-sheet,
+  html.sh-light.sh-high-contrast #shell-root .sh-build-drawer,
+  html.sh-light.sh-high-contrast #shell-root .sh-world-drawer,
+  html.sh-light.sh-high-contrast #shell-root .sh-gateway-card,
+  html.sh-light.sh-high-contrast #shell-root .sh-world-card,
+  html.sh-light.sh-high-contrast #shell-root .sh-world-new,
+  html.sh-light.sh-high-contrast #shell-root .sh-build-card,
+  html.sh-light.sh-high-contrast #shell-root .sh-place-card,
+  html.sh-light.sh-high-contrast #shell-root .sh-npc-row,
+  html.sh-light.sh-high-contrast #shell-root .sh-swatch,
+  html.sh-light.sh-high-contrast #shell-root .sh-current-brush,
+  html.sh-light.sh-high-contrast #shell-root .sh-canvas-topbar,
+  html.sh-light.sh-high-contrast #shell-root .sh-bottomnav,
+  html.sh-light.sh-high-contrast #shell-root .sh-playbar,
+  html.sh-light.sh-high-contrast #shell-root .sh-creator-bar,
+  html.sh-light.sh-high-contrast #shell-root .sh-overflow-menu,
+  html.sh-light.sh-high-contrast #shell-root .sh-check-item,
+  html.sh-light.sh-high-contrast #shell-root .sh-world-status,
+  html.sh-light.sh-high-contrast #shell-root .sh-w-row,
+  html.sh-light.sh-high-contrast #shell-root .sh-world-mapcard { background: #ffffff; border-color: #111111; color: #111111; }
+  html.sh-light.sh-high-contrast #shell-root .sh-field input,
+  html.sh-light.sh-high-contrast #shell-root .sh-search input,
+  html.sh-light.sh-high-contrast #shell-root .sh-icon-btn,
+  html.sh-light.sh-high-contrast #shell-root .sh-back-btn,
+  html.sh-light.sh-high-contrast #shell-root .sh-navbtn,
+  html.sh-light.sh-high-contrast #shell-root .sh-world-chip,
+  html.sh-light.sh-high-contrast #shell-root .sh-seg button { border-color: #111111; color: #111111; }
+  html.sh-light.sh-high-contrast #shell-root .sh-btn-primary,
+  html.sh-light.sh-high-contrast #shell-root .shell-btn { background: #111111; border-color: #111111; color: #ffffff; }
+  html.sh-light.sh-high-contrast #shell-root .sh-navbtn[aria-current="page"] { border-color: #111111; background: #ffffff; }
+  html.sh-light.sh-high-contrast #shell-root .sh-swatch[aria-pressed="true"],
+  html.sh-light.sh-high-contrast #shell-root .sh-place-card[aria-pressed="true"] { border-color: #111111; box-shadow: 0 0 0 1px #111111; }
+  html.sh-light.sh-high-contrast #shell-root :focus-visible { outline-color: #111111; }
+  html.sh-light.sh-high-contrast #shell-root .sh-canvas-loading { background: #ffffff; color: #111111; }
+
+  /* ===== Stage 9: canvas loading veil ===== */
+  #shell-root .sh-canvas-loading {
+    position: absolute; inset: 0; z-index: 2;
+    display: flex; align-items: center; justify-content: center; text-align: center;
+    padding: 24px; font-size: 16px; line-height: 1.5; color: #d8cdb4; background: #0a0a0a;
+  }
+
+  /* ===== Stage 9: drawer position preference =====
+     Automatic (default) keeps the responsive behavior: bottom sheet under
+     720px, side panel above. The pinned classes beat the media query by
+     specificity (two classes on html vs one). */
+  html.sh-drawer-bottom #shell-root .sh-build-drawer,
+  html.sh-drawer-bottom #shell-root .sh-world-drawer {
+    left: 0; right: 0; top: auto; bottom: 0; width: auto; max-height: 58%;
+    border-top: 2px solid #3a352b; border-left: 0; border-radius: 16px 16px 0 0;
+    animation-name: sh-build-in;
+  }
+  html.sh-drawer-side #shell-root .sh-build-drawer,
+  html.sh-drawer-side #shell-root .sh-world-drawer {
+    left: auto; top: 0; right: 0; bottom: 0; width: min(400px, 92vw); max-height: none;
+    border-top: 0; border-left: 2px solid #3a352b; border-radius: 16px 0 0 16px;
+    animation-name: sh-build-in-side;
+  }
+
+  /* ===== Stage 9: extra edge padding (safe-area preference) ===== */
+  html.sh-safe-extra #shell-root .sh-canvas-topbar {
+    padding-top: calc(max(8px, env(safe-area-inset-top)) + 14px);
+  }
+  html.sh-safe-extra #shell-root .sh-bottomnav {
+    padding-bottom: calc(max(10px, env(safe-area-inset-bottom)) + 14px);
+  }
+  html.sh-safe-extra #shell-root .sh-build-drawer,
+  html.sh-safe-extra #shell-root .sh-world-drawer {
+    padding-bottom: calc(max(10px, env(safe-area-inset-bottom)) + 14px);
+  }
+
+
 </style>
 </head>
 <body>
@@ -15058,9 +15980,12 @@ window.CrumbsShell = {
   // Device-local PRESENTATION prefs only — never permissions, never secrets.
   // coachDismissed: per-world first-entry coach card dismissal (Stage 4).
   // creatorSeen: the Creator Tools introduction was shown and entered (Stage 8).
+  // Stage 9: appearance ("dark"|"light"), drawerSide ("auto"|"bottom"|"side"),
+  // safeExtra (extra edge padding). All device-local presentation prefs.
   prefs: { welcomeCompleted: false, reduceMotion: false,
            textSize: "normal", highContrast: false, coachDismissed: {},
-           buildRecents: [], creatorSeen: false },
+           buildRecents: [], creatorSeen: false, appearance: "dark",
+           drawerSide: "auto", safeExtra: false },
   // Stage 4 working state (not part of the spec's state model): which world
   // file the canvas currently shows, so the nav can return to it.
   currentFile: null,
@@ -15087,7 +16012,10 @@ function shellLoadPrefs() {
       cur.buildRecents = p.buildRecents.filter(function (x) { return typeof x === "string" || typeof x === "number"; }).slice(0, 6);
     // Stage 8: the Creator Tools introduction was shown and entered — later
     // entries skip the gateway (resettable from the Menu).
-    if (typeof p.creatorSeen === "boolean") cur.creatorSeen = p.creatorSeen;
+    // Stage 9: appearance / drawer position / extra edge padding.
+    if (p.appearance === "light" || p.appearance === "dark") cur.appearance = p.appearance;
+    if (p.drawerSide === "bottom" || p.drawerSide === "side" || p.drawerSide === "auto") cur.drawerSide = p.drawerSide;
+    if (typeof p.safeExtra === "boolean") cur.safeExtra = p.safeExtra;
   } catch (e) {}
 }
 function shellSavePrefs() {
@@ -15099,6 +16027,11 @@ function shellApplyPrefs() {
   de.classList.toggle("sh-reduce-motion", !!p.reduceMotion);
   de.classList.toggle("sh-text-large", p.textSize === "large");
   de.classList.toggle("sh-high-contrast", !!p.highContrast);
+  // Stage 9: appearance + drawer position + extra edge padding.
+  de.classList.toggle("sh-light", p.appearance === "light");
+  de.classList.toggle("sh-drawer-bottom", p.drawerSide === "bottom");
+  de.classList.toggle("sh-drawer-side", p.drawerSide === "side");
+  de.classList.toggle("sh-safe-extra", !!p.safeExtra);
   window.CrumbsShell.state.welcome = p.welcomeCompleted ? "completed" : "not completed";
 }
 
@@ -15334,59 +16267,100 @@ function shellShowWelcome() {
   $("sh-a11y-open").onclick = function () { shellOpenA11y($("sh-a11y-open")); };
 }
 var _a11yReturnFocus = null;
-function shellOpenA11y(returnTo) {
+// Stage 9: the tester-visible Settings screen — consolidates EVERY shell
+// accessibility and display choice in one place (spec: text size, contrast,
+// reduced motion, safe area, dark/light preference, plus drawer position).
+// Used pre-entry (the "Accessibility and Display Options" link) and from the
+// Menu. Every control applies immediately and persists on this device.
+function shellOpenSettings(returnTo) {
   _a11yReturnFocus = returnTo || null;
   var root = shellRootEl(), p = window.CrumbsShell.prefs;
+  // Close any existing settings dialog first (single instance).
+  shellCloseSettings(true);
   var wrap = document.createElement("div");
   wrap.id = "sh-a11y-wrap";
   wrap.innerHTML =
-  '<div class="sh-scrim" id="sh-a11y-scrim"><div class="sh-dialog" role="dialog" ' +
+  '<div class="sh-scrim" id="sh-a11y-scrim"><div class="sh-dialog sh-settings" role="dialog" ' +
     'aria-modal="true" aria-labelledby="sh-a11y-h">' +
-    "<h2 id=\"sh-a11y-h\">Accessibility and Display Options</h2>" +
-    '<p class="sh-sub">Set these before you enter. Everything here is saved on this device.</p>' +
-    '<label class="sh-check"><input type="checkbox" id="sh-opt-motion"' +
-      (p.reduceMotion ? " checked" : "") + "> Reduce motion</label>" +
+    "<h2 id=\"sh-a11y-h\">Settings</h2>" +
+    '<p class="sh-sub">Display and accessibility. Everything here is saved on this device and applies right away.</p>' +
     '<div class="sh-seg-label" id="sh-ts-label">Text size</div>' +
     '<div class="sh-seg" role="group" aria-labelledby="sh-ts-label">' +
-      '<button id="sh-opt-text-normal" aria-pressed="' + (p.textSize !== "large") + '">Normal</button>' +
-      '<button id="sh-opt-text-large" aria-pressed="' + (p.textSize === "large") + '">Large</button>' +
+      '<button type="button" id="sh-opt-text-normal" aria-pressed="' + (p.textSize !== "large") + '">Normal</button>' +
+      '<button type="button" id="sh-opt-text-large" aria-pressed="' + (p.textSize === "large") + '">Large</button>' +
     "</div>" +
+    '<label class="sh-check"><input type="checkbox" id="sh-opt-motion"' +
+      (p.reduceMotion ? " checked" : "") + "> Reduce motion</label>" +
     '<label class="sh-check"><input type="checkbox" id="sh-opt-contrast"' +
       (p.highContrast ? " checked" : "") + "> High contrast</label>" +
+    '<div class="sh-seg-label" id="sh-ap-label">Appearance</div>' +
+    '<div class="sh-seg" role="group" aria-labelledby="sh-ap-label">' +
+      '<button type="button" id="sh-opt-ap-dark" aria-pressed="' + (p.appearance !== "light") + '">Dark</button>' +
+      '<button type="button" id="sh-opt-ap-light" aria-pressed="' + (p.appearance === "light") + '">Light</button>' +
+    "</div>" +
+    '<div class="sh-seg-label" id="sh-ds-label">Drawer position</div>' +
+    '<div class="sh-seg" role="group" aria-labelledby="sh-ds-label">' +
+      '<button type="button" id="sh-opt-ds-auto" aria-pressed="' + (p.drawerSide !== "bottom" && p.drawerSide !== "side") + '">Automatic</button>' +
+      '<button type="button" id="sh-opt-ds-bottom" aria-pressed="' + (p.drawerSide === "bottom") + '">Bottom</button>' +
+      '<button type="button" id="sh-opt-ds-side" aria-pressed="' + (p.drawerSide === "side") + '">Side</button>' +
+    "</div>" +
+    '<p class="sh-hint">Drawers open at the bottom on phones and at the side on wide screens. ' +
+      "Automatic follows the screen; Bottom or Side pins it.</p>" +
+    '<label class="sh-check"><input type="checkbox" id="sh-opt-safe"' +
+      (p.safeExtra ? " checked" : "") + "> Extra edge padding</label>" +
+    '<p class="sh-hint">Adds breathing room inside the screen edges, on top of the device safe areas.</p>' +
     '<p class="sh-hint">Chosen options always show more than color \u2014 ' +
       "look for the \u2713 and the thicker border.</p>" +
     '<button class="sh-btn-primary" id="sh-a11y-done">Done</button>' +
   "</div></div>";
   root.appendChild(wrap);
-  var seg = function (large) {
-    window.CrumbsShell.prefs.textSize = large ? "large" : "normal";
-    $("sh-opt-text-normal").setAttribute("aria-pressed", String(!large));
-    $("sh-opt-text-large").setAttribute("aria-pressed", String(large));
+  var apply = function () { shellSavePrefs(); shellApplyPrefs(); };
+  var seg = function (ids, vals, cur, set) {
+    for (var i = 0; i < ids.length; i++) (function (i) {
+      $(ids[i]).onclick = function () {
+        set(vals[i]);
+        for (var j = 0; j < ids.length; j++)
+          $(ids[j]).setAttribute("aria-pressed", String(vals[j] === vals[i]));
+        apply();
+      };
+    })(i);
   };
-  $("sh-opt-text-normal").onclick = function () { seg(false); };
-  $("sh-opt-text-large").onclick = function () { seg(true); };
+  seg(["sh-opt-text-normal", "sh-opt-text-large"], ["normal", "large"], p.textSize,
+    function (v) { window.CrumbsShell.prefs.textSize = v; });
+  seg(["sh-opt-ap-dark", "sh-opt-ap-light"], ["dark", "light"], p.appearance,
+    function (v) { window.CrumbsShell.prefs.appearance = v; });
+  seg(["sh-opt-ds-auto", "sh-opt-ds-bottom", "sh-opt-ds-side"], ["auto", "bottom", "side"], p.drawerSide,
+    function (v) { window.CrumbsShell.prefs.drawerSide = v; });
+  $("sh-opt-motion").onchange = function () {
+    window.CrumbsShell.prefs.reduceMotion = $("sh-opt-motion").checked; apply();
+  };
+  $("sh-opt-contrast").onchange = function () {
+    window.CrumbsShell.prefs.highContrast = $("sh-opt-contrast").checked; apply();
+  };
+  $("sh-opt-safe").onchange = function () {
+    window.CrumbsShell.prefs.safeExtra = $("sh-opt-safe").checked; apply();
+  };
   $("sh-a11y-scrim").onclick = function (e) {
-    if (e.target.id === "sh-a11y-scrim") shellCloseA11y();
+    if (e.target.id === "sh-a11y-scrim") shellCloseSettings();
   };
-  $("sh-a11y-done").onclick = shellCloseA11y;
+  $("sh-a11y-done").onclick = function () { shellCloseSettings(); };
   document.addEventListener("keydown", shellA11yKeys);
   $("sh-a11y-done").focus();
 }
-function shellA11yKeys(e) { if (e.key === "Escape") shellCloseA11y(); }
-function shellCloseA11y() {
-  var p = window.CrumbsShell.prefs;
-  var mo = document.getElementById("sh-opt-motion");
-  var hc = document.getElementById("sh-opt-contrast");
-  if (mo) p.reduceMotion = mo.checked;
-  if (hc) p.highContrast = hc.checked;
-  shellSavePrefs();
-  shellApplyPrefs();
+// Pre-entry name kept for the welcome-screen link; same Settings screen.
+function shellOpenA11y(returnTo) { shellOpenSettings(returnTo); }
+function shellA11yKeys(e) { if (e.key === "Escape") shellCloseSettings(); }
+function shellCloseSettings(silent) {
   var wrap = document.getElementById("sh-a11y-wrap");
   if (wrap) wrap.remove();
   document.removeEventListener("keydown", shellA11yKeys);
-  if (_a11yReturnFocus && _a11yReturnFocus.focus) _a11yReturnFocus.focus();
+  if (silent) return;
+  if (_a11yReturnFocus && _a11yReturnFocus.focus) {
+    try { _a11yReturnFocus.focus(); } catch (e) {}
+  }
   _a11yReturnFocus = null;
 }
+function shellCloseA11y() { shellCloseSettings(); }
 
 // ---- Stage 2, Screen 03: World Home ----
 function shellRelTime(ts) {
@@ -15836,6 +16810,7 @@ function shellOpenMenu(returnTo) {
     '<div class="sh-grab" aria-hidden="true"></div>' +
     '<p class="sh-menu-user"></p><p class="sh-menu-sub">' + sub + "</p>" +
     '<button class="sh-menu-item" id="sh-mi-creator"><span class="sh-mi" aria-hidden="true">\uD83D\uDEE0\uFE0F</span> Creator Tools</button>' +
+    '<button class="sh-menu-item" id="sh-mi-settings"><span class="sh-mi" aria-hidden="true">\u2699</span> Settings</button>' +
     '<button class="sh-menu-item" id="sh-mi-about"><span class="sh-mi" aria-hidden="true">?</span> About this build</button>' +
     '<button class="sh-menu-item" id="sh-mi-signout"><span class="sh-mi" aria-hidden="true">\u2192</span> Sign out</button>' +
     gwResetRow +
@@ -15845,6 +16820,9 @@ function shellOpenMenu(returnTo) {
   root.querySelector(".sh-menu-user").textContent = who;
   // Stage 8: Creator Tools opens through its gateway, not a raw /classic hop.
   $("sh-mi-creator").onclick = function () { shellEnterCreator(); };
+  // Stage 9: Settings opens standalone (menu closes first) so Escape exits
+  // exactly one layer.
+  $("sh-mi-settings").onclick = function () { shellCloseMenu(); shellOpenSettings(null); };
   var gwreset = $("sh-mi-gwreset");
   if (gwreset) gwreset.onclick = function () {
     window.CrumbsShell.prefs.creatorSeen = false;
@@ -15874,16 +16852,41 @@ function shellMenuAbout() {
   sheet.innerHTML =
     '<div class="sh-grab" aria-hidden="true"></div>' +
     '<p class="sh-menu-user">About this build</p>' +
-    '<p class="sh-menu-sub">Crumbs World v%%CRUMBS_VERSION%% \u00B7 tester build \u00B7 shell stage 8</p>' +
+    '<p class="sh-menu-sub">Crumbs World v%%CRUMBS_VERSION%% \u00B7 tester build \u00B7 shell stage 9</p>' +
     '<p class="sh-menu-sub">Your worlds and account live on the server. ' +
       "This device only keeps display choices like text size.</p>" +
+    '<button class="sh-menu-item" id="sh-mi-diag"><span class="sh-mi" aria-hidden="true">\u2398</span> Copy diagnostics</button>' +
+    '<p class="sh-menu-sub" id="sh-diag-note" hidden></p>' +
     '<button class="sh-menu-item" id="sh-mi-back"><span class="sh-mi" aria-hidden="true">\u2190</span> Back</button>';
+  // Device-visible app information only — no key, token, password, path, or secret.
+  $("sh-mi-diag").onclick = function () {
+    var p = window.CrumbsShell.prefs, st = window.CrumbsShell.state;
+    var txt =
+      "Crumbs World v%%CRUMBS_VERSION%% (tester build, shell stage 9)\n" +
+      "Shell: mode=" + st.mode + " destination=" + st.destination + "\n" +
+      "Display: appearance=" + p.appearance + " text=" + p.textSize +
+      " motion=" + (p.reduceMotion ? "reduced" : "full") +
+      " contrast=" + (p.highContrast ? "high" : "standard") +
+      " drawer=" + p.drawerSide + " edgepad=" + (p.safeExtra ? "extra" : "normal") + "\n" +
+      "Screen: " + window.innerWidth + "x" + window.innerHeight +
+      " @" + (window.devicePixelRatio || 1) + "x";
+    var note = $("sh-diag-note");
+    var done = function (ok) {
+      if (note) {
+        note.hidden = false;
+        note.textContent = ok ? "Diagnostics copied." : "Couldn't copy \u2014 long-press to copy from About.";
+      }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(function () { done(true); }, function () { done(false); });
+    } else { done(false); }
+  };
   $("sh-mi-back").onclick = function () {
     var rt = _menuReturnFocus;
     shellCloseMenu();
     shellOpenMenu(rt);
   };
-  $("sh-mi-back").focus();
+  $("sh-mi-diag").focus();
 }
 async function shellSignOut() {
   // POST (with a body) — the server only implements /api/auth/logout under
@@ -15996,6 +16999,7 @@ function shellShowCanvas(file) {
         '<button type="button" class="sh-menu-btn" id="sh-canvas-menu" aria-label="Menu" aria-haspopup="dialog">\u2630</button>' +
       "</div>" +
       '<div class="sh-canvas-wrap">' +
+        '<div class="sh-canvas-loading" id="sh-canvas-loading" role="status">Warming up the map&hellip;</div>' +
         '<iframe id="sh-canvas-frame" title="World map" src="/classic?shellframe=1"></iframe>' +
       "</div>" +
       shellBottomNav("build") +
@@ -16005,6 +17009,24 @@ function shellShowCanvas(file) {
   $("sh-canvas-chip").textContent = friendlyName(file);
   $("sh-canvas-menu").onclick = function () { shellOpenMenu($("sh-canvas-menu")); };
   shellWireNav(root);
+  // Stage 9: honest loading state while the framed map boots (first open can
+  // take a few seconds). Hides on iframe load; if it takes too long, say so.
+  (function () {
+    var veil = $("sh-canvas-loading"), frame = $("sh-canvas-frame");
+    if (!veil || !frame) return;
+    var done = false;
+    var hide = function () {
+      if (done) return; done = true;
+      if (veil.parentNode) veil.parentNode.removeChild(veil);
+    };
+    frame.addEventListener("load", hide);
+    setTimeout(function () {
+      if (!done && !shellFrameReady()) {
+        veil.innerHTML = "The map is taking a while. Check your connection \u2014 " +
+          "your world is safe, this is only the view warming up.";
+      }
+    }, 20000);
+  })();
   if (!shellCoachDismissed(file)) {
     // STAGE-5: Paint/Place open the Build Drawer on the matching view.
     $("sh-coach-paint").onclick = function () {
@@ -16641,8 +17663,17 @@ function shellShowPlayCard(file, dirty) {
   var scr = document.querySelector(".sh-canvas-screen");
   (scr || shellRootEl()).appendChild(card);
   card.querySelector(".sh-play-world").textContent = friendlyName(file);
-  $("sh-play-go").onclick = function () { card.remove(); shellBeginPlay(); };
-  $("sh-play-back").onclick = function () { card.remove(); };
+  // Stage 9: every dialog gets Escape. Back is the safe exit here.
+  var playCardKeys = function (e) {
+    if (e.key === "Escape") { var b = $("sh-play-back"); if (b) b.click(); }
+  };
+  var closePlayCard = function () {
+    document.removeEventListener("keydown", playCardKeys);
+    card.remove();
+  };
+  document.addEventListener("keydown", playCardKeys);
+  $("sh-play-go").onclick = function () { closePlayCard(); shellBeginPlay(); };
+  $("sh-play-back").onclick = function () { closePlayCard(); };
   var saveBtn = $("sh-play-save");
   if (saveBtn) saveBtn.onclick = async function () {
     saveBtn.disabled = true;
@@ -16652,7 +17683,7 @@ function shellShowPlayCard(file, dirty) {
     // pollStatus flips dirtyFlag from the server truth; give it a beat.
     await new Promise(function (r) { setTimeout(r, 1200); });
     var stillDirty = fw && fw.shellDirtyState ? !!fw.shellDirtyState() : true;
-    if (ok && !stillDirty) { card.remove(); shellBeginPlay(); }
+    if (ok && !stillDirty) { closePlayCard(); shellBeginPlay(); }
     else {
       saveBtn.disabled = false;
       if (err) {
@@ -16770,8 +17801,17 @@ function shellShowPlayConfirm(title, body, okLabel, cancelLabel, onOk) {
   d.querySelector("#sh-pc-cancel").textContent = cancelLabel;
   var scr = document.querySelector(".sh-canvas-screen");
   (scr || shellRootEl()).appendChild(d);
-  d.querySelector("#sh-pc-ok").onclick = function () { d.remove(); onOk(); };
-  d.querySelector("#sh-pc-cancel").onclick = function () { d.remove(); };
+  // Stage 9: Escape cancels, like the Stay button.
+  var pcKeys = function (e) {
+    if (e.key === "Escape") { var c = d.querySelector("#sh-pc-cancel"); if (c) c.click(); }
+  };
+  var pcClose = function () {
+    document.removeEventListener("keydown", pcKeys);
+    d.remove();
+  };
+  document.addEventListener("keydown", pcKeys);
+  d.querySelector("#sh-pc-ok").onclick = function () { pcClose(); onOk(); };
+  d.querySelector("#sh-pc-cancel").onclick = function () { pcClose(); };
   d.querySelector("#sh-pc-ok").focus();
 }
 
@@ -16879,8 +17919,17 @@ function shellShowCreatorSaveCard() {
   var scr = document.querySelector(".sh-canvas-screen");
   (scr || shellRootEl()).appendChild(card);
   card.querySelector(".sh-play-world").textContent = friendlyName(window.CrumbsShell.currentFile || "");
-  $("sh-cs-back").onclick = function () { card.remove(); };
-  $("sh-cs-skip").onclick = function () { card.remove(); shellCreatorGatewayOrOpen(); };
+  // Stage 9: Escape behaves like Back — never silently discards.
+  var csKeys = function (e) {
+    if (e.key === "Escape") { var b = $("sh-cs-back"); if (b) b.click(); }
+  };
+  var csClose = function () {
+    document.removeEventListener("keydown", csKeys);
+    card.remove();
+  };
+  document.addEventListener("keydown", csKeys);
+  $("sh-cs-back").onclick = function () { csClose(); };
+  $("sh-cs-skip").onclick = function () { csClose(); shellCreatorGatewayOrOpen(); };
   $("sh-cs-save").onclick = async function () {
     var btn = $("sh-cs-save"), err = $("sh-creator-save-err");
     btn.disabled = true;
@@ -16889,7 +17938,7 @@ function shellShowCreatorSaveCard() {
     // pollStatus flips dirtyFlag from the server truth; give it a beat.
     await new Promise(function (r) { setTimeout(r, 1200); });
     var stillDirty = fw && fw.shellDirtyState ? !!fw.shellDirtyState() : true;
-    if (ok && !stillDirty) { card.remove(); shellCreatorGatewayOrOpen(); }
+    if (ok && !stillDirty) { csClose(); shellCreatorGatewayOrOpen(); }
     else {
       btn.disabled = false;
       if (err) {

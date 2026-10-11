@@ -709,7 +709,10 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
 
   #zoom-cluster { position: fixed; right: 10px;
                   bottom: calc(10px + env(safe-area-inset-bottom));
-                  z-index: 30; display: flex; flex-direction: column; gap: 8px; }
+                  z-index: 100; display: flex; flex-direction: column; gap: 8px; }
+  /* v5.61.0: shift zoom cluster left when right panel is open — Lloyd's bug:
+     the minus button was hidden behind the panel */
+  body.panel-open #zoom-cluster { right: 244px; }
   #zoom-cluster button { width: 52px; height: 52px; border-radius: 50%; padding: 0;
                         font-size: 20px; background: rgba(42,42,42,.92); }
   #zoom-cluster #btn-pan { font-size: 12px; border-radius: 14px; height: auto;
@@ -3751,6 +3754,25 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
       <button id="btn-biome-overlay" title="Apply a biome without rebuilding the map">Apply biome…</button>
     </div>
   </div>
+  <!-- v5.61: entity placement selectors — which auto-populate on Map gen -->
+  <div class="row">
+    <div class="field" id="gen-entities" title="Auto-place on generate">
+      <span class="lbl">Populate:</span>
+      <label><input type="checkbox" id="gen-ent-trees" checked> 🌳 Trees</label>
+      <label><input type="checkbox" id="gen-ent-animals" checked> 🐾 Animals</label>
+      <label><input type="checkbox" id="gen-ent-creatures" checked> 👹 Creatures</label>
+      <label><input type="checkbox" id="gen-ent-characters" checked> 🧑 Characters</label>
+    </div>
+  </div>
+  <style>
+    /* v5.61: entity selector checkboxes — touch-friendly, wrap on narrow */
+    #gen-entities { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    #gen-entities label { display: flex; align-items: center; gap: 4px;
+      font-size: 14px; cursor: pointer; padding: 6px 8px; border-radius: 8px;
+      background: #2a2a2a; border: 1px solid #444; min-height: 44px; }
+    #gen-entities label:has(input:checked) { border-color: #6dd76d; background: #1a2a1a; }
+    #gen-entities input[type="checkbox"] { width: 20px; height: 20px; }
+  </style>
   <div class="row">
     <div class="field">
       <span class="lbl">Map file:</span><b id="map-name">hud_map.json</b>
@@ -8712,10 +8734,18 @@ function applyPanelPrefs() {
     hb.classList.toggle("on", panelsHidden);
   }
 }
-$("panel-ui-btn").onclick = () => { $("panel-sheet").classList.toggle("open"); };
+$("panel-ui-btn").onclick = () => {
+  const p = $("panel-sheet");
+  p.classList.toggle("open");
+  // v5.61.0: shift zoom cluster when panel opens — keeps minus button visible
+  document.body.classList.toggle("panel-open", p.classList.contains("open"));
+};
 // v5.57 (A-1): the popup finally has its own close — scrim taps reach it
 // via closeOverlays(), and this handles the × directly.
-$("panel-x").onclick = () => { $("panel-sheet").classList.remove("open"); };
+$("panel-x").onclick = () => {
+  $("panel-sheet").classList.remove("open");
+  document.body.classList.remove("panel-open");
+};
 $("panel-opacity").oninput = e => {
   panelOpacity = e.target.value / 100;
   applyPanelPrefs(); saveUiPrefs();
@@ -13547,7 +13577,14 @@ $("btn-gen").onclick = async () => {
   try {
   const seedRaw = $("seed").value.trim();
   const preset = $("gen-preset").value || undefined;  // v5.16
-  const r = await api("/api/generate", { biome: $("biome").value, seed: seedRaw === "" ? null : parseInt(seedRaw, 10), preset });
+  // v5.61: entity placement selectors
+  const entities = {
+    trees: $("gen-ent-trees").checked,
+    animals: $("gen-ent-animals").checked,
+    creatures: $("gen-ent-creatures").checked,
+    characters: $("gen-ent-characters").checked,
+  };
+  const r = await api("/api/generate", { biome: $("biome").value, seed: seedRaw === "" ? null : parseInt(seedRaw, 10), preset, entities });
   if (r.ok) {
     $("seed").value = r.seed;   // v5.29: a blank seed still shows the real one — reproducible
     await refresh();
@@ -13562,7 +13599,12 @@ $("btn-gen").onclick = async () => {
     // v3.7: fresh build — apply the user's saved rule defaults, if any
     const def = myDefaults();
     if (def) await setRules(def);
-    toast("generated " + r.biome);
+    // v5.61: report entity placement
+    const ent = r.entities || {};
+    const entMsg = (ent.trees || ent.movers)
+      ? ` (+${ent.trees || 0} trees, +${ent.movers || 0} movers)`
+      : "";
+    toast("generated " + r.biome + entMsg);
   } else { toast("generate failed"); Sfx.error(); }
   } finally {
     genBtn.disabled = false;
@@ -14015,6 +14057,7 @@ function closeOverlays() {
   // it stranded open with no way back except re-tapping ◨.
   document.querySelectorAll(".tray.open, .sheet.open, #panel-sheet.open, .menu-drop.open, .mtop.open")
     .forEach(el => el.classList.remove("open"));
+  document.body.classList.remove("panel-open");  // v5.61.0: zoom cluster back
   $("scrim").classList.remove("on");
   dodgeMelFab();   // v5.50: a closed tray hands the Mel button back its park
   dodgePlayFab();  // v5.50.8: same for the draggable Play button

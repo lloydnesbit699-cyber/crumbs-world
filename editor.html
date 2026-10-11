@@ -1596,6 +1596,107 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   html.sh-high-contrast #shell-root .sh-world-meta,
   html.sh-high-contrast #shell-root .sh-action-card small { color: #e8e2d2; }
   html.sh-high-contrast #shell-root .sh-field input { border-color: #f3ead6; }
+  /* ---- Screen 05: My Worlds (Stage 3) ---- */
+  #shell-root .sh-back-btn {
+    min-width: 48px; min-height: 48px; padding: 10px 14px;
+    font-size: 16px; font-weight: 600; color: #f3ead6; background: #1e1c18;
+    border: 2px solid #3a352b; border-radius: 12px; cursor: pointer; flex: none;
+  }
+  #shell-root .sh-search { margin: 0 0 14px; }
+  #shell-root .sh-search label {
+    display: block; font-size: 16px; font-weight: 600; color: #f3ead6; margin-bottom: 6px;
+  }
+  #shell-root .sh-search input {
+    display: block; width: 100%; min-height: 52px; padding: 12px 14px;
+    font-size: 16px; color: #f3ead6; background: #141311;
+    border: 2px solid #3a352b; border-radius: 10px;
+  }
+  #shell-root .sh-search input:focus { border-color: #c9973f; outline: none; }
+  #shell-root .sh-worlds-grid {
+    display: grid; gap: 14px; grid-template-columns: 1fr;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+  @media (min-width: 700px) {
+    #shell-root .sh-worlds-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+  }
+  /* Create New World stays visible as the first card. */
+  #shell-root .sh-world-new {
+    width: 100%; min-height: 200px; padding: 26px 18px; cursor: pointer;
+    background: #1e1c18; border: 2px dashed #6b6252; border-radius: 16px;
+    color: #f3ead6; text-align: center;
+  }
+  #shell-root .sh-world-new:active { border-color: #c9973f; }
+  #shell-root .sh-world-new .sh-ic {
+    display: block; font-size: 34px; line-height: 1; color: #c9973f; margin-bottom: 8px;
+  }
+  #shell-root .sh-world-new b { display: block; font-size: 18px; }
+  #shell-root .sh-world-new small { display: block; font-size: 14px; color: #8f8672; margin-top: 4px; }
+  #shell-root .sh-world-card {
+    background: #1e1c18; border: 2px solid #3a352b; border-radius: 16px;
+    overflow: hidden; display: flex; flex-direction: column;
+  }
+  #shell-root .sh-world-body {
+    padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 4px;
+  }
+  #shell-root .sh-world-card h3 { font-size: 19px; margin: 0; color: #f3ead6; }
+  #shell-root .sh-world-card .sh-sub { font-size: 14px; color: #8f8672; margin: 0; }
+  #shell-root .sh-card-actions { display: flex; gap: 10px; margin-top: 10px; align-items: stretch; }
+  #shell-root .sh-card-actions .sh-btn-primary,
+  #shell-root .sh-card-actions .sh-btn-secondary {
+    margin-top: 0; flex: 1; min-height: 48px; padding: 10px 16px; font-size: 16px;
+  }
+  #shell-root .sh-icon-btn {
+    flex: none; min-width: 48px; min-height: 48px; padding: 10px;
+    font-size: 20px; line-height: 1; color: #f3ead6; background: transparent;
+    border: 2px solid #3a352b; border-radius: 12px; cursor: pointer;
+  }
+  #shell-root .sh-overflow-wrap { position: relative; flex: none; }
+  #shell-root .sh-overflow-menu {
+    position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 650;
+    background: #24211b; border: 2px solid #3a352b; border-radius: 12px;
+    min-width: 220px; padding: 6px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  }
+  #shell-root .sh-overflow-item {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    min-height: 48px; padding: 10px 12px; font-size: 16px; color: #f3ead6;
+    background: none; border: 0; border-radius: 8px; cursor: pointer; text-align: left;
+  }
+  #shell-root .sh-overflow-item:active { background: #2c2a22; }
+  #shell-root .sh-overflow-item.danger { color: #ffb3b3; font-weight: 600; }
+  /* Destructive actions use clear warning language — never the gold primary. */
+  #shell-root .sh-btn-danger {
+    display: block; width: 100%; min-height: 52px; padding: 13px 28px;
+    font-size: 17px; font-weight: 700; color: #ffd9d9;
+    background: transparent; border: 2px solid #b0492f; border-radius: 12px;
+    cursor: pointer; margin-top: 12px;
+  }
+  #shell-root .sh-btn-danger:disabled { opacity: 0.55; cursor: default; }
+  #shell-root .sh-dialog .sh-danger-note {
+    font-size: 15px; line-height: 1.55; color: #ffd9d9; margin: 0 0 6px;
+  }
+  /* Toast: brief confirmation, never the only record of a destructive action. */
+  #shell-root .sh-toast {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: max(24px, env(safe-area-inset-bottom)); z-index: 700;
+    background: #24211b; border: 2px solid #c9973f; border-radius: 12px;
+    color: #f3ead6; font-size: 16px; line-height: 1.4; padding: 12px 18px;
+    max-width: 90vw; text-align: center;
+  }
+  html.sh-text-large #shell-root .sh-world-card h3 { font-size: 21px; }
+  html.sh-text-large #shell-root .sh-world-card .sh-sub,
+  html.sh-text-large #shell-root .sh-world-new small { font-size: 16px; }
+  html.sh-text-large #shell-root .sh-overflow-item,
+  html.sh-text-large #shell-root .sh-back-btn,
+  html.sh-text-large #shell-root .sh-search label { font-size: 18px; }
+  html.sh-high-contrast #shell-root .sh-world-card,
+  html.sh-high-contrast #shell-root .sh-world-new,
+  html.sh-high-contrast #shell-root .sh-overflow-menu { background: #0a0a0a; border-color: #f3ead6; }
+  html.sh-high-contrast #shell-root .sh-icon-btn,
+  html.sh-high-contrast #shell-root .sh-back-btn,
+  html.sh-high-contrast #shell-root .sh-search input { border-color: #f3ead6; }
+  html.sh-high-contrast #shell-root .sh-world-card .sh-sub,
+  html.sh-high-contrast #shell-root .sh-world-new small { color: #e8e2d2; }
+  html.sh-high-contrast #shell-root .sh-btn-danger { border-color: #ff9a9a; }
 </style>
 </head>
 <body>
@@ -3295,7 +3396,9 @@ async function doDeviceRegister() {
 $("dev-go").onclick = doDeviceRegister;
 $("dev-code").addEventListener("keydown", e => { if (e.key === "Enter") doDeviceRegister(); });
 $("btn-logout").onclick = async () => {
-  try { await api("/api/auth/logout"); } catch (e) {}
+  // POST (with a body) — the server only implements /api/auth/logout under
+  // POST; a bodyless GET answers "not found" and the session survives.
+  try { await api("/api/auth/logout", {}); } catch (e) {}
   location.reload();  // the gate shows the login overlay on the way back in
 };
 $("btn-world-switch").onclick = async () => {
@@ -14876,7 +14979,309 @@ async function shellShowHome() {
     $("sh-create-first").onclick = shellGoClassic;
   }
   $("sh-create").onclick = shellGoClassic;
-  $("sh-myworlds").onclick = shellGoClassic;
+  $("sh-myworlds").onclick = shellShowWorlds;
+}
+// ---- Stage 3, Screen 05: My Worlds ----
+// The visual world library. Real server APIs only:
+//   GET  /api/maps            list
+//   POST /api/maps/rename     {from, to}
+//   POST /api/maps/duplicate  {from}      (server names it "<name> copy")
+//   POST /api/maps/delete     {file}      (moves to _trash/ — never permanent)
+// Deliberately NOT in the overflow menu:
+//   World Check — /api/validate only checks the currently OPEN map; the server
+//     has no per-world check, so a per-card item would be fake.
+//   Restore — stays behind the recovery condition / Creator Tools per the spec;
+//     no recovery testing has been assigned.
+// Open/Play/Create route to /classic until Stages 4-7 land (same marked
+// routing as Stage 2). Cards never carry raw filenames — data-idx only,
+// display names via friendlyName().
+var _worldsAll = [];
+var _worldsList = [];
+var _worldsSearch = "";
+var _pendingToast = null;
+function shellWorldCardHTML(idx) {
+  var mp = _worldsList[idx];
+  return '<article class="sh-world-card" data-idx="' + idx + '">' +
+    shellPreviewImg(mp.file) +
+    '<div class="sh-world-body">' +
+      "<h3></h3>" +
+      '<p class="sh-sub">' + shellRelTime(mp.modified) + "</p>" +
+      '<div class="sh-world-meta">' + shellWorldStatus(mp) + "</div>" +
+      '<div class="sh-card-actions">' +
+        '<button class="sh-btn-primary" data-act="open">Open</button>' +
+        '<button class="sh-btn-secondary" data-act="play">Play</button>' +
+        '<div class="sh-overflow-wrap">' +
+          '<button class="sh-icon-btn" data-act="more" aria-haspopup="menu" ' +
+            'aria-label="More actions">\u22EF</button>' +
+        "</div>" +
+      "</div>" +
+    "</div>" +
+  "</article>";
+}
+function shellRenderWorldCards() {
+  var grid = $("sh-worlds-grid");
+  if (!grid) return;
+  var q = _worldsSearch.trim().toLowerCase();
+  _worldsList = _worldsAll.filter(function (mp) {
+    return !q || friendlyName(mp.file).toLowerCase().indexOf(q) !== -1;
+  });
+  var html = '<button class="sh-world-new" id="sh-world-new">' +
+    '<span class="sh-ic" aria-hidden="true">+</span>' +
+    "<b>Create New World</b><small>Start something new</small></button>";
+  for (var i = 0; i < _worldsList.length; i++) html += shellWorldCardHTML(i);
+  if (q && !_worldsList.length)
+    html += '<p class="sh-hint">No worlds match your search.</p>';
+  grid.innerHTML = html;
+  // Stage 4 builds the real create flow; until then the classic workshop
+  // (which can create worlds) is the honest destination.
+  $("sh-world-new").onclick = shellGoClassic;
+  var cards = grid.querySelectorAll(".sh-world-card");
+  for (var c = 0; c < cards.length; c++) (function (card, idx) {
+    var mp = _worldsList[idx], nm = friendlyName(mp.file);
+    card.querySelector("h3").textContent = nm;
+    var more = card.querySelector('[data-act="more"]');
+    more.setAttribute("aria-label", "More actions for " + nm);
+    card.querySelector('[data-act="open"]').onclick = shellGoClassic;
+    card.querySelector('[data-act="play"]').onclick = shellGoClassic;
+    more.onclick = function () {
+      if (document.getElementById("sh-overflow-menu") && _ovReturnFocus === more)
+        shellCloseOverflow();
+      else shellOpenOverflow(more, mp);
+    };
+  })(cards[c], c);
+}
+async function shellShowWorlds() {
+  window.CrumbsShell.state.destination = "worlds";
+  shellLoadingScreen("Opening your worlds\u2026");
+  try {
+    var m = await api("/api/maps");
+    _worldsAll = ((m && m.maps) || []).slice();
+  } catch (e) {
+    if (e && e.auth) {
+      $("login-overlay").classList.remove("show");  // keep the shell's own entry
+      shellShowAccount();
+      return;
+    }
+    shellErrorScreen("Couldn't load your worlds",
+      "Your worlds are safe \u2014 we just couldn't reach them right now.",
+      "Try again", shellShowWorlds);
+    return;
+  }
+  _worldsAll.sort(function (a, b) { return (b.modified || 0) - (a.modified || 0); });
+  var root = shellShow(
+  '<div class="sh-screen"><div class="sh-scroll"><div class="sh-wrap">' +
+    '<div class="sh-topbar">' +
+      '<button class="sh-back-btn" id="sh-worlds-back" aria-label="Back to World Home">' +
+        "\u2190 Back</button>" +
+      '<p class="sh-title">My Worlds</p>' +
+      '<button class="sh-menu-btn" id="sh-worlds-menu" aria-label="Menu" aria-haspopup="dialog">' +
+        "\u2630</button>" +
+    "</div>" +
+    '<div id="sh-worlds-search-slot"></div>' +
+    '<div class="sh-worlds-grid" id="sh-worlds-grid"></div>' +
+  "</div></div></div>",
+  "My Worlds");
+  $("sh-worlds-back").onclick = shellShowHome;
+  $("sh-worlds-menu").onclick = function () { shellOpenMenu($("sh-worlds-menu")); };
+  // Search appears only when the library is big enough to need it.
+  if (_worldsAll.length >= 8) {
+    $("sh-worlds-search-slot").innerHTML =
+      '<div class="sh-search"><label for="sh-worlds-q">Search worlds</label>' +
+      '<input id="sh-worlds-q" type="search" placeholder="Search by name" ' +
+        'autocomplete="off" autocapitalize="none" autocorrect="off"></div>';
+    var q = $("sh-worlds-q");
+    q.value = _worldsSearch;
+    q.addEventListener("input", function () {
+      _worldsSearch = q.value;
+      shellRenderWorldCards();  // the input lives outside the grid: no focus loss
+    });
+  }
+  shellRenderWorldCards();
+  if (_pendingToast) { var t = _pendingToast; _pendingToast = null; shellToast(t); }
+}
+// ---- Stage 3: overflow menu (Rename / Duplicate / Delete) ----
+var _ovReturnFocus = null, _ovCleanup = null;
+function shellOpenOverflow(btn, mp) {
+  shellCloseOverflow();
+  _ovReturnFocus = btn;
+  var wrap = btn.parentNode, nm = friendlyName(mp.file);
+  var menu = document.createElement("div");
+  menu.className = "sh-overflow-menu";
+  menu.id = "sh-overflow-menu";
+  menu.setAttribute("role", "menu");
+  menu.setAttribute("aria-label", "Actions for " + nm);
+  menu.innerHTML =
+    '<button class="sh-overflow-item" role="menuitem" data-op="rename">' +
+      '<span aria-hidden="true">\u270E</span> Rename</button>' +
+    '<button class="sh-overflow-item" role="menuitem" data-op="duplicate">' +
+      '<span aria-hidden="true">\u29C9</span> Duplicate</button>' +
+    '<button class="sh-overflow-item danger" role="menuitem" data-op="delete">' +
+      '<span aria-hidden="true">\uD83D\uDDD1</span> Delete</button>';
+  wrap.appendChild(menu);
+  var items = Array.prototype.slice.call(menu.querySelectorAll(".sh-overflow-item"));
+  items.forEach(function (it) {
+    it.onclick = function () {
+      var op = it.getAttribute("data-op"), backTo = _ovReturnFocus;
+      shellCloseOverflow();
+      if (op === "rename") shellRenameDialog(mp, backTo);
+      else if (op === "duplicate") shellDuplicateWorld(mp);
+      else if (op === "delete") shellDeleteDialog(mp, backTo);
+    };
+  });
+  var onOutside = function (e) { if (!wrap.contains(e.target)) shellCloseOverflow(); };
+  var onKey = function (e) { if (e.key === "Escape") { e.preventDefault(); shellCloseOverflow(); } };
+  document.addEventListener("pointerdown", onOutside);
+  document.addEventListener("keydown", onKey);
+  _ovCleanup = function () {
+    document.removeEventListener("pointerdown", onOutside);
+    document.removeEventListener("keydown", onKey);
+  };
+  items[0].focus();
+}
+function shellCloseOverflow() {
+  var menu = document.getElementById("sh-overflow-menu");
+  if (menu) menu.remove();
+  if (_ovCleanup) { _ovCleanup(); _ovCleanup = null; }
+  if (_ovReturnFocus && _ovReturnFocus.focus) {
+    try { _ovReturnFocus.focus(); } catch (e) {}
+  }
+  _ovReturnFocus = null;
+}
+// ---- Stage 3: world dialogs (rename / delete confirm) ----
+var _wdlgReturnFocus = null;
+function shellOpenWorldDialog(returnTo, title, body) {
+  shellCloseWorldDialog();
+  _wdlgReturnFocus = returnTo || null;
+  var wrap = document.createElement("div");
+  wrap.id = "sh-world-dlg";
+  wrap.innerHTML =
+  '<div class="sh-scrim" id="sh-wdlg-scrim"><div class="sh-dialog" role="dialog" ' +
+    'aria-modal="true" aria-labelledby="sh-wdlg-h">' + title + body +
+  "</div></div>";
+  shellRootEl().appendChild(wrap);
+  return wrap;
+}
+function shellWorldDialogKeys(e) { if (e.key === "Escape") shellCloseWorldDialog(); }
+function shellCloseWorldDialog() {
+  var wrap = document.getElementById("sh-world-dlg");
+  if (wrap) wrap.remove();
+  document.removeEventListener("keydown", shellWorldDialogKeys);
+  if (_wdlgReturnFocus && _wdlgReturnFocus.focus) {
+    try { _wdlgReturnFocus.focus(); } catch (e) {}
+  }
+  _wdlgReturnFocus = null;
+}
+function shellRenameDialog(mp, returnTo) {
+  var wrap = shellOpenWorldDialog(returnTo,
+    "<h2 id=\"sh-wdlg-h\">Rename world</h2>",
+    '<p class="sh-sub">Choose a new name for \u201C<span id="sh-wdlg-cur"></span>\u201D.</p>' +
+    shellField("sh-wdlg-name", "World name", "text", "World name", { maxlength: "80" }) +
+    '<button class="sh-btn-primary" id="sh-wdlg-save">Save name</button>' +
+    '<button class="sh-btn-secondary" id="sh-wdlg-cancel">Cancel</button>');
+  wrap.querySelector("#sh-wdlg-cur").textContent = friendlyName(mp.file);
+  var input = $("sh-wdlg-name");
+  input.value = friendlyName(mp.file);
+  input.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); $("sh-wdlg-save").click(); }
+  });
+  $("sh-wdlg-scrim").onclick = function (e) {
+    if (e.target.id === "sh-wdlg-scrim") shellCloseWorldDialog();
+  };
+  $("sh-wdlg-cancel").onclick = shellCloseWorldDialog;
+  document.addEventListener("keydown", shellWorldDialogKeys);
+  $("sh-wdlg-save").onclick = async function () {
+    var v = input.value.trim();
+    if (!v) { shellFieldError("sh-wdlg-name", "Give your world a name."); input.focus(); return; }
+    var btn = $("sh-wdlg-save");
+    btn.disabled = true; btn.textContent = "Saving\u2026";
+    try {
+      var r = await api("/api/maps/rename", { from: mp.file, to: v });
+      if (r && r.ok) {
+        shellCloseWorldDialog();
+        _pendingToast = "Renamed to \u201C" + friendlyName(r.file || (v + ".json")) + "\u201D.";
+        shellShowWorlds();
+        return;
+      }
+      var msg = String((r && r.error) || "Couldn't rename this world.");
+      shellFieldError("sh-wdlg-name",
+        /name taken/i.test(msg) ? "That name is already used. Pick another." : msg);
+      input.focus();
+    } catch (e) {
+      shellFieldError("sh-wdlg-name", "Couldn't reach the server. Your world is unchanged.");
+      input.focus();
+    }
+    btn.disabled = false; btn.textContent = "Save name";
+  };
+  input.focus();
+  input.select();
+}
+async function shellDuplicateWorld(mp) {
+  shellToast("Duplicating \u201C" + friendlyName(mp.file) + "\u201D\u2026");
+  try {
+    var r = await api("/api/maps/duplicate", { from: mp.file });
+    if (r && r.ok) {
+      _pendingToast = "Created \u201C" + friendlyName(r.file) + "\u201D.";
+      shellShowWorlds();
+    } else {
+      shellToast("Couldn't duplicate: " + String((r && r.error) || "unknown error") + ".");
+    }
+  } catch (e) {
+    shellToast("Couldn't reach the server. Nothing was copied.");
+  }
+}
+function shellDeleteDialog(mp, returnTo) {
+  var wrap = shellOpenWorldDialog(returnTo,
+    "<h2 id=\"sh-wdlg-h\">Delete this world?</h2>",
+    '<p class="sh-danger-note">\u201C<span id="sh-wdlg-cur"></span>\u201D will be moved ' +
+      "to the trash. It won't be permanently erased.</p>" +
+    '<button class="sh-btn-danger" id="sh-wdlg-del">Delete this world</button>' +
+    '<button class="sh-btn-secondary" id="sh-wdlg-cancel">Keep my world</button>');
+  wrap.querySelector("#sh-wdlg-cur").textContent = friendlyName(mp.file);
+  $("sh-wdlg-scrim").onclick = function (e) {
+    if (e.target.id === "sh-wdlg-scrim") shellCloseWorldDialog();
+  };
+  $("sh-wdlg-cancel").onclick = shellCloseWorldDialog;
+  document.addEventListener("keydown", shellWorldDialogKeys);
+  $("sh-wdlg-del").onclick = async function () {
+    var btn = $("sh-wdlg-del");
+    btn.disabled = true; btn.textContent = "Deleting\u2026";
+    try {
+      var r = await api("/api/maps/delete", { file: mp.file });
+      if (r && r.ok) {
+        shellCloseWorldDialog();
+        _pendingToast = "\u201C" + friendlyName(mp.file) + "\u201D moved to the trash.";
+        shellShowWorlds();
+        return;
+      }
+      var msg = String((r && r.error) || "Couldn't delete this world.");
+      shellCloseWorldDialog();
+      shellToast(/default/i.test(msg)
+        ? "The starting world can't be deleted."
+        : "Couldn't delete: " + msg + ".");
+    } catch (e) {
+      shellCloseWorldDialog();
+      shellToast("Couldn't reach the server. Your world is safe.");
+    }
+  };
+  $("sh-wdlg-cancel").focus();
+}
+// ---- Stage 3: toast ----
+var _toastTimer = null;
+function shellToast(msg) {
+  var old = document.getElementById("sh-toast");
+  if (old) old.remove();
+  var t = document.createElement("div");
+  t.id = "sh-toast";
+  t.className = "sh-toast";
+  t.setAttribute("role", "status");
+  t.textContent = msg;
+  shellRootEl().appendChild(t);
+  if (_toastTimer) clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(function () {
+    var el = document.getElementById("sh-toast");
+    if (el) el.remove();
+    _toastTimer = null;
+  }, 3600);
 }
 var _menuReturnFocus = null;
 function shellOpenMenu(returnTo) {
@@ -14922,7 +15327,7 @@ function shellMenuAbout() {
   sheet.innerHTML =
     '<div class="sh-grab" aria-hidden="true"></div>' +
     '<p class="sh-menu-user">About this build</p>' +
-    '<p class="sh-menu-sub">Crumbs World v%%CRUMBS_VERSION%% \u00B7 tester build \u00B7 shell stage 2</p>' +
+    '<p class="sh-menu-sub">Crumbs World v%%CRUMBS_VERSION%% \u00B7 tester build \u00B7 shell stage 3</p>' +
     '<p class="sh-menu-sub">Your worlds and account live on the server. ' +
       "This device only keeps display choices like text size.</p>" +
     '<button class="sh-menu-item" id="sh-mi-back"><span class="sh-mi" aria-hidden="true">\u2190</span> Back</button>';

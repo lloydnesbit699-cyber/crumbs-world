@@ -3090,6 +3090,182 @@ _ENTITY_NAMES = {
 }
 
 
+# ---- v5.61: Melody's designer room templates -------------------------------
+# Each template is a dict describing a room style. The builder function
+# _melody_build_room() takes (x, y, w, h, style) and returns a list of
+# (tx, ty, layer, tile_id) placements. Layers: "floor" -> world.data,
+# "wall" -> world.data (perimeter), "object" -> world.object_layer.
+#
+# Tile IDs from shared_library.json (all verified present):
+#   Floors: 70000 dark, 70001 teal, 70007 cobblestone, 70009 dirt,
+#           70010 blue mosaic, 70011 red mosaic
+#   Walls: 70012 stone, 70013 gray, 70015 dark, 70017 brick
+#   Doors: 70032 wooden, 70034 oak, 70035 blue
+#   Decor: 70040 gold chest, 70041 chest, 70043 fountain, 70046 statue,
+#          70048 brazier, 70049 altar
+
+MELODY_ROOM_TEMPLATES = {
+    "tavern": {
+        "label": "Tavern",
+        "floor": 70009,   # dirt — warm, worn
+        "wall": 70017,    # brick
+        "door": 70032,    # wooden door
+        # furniture: (dx, dy, tile_id) relative to room origin
+        # placed on object layer after floor/walls
+        "furniture": [
+            # central tables (chests as tables for v1)
+            (2, 2, 70041), (5, 2, 70041),
+            (2, 5, 70041), (5, 5, 70041),
+            # brazier as fireplace in corner
+            (1, 1, 70048),
+            # bar counter along north wall (chests)
+            (3, 1, 70040), (4, 1, 70040),
+        ],
+    },
+    "dungeon": {
+        "label": "Dungeon cell",
+        "floor": 70000,   # dark floor
+        "wall": 70012,    # stone wall
+        "door": 70034,    # oak door (heavy)
+        "furniture": [
+            (1, 1, 70048),  # brazier (torch)
+            (5, 5, 70046),  # statue (or chains stand-in)
+            (3, 3, 70041),  # chest (loot)
+        ],
+    },
+    "bedroom": {
+        "label": "Bedroom",
+        "floor": 70009,   # dirt (wood-like warmth)
+        "wall": 70013,    # gray wall
+        "door": 70032,    # wooden door
+        "furniture": [
+            (1, 1, 70041),  # chest (dresser stand-in)
+            (5, 1, 70040),  # gold chest (wardrobe)
+            (1, 5, 70048),  # brazier (lamp)
+        ],
+    },
+    "shop": {
+        "label": "Shop",
+        "floor": 70007,   # cobblestone
+        "wall": 70017,    # brick
+        "door": 70035,    # blue door
+        "furniture": [
+            # counter row
+            (2, 1, 70041), (3, 1, 70041), (4, 1, 70041),
+            # display shelves (chests)
+            (1, 3, 70040), (5, 3, 70040),
+            # fountain as decoration
+            (3, 5, 70043),
+        ],
+    },
+    "chapel": {
+        "label": "Chapel",
+        "floor": 70010,   # blue mosaic
+        "wall": 70012,    # stone wall
+        "door": 70034,    # oak door
+        "furniture": [
+            (3, 1, 70049),  # altar at north
+            (1, 3, 70048), (5, 3, 70048),  # braziers
+            (3, 5, 70046),  # statue
+        ],
+    },
+    "library": {
+        "label": "Library",
+        "floor": 70001,   # teal tiles
+        "wall": 70013,    # gray wall
+        "door": 70032,    # wooden door
+        "furniture": [
+            (1, 1, 70040), (2, 1, 70040), (4, 1, 70040), (5, 1, 70040),
+            (1, 5, 70041), (5, 5, 70041),
+            (3, 3, 70043),  # fountain center
+        ],
+    },
+}
+
+
+def _melody_build_room(x, y, w, h, style, overwrite=False):
+    """v5.61: Build a room from a template.
+    
+    Returns (placements, errors) where placements is a list of
+    (tx, ty, layer, tile_id). Does NOT write to world — the caller
+    wraps in _undoable().
+    """
+    tmpl = MELODY_ROOM_TEMPLATES.get(style)
+    if not tmpl:
+        return ([], [f"unknown style '{style}'"])
+    
+    if w < 5 or h < 5:
+        return ([], ["room too small (min 5x5)"])
+    if w > 30 or h > 30:
+        return ([], ["room too large (max 30x30)"])
+    
+    placements = []
+    errors = []
+    
+    def _in_bounds(tx, ty):
+        return 0 <= tx < world.width and 0 <= ty < world.height
+    
+    def _is_empty(tx, ty, layer):
+        if layer == "floor":
+            return world.data[ty][tx] == 0
+        elif layer == "object":
+            return world.object_layer[ty][tx] is None
+        return True
+    
+    # v5.61: floor interior
+    for dy in range(1, h - 1):
+        for dx in range(1, w - 1):
+            tx, ty = x + dx, y + dy
+            if not _in_bounds(tx, ty):
+                errors.append(f"out of bounds at ({tx},{ty})")
+                continue
+            if not overwrite and not _is_empty(tx, ty, "floor"):
+                continue
+            placements.append((tx, ty, "floor", tmpl["floor"]))
+    
+    # v5.61: walls on perimeter
+    for dx in range(w):
+        for dy in (0, h - 1):
+            tx, ty = x + dx, y + dy
+            if not _in_bounds(tx, ty):
+                continue
+            if not overwrite and not _is_empty(tx, ty, "floor"):
+                continue
+            placements.append((tx, ty, "floor", tmpl["wall"]))
+    for dy in range(1, h - 1):
+        for dx in (0, w - 1):
+            tx, ty = x + dx, y + dy
+            if not _in_bounds(tx, ty):
+                continue
+            if not overwrite and not _is_empty(tx, ty, "floor"):
+                continue
+            placements.append((tx, ty, "floor", tmpl["wall"]))
+    
+    # v5.61: door on south wall center (replace wall tile)
+    door_x = x + w // 2
+    door_y = y + h - 1
+    if _in_bounds(door_x, door_y):
+        # remove the wall placement at door position, add door
+        placements = [p for p in placements
+                      if not (p[0] == door_x and p[1] == door_y)]
+        placements.append((door_x, door_y, "floor", tmpl["door"]))
+    
+    # v5.61: furniture on object layer
+    for dx, dy, tid in tmpl["furniture"]:
+        # scale furniture to room size (templates designed for ~7x7)
+        fx = x + int(dx * w / 7)
+        fy = y + int(dy * h / 7)
+        if not _in_bounds(fx, fy):
+            continue
+        if not overwrite and not _is_empty(fx, fy, "object"):
+            continue
+        if tid not in assets.tiles:
+            continue
+        placements.append((fx, fy, "object", tid))
+    
+    return (placements, errors)
+
+
 def _populate_entities(biome, seed, entities):
     """v5.61: Place entities on a freshly generated map.
 
@@ -7282,6 +7458,223 @@ class Handler(BaseHTTPRequestHandler):
             status = 200 if res.get("ok") else (
                 429 if res.get("error") == "quota" else 400)
             return self._send_json(res, status)
+        # ---- v5.61: Melody's designer endpoints — she builds, not just suggests
+        if path == "/api/melody/design/room" and is_post:
+            user = self._melody_user()
+            if user is None:
+                return self._send_json({"ok": False, "error": "login required"},
+                                       401)
+            if not self._is_json_request():
+                return self._send_json(
+                    {"ok": False,
+                     "error": "Content-Type must be application/json"}, 415)
+            body = self._read_json(max_bytes=32768)
+            if not isinstance(body, dict):
+                return self._send_json({"ok": False, "error": "bad JSON"},
+                                       400)
+            try:
+                x = int(body.get("x", 0))
+                y = int(body.get("y", 0))
+                w = int(body.get("width", 7))
+                h = int(body.get("height", 7))
+                style = str(body.get("style", "tavern")).lower()
+                overwrite = bool(body.get("overwrite", False))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False,
+                                        "error": "x/y/width/height must be ints"},
+                                       400)
+            placements, errors = _melody_build_room(x, y, w, h, style,
+                                                    overwrite)
+            if errors and not placements:
+                return self._send_json({"ok": False, "error": "; ".join(errors)},
+                                       400)
+            def _do():
+                for tx, ty, layer, tid in placements:
+                    if layer == "floor":
+                        world.data[ty][tx] = tid
+                    elif layer == "object":
+                        world.object_layer[ty][tx] = tid
+                _mark_dirty()
+            _undoable(f"melody room: {style} at ({x},{y})", _do)
+            _log_event(f"melody built {style} room at ({x},{y}) "
+                       f"{w}x{h} ({len(placements)} tiles)")
+            return self._send_json({"ok": True, "style": style,
+                                    "placed": len(placements),
+                                    "warnings": errors})
+        if path == "/api/melody/design/furnish" and is_post:
+            user = self._melody_user()
+            if user is None:
+                return self._send_json({"ok": False, "error": "login required"},
+                                       401)
+            if not self._is_json_request():
+                return self._send_json(
+                    {"ok": False,
+                     "error": "Content-Type must be application/json"}, 415)
+            body = self._read_json(max_bytes=32768)
+            if not isinstance(body, dict):
+                return self._send_json({"ok": False, "error": "bad JSON"},
+                                       400)
+            try:
+                x = int(body.get("x", 0))
+                y = int(body.get("y", 0))
+                layout = body.get("layout", [])
+                overwrite = bool(body.get("overwrite", False))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False,
+                                        "error": "x/y must be ints"}, 400)
+            if not isinstance(layout, list) or len(layout) > 50:
+                return self._send_json({"ok": False,
+                                        "error": "layout must be a list (max 50)"},
+                                       400)
+            placements = []
+            for item in layout:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    tid = int(item.get("tile_id", 0))
+                    dx = int(item.get("dx", 0))
+                    dy = int(item.get("dy", 0))
+                except (TypeError, ValueError):
+                    continue
+                if tid not in assets.tiles:
+                    continue
+                tx, ty = x + dx, y + dy
+                if not (0 <= tx < world.width and 0 <= ty < world.height):
+                    continue
+                if not overwrite and world.object_layer[ty][tx] is not None:
+                    continue
+                placements.append((tx, ty, tid))
+            def _do():
+                for tx, ty, tid in placements:
+                    world.object_layer[ty][tx] = tid
+                _mark_dirty()
+            _undoable(f"melody furnish at ({x},{y})", _do)
+            _log_event(f"melody furnished ({x},{y}) ({len(placements)} items)")
+            return self._send_json({"ok": True, "placed": len(placements)})
+        if path == "/api/melody/design/populate" and is_post:
+            user = self._melody_user()
+            if user is None:
+                return self._send_json({"ok": False, "error": "login required"},
+                                       401)
+            if not self._is_json_request():
+                return self._send_json(
+                    {"ok": False,
+                     "error": "Content-Type must be application/json"}, 415)
+            body = self._read_json(max_bytes=32768)
+            if not isinstance(body, dict):
+                return self._send_json({"ok": False, "error": "bad JSON"},
+                                       400)
+            try:
+                cx = int(body.get("x", world.width // 2))
+                cy = int(body.get("y", world.height // 2))
+                radius = int(body.get("radius", 10))
+                types = body.get("types", {})
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False,
+                                        "error": "x/y/radius must be ints"},
+                                       400)
+            if not isinstance(types, dict):
+                return self._send_json({"ok": False,
+                                        "error": "types must be a dict"}, 400)
+            # v5.61: populate a circular area — reuse entity logic but
+            # scoped to radius instead of whole map
+            import random as _rand
+            rng = _rand.Random()
+            enabled = [k for k in ("trees", "animals", "creatures", "characters")
+                       if types.get(k)]
+            if not enabled:
+                return self._send_json({"ok": False,
+                                        "error": "no types enabled"}, 400)
+            radius = max(3, min(radius, 50))
+            # find walkable tiles in circle
+            candidates = []
+            for dy in range(-radius, radius + 1):
+                for dx in range(-radius, radius + 1):
+                    if dx*dx + dy*dy > radius*radius:
+                        continue
+                    tx, ty = cx + dx, cy + dy
+                    if _walkable(tx, ty):
+                        candidates.append((tx, ty))
+            if not candidates:
+                return self._send_json({"ok": False,
+                                        "error": "no walkable tiles in area"},
+                                       400)
+            # ~1 entity per 20 tiles in the area, split across types
+            per_type = max(1, min(20, (len(candidates) // 20) // len(enabled)))
+            placed_trees = 0
+            placed_movers = 0
+            new_npcs = []
+            new_patrols = []
+            for etype in enabled:
+                tile_ids, role, name_prefix, line = ENTITY_TILES[etype]
+                tile_ids = [tid for tid in tile_ids if tid in assets.tiles]
+                if not tile_ids:
+                    continue
+                for _ in range(per_type):
+                    tx, ty = rng.choice(candidates)
+                    tid = rng.choice(tile_ids)
+                    if etype == "trees":
+                        if world.object_layer[ty][tx] is not None:
+                            continue
+                        # defer write to _undoable
+                        placed_trees += 1
+                    else:
+                        if any(n["x"] == tx and n["y"] == ty for n in _npcs):
+                            continue
+                        if any(n["x"] == tx and n["y"] == ty for n in new_npcs):
+                            continue
+                        placed_movers += 1
+                    # store for _do closure
+                    if etype == "trees":
+                        new_patrols.append(("tree", tx, ty, tid))
+                    else:
+                        new_npcs.append((tx, ty, tid, role, name_prefix, line))
+            def _do():
+                for kind, tx, ty, tid in new_patrols:
+                    if kind == "tree":
+                        world.object_layer[ty][tx] = tid
+                for tx, ty, tid, role, name_prefix, line in new_npcs:
+                    nid = _npc_seq["next"]
+                    _npc_seq["next"] += 1
+                    ename = _ENTITY_NAMES.get(tid, f"Entity {tid}")
+                    npc_name = f"{name_prefix} {ename}" if name_prefix else ename
+                    n = {"id": nid, "name": npc_name, "tile_id": tid,
+                         "x": tx, "y": ty, "role": role, "line": line,
+                         "stock": [], "gear": {"weapon": None, "tool": None}}
+                    _npcs.append(n)
+                    # 3-5 waypoints in 10x10 area
+                    import random as _r2
+                    r2 = _r2.Random()
+                    n_pts = r2.randint(3, 5)
+                    waypoints = [[tx, ty]]
+                    for _ in range(50):
+                        if len(waypoints) >= n_pts:
+                            break
+                        wx = tx + r2.randint(-5, 5)
+                        wy = ty + r2.randint(-5, 5)
+                        if not _walkable(wx, wy):
+                            continue
+                        if [wx, wy] in waypoints:
+                            continue
+                        waypoints.append([wx, wy])
+                    if len(waypoints) >= 2:
+                        pid = _patrol_seq["next"]
+                        _patrol_seq["next"] += 1
+                        _patrols.append({
+                            "id": pid, "tile_id": tid, "x": tx, "y": ty,
+                            "points": waypoints,
+                            "pauses": [{"secs": 0, "mode": "stand"}
+                                      for _ in waypoints],
+                            "map": _current_map,
+                        })
+                _save_npcs(_current_map)
+                _save_patrols()
+                _mark_dirty()
+            _undoable(f"melody populate at ({cx},{cy})", _do)
+            _log_event(f"melody populated ({cx},{cy}) r={radius} "
+                       f"({placed_trees} trees, {placed_movers} movers)")
+            return self._send_json({"ok": True, "trees": placed_trees,
+                                    "movers": placed_movers})
         return self._send_json({"ok": False, "error": "not found"}, 404)
 
     def handle_one_request(self):

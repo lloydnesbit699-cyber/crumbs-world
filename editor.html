@@ -3899,6 +3899,14 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   <button id="melody-new" class="widebtn">＋ New mission…</button>
   <div id="melody-presets" hidden></div>
   <div id="melody-form" hidden></div>
+  <!-- v5.61: Melody's designer — she builds rooms from prompts -->
+  <div class="tray-head" style="margin-top:12px">&#127912; Melody designs <span class="tray-hint">she builds, you approve</span></div>
+  <div class="row2">
+    <input id="melody-design-prompt" type="text" maxlength="200"
+           placeholder="tavern, dungeon, forest, shop…" aria-label="Design prompt">
+    <button id="melody-design-build" class="widebtn" style="flex:0 0 auto">Build</button>
+  </div>
+  <div id="melody-design-status" class="melody-says" style="min-height:0"></div>
 </div>
 
 <div id="sheet-items" class="sheet">
@@ -20394,6 +20402,97 @@ async function createMelodyTask() {
 $("melody-task-add").onclick = createMelodyTask;
 $("melody-task-title").onkeydown = e => {
   if (e.key === "Enter") createMelodyTask();
+};
+// ---- v5.61: Melody's designer — keyword prompt to build -------------------
+// She was always meant to be a designer and player, not just a suggester.
+// v1 uses keyword matching; full NLP is out of scope.
+const MELODY_DESIGN_KEYWORDS = {
+  // rooms: keyword -> style
+  "tavern": "tavern", "inn": "tavern", "bar": "tavern", "pub": "tavern",
+  "dungeon": "dungeon", "cell": "dungeon", "prison": "dungeon",
+  "bedroom": "bedroom", "bed": "bedroom", "sleep": "bedroom",
+  "shop": "shop", "store": "shop", "market": "shop",
+  "chapel": "chapel", "church": "chapel", "temple": "chapel", "shrine": "chapel",
+  "library": "library", "books": "library", "study": "library",
+  // populate: keyword -> entity types
+  "forest": {trees: true, animals: true},
+  "trees": {trees: true},
+  "animals": {animals: true}, "wildlife": {animals: true},
+  "creatures": {creatures: true}, "monsters": {creatures: true},
+  "village": {characters: true}, "people": {characters: true},
+  "characters": {characters: true},
+};
+function melodyDesignStatus(msg, isErr) {
+  const el = $("melody-design-status");
+  el.textContent = msg;
+  el.style.color = isErr ? "#ff8888" : "";
+}
+// v5.61: get viewport center in tile coords for placement
+function melodyDesignCenter() {
+  // Use the map center if viewport math isn't available
+  try {
+    if (typeof viewX !== "undefined" && typeof viewY !== "undefined" &&
+        typeof viewW !== "undefined" && typeof viewH !== "undefined") {
+      return [Math.floor(viewX + viewW / 2), Math.floor(viewY + viewH / 2)];
+    }
+  } catch (e) {}
+  return [Math.floor(W / 2), Math.floor(H / 2)];
+}
+$("melody-design-build").onclick = async () => {
+  const prompt = $("melody-design-prompt").value.trim().toLowerCase();
+  if (!prompt) { melodyDesignStatus("Tell me what to build.", true); return; }
+  melodyDesignStatus("Melody is building…");
+  const [cx, cy] = melodyDesignCenter();
+  try {
+    // v5.61: check for room keywords first
+    let roomStyle = null;
+    for (const [kw, style] of Object.entries(MELODY_DESIGN_KEYWORDS)) {
+      if (typeof style === "string" && prompt.includes(kw)) {
+        roomStyle = style;
+        break;
+      }
+    }
+    if (roomStyle) {
+      // v5.61: build a 9x9 room centered on viewport
+      const w = 9, h = 9;
+      const x = Math.max(0, cx - Math.floor(w / 2));
+      const y = Math.max(0, cy - Math.floor(h / 2));
+      const r = await api("/api/melody/design/room", {
+        x, y, width: w, height: h, style: roomStyle,
+      });
+      if (!r.ok) throw new Error(r.error || "build failed");
+      melodyDesignStatus(`Built ${roomStyle} (${r.placed} tiles).`);
+      await refresh();
+      toast(`Melody built a ${roomStyle}`);
+      return;
+    }
+    // v5.61: check for populate keywords
+    let types = null;
+    for (const [kw, t] of Object.entries(MELODY_DESIGN_KEYWORDS)) {
+      if (typeof t === "object" && prompt.includes(kw)) {
+        types = t;
+        break;
+      }
+    }
+    if (types) {
+      const r = await api("/api/melody/design/populate", {
+        x: cx, y: cy, radius: 12, types,
+      });
+      if (!r.ok) throw new Error(r.error || "populate failed");
+      melodyDesignStatus(`Placed ${r.trees} trees, ${r.movers} movers.`);
+      await refresh();
+      toast("Melody populated the area");
+      return;
+    }
+    melodyDesignStatus(
+      "Try: tavern, dungeon, bedroom, shop, chapel, library, forest, village…",
+      true);
+  } catch (e) {
+    melodyDesignStatus("Build failed: " + e.message, true);
+  }
+};
+$("melody-design-prompt").onkeydown = e => {
+  if (e.key === "Enter") $("melody-design-build").click();
 };
 function diffLabel(n) {
   const d = melodyDiffs.find(d => d.n === n);

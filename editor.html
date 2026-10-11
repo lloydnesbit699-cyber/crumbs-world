@@ -268,6 +268,22 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   html[data-shellframe="1"] .edge-tab,
   html[data-shellframe="1"] .tray { display: none !important; }
   html[data-shellframe="1"] #stage { top: 0; }
+  /* v5.61 Stage 5: shell placement pulse — a soft ring at the touch point
+     after a paint stroke / item drop / NPC placement lands. The shell drawer
+     (parent page) shows the text confirmation; this is the in-canvas half.
+     Shellframe only; never renders in the classic HUD. */
+  html[data-shellframe="1"] .shell-pulse {
+    position: fixed; width: 52px; height: 52px; border-radius: 50%;
+    border: 3px solid #c9973f; pointer-events: none; z-index: 9999;
+    animation: shell-pulse-anim 0.65s ease-out forwards;
+  }
+  @keyframes shell-pulse-anim {
+    from { transform: scale(0.4); opacity: 0.9; }
+    to { transform: scale(1.7); opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html[data-shellframe="1"] .shell-pulse { animation: none; opacity: 0; }
+  }
   canvas { position: absolute; left: 0; top: 0; display: block; touch-action: none;
            image-rendering: pixelated; will-change: transform; }
 
@@ -1779,6 +1795,141 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   html.sh-high-contrast #shell-root .sh-navbtn,
   html.sh-high-contrast #shell-root .sh-world-chip { border-color: #f3ead6; }
   html.sh-high-contrast #shell-root .sh-navbtn[aria-current="page"] { background: #0a0a0a; }
+  /* ===== TESTER SHELL (v5.61+, Stage 5: Build Drawer) ===== */
+  /* Bottom sheet on phones, side panel on wider screens. No scrim: the map
+     stays interactive above/beside the drawer so placement taps land while
+     the drawer is open. Tapping the map with no tool armed closes it. */
+  #shell-root .sh-build-drawer {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 70;
+    max-height: 58%; display: flex; flex-direction: column;
+    background: #1e1c18; border-top: 2px solid #3a352b;
+    border-radius: 16px 16px 0 0;
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+    box-shadow: 0 -8px 32px rgba(0,0,0,0.55);
+    animation: sh-build-in 0.25s ease-out;
+  }
+  @keyframes sh-build-in {
+    from { transform: translateY(40px); opacity: 0.4; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+  @media (min-width: 720px) {
+    #shell-root .sh-build-drawer {
+      left: auto; top: 0; right: 0; bottom: 0; width: 400px; max-height: none;
+      border-top: 0; border-left: 2px solid #3a352b; border-radius: 16px 0 0 16px;
+      animation-name: sh-build-in-side;
+    }
+    @keyframes sh-build-in-side {
+      from { transform: translateX(40px); opacity: 0.4; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+  }
+  #shell-root .sh-build-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 14px 10px; border-bottom: 1px solid #2c2a22; flex: none;
+  }
+  #shell-root .sh-build-grab {
+    width: 44px; height: 5px; border-radius: 3px; background: #6b6252;
+    margin: 0 auto; position: absolute; top: 6px; left: 0; right: 0;
+  }
+  #shell-root .sh-build-back {
+    min-width: 48px; min-height: 48px; padding: 8px 12px; font-size: 18px;
+    color: #f3ead6; background: none; border: 0; cursor: pointer; flex: none;
+  }
+  #shell-root .sh-build-title { font-size: 18px; font-weight: 700; color: #f3ead6; margin: 0; flex: 1; }
+  #shell-root .sh-build-close {
+    min-width: 48px; min-height: 48px; font-size: 20px; color: #f3ead6;
+    background: #2c2a22; border: 2px solid #3a352b; border-radius: 12px; cursor: pointer; flex: none;
+  }
+  #shell-root .sh-build-body { overflow-y: auto; padding: 12px 14px 16px; -webkit-overflow-scrolling: touch; }
+  #shell-root .sh-build-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  #shell-root .sh-build-card {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+    min-height: 96px; padding: 14px; text-align: left;
+    background: #26241f; border: 2px solid #3a352b; border-radius: 14px;
+    color: #f3ead6; cursor: pointer; font-size: 16px;
+  }
+  #shell-root .sh-build-card .sh-bc-ico { font-size: 30px; line-height: 1; }
+  #shell-root .sh-build-card b { font-size: 17px; }
+  #shell-root .sh-build-card small { font-size: 14px; color: #8f8672; }
+  #shell-root .sh-build-card:active { border-color: #c9973f; }
+  #shell-root .sh-build-section-title { font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #8f8672; margin: 14px 0 8px; }
+  #shell-root .sh-build-section-title:first-child { margin-top: 0; }
+  #shell-root .sh-swatch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); gap: 8px; }
+  #shell-root .sh-swatch {
+    aspect-ratio: 1; padding: 4px; background: #141311;
+    border: 2px solid #3a352b; border-radius: 10px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; min-height: 56px;
+  }
+  #shell-root .sh-swatch img { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; border-radius: 6px; }
+  #shell-root .sh-swatch[aria-pressed="true"] { border-color: #c9973f; border-width: 3px; box-shadow: 0 0 0 1px #c9973f; }
+  #shell-root .sh-swatch .sh-sw-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  #shell-root .sh-current-brush {
+    display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+    background: #26241f; border: 2px solid #3a352b; border-radius: 12px; margin-bottom: 10px;
+  }
+  #shell-root .sh-current-brush img { width: 44px; height: 44px; image-rendering: pixelated; border-radius: 8px; background: #141311; }
+  #shell-root .sh-current-brush .sh-cb-meta b { display: block; font-size: 16px; color: #f3ead6; }
+  #shell-root .sh-current-brush .sh-cb-meta small { font-size: 14px; color: #8f8672; }
+  #shell-root .sh-build-row { display: flex; gap: 10px; margin-top: 10px; }
+  #shell-root .sh-build-row .sh-btn-secondary { flex: 1; }
+  #shell-root .sh-place-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  #shell-root .sh-place-card {
+    display: flex; align-items: center; gap: 10px; padding: 10px;
+    background: #26241f; border: 2px solid #3a352b; border-radius: 12px;
+    color: #f3ead6; cursor: pointer; font-size: 16px; text-align: left; min-height: 64px;
+  }
+  #shell-root .sh-place-card img { width: 40px; height: 40px; image-rendering: pixelated; border-radius: 8px; background: #141311; flex: none; }
+  #shell-root .sh-place-card .sh-pc-meta { min-width: 0; }
+  #shell-root .sh-place-card .sh-pc-meta b { display: block; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #shell-root .sh-place-card .sh-pc-meta small { font-size: 13px; color: #8f8672; }
+  #shell-root .sh-place-card[aria-pressed="true"] { border-color: #c9973f; border-width: 3px; box-shadow: 0 0 0 1px #c9973f; }
+  #shell-root .sh-place-card .sh-pc-check { margin-left: auto; color: #c9973f; font-size: 20px; font-weight: 700; flex: none; }
+  #shell-root .sh-arm-banner {
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 10px;
+    background: #2a251c; border: 2px solid #c9973f; border-radius: 12px;
+    font-size: 15px; color: #f3ead6;
+  }
+  #shell-root .sh-arm-banner .sh-btn-secondary { margin-left: auto; flex: none; min-height: 44px; }
+  #shell-root .sh-npc-row {
+    display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px;
+    background: #26241f; border: 2px solid #3a352b; border-radius: 12px;
+    color: #f3ead6; font-size: 16px; text-align: left; margin-bottom: 8px; min-height: 60px;
+  }
+  #shell-root .sh-npc-row img { width: 40px; height: 40px; image-rendering: pixelated; border-radius: 8px; background: #141311; flex: none; }
+  #shell-root .sh-npc-row .sh-npc-meta b { display: block; font-size: 16px; }
+  #shell-root .sh-npc-row .sh-npc-meta small { font-size: 14px; color: #8f8672; }
+  #shell-root .sh-more-item {
+    display: flex; align-items: center; gap: 12px; width: 100%;
+    min-height: 56px; padding: 12px 6px; font-size: 16px; color: #f3ead6;
+    background: none; border: 0; border-top: 1px solid #2c2a22; cursor: pointer; text-align: left;
+  }
+  #shell-root .sh-more-item .sh-mi { width: 28px; text-align: center; flex: none; font-size: 20px; }
+  #shell-root .sh-more-item .sh-go { margin-left: auto; color: #8f8672; flex: none; }
+  #shell-root .sh-build-confirm {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: calc(70px + env(safe-area-inset-bottom)); z-index: 80;
+    display: flex; align-items: center; gap: 8px;
+    background: #2a251c; border: 2px solid #c9973f; border-radius: 999px;
+    color: #f3ead6; font-size: 16px; font-weight: 600; padding: 10px 18px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    animation: sh-confirm-in 0.2s ease-out;
+  }
+  @keyframes sh-confirm-in { from { transform: translateX(-50%) translateY(8px); opacity: 0; } to { transform: translateX(-50%) translateY(0); opacity: 1; } }
+  #shell-root .sh-build-confirm .sh-cc-check { color: #c9973f; font-size: 18px; }
+  #shell-root .sh-build-empty { font-size: 15px; color: #8f8672; text-align: center; padding: 18px 10px; }
+  #shell-root .sh-build-hint { font-size: 14px; color: #8f8672; margin: 8px 0 0; }
+  @media (prefers-reduced-motion: reduce) {
+    #shell-root .sh-build-drawer, #shell-root .sh-build-confirm { animation: none; }
+  }
+  html.sh-high-contrast #shell-root .sh-build-drawer,
+  html.sh-high-contrast #shell-root .sh-build-card,
+  html.sh-high-contrast #shell-root .sh-swatch,
+  html.sh-high-contrast #shell-root .sh-place-card,
+  html.sh-high-contrast #shell-root .sh-npc-row,
+  html.sh-high-contrast #shell-root .sh-current-brush { background: #0a0a0a; border-color: #f3ead6; }
+  html.sh-text-large #shell-root .sh-build-card small,
+  html.sh-text-large #shell-root .sh-build-hint,
+  html.sh-text-large #shell-root .sh-place-card .sh-pc-meta small { font-size: 16px; }
 </style>
 </head>
 <body>
@@ -6153,6 +6304,16 @@ canvas.addEventListener("pointerdown", async e => {
     return;
   }
   const cell = evCell(e); if (!cell) return;
+  // v5.61 Stage 5: shell drawer outside-tap. A confirmed map tap with no tool
+  // armed tells the parent shell to close the Build Drawer. The parent reads
+  // live iframe state (itemPlace/npcPlace/brush) so an active placement never
+  // dismisses. Additive, shellframe only, never fires in the classic HUD.
+  try {
+    if (document.documentElement.dataset.shellframe === "1" &&
+        window.parent && window.parent !== window &&
+        typeof window.parent.shellMapTapped === "function")
+      window.parent.shellMapTapped();
+  } catch (e) {}
   // v5.47: a numbered patrol pin under the finger opens the walker's event
   // card — only when no other tool claims the tap.
   if (!playMode && !buildBreak && !selectTool && !patrolTool && !ruleDraft && !traitTool &&
@@ -6355,6 +6516,9 @@ function endStroke() {
     else
       paintQueue.push({ layer: s.layer, cells: [...s.cells.values()],
         link_cells: [...s.linkCells.values()], file: currentFile });   // v5.7: one call, one undo step
+    // v5.61 Stage 5: shell feedback — the gesture landed. Guarded inside.
+    if (typeof window.shellNotifyPlaced === "function")
+      window.shellNotifyPlaced("paint", { count: s.cells.size });
   } else queueRender();
   pumpPaintQueue();
 }
@@ -12512,7 +12676,15 @@ function showItemForm() {
 
 async function itemPlaceTap(cell) {
   const r = await api("/api/items/place", { item: itemPlace, x: cell.x, y: cell.y, qty: 1 });
-  if (!r.ok) toast(r.error || "can't drop it there"); else await loadItems();
+  if (!r.ok) toast(r.error || "can't drop it there");
+  else {
+    await loadItems();
+    // v5.61 Stage 5: shell feedback — guarded inside shellNotifyPlaced.
+    if (typeof window.shellNotifyPlaced === "function") {
+      const d = (typeof itemById === "function") ? itemById(itemPlace) : null;
+      window.shellNotifyPlaced("item", { id: itemPlace, name: (d && d.name) || "Object" });
+    }
+  }
 }
 
 // ---- folks ------------------------------------------------------------------
@@ -12569,6 +12741,9 @@ async function npcPlaceTap(cell) {
   if (!r.ok) { toast(r.error || "can't place them"); return; }
   npcPlace = false; syncNpcPlaceBtn(); closeOverlays();
   await loadNpcs(); toast(`${r.npc.name} moved in`);
+  // v5.61 Stage 5: shell feedback — guarded inside shellNotifyPlaced.
+  if (typeof window.shellNotifyPlaced === "function")
+    window.shellNotifyPlaced("npc", { id: r.npc.id, name: r.npc.name || "Person" });
 }
 
 function stockRowHtml(ln) {
@@ -14628,7 +14803,8 @@ window.CrumbsShell = {
   // Device-local PRESENTATION prefs only — never permissions, never secrets.
   // coachDismissed: per-world first-entry coach card dismissal (Stage 4).
   prefs: { welcomeCompleted: false, reduceMotion: false,
-           textSize: "normal", highContrast: false, coachDismissed: {} },
+           textSize: "normal", highContrast: false, coachDismissed: {},
+           buildRecents: [] },
   // Stage 4 working state (not part of the spec's state model): which world
   // file the canvas currently shows, so the nav can return to it.
   currentFile: null,
@@ -14650,6 +14826,9 @@ function shellLoadPrefs() {
       for (var k in p.coachDismissed)
         if (p.coachDismissed[k] === true) cur.coachDismissed[k] = true;
     }
+    // Stage 5: recently placed item ids (most recent first, capped at 6).
+    if (Array.isArray(p.buildRecents))
+      cur.buildRecents = p.buildRecents.filter(function (x) { return typeof x === "string" || typeof x === "number"; }).slice(0, 6);
   } catch (e) {}
 }
 function shellSavePrefs() {
@@ -15475,21 +15654,25 @@ function shellWireNav(root) {
     b.onclick = function () { shellNavGo(b.getAttribute("data-nav")); };
   })(btns[i]);
 }
-// STAGE-5: build -> open the Build Drawer over the canvas (no navigation).
 // STAGE-6: world -> open the World Drawer over the canvas (no navigation).
 // STAGE-7: play -> Play Entry card, then the Play transition.
-// Stage 4: the drawers and Play Entry are not built yet. Build returns to
-// the canvas for the current world, World opens the My Worlds library, and
-// Play uses the workshop until its entry lands. Tapping the active
-// destination is a no-op (standard tab behavior).
+// Stage 5: Build opens the Build Drawer over the canvas. Tapping Build while
+// the drawer is open closes it (toggle). World opens the My Worlds library,
+// and Play uses the workshop until its entry lands.
 function shellNavGo(dest) {
   var st = window.CrumbsShell.state;
+  if (dest === "build") {
+    if ($("sh-build-drawer")) { shellCloseBuildDrawer(); return; }
+    var f = window.CrumbsShell.currentFile;
+    if (!f) { shellShowHome(); return; }
+    if (st.destination !== "build" || !$("sh-canvas-frame")) shellShowCanvas(f);
+    shellOpenBuildDrawer("home");
+    return;
+  }
   if (st.destination === dest) return;
   st.destination = dest;
-  if (dest === "build") {
-    var f = window.CrumbsShell.currentFile;
-    if (f) shellShowCanvas(f); else shellShowHome();
-  } else if (dest === "world") {
+  shellCloseBuildDrawer();
+  if (dest === "world") {
     shellShowWorlds();
   } else if (dest === "play") {
     location.href = "/classic";  // STAGE-7: replace with Play Entry
@@ -15544,13 +15727,12 @@ function shellShowCanvas(file) {
   $("sh-canvas-menu").onclick = function () { shellOpenMenu($("sh-canvas-menu")); };
   shellWireNav(root);
   if (!shellCoachDismissed(file)) {
-    // STAGE-5: Paint/Place open the Build Drawer. Until then the workshop
-    // (which has the real paint and place tools) is the honest destination.
+    // STAGE-5: Paint/Place open the Build Drawer on the matching view.
     $("sh-coach-paint").onclick = function () {
-      shellDismissCoach(file); location.href = "/classic";
+      shellDismissCoach(file); shellOpenBuildDrawer("paint");
     };
     $("sh-coach-place").onclick = function () {
-      shellDismissCoach(file); location.href = "/classic";
+      shellDismissCoach(file); shellOpenBuildDrawer("place");
     };
     // STAGE-7: replace with the Play Entry card.
     $("sh-coach-play").onclick = function () {
@@ -15558,6 +15740,440 @@ function shellShowCanvas(file) {
     };
     $("sh-coach-x").onclick = function () { shellDismissCoach(file); };
   }
+}
+
+// ---- Stage 5: Build Drawer (Screen 07) ----
+// A simplified doorway into creation. The drawer lives in the shell (parent
+// page); the map canvas lives in the iframe (/classic?shellframe=1). The
+// drawer drives the REAL classic tools through the iframe — selectTile,
+// setBrushTool, itemPlace/npcPlace arming, doUndo/doRedo — and the iframe
+// reports placements back via shellPlacedFeedback (see the shellNotifyPlaced
+// hooks in the classic code). Nothing is duplicated; nothing is faked.
+var _buildReturnFocus = null;
+var _buildView = "home";
+var _buildConfirmTimer = null;
+// True once THIS drawer session arms a tool (brush/item/NPC). Reset on close
+// and on disarm. shellMapTapped uses this — not live iframe state — so a
+// brush left armed from an earlier session never traps the drawer open.
+var _buildSessionArmed = false;
+
+function shellFrameWin() {
+  try {
+    var f = document.getElementById("sh-canvas-frame");
+    return (f && f.contentWindow) ? f.contentWindow : null;
+  } catch (e) { return null; }
+}
+function shellFrameReady() {
+  var fw = shellFrameWin();
+  try { return !!(fw && typeof fw.selectTile === "function" && typeof fw.doUndo === "function"); }
+  catch (e) { return false; }
+}
+
+function shellOpenBuildDrawer(view) {
+  shellCloseMenu();  // one drawer at a time
+  var st = window.CrumbsShell.state;
+  if (st.destination !== "build" || !$("sh-canvas-frame")) {
+    var f = window.CrumbsShell.currentFile;
+    if (!f) { shellShowHome(); return; }
+    shellShowCanvas(f);
+  }
+  if ($("sh-build-drawer")) { if (view) shellBuildShow(view); return; }
+  _buildReturnFocus = document.activeElement;
+  st.drawer = "half";
+  st.destination = "build";
+  var wrap = document.createElement("div");
+  wrap.id = "sh-build-drawer";
+  wrap.className = "sh-build-drawer";
+  wrap.setAttribute("role", "dialog");
+  wrap.setAttribute("aria-modal", "false");
+  wrap.setAttribute("aria-label", "Build");
+  wrap.innerHTML =
+    '<div class="sh-build-head">' +
+      '<div class="sh-build-grab" aria-hidden="true"></div>' +
+      '<button type="button" class="sh-build-back" id="sh-build-back" aria-label="Back">&lsaquo;</button>' +
+      '<h2 class="sh-build-title" id="sh-build-title">Build</h2>' +
+      '<button type="button" class="sh-build-close" id="sh-build-close" aria-label="Close build tools">&times;</button>' +
+    "</div>" +
+    '<div class="sh-build-body" id="sh-build-body"></div>';
+  shellRootEl().appendChild(wrap);
+  $("sh-build-back").onclick = function () { shellBuildShow("home"); };
+  $("sh-build-close").onclick = shellCloseBuildDrawer;
+  document.addEventListener("keydown", shellBuildKeys);
+  shellBuildShow(view || "home");
+  $("sh-build-close").focus();
+}
+function shellBuildKeys(e) { if (e.key === "Escape") shellCloseBuildDrawer(); }
+function shellCloseBuildDrawer() {
+  var d = $("sh-build-drawer");
+  if (d && d.parentNode) d.parentNode.removeChild(d);
+  document.removeEventListener("keydown", shellBuildKeys);
+  window.CrumbsShell.state.drawer = "closed";
+  _buildSessionArmed = false;
+  var c = $("sh-build-confirm");
+  if (c && c.parentNode) c.parentNode.removeChild(c);
+  if (_buildConfirmTimer) { clearTimeout(_buildConfirmTimer); _buildConfirmTimer = null; }
+  if (_buildReturnFocus && _buildReturnFocus.focus) {
+    try { _buildReturnFocus.focus(); } catch (e) {}
+  }
+  _buildReturnFocus = null;
+  _buildView = "home";
+}
+
+var SHELL_BUILD_TITLES = { home: "Build", paint: "Paint", place: "Place",
+  people: "People", more: "More", look: "Pick a Look" };
+function shellBuildShow(view) {
+  _buildView = view;
+  var t = $("sh-build-title");
+  if (t) t.textContent = SHELL_BUILD_TITLES[view] || "Build";
+  var back = $("sh-build-back");
+  if (back) back.style.visibility = (view === "home" || view === "look") ? "hidden" : "visible";
+  var body = $("sh-build-body");
+  if (!body) return;
+  body.innerHTML = '<div class="sh-build-empty">Loading&hellip;</div>';
+  body.scrollTop = 0;
+  if (view === "home") shellBuildHomeInto(body);
+  else if (view === "paint") shellBuildPaintInto(body);
+  else if (view === "place") shellBuildPlaceInto(body);
+  else if (view === "people") shellBuildPeopleInto(body);
+  else if (view === "look") shellBuildLookInto(body);
+  else if (view === "more") shellBuildMoreInto(body);
+  else shellBuildHomeInto(body);
+}
+
+function shellBuildHomeInto(body) {
+  body.innerHTML =
+    '<div class="sh-build-cards">' +
+      '<button type="button" class="sh-build-card" data-bview="paint">' +
+        '<span class="sh-bc-ico" aria-hidden="true">\uD83D\uDD8C\uFE0F</span><b>Paint</b><small>Brushes, undo, redo</small>' +
+      "</button>" +
+      '<button type="button" class="sh-build-card" data-bview="place">' +
+        '<span class="sh-bc-ico" aria-hidden="true">\uD83D\uDCE6</span><b>Place</b><small>Objects and decorations</small>' +
+      "</button>" +
+      '<button type="button" class="sh-build-card" data-bview="people">' +
+        '<span class="sh-bc-ico" aria-hidden="true">\uD83E\uDDD1</span><b>People</b><small>Villagers and merchants</small>' +
+      "</button>" +
+      '<button type="button" class="sh-build-card" data-bview="more">' +
+        '<span class="sh-bc-ico" aria-hidden="true">\u22EF</span><b>More</b><small>Portals, rules, art, tools</small>' +
+      "</button>" +
+    "</div>" +
+    '<p class="sh-build-hint">Pick what you want to do — the map stays right there above.</p>';
+  var cards = body.querySelectorAll("[data-bview]");
+  for (var i = 0; i < cards.length; i++) (function (c) {
+    c.onclick = function () { shellBuildShow(c.getAttribute("data-bview")); };
+  })(cards[i]);
+}
+
+// ---- Paint view: simplified doorway to the real brush ----
+async function shellBuildPaintInto(body) {
+  var pal = [];
+  try {
+    var r = await api("/api/palette");
+    if (r && r.tiles) pal = r.tiles;
+  } catch (e) {}
+  if (!pal.length) {
+    body.innerHTML = '<div class="sh-build-empty">Couldn\'t load the tile set. Check the connection and try again.</div>' +
+      '<div class="sh-build-row"><button type="button" class="sh-btn-secondary" id="sh-b-paint-retry">Retry</button></div>';
+    $("sh-b-paint-retry").onclick = function () { shellBuildShow("paint"); };
+    return;
+  }
+  var fw = shellFrameWin(), curId = null, curName = "No brush selected";
+  try {
+    var ts = fw && fw.shellToolState ? fw.shellToolState() : null;
+    if (ts) curId = ts.selTile;
+  } catch (e) {}
+  var cur = null;
+  for (var i = 0; i < pal.length; i++) if (pal[i].id === curId) { cur = pal[i]; break; }
+  if (cur) curName = cur.name || ("Tile " + cur.id);
+  var h = '<div class="sh-build-section-title">Current brush</div>' +
+    '<div class="sh-current-brush">' +
+      (cur ? '<img src="/api/thumb/' + encodeURIComponent(cur.id) + '" alt="">' : "") +
+      '<div class="sh-cb-meta"><b></b><small>Tap a tile below to change it</small></div>' +
+    "</div>" +
+    '<div class="sh-build-row">' +
+      '<button type="button" class="sh-btn-secondary" id="sh-b-undo">\u21A9 Undo</button>' +
+      '<button type="button" class="sh-btn-secondary" id="sh-b-redo">\u21AA Redo</button>' +
+    "</div>" +
+    '<div class="sh-build-section-title">Tiles</div>' +
+    '<div class="sh-swatch-grid" role="group" aria-label="Paint tiles">';
+  for (var j = 0; j < pal.length; j++) {
+    var t = pal[j], sel = (t.id === curId);
+    h += '<button type="button" class="sh-swatch" data-tid="' + esc(String(t.id)) + '"' +
+      ' aria-pressed="' + (sel ? "true" : "false") + '" title="' + esc(t.name || ("Tile " + t.id)) + '">' +
+      '<img src="/api/thumb/' + encodeURIComponent(t.id) + '" alt="" loading="lazy">' +
+      '<span class="sh-sw-name">' + esc(t.name || ("Tile " + t.id)) + "</span></button>";
+  }
+  h += "</div>" +
+    '<div class="sh-build-row"><button type="button" class="sh-btn-secondary" id="sh-b-morepaint">More Paint Options</button></div>' +
+    '<p class="sh-build-hint">Pick a tile, then paint right on the map above. Your change lands when you lift your finger.</p>';
+  body.innerHTML = h;
+  body.querySelector(".sh-cb-meta b").textContent = curName;
+  var sw = body.querySelectorAll(".sh-swatch");
+  for (var k = 0; k < sw.length; k++) (function (s) {
+    s.onclick = function () { shellArmBrush(s.getAttribute("data-tid")); };
+  })(sw[k]);
+  $("sh-b-undo").onclick = async function () {
+    var f2 = shellFrameWin();
+    try { if (f2 && f2.doUndo) await f2.doUndo(); } catch (e) {}
+    shellBuildShow("paint");
+  };
+  $("sh-b-redo").onclick = async function () {
+    var f2 = shellFrameWin();
+    try { if (f2 && f2.doRedo) await f2.doRedo(); } catch (e) {}
+    shellBuildShow("paint");
+  };
+  // Honest bridge: the full paint workshop (scatter, fill, meaning brushes…)
+  // lives in the classic HUD until a simplified version lands.
+  $("sh-b-morepaint").onclick = function () { location.href = "/classic"; };
+}
+function shellArmBrush(tid) {
+  var fw = shellFrameWin();
+  if (!shellFrameReady()) { shellBuildConfirm("Canvas is still warming up — try again in a moment"); return; }
+  try {
+    var id = (/^\d+$/.test(tid)) ? parseInt(tid, 10) : tid;
+    fw.selectTile(id);
+    fw.setBrushTool("paint");
+    _buildSessionArmed = true;
+  } catch (e) {}
+  shellBuildShow("paint");
+}
+
+// ---- Place view: real item library, arming the real placement tool ----
+async function shellBuildPlaceInto(body) {
+  var items = [];
+  try {
+    var r = await api("/api/items");
+    if (r && r.ok && r.items) items = r.items;
+  } catch (e) {}
+  var fw = shellFrameWin(), armedId = null, armedName = "";
+  try {
+    var ts = fw && fw.shellToolState ? fw.shellToolState() : null;
+    if (ts) armedId = ts.itemPlace;
+  } catch (e) {}
+  var byId = {};
+  for (var i = 0; i < items.length; i++) byId[items[i].id] = items[i];
+  if (armedId != null && byId[armedId]) armedName = byId[armedId].name;
+  var h = "";
+  if (armedId != null) {
+    h += '<div class="sh-arm-banner" role="status"><span>\uD83D\uDCE6 <b></b> — tap the map to place it</span>' +
+      '<button type="button" class="sh-btn-secondary" id="sh-b-disarm">Done</button></div>';
+  }
+  var recents = window.CrumbsShell.prefs.buildRecents || [];
+  var recentItems = [], rest = [], seen = {};
+  for (var ri = 0; ri < recents.length; ri++) {
+    var rit = byId[recents[ri]];
+    if (rit) { recentItems.push(rit); seen[rit.id] = true; }
+  }
+  for (var ai = 0; ai < items.length; ai++) if (!seen[items[ai].id]) rest.push(items[ai]);
+  function card(t) {
+    var sel = (t.id === armedId);
+    return '<button type="button" class="sh-place-card" data-iid="' + esc(String(t.id)) + '"' +
+      ' aria-pressed="' + (sel ? "true" : "false") + '">' +
+      '<img src="/api/thumb/' + encodeURIComponent(t.tile_id) + '" alt="" loading="lazy">' +
+      '<span class="sh-pc-meta"><b></b><small>' + esc(t.kind || "object") + "</small></span>" +
+      (sel ? '<span class="sh-pc-check" aria-hidden="true">\u2713</span>' : "") + "</button>";
+  }
+  if (recentItems.length) {
+    h += '<div class="sh-build-section-title">Recently used</div><div class="sh-place-grid">';
+    for (var q = 0; q < recentItems.length; q++) h += card(recentItems[q]);
+    h += "</div>";
+  }
+  h += '<div class="sh-build-section-title">All objects</div>';
+  if (!items.length) {
+    h += '<div class="sh-build-empty">No objects yet — make some in the full workshop.</div>';
+  } else {
+    h += '<div class="sh-place-grid">';
+    for (var w = 0; w < rest.length; w++) h += card(rest[w]);
+    h += "</div>";
+  }
+  h += '<p class="sh-build-hint">Pick an object, then tap the map to place it. It stays selected until you tap Done.</p>';
+  body.innerHTML = h;
+  if (armedId != null) {
+    var bn = body.querySelector(".sh-arm-banner b");
+    if (bn) bn.textContent = armedName || "Object";
+    $("sh-b-disarm").onclick = shellDisarmPlace;
+  }
+  var names = body.querySelectorAll(".sh-place-card .sh-pc-meta b");
+  var cards = body.querySelectorAll(".sh-place-card");
+  for (var c = 0; c < cards.length; c++) {
+    (function (el, idx) {
+      var t = (idx < recentItems.length) ? recentItems[idx] :
+        rest[idx - recentItems.length];
+      if (names[idx]) names[idx].textContent = t.name || ("Object " + t.id);
+      el.onclick = function () { shellArmItem(t.id); };
+    })(cards[c], c);
+  }
+}
+function shellArmItem(id) {
+  if (!shellFrameReady()) { shellBuildConfirm("Canvas is still warming up — try again in a moment"); return; }
+  var fw = shellFrameWin();
+  try { if (fw && fw.shellArmItem) { fw.shellArmItem(id); _buildSessionArmed = true; } } catch (e) {}
+  shellBuildShow("place");
+}
+function shellDisarmPlace() {
+  var fw = shellFrameWin();
+  try { if (fw && fw.shellDisarmTools) fw.shellDisarmTools(); } catch (e) {}
+  _buildSessionArmed = false;
+  shellBuildShow("place");
+}
+
+// ---- People view: real NPC roster + Add Person flow ----
+async function shellBuildPeopleInto(body) {
+  var npcs = [];
+  try {
+    var r = await api("/api/npcs");
+    if (r && r.ok && r.npcs) npcs = r.npcs;
+  } catch (e) {}
+  var fw = shellFrameWin(), npcArmed = false;
+  try {
+    var ts = fw && fw.shellToolState ? fw.shellToolState() : null;
+    npcArmed = !!(ts && ts.npcPlace);
+  } catch (e) {}
+  var h = "";
+  if (npcArmed) {
+    h += '<div class="sh-arm-banner" role="status"><span>\uD83E\uDDD1 <b>Placing someone</b> — tap the map to put them down</span>' +
+      '<button type="button" class="sh-btn-secondary" id="sh-b-npc-cancel">Cancel</button></div>';
+  }
+  h += '<div class="sh-build-row" style="margin-top:0;margin-bottom:6px;">' +
+    '<button type="button" class="sh-btn-primary" id="sh-b-addperson" style="flex:1">+ Add Person</button></div>' +
+    '<div class="sh-build-section-title">People in this world</div>';
+  if (!npcs.length) {
+    h += '<div class="sh-build-empty">Nobody lives here yet — add the first person above.</div>';
+  } else {
+    for (var i = 0; i < npcs.length; i++) {
+      var n = npcs[i];
+      h += '<div class="sh-npc-row"><img src="/api/thumb/' + encodeURIComponent(n.tile_id) + '" alt="" loading="lazy">' +
+        '<span class="sh-npc-meta"><b></b><small>' +
+        esc(n.role === "merchant" ? "\uD83C\uDFEA merchant" : "\uD83E\uDDD1 villager") + "</small></span></div>";
+    }
+  }
+  h += '<div class="sh-build-row"><button type="button" class="sh-btn-secondary" id="sh-b-npcdetails">Edit Details</button></div>' +
+    '<p class="sh-build-hint">Traits, dialogue, and patrols live in the full workshop.</p>';
+  body.innerHTML = h;
+  var rows = body.querySelectorAll(".sh-npc-row .sh-npc-meta b");
+  for (var b = 0; b < rows.length; b++) rows[b].textContent = npcs[b].name || ("Person " + npcs[b].id);
+  $("sh-b-addperson").onclick = function () { shellBuildShow("look"); };
+  // Honest bridge: advanced NPC editing stays in the classic workshop.
+  $("sh-b-npcdetails").onclick = function () { location.href = "/classic"; };
+  var cancel = $("sh-b-npc-cancel");
+  if (cancel) cancel.onclick = function () {
+    var f2 = shellFrameWin();
+    try { if (f2 && f2.shellArmNpc) f2.shellArmNpc(false); } catch (e) {}
+    _buildSessionArmed = false;
+    shellBuildShow("people");
+  };
+}
+// Look picker for Add Person: choose the tile that becomes their appearance.
+async function shellBuildLookInto(body) {
+  var pal = [];
+  try {
+    var r = await api("/api/palette");
+    if (r && r.tiles) pal = r.tiles;
+  } catch (e) {}
+  if (!pal.length) {
+    body.innerHTML = '<div class="sh-build-empty">Couldn\'t load the tile set.</div>' +
+      '<div class="sh-build-row"><button type="button" class="sh-btn-secondary" id="sh-b-look-retry">Retry</button></div>';
+    $("sh-b-look-retry").onclick = function () { shellBuildShow("look"); };
+    return;
+  }
+  var h = '<div class="sh-build-section-title">Pick their look</div><div class="sh-swatch-grid" role="group" aria-label="Person appearance">';
+  for (var i = 0; i < pal.length; i++) {
+    var t = pal[i];
+    h += '<button type="button" class="sh-swatch" data-tid="' + esc(String(t.id)) + '" title="' + esc(t.name || ("Tile " + t.id)) + '">' +
+      '<img src="/api/thumb/' + encodeURIComponent(t.id) + '" alt="" loading="lazy">' +
+      '<span class="sh-sw-name">' + esc(t.name || ("Tile " + t.id)) + "</span></button>";
+  }
+  h += '</div><p class="sh-build-hint">Choose how they look, then tap the map to place them.</p>';
+  body.innerHTML = h;
+  var sw = body.querySelectorAll(".sh-swatch");
+  for (var k = 0; k < sw.length; k++) (function (s) {
+    s.onclick = function () { shellArmNpc(s.getAttribute("data-tid")); };
+  })(sw[k]);
+}
+function shellArmNpc(tid) {
+  if (!shellFrameReady()) { shellBuildConfirm("Canvas is still warming up — try again in a moment"); return; }
+  var fw = shellFrameWin();
+  try {
+    var id = (/^\d+$/.test(tid)) ? parseInt(tid, 10) : tid;
+    if (fw && fw.shellArmNpc) { fw.shellArmNpc(true, id); _buildSessionArmed = true; }
+  } catch (e) {}
+  shellBuildShow("people");
+}
+
+// ---- More view: the bridge to the full workshop (never faked) ----
+var SHELL_BUILD_MORE = [
+  { id: "details", icon: "\uD83D\uDD0D", name: "Details", desc: "Inspect anything up close" },
+  { id: "portals", icon: "\uD83C\uDF00", name: "Portals", desc: "Link maps together" },
+  { id: "rules", icon: "\uD83D\uDCDC", name: "Rules", desc: "Game rules and logic" },
+  { id: "art", icon: "\uD83C\uDFA8", name: "Art", desc: "Tile art and imports" },
+  { id: "animation", icon: "\uD83C\uDF9E\uFE0F", name: "Animation", desc: "Bring tiles to life" },
+  { id: "suggestions", icon: "\uD83D\uDCA1", name: "Suggestions", desc: "Ideas and helpers" },
+  // STAGE-8: Creator Tools gets its proper gateway screen then; until then
+  // the full workshop is the honest destination.
+  { id: "creator", icon: "\uD83D\uDEE0\uFE0F", name: "Creator Tools", desc: "The full workshop" }
+];
+function shellBuildMoreInto(body) {
+  var h = "";
+  for (var i = 0; i < SHELL_BUILD_MORE.length; i++) {
+    var m = SHELL_BUILD_MORE[i];
+    h += '<button type="button" class="sh-more-item" data-more="' + m.id + '">' +
+      '<span class="sh-mi" aria-hidden="true">' + m.icon + "</span>" +
+      '<span><b></b><br><small style="font-size:14px;color:#8f8672">' + esc(m.desc) + "</small></span>" +
+      '<span class="sh-go" aria-hidden="true">&rsaquo;</span></button>';
+  }
+  h += '<p class="sh-build-hint">These open the full workshop — nothing here is simplified or hidden.</p>';
+  body.innerHTML = h;
+  var items = body.querySelectorAll(".sh-more-item");
+  for (var k = 0; k < items.length; k++) (function (el, idx) {
+    el.querySelector("b").textContent = SHELL_BUILD_MORE[idx].name;
+    el.onclick = function () { location.href = "/classic"; };
+  })(items[k], k);
+}
+
+// ---- Placement feedback: called by the iframe via shellNotifyPlaced ----
+function shellPlacedFeedback(kind, info) {
+  info = info || {};
+  var label = kind === "paint" ? "Tile Painted" :
+              kind === "item" ? "Object Placed" :
+              kind === "npc" ? "Person Added" : "Done";
+  if (kind === "item" && info.id != null) {
+    var p = window.CrumbsShell.prefs, rec = p.buildRecents || [];
+    rec = rec.filter(function (x) { return x !== info.id; });
+    rec.unshift(info.id);
+    p.buildRecents = rec.slice(0, 6);
+    shellSavePrefs();
+    if (_buildView === "place") shellBuildShow("place");
+  }
+  if (kind === "npc" && _buildView === "people") shellBuildShow("people");
+  // The classic NPC flow disarms itself on a successful placement.
+  if (kind === "npc") _buildSessionArmed = false;
+  // Undo stays visible after the action — the Paint view keeps its buttons;
+  // the confirmation is deliberately brief and never per-cell (the iframe
+  // notifies once per completed gesture, not per cell).
+  shellBuildConfirm(label);
+}
+function shellBuildConfirm(label) {
+  var old = $("sh-build-confirm");
+  if (old && old.parentNode) old.parentNode.removeChild(old);
+  var el = document.createElement("div");
+  el.id = "sh-build-confirm";
+  el.className = "sh-build-confirm";
+  el.setAttribute("role", "status");
+  el.innerHTML = '<span class="sh-cc-check" aria-hidden="true">\u2713</span><span></span>';
+  el.querySelector("span:last-child").textContent = label;
+  shellRootEl().appendChild(el);
+  if (_buildConfirmTimer) clearTimeout(_buildConfirmTimer);
+  _buildConfirmTimer = setTimeout(function () {
+    if (el.parentNode) el.parentNode.removeChild(el);
+    _buildConfirmTimer = null;
+  }, 2200);
+}
+
+// ---- Outside-tap: called by the iframe on a confirmed map tap ----
+function shellMapTapped() {
+  if (!$("sh-build-drawer")) return;
+  // A tap while this drawer session has a tool armed is work, not dismissal.
+  // A bare tap (nothing armed since the drawer opened) closes the drawer.
+  if (!_buildSessionArmed) shellCloseBuildDrawer();
 }
 
 // ---- Stage 2: boot ----
@@ -15607,6 +16223,56 @@ async function shellBoot() {
       if (new URLSearchParams(location.search).get("shellframe") === "1")
         document.documentElement.dataset.shellframe = "1";
     } catch (e) {}
+    // v5.61 Stage 5: shell placement feedback + pulse. Additive and
+    // shellframe-only: the shell drawer (parent page) arms tools through this
+    // frame; these hooks let it confirm placements and pulse the touch point.
+    // Never fires in the classic HUD (dataset guard). Defined here so it is
+    // available before any stroke/placement can complete.
+    window.shellNotifyPlaced = function (kind, info) {
+      try {
+        if (document.documentElement.dataset.shellframe !== "1") return;
+        info = info || {};
+        var x = (typeof lastTouchX === "number") ? lastTouchX : window.innerWidth / 2;
+        var y = (typeof lastTouchY === "number") ? lastTouchY : window.innerHeight / 2;
+        var d = document.createElement("div");
+        d.className = "shell-pulse"; d.setAttribute("aria-hidden", "true");
+        d.style.left = (x - 26) + "px"; d.style.top = (y - 26) + "px";
+        document.body.appendChild(d);
+        setTimeout(function () { if (d.parentNode) d.parentNode.removeChild(d); }, 700);
+        if (window.parent && window.parent !== window &&
+            typeof window.parent.shellPlacedFeedback === "function")
+          window.parent.shellPlacedFeedback(kind, info);
+      } catch (e) {}
+    };
+    // v5.61 Stage 5: shell tool bridge. The classic tool state uses `let`
+    // bindings, which do NOT become window properties — so the parent shell
+    // cannot set them via frame.itemPlace = x (that would only shadow).
+    // These functions run in classic scope and touch the real bindings.
+    // selectTile/setBrushTool/doUndo/doRedo are function declarations, so
+    // the parent can call them directly; the lets need these setters.
+    window.shellToolState = function () {
+      try { return { itemPlace: itemPlace, npcPlace: npcPlace, selTile: selTile, brushTool: brushTool }; }
+      catch (e) { return null; }
+    };
+    window.shellArmItem = function (id) {
+      try {
+        itemPlace = id; npcPlace = false;
+        if (typeof syncNpcPlaceBtn === "function") syncNpcPlaceBtn();
+      } catch (e) {}
+    };
+    window.shellArmNpc = function (on, tid) {
+      try {
+        if (tid != null && typeof selectTile === "function") selectTile(tid);
+        npcPlace = !!on; if (on) itemPlace = null;
+        if (typeof syncNpcPlaceBtn === "function") syncNpcPlaceBtn();
+      } catch (e) {}
+    };
+    window.shellDisarmTools = function () {
+      try {
+        itemPlace = null; npcPlace = false;
+        if (typeof syncNpcPlaceBtn === "function") syncNpcPlaceBtn();
+      } catch (e) {}
+    };
     // v5.27: public mode parks on the login overlay until the user logs
     // in; local mode skips the gate and boots straight in.
     if (!(await authGate())) return;

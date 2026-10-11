@@ -489,6 +489,11 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   #login-box { background: #14141c; border: 1px solid #2a2a38; border-radius: 12px;
     padding: 24px; width: min(86vw, 320px); text-align: center; }
   #login-box h2 { color: #ffd75f; margin: 0 0 4px; font-size: 20px; }
+  /* v5.61: the Crumbs World shield on the login card */
+  #login-logo { width: 120px; height: 120px; object-fit: cover;
+    object-position: center 30%; border-radius: 14px; margin-bottom: 10px;
+    border: 1px solid #2a2a38;
+    box-shadow: 0 0 22px rgba(255,90,90,.28), 0 0 22px rgba(90,140,255,.28); }
   #login-box .login-sub { color: #888; font-size: 12px; margin-bottom: 14px; }
   #login-box input:not([type=checkbox]) { display: block; width: 100%; box-sizing: border-box;
     margin: 8px 0; padding: 10px; border-radius: 8px; border: 1px solid #333;
@@ -3761,7 +3766,9 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
 <!-- v5.27: login overlay (public mode only) -->
 <div id="login-overlay">
   <div id="login-box">
-    <h2>&#x1F9F1; Crumbs HUD</h2>
+    <!-- v5.61: the shield — no more brick emoji -->
+    <img id="login-logo" src="/splash-logo-cw.jpg" alt="Crumbs World">
+    <h2>Crumbs HUD</h2>
     <div class="login-tabs">
       <button id="tab-login" class="on">Log in</button>
       <button id="tab-signup">Sign up</button>
@@ -13404,6 +13411,7 @@ $("menu-update").onclick = async () => {
       const artNames = ["shared_library.json", "shared_library/starter_pack.png",
         "sprite_library.json", "asset_library/hero_hood.png",
         "asset_library/logo_rata.png", "asset_library/portrait_apple.jpg",
+        "splash-logo-cw.jpg",
         "asset_library/melody_trueform_portrait.png",
         "asset_library/melody_trueform_f0.png",
         "asset_library/melody_trueform_f1.png",

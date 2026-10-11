@@ -211,6 +211,7 @@ UPDATE_ART_FILES = [
     "asset_library/hero_hood.png",
     "asset_library/logo_rata.png",
     "asset_library/portrait_apple.jpg",
+    "splash-logo-cw.jpg",
     "asset_library/melody_trueform_portrait.png",
     "asset_library/melody_trueform_f0.png",
     "asset_library/melody_trueform_f1.png",
@@ -7708,15 +7709,18 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/slots":
             # v5.6: play-session save slots for the current map
             self._send_json({"slots": _load_slots(), "map": _current_map})
-        elif path in ("/icon-512.png", "/favicon.ico"):
+        elif path in ("/icon-512.png", "/favicon.ico", "/splash-logo-cw.jpg"):
             # v5.6: app icon / favicon (splash + home-screen icon)
+            # v5.61: the Crumbs World shield for the login card
+            fname = "splash-logo-cw.jpg" if path == "/splash-logo-cw.jpg" else "icon-512.png"
+            ctype = "image/jpeg" if fname.endswith(".jpg") else "image/png"
             try:
-                with open(os.path.join(SCRIPT_DIR, "icon-512.png"), "rb") as f:
+                with open(os.path.join(SCRIPT_DIR, fname), "rb") as f:
                     data = f.read()
             except OSError:
                 return self._send_json({"ok": False, "error": "no icon yet"}, 404)
             self.send_response(200)
-            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "max-age=3600")
             self.end_headers()

@@ -6824,6 +6824,20 @@ const SHEET_HEIGHTS = ["peek", "half", "full"];
 const SHEET_VIEWS = ["paint", "tiles", "inspect", "anim", "npc", "suggest"];
 const SHEET_TITLES = { paint: "🎨 Paint", tiles: "🧱 Tiles", inspect: "🔍 Inspect",
   anim: "🎞 Animate", npc: "🚶 Patrol", suggest: "💡 Melody suggests" };
+// v5.61.0: layer-aware sheet — Lloyd's call. The sheet only shows views that
+// make sense for the active map layer, cutting the overcrowded feeling. The
+// Tiles/Objects/Characters layers get the art views; Colors and Collision
+// are data layers, so they get the lean set.
+const SHEET_VIEWS_BY_LAYER = {
+  tiles:      ["paint", "tiles", "inspect", "anim", "suggest"],
+  colors:     ["paint", "inspect", "suggest"],
+  objects:    ["paint", "tiles", "inspect", "anim", "suggest"],
+  characters: ["paint", "tiles", "inspect", "anim", "npc", "suggest"],
+  collision:  ["paint", "inspect", "suggest"],
+};
+function sheetViewsForLayer(l) {
+  return SHEET_VIEWS_BY_LAYER[l] || SHEET_VIEWS.slice();
+}
 function sheetNextHeight(h) {
   const i = SHEET_HEIGHTS.indexOf(h);
   return SHEET_HEIGHTS[(i + 1) % SHEET_HEIGHTS.length] || "peek";
@@ -12575,6 +12589,7 @@ document.querySelectorAll("#layer-seg button").forEach(b => {
     const st = selByLayer[layer];
     selTile = (st != null) ? st : defaultBrush(layer);
     buildPalette(); render();
+    syncSheetViewToLayer();   // v5.61.0: sheet follows the layer
   };
 });
 $("btn-eraser").onclick = () => {
@@ -15139,7 +15154,10 @@ function renderSheet() {
       () => PanelSys.fwd(), PanelSys.hix < PanelSys.hist.length - 1);
   const meta = [["paint", "🎨"], ["tiles", "🧱"], ["inspect", "🔍"], ["anim", "🎞"],
                 ["npc", "🚶"], ["suggest", "💡"]];
+  // v5.61.0: layer-aware tabs — only views relevant to the active layer.
+  const allowed = sheetViewsForLayer(typeof layer !== "undefined" ? layer : null);
   for (const [v, g] of meta) {
+    if (!allowed.includes(v)) continue;
     // v5.57 (A-5): Law 11 retired for the suggest tab here too — it stays
     // visible always, matching renderTrayTabs (v5.54.1). A button that only
     // exists sometimes is undiscoverable.
@@ -15399,6 +15417,14 @@ function renderTrayTabs() {
     mkNav("›", "Forward (panel history)",
           () => PanelSys.fwd(), PanelSys.hix < PanelSys.hist.length - 1);
     PANEL_MODULES.filter(m => m.tray === side).forEach(m => {
+      // v5.61.0: layer-aware — only modules relevant to the active layer.
+      // (The suggest tab used to stay visible always; Lloyd asked for the
+      // filter everywhere to cut the overcrowded feeling.)
+      if (typeof layer !== "undefined") {
+        const allowed = sheetViewsForLayer(layer);
+        // "tools" is the right-tray's own module root, always visible there.
+        if (m.id !== "tools" && !allowed.includes(m.id)) return;
+      }
       // v5.54.1: the suggest tab stays visible always — a button that only
       // exists sometimes is undiscoverable. Empty state handled in the card.
       const b = document.createElement("button");
@@ -15464,6 +15490,17 @@ const PanelSys = {
 };
 function setSheetView(v) { PanelSys.setView(v); }   // alias — the old name stuck around
 function openSheet(view, height) { PanelSys.open(view, height); }   // alias
+// v5.61.0: keep the sheet on a view that makes sense for the layer. Called
+// after every layer change; if the current view isn't in the layer's set,
+// fall back to the layer's first view (usually paint).
+function syncSheetViewToLayer() {
+  if (typeof layer === "undefined" || typeof sheetView === "undefined") return;
+  const allowed = sheetViewsForLayer(layer);
+  if (!allowed.includes(sheetView)) {
+    sheetView = allowed[0] || "paint";
+  }
+  if (typeof renderSheet === "function") renderSheet();
+}
 
 function setPanelLayout(which, opts) {
   opts = opts || {};

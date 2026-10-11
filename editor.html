@@ -290,7 +290,12 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
      the classic HUD outside the frame is untouched. */
   html[data-shellframe="1"] #btn-play-fab { display: none !important; }
   html[data-shellframe="1"] #dpad button { min-width: 48px; min-height: 48px; font-size: 22px; }
-  canvas { position: absolute; left: 0; top: 0; display: block; touch-action: none;
+  /* v5.61.0: scoped to the map canvas — the old bare `canvas` selector
+     absolutely-positioned EVERY canvas on the page, so UI canvases with
+     static parents (anim preview, swatches, QR codes) escaped to the nearest
+     fixed ancestor and covered tappable chrome (the sheet's X/back/forward
+     buttons). UI canvases stay in normal flow now. */
+  #stage canvas { position: absolute; left: 0; top: 0; display: block; touch-action: none;
            image-rendering: pixelated; will-change: transform; }
 
   .edge-tab { position: fixed; top: 50%; transform: translateY(-50%); z-index: 35;

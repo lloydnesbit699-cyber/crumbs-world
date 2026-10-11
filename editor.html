@@ -828,6 +828,14 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   #sheet-advanced[hidden] { display: none; }
   #sheet-advanced .adv-title { font-size: 13px; color: #ffd75f; font-weight: bold;
     text-transform: uppercase; letter-spacing: 1px; }
+  /* v5.61.0: collapsible sections — tap title to expand/collapse */
+  #sheet-advanced details.adv-sec { margin-bottom: 4px; }
+  #sheet-advanced details.adv-sec > summary.adv-title { cursor: pointer;
+    list-style: none; padding: 6px 0; }
+  #sheet-advanced details.adv-sec > summary.adv-title::-webkit-details-marker { display: none; }
+  #sheet-advanced details.adv-sec > summary.adv-title::before { content: "▸ ";
+    color: #888; }
+  #sheet-advanced details.adv-sec[open] > summary.adv-title::before { content: "▾ "; }
   #sheet-advanced .adv-row { display: flex; align-items: center; gap: 8px;
     font-size: 13px; color: #ddd; }
   #sheet-advanced .adv-row label { min-width: 90px; }
@@ -16511,20 +16519,29 @@ const PanelSys = {
 function renderAdvanced() {
   const p = $("sheet-advanced"); if (!p) return;
   p.innerHTML = "";
+  // v5.61.0: sections are collapsible <details>, collapsed by default —
+  // Lloyd's fix: the top section was eating the whole panel.
+  let curSec = null;
   const mkTitle = t => {
-    const d = document.createElement("div");
-    d.className = "adv-title"; d.textContent = t; p.appendChild(d);
+    const det = document.createElement("details");
+    det.className = "adv-sec";
+    const sum = document.createElement("summary");
+    sum.className = "adv-title"; sum.textContent = t;
+    det.appendChild(sum);
+    p.appendChild(det);
+    curSec = det;
   };
+  const _parent = () => curSec || p;
   const mkRow = (label, ctrl) => {
     const d = document.createElement("div");
     d.className = "adv-row";
     const l = document.createElement("label"); l.textContent = label;
-    d.appendChild(l); d.appendChild(ctrl); p.appendChild(d);
+    d.appendChild(l); d.appendChild(ctrl); _parent().appendChild(d);
     return d;
   };
   const mkNote = t => {
     const d = document.createElement("div");
-    d.className = "adv-note"; d.textContent = t; p.appendChild(d);
+    d.className = "adv-note"; d.textContent = t; _parent().appendChild(d);
   };
   const mkSlider = (min, max, val, fn) => {
     const w = document.createElement("div");

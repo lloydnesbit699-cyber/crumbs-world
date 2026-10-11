@@ -1779,6 +1779,15 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   @media (min-width: 760px) {
     #shell-root .sh-bottomnav { justify-content: center; }
     #shell-root .sh-navbtn { flex: 0 1 200px; flex-direction: row; gap: 10px; font-size: 16px; }
+    /* Stage 10: tighter computer chrome so the canvas keeps >= 85% of the
+       viewport. Targets stay above the 48px floor; only padding/height trim. */
+    #shell-root .sh-canvas-topbar {
+      padding-top: max(4px, env(safe-area-inset-top)); padding-bottom: 4px;
+    }
+    #shell-root .sh-navbtn { height: 50px; }
+    #shell-root .sh-bottomnav {
+      padding-top: 4px; padding-bottom: max(6px, env(safe-area-inset-bottom));
+    }
   }
   /* First-entry coach card: overlays the canvas above the nav. */
   #shell-root .sh-coach {
@@ -3106,6 +3115,69 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     padding-bottom: calc(max(10px, env(safe-area-inset-bottom)) + 14px);
   }
 
+  /* ===== Stage 10, Screen 04: Create a World ===== */
+  #shell-root .sh-h2 { font-size: 20px; margin: 0 0 10px; color: #f3ead6; }
+  #shell-root .sh-steps {
+    display: flex; gap: 8px; list-style: none; margin: 0 0 16px; padding: 0;
+  }
+  #shell-root .sh-steps li {
+    flex: 1; font-size: 13px; color: #8f8672; text-align: center;
+    padding-top: 8px; border-top: 3px solid #3a352b;
+  }
+  #shell-root .sh-steps li[aria-current="step"] {
+    color: #f3ead6; font-weight: 700; border-top-color: #c9973f;
+  }
+  #shell-root .sh-suggest {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: none; border: 0; color: #c9973f; font-size: 14px;
+    padding: 10px 4px; margin: 2px 0 8px; cursor: pointer; min-height: 44px;
+  }
+  #shell-root .sh-begin-card {
+    display: flex; align-items: center; gap: 12px; width: 100%;
+    text-align: left; padding: 14px; margin: 4px 0 12px;
+    background: #26241f; border: 3px solid #c9973f; border-radius: 14px;
+    box-shadow: 0 0 0 1px #c9973f; color: #f3ead6; cursor: pointer; min-height: 88px;
+  }
+  #shell-root .sh-begin-card .sh-bc-ico { font-size: 34px; line-height: 1; flex: none; }
+  #shell-root .sh-begin-card b { display: block; font-size: 17px; margin-bottom: 2px; }
+  #shell-root .sh-begin-card small { font-size: 14px; color: #cfc6b0; }
+  #shell-root .sh-begin-card .sh-pc-check {
+    margin-left: auto; color: #c9973f; font-size: 22px; font-weight: 700; flex: none;
+  }
+  #shell-root .sh-world-line {
+    font-size: 16px; color: #f3ead6; text-align: center; margin: 10px 0 14px;
+  }
+  html.sh-light #shell-root .sh-h2 { color: #2b2517; }
+  html.sh-light #shell-root .sh-steps li { color: #6a6050; border-top-color: #d8cfbc; }
+  html.sh-light #shell-root .sh-steps li[aria-current="step"] {
+    color: #2b2517; border-top-color: #8a6520;
+  }
+  html.sh-light #shell-root .sh-suggest { color: #8a6520; }
+  html.sh-light #shell-root .sh-begin-card {
+    background: #fffdf8; border-color: #8a6520; box-shadow: 0 0 0 1px #8a6520; color: #2b2517;
+  }
+  html.sh-light #shell-root .sh-begin-card small { color: #5c5344; }
+  html.sh-light #shell-root .sh-begin-card .sh-pc-check { color: #8a6520; }
+  html.sh-light #shell-root .sh-world-line { color: #2b2517; }
+  html.sh-high-contrast #shell-root .sh-begin-card {
+    background: #0a0a0a; border-color: #f3ead6; box-shadow: 0 0 0 1px #f3ead6;
+  }
+  html.sh-high-contrast #shell-root .sh-steps li[aria-current="step"] { border-top-color: #f3ead6; }
+  html.sh-text-large #shell-root .sh-steps li { font-size: 15px; }
+  html.sh-text-large #shell-root .sh-begin-card small,
+  html.sh-text-large #shell-root .sh-suggest { font-size: 16px; }
+  @media (prefers-reduced-motion: reduce) {
+    #shell-root .sh-begin-card { box-shadow: none; }
+  }
+
+  /* ===== Stage 10: Menu Help / Report a Problem ===== */
+  #shell-root .sh-menu-help p { font-size: 15px; color: #f3ead6; margin: 0 0 10px; line-height: 1.45; }
+  #shell-root .sh-menu-help p b { color: #f3ead6; }
+  html.sh-light #shell-root .sh-menu-help p,
+  html.sh-light #shell-root .sh-menu-help p b { color: #2b2517; }
+  html.sh-text-large #shell-root .sh-menu-help p { font-size: 17px; }
+  html.sh-high-contrast #shell-root .sh-menu-help p,
+  html.sh-high-contrast #shell-root .sh-menu-help p b { color: #f3ead6; }
 
 </style>
 </head>
@@ -16406,15 +16478,15 @@ function shellActionCard(id, icon, title, sub) {
     '<span class="sh-go" aria-hidden="true">\u2192</span></button>';
 }
 // Stage 2 routing: the full canvas/create/play flows land in Stages 4-7.
-// Until then every world action opens the existing workshop at /classic,
-// which already loads the tester's vault and world.
+// Stage 10, Screen 04: Create a World is the shell's own 3-step flow
+// (Name -> Choose a Beginning -> Enter) over the real /api/maps/create.
 function shellGoClassic() { location.href = "/classic"; }
 async function shellShowHome() {
   window.CrumbsShell.state.destination = "home";
   shellLoadingScreen("Opening your worlds\u2026");
   var maps = [];
   try {
-    var m = await api("/api/maps");
+    var m = await shellApi("/api/maps");
     maps = (m && m.maps) || [];
   } catch (e) {
     if (e && e.auth) {
@@ -16481,9 +16553,11 @@ async function shellShowHome() {
     $("sh-continue").onclick = function () { shellShowCanvas(top.file); };
     $("sh-play").onclick = function () { shellEnterPlay(top.file); };
   } else {
-    $("sh-create-first").onclick = shellGoClassic;
+    // Stage 10: Create a World opens the shell's Screen 04 flow.
+    $("sh-create-first").onclick = function () { shellShowCreate("home"); };
   }
-  $("sh-create").onclick = shellGoClassic;
+  // Stage 10: the action card opens the shell's Screen 04 flow.
+  $("sh-create").onclick = function () { shellShowCreate("home"); };
   $("sh-myworlds").onclick = shellShowWorlds;
 }
 // ---- Stage 3, Screen 05: My Worlds ----
@@ -16497,8 +16571,8 @@ async function shellShowHome() {
 //     has no per-world check, so a per-card item would be fake.
 //   Restore — stays behind the recovery condition / Creator Tools per the spec;
 //     no recovery testing has been assigned.
-// Open/Play/Create route to /classic until Stages 4-7 land (same marked
-// routing as Stage 2). Cards never carry raw filenames — data-idx only,
+// Open/Play route through the shell's canvas and Play flows (Stages 4-7);
+// Create opens the shell's Screen 04 flow (Stage 10). Cards never carry raw filenames — data-idx only,
 // display names via friendlyName().
 var _worldsAll = [];
 var _worldsList = [];
@@ -16537,9 +16611,9 @@ function shellRenderWorldCards() {
   if (q && !_worldsList.length)
     html += '<p class="sh-hint">No worlds match your search.</p>';
   grid.innerHTML = html;
-  // Stage 4 builds the real create flow; until then the classic workshop
-  // (which can create worlds) is the honest destination.
-  $("sh-world-new").onclick = shellGoClassic;
+  // Stage 10: "Create New World" opens the shell's Screen 04 flow
+  // (Name -> Choose a Beginning -> Enter) over /api/maps/create.
+  $("sh-world-new").onclick = function () { shellShowCreate("worlds"); };
   var cards = grid.querySelectorAll(".sh-world-card");
   for (var c = 0; c < cards.length; c++) (function (card, idx) {
     var mp = _worldsList[idx], nm = friendlyName(mp.file);
@@ -16561,7 +16635,7 @@ async function shellShowWorlds() {
   window.CrumbsShell.state.destination = "world";
   shellLoadingScreen("Opening your worlds\u2026");
   try {
-    var m = await api("/api/maps");
+    var m = await shellApi("/api/maps");
     _worldsAll = ((m && m.maps) || []).slice();
   } catch (e) {
     if (e && e.auth) {
@@ -16775,6 +16849,168 @@ function shellDeleteDialog(mp, returnTo) {
 }
 // ---- Stage 3: toast ----
 var _toastTimer = null;
+// ---- Stage 10: offline fast-path ----
+// When the browser KNOWS the connection is dead, fail fast instead of
+// running api()'s full retry/backoff loop (which exists for iOS freezes,
+// not for known-dead connections). Callers keep their existing try/catch,
+// so the only change is speed: honest error states appear at once.
+function shellIsOffline() {
+  try { return navigator.onLine === false; } catch (e) { return false; }
+}
+async function shellApi(path, body) {
+  if (shellIsOffline()) throw new Error("offline");
+  return api(path, body);
+}
+// ---- Stage 10, Screen 04: Create a World ----
+// The spec's 3-step flow: Name -> Choose a Beginning -> Enter.
+// Minimum behavior: /api/maps/create is the only creation API and no
+// template beginnings ship, so Blank Canvas is the single honest card
+// (the spec forbids faking unavailable templates). Creation errors stay
+// on the screen with Retry and Back — never a blank loading state.
+var _createReturnTo = "home"; // "home" | "worlds"
+var _createName = "";
+var _createEsc = null;
+var _createSugg = ["My First World", "Pixel Hollow", "The Quiet Dungeon", "Ember Isles", "Mossy Depths"];
+var _createSuggIdx = 0;
+function shellCreateEscName(s) {
+  return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+  });
+}
+function shellCreateKeys(e) {
+  if (e.key === "Escape" && _createEsc) { e.preventDefault(); _createEsc(); }
+}
+function shellCreateUnwire() {
+  document.removeEventListener("keydown", shellCreateKeys);
+  _createEsc = null;
+}
+function shellCreateBack() {  // leave the flow entirely
+  if (_createReturnTo === "worlds") shellShowWorlds(); else shellShowHome();
+}
+function shellCreateSteps(cur) {
+  var steps = ["Name", "Choose a Beginning", "Enter"], html = "";
+  for (var i = 0; i < steps.length; i++)
+    html += '<li' + (i === cur ? ' aria-current="step"' : '') + '><span aria-hidden="true">' +
+      (i + 1) + ".</span> " + steps[i] + "</li>";
+  return '<ol class="sh-steps" aria-label="Create a world, step ' + (cur + 1) + " of 3\">" + html + "</ol>";
+}
+function shellCreateTopbar() {
+  return '<div class="sh-topbar">' +
+    '<button class="sh-back-btn" id="sh-cr-back">\u2190 Back</button>' +
+    '<p class="sh-title">Create a World</p>' +
+    '<button class="sh-menu-btn" id="sh-cr-menu" aria-label="Menu" aria-haspopup="dialog">\u2630</button></div>';
+}
+function shellShowCreateStep1() {
+  // Step 1 re-render that keeps the typed name (used by Step 2's Back).
+  shellCreateUnwire();
+  var root = shellShow(
+    '<div class="sh-screen"><div class="sh-scroll"><div class="sh-wrap">' +
+    shellCreateTopbar() +
+    '<div class="sh-card sh-enter" role="form" aria-label="Name your world">' +
+    shellCreateSteps(0) +
+    '<h2 class="sh-h2">Name your world</h2>' +
+    shellField("sh-cr-name", "World Name", "text", "World name", { maxlength: "80" }) +
+    '<button class="sh-suggest" id="sh-cr-suggest" type="button">' +
+      '<span aria-hidden="true">\uD83C\uDFB2</span> Suggest another name</button>' +
+    '<button class="sh-btn-primary" id="sh-cr-next">Next</button>' +
+    "</div></div></div></div>", "Create a World");
+  var input = $("sh-cr-name");
+  input.value = _createName;
+  _createEsc = function () { shellCreateUnwire(); shellCreateBack(); };
+  $("sh-cr-menu").onclick = function () { shellOpenMenu($("sh-cr-menu")); };
+  $("sh-cr-suggest").onclick = function () {
+    _createSuggIdx++;
+    input.value = _createSugg[_createSuggIdx % _createSugg.length];
+    input.focus();
+  };
+  $("sh-cr-back").onclick = function () { shellCreateUnwire(); shellCreateBack(); };
+  var go = function () {
+    var v = input.value.trim();
+    if (!v) { shellFieldError("sh-cr-name", "Give your world a name."); input.focus(); return; }
+    _createName = v;
+    shellShowCreateStep2();
+  };
+  $("sh-cr-next").onclick = go;
+  input.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); go(); }
+  });
+  document.addEventListener("keydown", shellCreateKeys);
+  input.focus(); input.select();
+}
+function shellShowCreate(returnTo) {
+  _createReturnTo = (returnTo === "worlds") ? "worlds" : "home";
+  window.CrumbsShell.state.destination = "create";
+  _createName = _createSugg[_createSuggIdx % _createSugg.length];
+  shellShowCreateStep1();
+}
+function shellShowCreateStep2() {
+  shellCreateUnwire();
+  var root = shellShow(
+    '<div class="sh-screen"><div class="sh-scroll"><div class="sh-wrap">' +
+    shellCreateTopbar() +
+    '<div class="sh-card sh-enter">' + shellCreateSteps(1) +
+    '<h2 class="sh-h2">Choose a beginning</h2>' +
+    '<p class="sh-sub">Pick how your world starts. You can change everything later.</p>' +
+    '<button class="sh-begin-card" id="sh-cr-begin" aria-pressed="true" ' +
+      'aria-label="Blank Canvas, selected. A fresh 25 by 15 map.">' +
+      '<span class="sh-bc-ico" aria-hidden="true">\u25FB</span>' +
+      '<span><b>Blank Canvas</b><small>A fresh 25\u00D715 map. Everything is yours to build.</small></span>' +
+      '<span class="sh-pc-check" aria-hidden="true">\u2713</span></button>' +
+    '<div class="sh-err" id="sh-cr-err" role="alert" hidden>' +
+      '<span class="sh-err-icon" aria-hidden="true">\u26A0</span><span></span></div>' +
+    '<button class="sh-btn-primary" id="sh-cr-make">Create World</button>' +
+    '<button class="sh-btn-secondary" id="sh-cr-back2">Back</button>' +
+    "</div></div></div></div>", "Choose a beginning");
+  _createEsc = shellShowCreateStep1;
+  $("sh-cr-menu").onclick = function () { shellOpenMenu($("sh-cr-menu")); };
+  $("sh-cr-back").onclick = shellShowCreateStep1;
+  $("sh-cr-back2").onclick = shellShowCreateStep1;
+  $("sh-cr-make").onclick = shellCreateDo;
+  document.addEventListener("keydown", shellCreateKeys);
+  $("sh-cr-make").focus();
+}
+async function shellCreateDo() {
+  var btn = $("sh-cr-make"), err = $("sh-cr-err");
+  if (!btn || btn.disabled) return;
+  err.hidden = true;
+  btn.disabled = true;
+  btn.textContent = "Creating\u2026";
+  var fail = function (msg) {
+    err.hidden = false;
+    err.querySelector("span:last-child").textContent = msg;
+    btn.disabled = false;
+    btn.textContent = "Retry";
+    btn.focus();
+  };
+  try {
+    var r = await shellApi("/api/maps/create", { name: _createName, width: 25, height: 15 });
+    if (r && r.ok && r.file) { shellShowCreateStep3(r.file); return; }
+    var msg = String((r && r.error) || "Couldn't create your world.");
+    fail(/name taken|already (exists|used)/i.test(msg)
+      ? "That name is already used. Pick another."
+      : msg + " Your world wasn't created \u2014 nothing was lost.");
+  } catch (e) {
+    fail("Couldn't reach the server. Your world wasn't created \u2014 try again.");
+  }
+}
+function shellShowCreateStep3(file) {
+  shellCreateUnwire(); // terminal step: Escape has no target here
+  var root = shellShow(
+    '<div class="sh-screen"><div class="sh-scroll"><div class="sh-wrap">' +
+    shellCreateTopbar() +
+    '<div class="sh-card sh-enter">' + shellCreateSteps(2) +
+    '<h2 class="sh-h2">Your world is ready.</h2>' +
+    shellPreviewImg(file) +
+    '<p class="sh-world-line">' + shellCreateEscName(_createName) + "</p>" +
+    '<button class="sh-btn-primary" id="sh-cr-build">Start Building</button>' +
+    '<button class="sh-btn-secondary" id="sh-cr-play">Play First</button>' +
+    "</div></div></div></div>", "Your world is ready");
+  $("sh-cr-menu").onclick = function () { shellOpenMenu($("sh-cr-menu")); };
+  $("sh-cr-back").onclick = function () { shellShowCanvas(file); };
+  $("sh-cr-build").onclick = function () { shellShowCanvas(file); };
+  $("sh-cr-play").onclick = function () { shellEnterPlay(file); };
+  $("sh-cr-build").focus();
+}
 function shellToast(msg) {
   var old = document.getElementById("sh-toast");
   if (old) old.remove();
@@ -16811,6 +17047,8 @@ function shellOpenMenu(returnTo) {
     '<p class="sh-menu-user"></p><p class="sh-menu-sub">' + sub + "</p>" +
     '<button class="sh-menu-item" id="sh-mi-creator"><span class="sh-mi" aria-hidden="true">\uD83D\uDEE0\uFE0F</span> Creator Tools</button>' +
     '<button class="sh-menu-item" id="sh-mi-settings"><span class="sh-mi" aria-hidden="true">\u2699</span> Settings</button>' +
+    '<button class="sh-menu-item" id="sh-mi-help"><span class="sh-mi" aria-hidden="true">\u2139</span> Help</button>' +
+    '<button class="sh-menu-item" id="sh-mi-report"><span class="sh-mi" aria-hidden="true">\u26A0</span> Report a Problem</button>' +
     '<button class="sh-menu-item" id="sh-mi-about"><span class="sh-mi" aria-hidden="true">?</span> About this build</button>' +
     '<button class="sh-menu-item" id="sh-mi-signout"><span class="sh-mi" aria-hidden="true">\u2192</span> Sign out</button>' +
     gwResetRow +
@@ -16823,6 +17061,8 @@ function shellOpenMenu(returnTo) {
   // Stage 9: Settings opens standalone (menu closes first) so Escape exits
   // exactly one layer.
   $("sh-mi-settings").onclick = function () { shellCloseMenu(); shellOpenSettings(null); };
+  $("sh-mi-help").onclick = shellMenuHelp;
+  $("sh-mi-report").onclick = shellMenuReport;
   var gwreset = $("sh-mi-gwreset");
   if (gwreset) gwreset.onclick = function () {
     window.CrumbsShell.prefs.creatorSeen = false;
@@ -16846,46 +17086,87 @@ function shellCloseMenu() {
   if (_menuReturnFocus && _menuReturnFocus.focus) _menuReturnFocus.focus();
   _menuReturnFocus = null;
 }
+// Device-visible diagnostics: app info and display state only — no key,
+// token, password, path, or secret. Shared by About and Report a Problem.
+function shellDiagText() {
+  var p = window.CrumbsShell.prefs, st = window.CrumbsShell.state;
+  return "Crumbs World v%%CRUMBS_VERSION%% (tester build)\n" +
+    "Shell: mode=" + st.mode + " destination=" + st.destination + "\n" +
+    "Display: appearance=" + p.appearance + " text=" + p.textSize +
+    " motion=" + (p.reduceMotion ? "reduced" : "full") +
+    " contrast=" + (p.highContrast ? "high" : "standard") +
+    " drawer=" + p.drawerSide + " edgepad=" + (p.safeExtra ? "extra" : "normal") + "\n" +
+    "Screen: " + window.innerWidth + "x" + window.innerHeight +
+    " @" + (window.devicePixelRatio || 1) + "x";
+}
+function shellCopyDiag(noteId) {
+  var txt = shellDiagText();
+  var note = noteId ? document.getElementById(noteId) : null;
+  var done = function (ok) {
+    if (note) {
+      note.hidden = false;
+      note.textContent = ok ? "Diagnostics copied." : "Couldn't copy \u2014 you can read the details in About this build.";
+    }
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(function () { done(true); }, function () { done(false); });
+  } else { done(false); }
+}
+function shellMenuSheetBack() {
+  var rt = _menuReturnFocus;
+  shellCloseMenu();
+  shellOpenMenu(rt);
+}
+// Stage 10: the spec's task-based Help — short lines that name the shell's
+// real destinations, never workshop internals.
+function shellMenuHelp() {
+  var sheet = document.querySelector("#sh-menu-wrap .sh-menu-sheet");
+  if (!sheet) return;
+  sheet.innerHTML =
+    '<div class="sh-grab" aria-hidden="true"></div>' +
+    '<p class="sh-menu-user">Help</p>' +
+    '<div class="sh-menu-help">' +
+    "<p><b>Build something.</b><br>Open Build, then pick Paint, Place, or People.</p>" +
+    "<p><b>Open another world.</b><br>Open World, then My Worlds.</p>" +
+    "<p><b>Play your world.</b><br>Tap Play in the bottom bar. Exit Play brings you back to building.</p>" +
+    "<p><b>Check your world.</b><br>Open World, then World Check, for plain-language results.</p>" +
+    "<p><b>Need more tools?</b><br>Creator Tools opens the full workshop. Return to Simple View brings you back.</p>" +
+    "</div>" +
+    '<button class="sh-menu-item" id="sh-mi-back"><span class="sh-mi" aria-hidden="true">\u2190</span> Back</button>';
+  $("sh-mi-back").onclick = shellMenuSheetBack;
+  $("sh-mi-back").focus();
+}
+// Stage 10: the spec's Report a Problem — diagnostics the tester can copy
+// and send to whoever invited them, with no invented ticket system.
+function shellMenuReport() {
+  var sheet = document.querySelector("#sh-menu-wrap .sh-menu-sheet");
+  if (!sheet) return;
+  sheet.innerHTML =
+    '<div class="sh-grab" aria-hidden="true"></div>' +
+    '<p class="sh-menu-user">Report a Problem</p>' +
+    '<p class="sh-menu-sub">Tell the person who invited you to test what happened ' +
+      "and what you were doing, and include these details:</p>" +
+    '<button class="sh-menu-item" id="sh-mi-diag"><span class="sh-mi" aria-hidden="true">\u2398</span> Copy diagnostics</button>' +
+    '<p class="sh-menu-sub" id="sh-diag-note" hidden></p>' +
+    '<button class="sh-menu-item" id="sh-mi-back"><span class="sh-mi" aria-hidden="true">\u2190</span> Back</button>';
+  $("sh-mi-diag").onclick = function () { shellCopyDiag("sh-diag-note"); };
+  $("sh-mi-back").onclick = shellMenuSheetBack;
+  $("sh-mi-diag").focus();
+}
 function shellMenuAbout() {
   var sheet = document.querySelector("#sh-menu-wrap .sh-menu-sheet");
   if (!sheet) return;
   sheet.innerHTML =
     '<div class="sh-grab" aria-hidden="true"></div>' +
     '<p class="sh-menu-user">About this build</p>' +
-    '<p class="sh-menu-sub">Crumbs World v%%CRUMBS_VERSION%% \u00B7 tester build \u00B7 shell stage 9</p>' +
+    '<p class="sh-menu-sub">Crumbs World v%%CRUMBS_VERSION%% \u00B7 tester build</p>' +
     '<p class="sh-menu-sub">Your worlds and account live on the server. ' +
       "This device only keeps display choices like text size.</p>" +
     '<button class="sh-menu-item" id="sh-mi-diag"><span class="sh-mi" aria-hidden="true">\u2398</span> Copy diagnostics</button>' +
     '<p class="sh-menu-sub" id="sh-diag-note" hidden></p>' +
     '<button class="sh-menu-item" id="sh-mi-back"><span class="sh-mi" aria-hidden="true">\u2190</span> Back</button>';
-  // Device-visible app information only — no key, token, password, path, or secret.
-  $("sh-mi-diag").onclick = function () {
-    var p = window.CrumbsShell.prefs, st = window.CrumbsShell.state;
-    var txt =
-      "Crumbs World v%%CRUMBS_VERSION%% (tester build, shell stage 9)\n" +
-      "Shell: mode=" + st.mode + " destination=" + st.destination + "\n" +
-      "Display: appearance=" + p.appearance + " text=" + p.textSize +
-      " motion=" + (p.reduceMotion ? "reduced" : "full") +
-      " contrast=" + (p.highContrast ? "high" : "standard") +
-      " drawer=" + p.drawerSide + " edgepad=" + (p.safeExtra ? "extra" : "normal") + "\n" +
-      "Screen: " + window.innerWidth + "x" + window.innerHeight +
-      " @" + (window.devicePixelRatio || 1) + "x";
-    var note = $("sh-diag-note");
-    var done = function (ok) {
-      if (note) {
-        note.hidden = false;
-        note.textContent = ok ? "Diagnostics copied." : "Couldn't copy \u2014 long-press to copy from About.";
-      }
-    };
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(txt).then(function () { done(true); }, function () { done(false); });
-    } else { done(false); }
-  };
-  $("sh-mi-back").onclick = function () {
-    var rt = _menuReturnFocus;
-    shellCloseMenu();
-    shellOpenMenu(rt);
-  };
+  $("sh-mi-diag").onclick = function () { shellCopyDiag("sh-diag-note"); };
+  $("sh-mi-back").onclick = shellMenuSheetBack;
   $("sh-mi-diag").focus();
 }
 async function shellSignOut() {
@@ -17170,7 +17451,7 @@ function shellBuildHomeInto(body) {
 async function shellBuildPaintInto(body) {
   var pal = [];
   try {
-    var r = await api("/api/palette");
+    var r = await shellApi("/api/palette");
     if (r && r.tiles) pal = r.tiles;
   } catch (e) {}
   if (!pal.length) {
@@ -17244,7 +17525,7 @@ function shellArmBrush(tid) {
 async function shellBuildPlaceInto(body) {
   var items = [];
   try {
-    var r = await api("/api/items");
+    var r = await shellApi("/api/items");
     if (r && r.ok && r.items) items = r.items;
   } catch (e) {}
   var fw = shellFrameWin(), armedId = null, armedName = "";
@@ -17323,7 +17604,7 @@ function shellDisarmPlace() {
 async function shellBuildPeopleInto(body) {
   var npcs = [];
   try {
-    var r = await api("/api/npcs");
+    var r = await shellApi("/api/npcs");
     if (r && r.ok && r.npcs) npcs = r.npcs;
   } catch (e) {}
   var fw = shellFrameWin(), npcArmed = false;
@@ -17369,7 +17650,7 @@ async function shellBuildPeopleInto(body) {
 async function shellBuildLookInto(body) {
   var pal = [];
   try {
-    var r = await api("/api/palette");
+    var r = await shellApi("/api/palette");
     if (r && r.tiles) pal = r.tiles;
   } catch (e) {}
   if (!pal.length) {
@@ -18118,17 +18399,17 @@ async function shellWorldHomeInto(body) {
   var saveIco = "\u2026", saveTxt = "Checking save state\u2026", saveCls = "";
   var counts = [];
   try {
-    var s = await api("/api/status");
+    var s = await shellApi("/api/status");
     if (s && s.dirty) { saveIco = "\u270E"; saveTxt = "Unsaved changes"; saveCls = "warn"; }
     else { saveIco = "\u2713"; saveTxt = (s && s.last_save) ? "Saved" : "No changes yet"; saveCls = "ok"; }
   } catch (e) { saveIco = "\u26A0"; saveTxt = "Connection lost \u2014 changes may not be saved"; saveCls = "err"; }
   try {
-    var m = await api("/api/maps");
+    var m = await shellApi("/api/maps");
     var n = (m && m.maps) ? m.maps.length : 0;
     counts.push(n === 1 ? "1 world" : n + " worlds");
   } catch (e) {}
   try {
-    var p = await api("/api/portals");
+    var p = await shellApi("/api/portals");
     var pn = (p && p.portals) ? Object.keys(p.portals).length : 0;
     counts.push(pn === 1 ? "1 portal" : pn + " portals");
   } catch (e) {}
@@ -18157,7 +18438,7 @@ async function shellWorldMapInto(body) {
   var file = window.CrumbsShell.currentFile, name = friendlyName(file) || "World";
   var info = null;
   try {
-    var m = await api("/api/maps");
+    var m = await shellApi("/api/maps");
     var maps = (m && m.maps) || [];
     for (var i = 0; i < maps.length; i++)
       if (maps[i].file === file) { info = maps[i]; break; }
@@ -18191,7 +18472,7 @@ async function shellWorldMapInto(body) {
 async function shellWorldPortalsInto(body) {
   var list = [], failed = false;
   try {
-    var p = await api("/api/portals");
+    var p = await shellApi("/api/portals");
     var po = (p && p.portals) || {};
     for (var k in po) list.push(po[k]);
   } catch (e) { failed = true; }
@@ -18256,7 +18537,7 @@ async function shellWorldCheckRun() {
   try {
     // NOTE: /api/validate is POST-only on the server (do_POST). A GET 404s
     // with a JSON body, which would falsely render as "clean" — always POST.
-    var r = await api("/api/validate", {});
+    var r = await shellApi("/api/validate", {});
     issues = (r && r.ok && r.issues) || [];
   } catch (e) {
     out.innerHTML = '<div class="sh-build-empty">Couldn\'t run the check. Check the connection and try again.</div>';
@@ -18293,11 +18574,11 @@ async function shellWorldCheckRun() {
 async function shellWorldRulesInto(body) {
   var rules = null, grules = [];
   try {
-    var r = await api("/api/rules");
+    var r = await shellApi("/api/rules");
     if (r && r.ok) rules = r.rules || {};
   } catch (e) {}
   try {
-    var g = await api("/api/game-rules");
+    var g = await shellApi("/api/game-rules");
     if (g && g.ok && g.rules) grules = g.rules;
   } catch (e) {}
   if (!rules && !grules.length) {

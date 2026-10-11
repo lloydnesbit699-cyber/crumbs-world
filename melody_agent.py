@@ -16,6 +16,9 @@
 #   MELODY_BRAIN=gemini             GEMINI_API_KEY  -> Google AI Studio, free tier
 #   MELODY_BRAIN=ollama             MELODY_BRAIN_BASE=http://host:11434/v1
 #                                   -> homecoming: Lloyd's own weights, no game changes
+#   MELODY_BRAIN=proxy              MELODY_PROXY_URL + MELODY_PROXY_TOKEN
+#                                   -> split-brain: Melody Prime holds the API key;
+#                                      the game holds only a bearer token
 #   MELODY_BRAIN=off                -> knowledge-base only, zero cost, zero network
 # The first configured backend wins; if the primary errors, the fallback is
 # tried once. No key anywhere -> honest "brain not configured" answers.
@@ -1592,6 +1595,16 @@ def brain_backends():
     mode = _env("MELODY_BRAIN", "groq").lower()
     order = []
     if mode == "off":
+        return order
+    if mode == "proxy":
+        # v5.61: split-brain — Melody Prime holds the API key; the game
+        # holds only a bearer token. OpenAI-compatible chat completions.
+        # The token is used as the Bearer credential and never logged.
+        url = _env("MELODY_PROXY_URL", "").rstrip("/")
+        token = _env("MELODY_PROXY_TOKEN", "")
+        if url and token:
+            return [("proxy(Melody Prime)", url, token,
+                     _env("MELODY_PROXY_MODEL", "melody-prime"))]
         return order
     if mode == "ollama":
         base = _env("MELODY_BRAIN_BASE", "http://127.0.0.1:11434/v1").rstrip("/")

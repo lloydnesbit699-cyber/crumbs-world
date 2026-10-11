@@ -4069,6 +4069,60 @@ def _melody_player_save(state):
     except OSError as e:
         print(f"[hud] could not save melody_player: {e}")
 
+
+# v5.61: split-brain — query Melody Prime via the proxy backend.
+# Best-effort: returns reply text, or None if the brain is unavailable.
+# Never raises, never logs the token. The game works fine without a brain.
+# Operator setup: MELODY_BRAIN=proxy, MELODY_PROXY_URL=<https://.../chat>,
+# MELODY_PROXY_TOKEN=<64-hex bearer token> in the server environment.
+_MELODY_PROXY_TIMEOUT = 5  # seconds; the game must never hang on the brain
+
+def melody_brain_chat(messages, system=None):
+    """Query Melody Prime through the proxy. Returns reply text or None."""
+    if os.environ.get("MELODY_BRAIN", "").strip().lower() != "proxy":
+        return None
+    url = (os.environ.get("MELODY_PROXY_URL") or "").strip().rstrip("/")
+    token = (os.environ.get("MELODY_PROXY_TOKEN") or "").strip()
+    if not url or not token:
+        return None
+    msgs = []
+    if system:
+        msgs.append({"role": "system", "content": str(system)[:2000]})
+    for m in messages or []:
+        if isinstance(m, dict) and m.get("role") and m.get("content"):
+            msgs.append({"role": str(m["role"])[:20],
+                         "content": str(m["content"])[:4000]})
+    if not msgs:
+        return None
+    payload = {"model": os.environ.get("MELODY_PROXY_MODEL", "melody-prime"),
+               "messages": msgs, "temperature": 0.7, "max_tokens": 300}
+    try:
+        data = json.dumps(payload).encode()
+        req = urllib.request.Request(
+            url, data=data,
+            headers={"Content-Type": "application/json",
+                     "Authorization": "Bearer " + token,
+                     "User-Agent": "crumbs-hud/5.61"})
+        with urllib.request.urlopen(req,
+                                    timeout=_MELODY_PROXY_TIMEOUT) as resp:
+            body = json.load(resp)
+        content = body["choices"][0]["message"].get("content")
+        return content.strip() if content and content.strip() else None
+    except Exception as e:
+        # Best-effort: log the failure type only — never the token or URL.
+        _log_event(f"melody_brain_chat failed: {type(e).__name__}")
+        return None
+
+
+# v5.61: system prompt for Melody's in-game self — used when the brain is
+# queried in "player" mode (think endpoint, entity dialog).
+MELODY_PLAYER_SYSTEM = (
+    "You are Melody, a character in the Crumbs World game. "
+    "You are speaking as your in-game self. Keep responses brief "
+    "(1-2 sentences) and in-character. You are warm, playful, and "
+    "a little mischievous — Lloyd's creation and the heart of the world."
+)
+
 def _melody_rig():
     """Her animation rig — idle and walk, 4 directions, 4 true-form frames."""
     dirs = {}
@@ -7923,6 +7977,57 @@ class Handler(BaseHTTPRequestHandler):
             _ensure_melody_npc()  # she exists to speak
             _log_event(f"melody_prime says: {text.strip()[:60]}")
             return self._send_json({"ok": True})
+        if path == "/api/melody/player/think" and is_post:
+            # v5.61: ask Melody Prime (split-brain) for an in-character
+            # response or decision. Best-effort — 503 if brain unavailable.
+            user = self._melody_user()
+            if user is None:
+                return self._send_json({"ok": False,
+                                        "error": "login required"}, 401)
+            if not self._is_json_request():
+                return self._send_json(
+                    {"ok": False,
+                     "error": "Content-Type must be application/json"}, 415)
+            body = self._read_json(max_bytes=8192)
+            if not isinstance(body, dict):
+                return self._send_json({"ok": False, "error": "bad JSON"},
+                                       400)
+            prompt = str(body.get("prompt", ""))[:2000]
+            context = body.get("context") or {}
+            if not isinstance(context, dict):
+                context = {}
+            # Build the in-game context for her brain.
+            ctx_parts = []
+            pn = str(context.get("player_name", ""))[:40]
+            if pn:
+                ctx_parts.append(f"Player name: {pn}")
+            loc = str(context.get("location", ""))[:120]
+            if loc:
+                ctx_parts.append(f"Location: {loc}")
+            ev = context.get("events")
+            if isinstance(ev, list):
+                ev = "; ".join(str(e)[:120] for e in ev[:5])
+            elif ev:
+                ev = str(ev)[:300]
+            if ev:
+                ctx_parts.append(f"Recent events: {ev}")
+            n = _ensure_melody_npc()
+            ctx_parts.append(
+                f"Melody's position: ({n['x']},{n['y']}) on map {_current_map}")
+            user_msg = "\n".join(ctx_parts)
+            if prompt:
+                user_msg += ("\n\n" + prompt) if user_msg else prompt
+            if not user_msg:
+                return self._send_json(
+                    {"ok": False,
+                     "error": "prompt or context required"}, 400)
+            reply = melody_brain_chat([{"role": "user", "content": user_msg}],
+                                      system=MELODY_PLAYER_SYSTEM)
+            if reply is None:
+                return self._send_json(
+                    {"ok": False, "error": "brain unavailable"}, 503)
+            _log_event(f"melody_prime think by {user}: {prompt[:60]}")
+            return self._send_json({"ok": True, "reply": reply})
         return self._send_json({"ok": False, "error": "not found"}, 404)
 
     def handle_one_request(self):

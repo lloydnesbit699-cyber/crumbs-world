@@ -761,6 +761,26 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   #sem-adv { background: rgba(30,30,30,.96); border: 2px solid #555; border-radius: 14px;
              padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;
              max-width: 92vw; }
+  /* v5.61.0: color wheel popup — eyedropper refinement */
+  #wheel-pop { position: fixed; inset: 0; z-index: 9999; display: flex;
+    align-items: center; justify-content: center;
+    background: rgba(0,0,0,.55); }
+  #wheel-pop[hidden] { display: none; }
+  #wheel-card { background: #1e1e1e; border: 2px solid #555; border-radius: 16px;
+    padding: 16px; display: flex; flex-direction: column; align-items: center;
+    gap: 10px; max-width: 92vw; }
+  #wheel-title { font-size: 16px; color: #ffd75f; font-weight: bold; }
+  #wheel-cv { border-radius: 50%; touch-action: none; cursor: crosshair; }
+  #wheel-swatches { display: flex; gap: 16px; }
+  #wheel-swatches .wsw { display: flex; flex-direction: column; align-items: center;
+    gap: 4px; font-size: 12px; color: #aaa; }
+  #wheel-swatches .wsw div { width: 48px; height: 32px; border-radius: 8px;
+    border: 2px solid #555; }
+  #wheel-hex { font-family: monospace; font-size: 14px; color: #ddd; }
+  #wheel-btns { display: flex; gap: 10px; }
+  #wheel-btns button { padding: 10px 18px; border-radius: 10px; font-size: 15px;
+    border: 2px solid #777; background: #2a2a2a; color: #fff; }
+  #wheel-use { border-color: #4da3ff !important; background: #1a3a5c !important; }
   #sem-adv .arow { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #ddd; }
   #sem-adv .arow label { min-width: 92px; }
   #sem-adv .arow input[type=range] { flex: 1; min-width: 0; min-height: 34px; }
@@ -7223,6 +7243,124 @@ function floodFillStroke(cell) {
   endStroke();
   toast("filled " + n + " tiles" + (r.truncated ? " (area capped at 100k)" : ""));
 }
+// ---- color wheel (v5.61.0: Lloyd's call — eyedropper refinement) ---------------
+const wheel = { h: 0, s: 1, v: 1, picked: "#000000", onPick: null };
+function hsvToRgb(h, s, v) {
+  h = ((h % 360) + 360) % 360;
+  const c = v * s, x = c * (1 - Math.abs(((h / 60) % 2) - 1)), m = v - c;
+  let r, g, b;
+  if (h < 60) { r = c; g = x; b = 0; } else if (h < 120) { r = x; g = c; b = 0; }
+  else if (h < 180) { r = 0; g = c; b = x; } else if (h < 240) { r = 0; g = x; b = c; }
+  else if (h < 300) { r = x; g = 0; b = c; } else { r = c; g = 0; b = x; }
+  return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+}
+function rgbToHsv(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let h = 0;
+  if (d) {
+    if (mx === r) h = 60 * (((g - b) / d) % 6);
+    else if (mx === g) h = 60 * ((b - r) / d + 2);
+    else h = 60 * ((r - g) / d + 4);
+  }
+  return [((h % 360) + 360) % 360, mx ? d / mx : 0, mx];
+}
+function hexToRgb(hex) {
+  hex = hex.replace("#", "");
+  if (hex.length === 3) hex = hex.split("").map(c => c + c).join("");
+  const n = parseInt(hex, 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+function rgbToHex(r, g, b) {
+  return "#" + [r, g, b].map(v => Math.round(v).toString(16).padStart(2, "0")).join("");
+}
+function drawWheel() {
+  const cv = $("wheel-cv"); if (!cv) return;
+  const ctx = cv.getContext("2d"), S = 280, C = S / 2;
+  ctx.clearRect(0, 0, S, S);
+  const R_OUT = 138, R_IN = 108, SQ = 150;  // ring radii, SV square size
+  // hue ring
+  for (let a = 0; a < 360; a += 1) {
+    const r0 = a * Math.PI / 180, r1 = (a + 1.5) * Math.PI / 180;
+    ctx.beginPath();
+    ctx.arc(C, C, R_OUT, r0, r1); ctx.arc(C, C, R_IN, r1, r0, true);
+    ctx.closePath();
+    const [r, g, b] = hsvToRgb(a, 1, 1);
+    ctx.fillStyle = `rgb(${r},${g},${b})`; ctx.fill();
+  }
+  // hue cursor
+  const ha = wheel.h * Math.PI / 180, hr = (R_OUT + R_IN) / 2;
+  ctx.beginPath();
+  ctx.arc(C + hr * Math.cos(ha), C - hr * Math.sin(ha), 8, 0, 7);
+  ctx.fillStyle = "#fff"; ctx.fill();
+  ctx.lineWidth = 3; ctx.strokeStyle = "#000"; ctx.stroke();
+  // SV square (for current hue)
+  const x0 = C - SQ / 2, y0 = C - SQ / 2;
+  for (let y = 0; y < SQ; y++) {
+    for (let x = 0; x < SQ; x++) {
+      const [r, g, b] = hsvToRgb(wheel.h, x / SQ, 1 - y / SQ);
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(x0 + x, y0 + y, 1, 1);
+    }
+  }
+  ctx.strokeStyle = "#888"; ctx.lineWidth = 2;
+  ctx.strokeRect(x0, y0, SQ, SQ);
+  // SV cursor
+  ctx.beginPath();
+  ctx.arc(x0 + wheel.s * SQ, y0 + (1 - wheel.v) * SQ, 7, 0, 7);
+  ctx.fillStyle = "#fff"; ctx.fill();
+  ctx.lineWidth = 3; ctx.strokeStyle = "#000"; ctx.stroke();
+  // swatches + hex
+  const [r, g, b] = hsvToRgb(wheel.h, wheel.s, wheel.v);
+  const hex = rgbToHex(r, g, b);
+  $("wheel-new").style.background = hex;
+  $("wheel-hex").textContent = hex;
+  wheel.current = hex;
+}
+function wheelFromEvent(e) {
+  const cv = $("wheel-cv"), r = cv.getBoundingClientRect();
+  const t = (e.touches && e.touches[0]) || e;
+  const x = (t.clientX - r.left) * (280 / r.width), y = (t.clientY - r.top) * (280 / r.height);
+  const C = 140, dx = x - C, dy = C - y, dist = Math.hypot(dx, dy);
+  const R_OUT = 138, R_IN = 108, SQ = 150, x0 = C - SQ / 2, y0 = C - SQ / 2;
+  if (dist >= R_IN - 8 && dist <= R_OUT + 8) {
+    // hue ring
+    let h = Math.atan2(dy, dx) * 180 / Math.PI;
+    wheel.h = ((h % 360) + 360) % 360;
+  } else if (x >= x0 && x <= x0 + SQ && y >= y0 && y <= y0 + SQ) {
+    // SV square
+    wheel.s = Math.min(1, Math.max(0, (x - x0) / SQ));
+    wheel.v = Math.min(1, Math.max(0, 1 - (y - y0) / SQ));
+  }
+  drawWheel();
+}
+function showWheel(hex, onPick) {
+  const [r, g, b] = hexToRgb(hex);
+  const [h, s, v] = rgbToHsv(r, g, b);
+  wheel.h = h; wheel.s = s; wheel.v = Math.max(v, 0.05);
+  wheel.picked = hex; wheel.onPick = onPick || null;
+  $("wheel-picked").style.background = hex;
+  $("wheel-pop").hidden = false;
+  drawWheel();
+}
+function hideWheel() { $("wheel-pop").hidden = true; wheel.onPick = null; }
+function initWheel() {
+  const cv = $("wheel-cv"); if (!cv) return;
+  const h = e => { e.preventDefault(); wheelFromEvent(e); };
+  cv.addEventListener("pointerdown", h);
+  cv.addEventListener("pointermove", e => { if (e.buttons) h(e); });
+  $("wheel-use").onclick = () => {
+    const hex = wheel.current || wheel.picked;
+    const cb = wheel.onPick;
+    hideWheel();
+    if (cb) cb(hex);
+  };
+  $("wheel-cancel").onclick = hideWheel;
+  $("wheel-pop").addEventListener("pointerdown", e => {
+    if (e.target.id === "wheel-pop") hideWheel();
+  });
+}
+
 function eyedropperTap(cell) {
   // v5.45: pick the tile under the tap, then hand the brush straight back.
   const pl = paintLayer();
@@ -7230,6 +7368,31 @@ function eyedropperTap(cell) {
     selCollide = (coll[cell.y] && coll[cell.y][cell.x]) ? 1 : 0;
     document.querySelectorAll("#collide-palette .sw").forEach(x =>
       x.classList.toggle("sel", +x.dataset.cv === selCollide));
+  } else if (layer === "colors") {
+    // v5.61.0: on the colors layer the eyedropper picks a COLOR — show
+    // Lloyd's color wheel so he can refine it before painting.
+    const g = tiles;
+    let v = g[cell.y] ? g[cell.y][cell.x] : null;
+    if (v && typeof v === "object") v = v.tid;
+    const hex = (v != null && v !== "natural") ? (colorOf[v] || "#888888") : "#888888";
+    if (v == null || v === "natural") { toast("nothing to pick there"); return; }
+    showWheel(hex, (pickedHex) => {
+      // find the closest palette color to the refined pick
+      const [pr, pg_, pb] = hexToRgb(pickedHex);
+      let best = null, bestD = 1e9;
+      for (const t of palette) {
+        const c = t.color || "#000000";
+        const [r, g, b] = hexToRgb(c);
+        const d = (r - pr) ** 2 + (g - pg_) ** 2 + (b - pb) ** 2;
+        if (d < bestD) { bestD = d; best = t.id; }
+      }
+      if (best != null) {
+        selectTile(best);
+        toast("color picked: " + pickedHex);
+      }
+      setBrushTool(lastBrush);
+    });
+    return;  // wheel handles the brush handoff
   } else {
     const g = pl === "objects" ? objects : tiles;
     let v = g[cell.y] ? g[cell.y][cell.x] : null;
@@ -15541,6 +15704,7 @@ function initPanelSystem() {
   if (p.panelLayout === "sheet" || p.panelLayout === "trays")
     PanelSys.layout = p.panelLayout;
   initSheetGrab();    // sheet chrome never moves — wire once, not per mount
+  initWheel();        // v5.61.0: color wheel popup
   initPlayFab();
   initBudgetStrip();
   initReaderPagers();   // v5.58 (C-2): paged navigation on pilot reader sheets
@@ -19307,5 +19471,22 @@ if ("serviceWorker" in navigator) {
   });
 }
 </script>
+<!-- v5.61.0: color wheel popup for the eyedropper — Lloyd's call. Pick a
+     color off the map, refine it on the wheel, paint with it. -->
+<div id="wheel-pop" hidden>
+  <div id="wheel-card">
+    <div id="wheel-title">🎨 Pick a color</div>
+    <canvas id="wheel-cv" width="280" height="280"></canvas>
+    <div id="wheel-swatches">
+      <div class="wsw"><span>Picked</span><div id="wheel-picked"></div></div>
+      <div class="wsw"><span>New</span><div id="wheel-new"></div></div>
+    </div>
+    <div id="wheel-hex">#000000</div>
+    <div id="wheel-btns">
+      <button id="wheel-use" type="button">Use this color</button>
+      <button id="wheel-cancel" type="button">Cancel</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>

@@ -3063,6 +3063,156 @@ def _save_patrols():
         print(f"[hud] could not save patrols: {e}")
 
 
+# ---- v5.61: biome entity placement with auto-patrols -------------------------
+# When Map gen runs, Lloyd can check which entity types to auto-place.
+# Trees go on the object layer (static). Animals, creatures, and characters
+# become NPCs with random patrol routes. Only runs on fresh generation.
+ENTITY_TILES = {
+    # (tile_ids, role, name_prefix, line)
+    "trees": ([70052, 70053, 70054], None, None, None),  # Oak, Birch, Autumn
+    "animals": ([70062, 70063, 70065, 70066, 70067], "animal", "Wild",
+                "sniff sniff"),
+    "creatures": ([70064, 70068, 70069, 70070, 70071, 70072, 70073],
+                  "monster", None, "Grrr..."),
+    "characters": ([70074, 70075, 70076, 70077, 70078, 70079, 70080, 70081],
+                   "villager", "Traveler", "Mind the roads, traveler."),
+}
+
+# Human-readable names for the entity tiles (for NPC naming)
+_ENTITY_NAMES = {
+    70052: "Oak tree", 70053: "Birch tree", 70054: "Autumn tree",
+    70062: "Pig", 70063: "Hound", 70065: "Rat", 70066: "Sheep", 70067: "Bee",
+    70064: "Spider", 70068: "Goblin", 70069: "Orc warrior",
+    70070: "Orc knight", 70071: "Hydra", 70072: "Treant",
+    70073: "Skeleton", 70074: "Knight", 70075: "Wizard",
+    70076: "Angel warrior", 70077: "Fighter", 70078: "Red guard",
+    70079: "Tide warrior", 70080: "Paladin", 70081: "Merfolk",
+}
+
+
+def _populate_entities(biome, seed, entities):
+    """v5.61: Place entities on a freshly generated map.
+
+    entities: dict like {"trees": True, "animals": True, ...}.
+    Trees -> object_layer (static). Movers -> NPCs + patrols.
+    Clears this map's existing NPCs/patrols first (fresh build, fresh cast).
+    Returns (trees_placed, movers_placed).
+    """
+    global _npcs, _patrols
+    import random as _rand
+    rng = _rand.Random(seed ^ 0x5EED)
+    
+    # v5.61: fresh generation clears the old cast — their positions are
+    # meaningless on new terrain. Only touches this map's records.
+    _npcs.clear()
+    _patrols = [p for p in _patrols if p.get("map") != _current_map]
+    _save_npcs(_current_map)
+    _save_patrols()
+    
+    w, h = world.width, world.height
+    total_tiles = w * h
+    
+    # v5.61: density — roughly 1 entity per 350 tiles, split across the
+    # enabled types. A 500x500 map gets ~714 entities total.
+    enabled = [k for k in ("trees", "animals", "creatures", "characters")
+               if entities.get(k)]
+    if not enabled:
+        return (0, 0)
+    
+    per_type = max(1, (total_tiles // 350) // len(enabled))
+    # v5.61: cap at 200 per type — beyond that the map feels crowded
+    # and the patrol tick gets expensive.
+    per_type = min(per_type, 200)
+    
+    # v5.61: find all walkable tiles once, then sample from them.
+    # _walkable() checks bounds, collision_layer, deep water, and solid.
+    walkable = []
+    for y in range(h):
+        for x in range(w):
+            if _walkable(x, y):
+                walkable.append((x, y))
+    if not walkable:
+        return (0, 0)
+    
+    trees_placed = 0
+    movers_placed = 0
+    
+    for etype in enabled:
+        tile_ids, role, name_prefix, line = ENTITY_TILES[etype]
+        # v5.61: only use tiles that actually exist in the asset library
+        tile_ids = [tid for tid in tile_ids if tid in assets.tiles]
+        if not tile_ids:
+            continue
+        
+        placed = 0
+        attempts = 0
+        max_attempts = per_type * 10
+        
+        while placed < per_type and attempts < max_attempts:
+            attempts += 1
+            x, y = rng.choice(walkable)
+            tid = rng.choice(tile_ids)
+            
+            if etype == "trees":
+                # v5.61: trees are static objects — don't stack on existing
+                if world.object_layer[y][x] is not None:
+                    continue
+                world.object_layer[y][x] = tid
+                trees_placed += 1
+                placed += 1
+            else:
+                # v5.61: movers become NPCs with patrol routes.
+                # Don't stack NPCs on the same tile.
+                if any(n["x"] == x and n["y"] == y for n in _npcs):
+                    continue
+                
+                # v5.61: build the NPC record
+                nid = _npc_seq["next"]
+                _npc_seq["next"] += 1
+                ename = _ENTITY_NAMES.get(tid, f"Entity {tid}")
+                npc_name = f"{name_prefix} {ename}" if name_prefix else ename
+                n = {"id": nid, "name": npc_name, "tile_id": tid,
+                     "x": x, "y": y, "role": role, "line": line,
+                     "stock": [], "gear": {"weapon": None, "tool": None}}
+                _npcs.append(n)
+                
+                # v5.61: 3-5 waypoints in a 10x10 to 15x15 area around spawn.
+                # All waypoints must be walkable.
+                n_pts = rng.randint(3, 5)
+                radius = rng.randint(5, 7)  # 10x10 to 14x14 area
+                waypoints = [[x, y]]  # start at spawn
+                wp_attempts = 0
+                while len(waypoints) < n_pts and wp_attempts < 50:
+                    wp_attempts += 1
+                    wx = x + rng.randint(-radius, radius)
+                    wy = y + rng.randint(-radius, radius)
+                    if not _walkable(wx, wy):
+                        continue
+                    if [wx, wy] in waypoints:
+                        continue
+                    waypoints.append([wx, wy])
+                
+                # v5.61: need at least 2 points for a valid patrol
+                if len(waypoints) >= 2:
+                    pid = _patrol_seq["next"]
+                    _patrol_seq["next"] += 1
+                    _patrols.append({
+                        "id": pid, "tile_id": tid, "x": x, "y": y,
+                        "points": waypoints,
+                        "pauses": [{"secs": 0, "mode": "stand"}
+                                  for _ in waypoints],
+                        "map": _current_map,
+                    })
+                
+                movers_placed += 1
+                placed += 1
+    
+    _save_npcs(_current_map)
+    _save_patrols()
+    _mark_dirty()
+    return (trees_placed, movers_placed)
+
+
 # ---- v5.12: Melody's mission workshop ---------------------------------------
 # She designs missions from presets + a short questionnaire, builds the enemy
 # flows the difficulty calls for, and playtests every objective herself.
@@ -10224,6 +10374,17 @@ class Handler(BaseHTTPRequestHandler):
                 # v5.0: a blank seed still gets a concrete one — otherwise the
                 # build can't be reproduced or restored by the eraser.
                 seed = random.randrange(1_000_000_000)
+            # v5.61: entity placement selectors — all on by default.
+            # Client sends {trees: bool, animals: bool, creatures: bool,
+            # characters: bool}. Missing = all True (backward compatible).
+            ent = body.get("entities") or {}
+            entities = {
+                "trees": bool(ent.get("trees", True)),
+                "animals": bool(ent.get("animals", True)),
+                "creatures": bool(ent.get("creatures", True)),
+                "characters": bool(ent.get("characters", True)),
+            }
+            ent_result = []  # v5.61: _undoable doesn't propagate return values
             def _do():
                 world.generate_biome(biome, seed, noise_over)
                 map_meta["biome"] = biome  # v5.0: the eraser needs the seed
@@ -10250,11 +10411,17 @@ class Handler(BaseHTTPRequestHandler):
                 _save_rules(_current_map)
                 _save_traits(_current_map)
                 _clear_natural_cache()  # v5.42.1: new seed, new ground
+                # v5.61: populate entities (trees on objects, movers as
+                # NPCs with patrols) — only on fresh generation.
+                ent_result.append(_populate_entities(biome, seed, entities))
                 _mark_dirty()
             _undoable("generate " + biome, _do, full=True)  # v5.0: whole build, one step
+            trees_n, movers_n = ent_result[0] if ent_result else (0, 0)
             _log_event(f"generated {biome} (seed {seed})")  # v5.6
             return self._send_json({"ok": True, "biome": biome, "seed": seed,
-                                    "rules": rules})
+                                    "rules": rules,
+                                    "entities": {"trees": trees_n,
+                                                 "movers": movers_n}})
 
         if path == "/api/newmap":
             # v5.20: Reset map — archive the current build first (world.save

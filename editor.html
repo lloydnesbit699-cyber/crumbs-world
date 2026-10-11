@@ -3614,6 +3614,12 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     <div id="sheet-cellsizes" class="seg">
       <button data-c="8">8px</button><button data-c="16" class="on">16px</button><button data-c="32">32px</button><button data-c="pico" title="PICO-8: a 128×128 sheet of 8×8 sprites">PICO-8</button>
     </div>
+    <div id="sheet-offset" style="display:flex;gap:8px;align-items:center;margin-bottom:6px;font-size:13px;color:#ccc;">
+      <span>Grid offset:</span>
+      <label>X <input id="sheet-ox" type="number" value="0" min="0" style="width:52px;min-height:44px;"></label>
+      <label>Y <input id="sheet-oy" type="number" value="0" min="0" style="width:52px;min-height:44px;"></label>
+      <button id="sheet-offset-apply" style="min-height:44px;">Apply</button>
+    </div>
     <div id="sheet-hint"></div>
     <label id="sheet-emptyrow"><input type="checkbox" id="sheet-showempty"> show empty cells</label>
     <div id="sheet-grid"></div>
@@ -13219,15 +13225,16 @@ function normalizeSheet(dataUrl) {
     img.src = dataUrl;
   });
 }
-function sliceSheetCells(img, cell) {
+function sliceSheetCells(img, cell, ox, oy) {
   // mirrors crumbs_core.slice_sheet: row-major, index = row*cols+col,
-  // partial edge cells dropped.
+  // partial edge cells dropped. ox/oy = grid offset for misaligned sheets.
+  ox = ox || 0; oy = oy || 0;
   const cv = document.createElement("canvas");
   cv.width = img.naturalWidth; cv.height = img.naturalHeight;
   const c = cv.getContext("2d", { willReadFrequently: true });
   c.drawImage(img, 0, 0);
   const data = c.getImageData(0, 0, cv.width, cv.height).data;
-  const cols = Math.floor(cv.width / cell), rows = Math.floor(cv.height / cell);
+  const cols = Math.floor((cv.width - ox) / cell), rows = Math.floor((cv.height - oy) / cell);
   const cells = [];
   for (let r = 0; r < rows; r++) for (let q = 0; q < cols; q++) {
     const ccv = document.createElement("canvas");
@@ -13236,7 +13243,7 @@ function sliceSheetCells(img, cell) {
     const imd = cx.createImageData(cell, cell);
     let used = false;
     for (let y = 0; y < cell; y++) for (let x = 0; x < cell; x++) {
-      const si = (((r * cell + y) * cv.width) + (q * cell + x)) * 4;
+      const si = (((r * cell + oy + y) * cv.width) + (q * cell + ox + x)) * 4;
       const di = (y * cell + x) * 4;
       imd.data[di] = data[si]; imd.data[di + 1] = data[si + 1];
       imd.data[di + 2] = data[si + 2]; imd.data[di + 3] = data[si + 3];
@@ -13254,13 +13261,14 @@ function bestSheetCell(img) {
   return 8;
 }
 function resliceSheet(f) {
-  f.grid = sliceSheetCells(f.img, f.cell);
+  const ox = +($("sheet-ox")?.value || 0), oy = +($("sheet-oy")?.value || 0);
+  f.grid = sliceSheetCells(f.img, f.cell, ox, oy);
   f.autoFitCell = false;
   if (!f.grid.cells.length) {
     const fit = bestSheetCell(f.img);
     if (fit !== f.cell) {
       f.cell = fit;
-      f.grid = sliceSheetCells(f.img, f.cell);
+      f.grid = sliceSheetCells(f.img, f.cell, ox, oy);
       f.autoFitCell = true;
     }
   }
@@ -13390,6 +13398,12 @@ document.querySelectorAll("#sheet-cellsizes button").forEach(b => {
   };
 });
 $("sheet-showempty").onchange = renderSheetGrid;
+// v5.61.0: grid offset for misaligned sheets — Lloyd's fix
+$("sheet-offset-apply").onclick = () => {
+  const f = sheetCur(); if (!f) return;
+  resliceSheet(f); renderSheetGrid(); syncSheetSizes();
+  toast("grid offset applied");
+};
 $("sheet-addtiles").onclick = () => {
   const f = sheetCur(); if (!f || !f.sel.size) { toast("select some cells first"); return; }
   const base = $("sheet-name").value.trim() || f.name;

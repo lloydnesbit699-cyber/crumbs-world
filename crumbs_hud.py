@@ -10998,6 +10998,15 @@ class Handler(BaseHTTPRequestHandler):
             mode = str(body.get("mode", "empty"))
             if mode not in ("empty", "replace"):
                 return self._send_json({"ok": False, "error": "mode must be empty or replace"}, 400)
+            # v5.61.0: entity selection for overlay — same as Map gen.
+            # Defaults all True for backward compat.
+            _ent = body.get("entities") or {}
+            entities = {
+                "trees": bool(_ent.get("trees", True)),
+                "animals": bool(_ent.get("animals", True)),
+                "creatures": bool(_ent.get("creatures", True)),
+                "characters": bool(_ent.get("characters", True)),
+            }
             seed = body.get("seed")
             seed = int(seed) if isinstance(seed,int) or (isinstance(seed,str) and seed.strip().lstrip("-").isdigit()) else None
             if seed is None: seed = random.randrange(1_000_000_000)
@@ -11009,16 +11018,21 @@ class Handler(BaseHTTPRequestHandler):
                     old=world.data[yy][xx]; new=overlay.data[yy][xx]
                     if (mode == "replace" or old == 0) and old != new:
                         changes.append((xx,yy,new))
+            ent_result = []
             def _do():
                 for xx,yy,new in changes: world.data[yy][xx]=new
                 map_meta["biome"]=biome; map_meta["seed"]=seed
                 if preset_id: map_meta["preset"]=preset_id
                 else: map_meta.pop("preset",None)
                 _clear_natural_cache()  # v5.42.1: new seed, new ground
+                # v5.61.0: populate entities on overlay too (trees + movers)
+                ent_result.append(_populate_entities(biome, seed, entities))
                 _mark_dirty()
             _undoable("overlay " + biome, _do)
-            _log_event(f"overlay {biome} (seed {seed}, {mode}, {len(changes)} tiles)")
-            return self._send_json({"ok": True, "biome": biome, "seed": seed, "mode": mode, "painted": len(changes)})
+            trees_n, movers_n = ent_result[0] if ent_result else (0, 0)
+            _log_event(f"overlay {biome} (seed {seed}, {mode}, {len(changes)} tiles, +{trees_n} trees, +{movers_n} movers)")
+            return self._send_json({"ok": True, "biome": biome, "seed": seed, "mode": mode, "painted": len(changes),
+                                    "entities": {"trees": trees_n, "movers": movers_n}})
 
         if path == "/api/generate":
             # v5.16: a named preset is a deterministic recipe — same seed,

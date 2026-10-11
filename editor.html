@@ -13696,14 +13696,23 @@ $("btn-biome-overlay").onclick = async () => {
   const seedRaw = $("seed").value.trim();
   const mode = prompt("Apply biome to current map:\n\nempty = paint only blank tiles\nreplace = replace ground/tile layer\n\nEnter empty or replace:", "empty");
   if (mode !== "empty" && mode !== "replace") { toast("overlay cancelled"); return; }
+  // v5.61.0: reuse the Map gen entity checkboxes for the overlay
+  const entities = {
+    trees: $("gen-ent-trees")?.checked ?? true,
+    animals: $("gen-ent-animals")?.checked ?? true,
+    creatures: $("gen-ent-creatures")?.checked ?? true,
+    characters: $("gen-ent-characters")?.checked ?? true,
+  };
   const btn = $("btn-biome-overlay"); btn.disabled = true; btn.textContent = "Applying…";
   try {
-    const r = await api("/api/generate-overlay", {biome, preset, seed: seedRaw === "" ? null : parseInt(seedRaw,10), mode});
+    const r = await api("/api/generate-overlay", {biome, preset, seed: seedRaw === "" ? null : parseInt(seedRaw,10), mode, entities});
     if (!r.ok) { toast("overlay failed: " + (r.error || "unknown")); Sfx.error(); return; }
     $("seed").value = r.seed;   // v5.29: keep the seed visible and reproducible
     await refresh(); await loadNatural();
     currentTheme = r.biome || currentTheme; $("theme-sel").value = currentTheme; markBaseDirty();
-    buildPalette(); render(); toast("applied " + r.biome + " (" + r.painted + " tiles)");
+    buildPalette(); render();
+    const ent = r.entities ? ` (+${r.entities.trees} trees, +${r.entities.movers} movers)` : "";
+    toast("applied " + r.biome + " (" + r.painted + " tiles)" + ent);
   } catch (e) { toast("overlay failed"); Sfx.error(); }
   finally { btn.disabled = false; btn.textContent = "Apply biome…"; }
 };

@@ -7,6 +7,7 @@ hud_map.portals.json
 .map_thumb_cache/
 custom_tiles.json
 hud_patrols.json
+melody_player.json
 custom_tiles/
 *.rules.json
 # shipped content: tutorial + starter maps (their rules are the product,

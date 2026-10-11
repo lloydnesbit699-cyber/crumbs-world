@@ -5618,6 +5618,7 @@ async function refreshAll() {
   try { await loadPatrols(); } catch (e) {}
   try { await loadItems(); } catch (e) {}    // v5.13: gear sidecars
   try { await loadNpcs(); } catch (e) {}
+  try { if (typeof melodyPlayerPollStart === "function") melodyPlayerPollStart(); } catch (e) {}
   await loadTraits();
   await loadNames();   // v5.1: per-instance names
   await refreshRules();
@@ -10936,7 +10937,16 @@ function drawNpc(n) {
   // gentle hover), never a borrowed tile. Falls back to the old body tile
   // only while her art is still arriving.
   if (n.melody && melodySpriteReady()) {
-    const fr = melodySpriteFrames[Math.floor(Date.now() / 280) % 4];
+    // v5.61: rig-aware timing — her walk cycle runs faster than idle.
+    let frameMs = 280;
+    try {
+      const rig = n.rig;
+      const acts = rig && rig.actions;
+      const act = acts && (acts[st] || acts[rig.default_action]);
+      const clip = act && (act.down || act[rig.default_direction]);
+      if (clip && clip.frame_ms) frameMs = Math.max(40, Math.min(2000, clip.frame_ms));
+    } catch (e) {}
+    const fr = melodySpriteFrames[Math.floor(Date.now() / frameMs) % 4];
     const sw2 = tilePx * 1.15, sh2 = sw2 * (fr.naturalHeight / fr.naturalWidth);
     const bob = Math.sin(Date.now() / 650) * tilePx * 0.05;
     const dx2 = px + (tilePx - sw2) / 2, dy2 = py + tilePx - sh2 + bob;
@@ -10957,6 +10967,35 @@ function drawNpc(n) {
     ctx.beginPath();
     ctx.arc(px + tilePx / 2, py + tilePx / 2, tilePx * 0.46, 0, Math.PI * 2);
     ctx.stroke();
+    // v5.61: her speech bubble — from /api/melody/player/say, expires in 30s
+    if (n.say) {
+      const cx = px + tilePx / 2;
+      const fs = Math.max(11, Math.round(tilePx * 0.28));
+      ctx.font = fs + "px sans-serif";
+      const lines = String(n.say).split("\n").slice(0, 3);
+      let maxW = 0;
+      lines.forEach(l => { maxW = Math.max(maxW, ctx.measureText(l).width); });
+      const bw = maxW + 16, bh = lines.length * (fs + 4) + 12;
+      const bx = Math.max(4, Math.min(cx - bw / 2, ctx.canvas.width - bw - 4));
+      const byy = py - bh - tilePx * 0.55;
+      ctx.fillStyle = "rgba(255,255,255,0.95)";
+      ctx.strokeStyle = "rgba(190,120,255,0.9)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(bx, byy, bw, bh, 8);
+      else ctx.rect(bx, byy, bw, bh);
+      ctx.fill(); ctx.stroke();
+      // tail
+      ctx.beginPath();
+      ctx.moveTo(cx - 6, byy + bh); ctx.lineTo(cx + 6, byy + bh);
+      ctx.lineTo(cx, byy + bh + 8); ctx.closePath();
+      ctx.fillStyle = "rgba(255,255,255,0.95)"; ctx.fill();
+      ctx.fillStyle = "#2a1a3e";
+      ctx.textAlign = "center"; ctx.textBaseline = "top";
+      lines.forEach((l, i) => {
+        ctx.fillText(l, bx + bw / 2, byy + 6 + i * (fs + 4));
+      });
+    }
     return;
   }
   if (!im) return;
@@ -11081,6 +11120,30 @@ MELODY_TRUEFORM_FILES.slice(1).forEach(f => {
 function melodySpriteReady() {
   return melodySpriteFrames.length === 4 &&
     melodySpriteFrames.every(im => im.complete && im.naturalWidth > 0);
+}
+// v5.61: Melody as player — poll her server-side position/speech so moves
+// and say bubbles appear live in the editor. 5s cadence, cheap.
+let _melodyPollT = null;
+function melodyPlayerPollStart() {
+  if (_melodyPollT) return;
+  _melodyPollT = setInterval(async () => {
+    try {
+      const r = await api("/api/melody/player/position").catch(() => null);
+      if (!r || !r.ok) return;
+      let n = (typeof npcsReal !== "undefined")
+        ? npcsReal.find(x => x.id === "melody_prime") : null;
+      let changed = false;
+      if (!n) {
+        // she isn't in this map's list yet — reload to pick her up
+        if (typeof loadNpcs === "function") { await loadNpcs().catch(() => {}); }
+        return;
+      }
+      if (n.x !== r.x || n.y !== r.y) { n.x = r.x; n.y = r.y; changed = true; }
+      const say = r.say || null;
+      if ((n.say || null) !== say) { n.say = say; changed = true; }
+      if (changed && typeof queueRender === "function") queueRender();
+    } catch (e) {}
+  }, 5000);
 }
 
 function melodyBodyTile() {

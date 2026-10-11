@@ -4045,6 +4045,93 @@ def _npc_by_id(nid):
     return next((n for n in _npcs if n["id"] == nid), None)
 
 
+# ---- v5.61: Melody as player — in-world entity --------------------------------
+# Lloyd: "melody was always meant to be a designer and player within the game."
+# She has a dedicated NPC record (id "melody_prime", melody: True) in the NPC
+# system, her true-form sprite, and a rig. A sidecar tracks her speech.
+_MELODY_PLAYER_ID = "melody_prime"
+
+def _melody_player_path():
+    return _vpath("melody_player.json")
+
+def _melody_player_load():
+    d, err = _load_json_file(_melody_player_path(), "melody_player",
+                             {"say": None})
+    if err:
+        _log_event(f"melody_player sidecar: {err['detail']}")
+        d = {"say": None}
+    return d
+
+def _melody_player_save(state):
+    try:
+        with open(_melody_player_path(), "w") as f:
+            json.dump(_stamp(state), f)
+    except OSError as e:
+        print(f"[hud] could not save melody_player: {e}")
+
+def _melody_rig():
+    """Her animation rig — idle and walk, 4 directions, 4 true-form frames."""
+    dirs = {}
+    for d in ("down", "up", "left", "right"):
+        dirs[d] = {"frames": [0, 1, 2, 3], "frame_ms": 280}
+    walk_dirs = {}
+    for d in ("down", "up", "left", "right"):
+        walk_dirs[d] = {"frames": [0, 1, 2, 3], "frame_ms": 140}
+    return {"actions": {"idle": dirs, "walk": walk_dirs},
+            "default_action": "idle", "default_direction": "down"}
+
+def _ensure_melody_npc():
+    """Ensure Melody's NPC record exists in the current map's _npcs.
+    Returns the record. She is unique — never duplicated."""
+    n = _npc_by_id(_MELODY_PLAYER_ID)
+    if n is not None:
+        # v5.61: heal the record — she keeps her identity even if a hand-edit
+        # stripped fields.
+        n["melody"] = True
+        n["name"] = "Melody"
+        if "rig" not in n:
+            n["rig"] = _melody_rig()
+        return n
+    # Spawn: near map center, nearest walkable.
+    cx, cy = world.width // 2, world.height // 2
+    spot = _near_walkable(cx, cy, radius=10)
+    if spot is None:
+        # fallback: scan for any walkable tile
+        spot = (cx, cy)
+        for yy in range(world.height):
+            for xx in range(world.width):
+                if _walkable(xx, yy):
+                    spot = (xx, yy)
+                    break
+            else:
+                continue
+            break
+    n = {"id": _MELODY_PLAYER_ID, "name": "Melody", "melody": True,
+         "tile_id": 0, "x": spot[0], "y": spot[1], "role": "melody",
+         "line": "", "stock": [], "gear": {"weapon": None, "tool": None},
+         "rig": _melody_rig()}
+    _npcs.append(n)
+    _save_npcs(_current_map)
+    _log_event(f"melody_prime spawned at ({spot[0]},{spot[1]})")
+    return n
+
+def _melody_say_get():
+    """Current speech bubble text, or None if expired/absent."""
+    st = _melody_player_load()
+    say = st.get("say")
+    if not isinstance(say, dict):
+        return None
+    text = say.get("text")
+    ts = say.get("ts", 0)
+    if not text or not isinstance(text, str):
+        return None
+    # v5.61: bubbles expire after 30 seconds
+    import time as _t
+    if _t.time() - ts > 30:
+        return None
+    return text[:280]
+
+
 def _item_cell_key(x, y):
     return f"{x},{y}"
 
@@ -7675,6 +7762,167 @@ class Handler(BaseHTTPRequestHandler):
                        f"({placed_trees} trees, {placed_movers} movers)")
             return self._send_json({"ok": True, "trees": placed_trees,
                                     "movers": placed_movers})
+        # ---- v5.61: Melody as player — in-world entity --------------------
+        # Lloyd: "melody was always meant to be a designer and player
+        # within the game." These move her, route her, locate her, and
+        # let her speak. Same auth as other /api/melody/* endpoints.
+        if path == "/api/melody/player/move" and is_post:
+            user = self._melody_user()
+            if user is None:
+                return self._send_json({"ok": False,
+                                        "error": "login required"}, 401)
+            if not self._is_json_request():
+                return self._send_json(
+                    {"ok": False,
+                     "error": "Content-Type must be application/json"}, 415)
+            body = self._read_json(max_bytes=8192)
+            if not isinstance(body, dict):
+                return self._send_json({"ok": False, "error": "bad JSON"},
+                                       400)
+            # v5.61: {x, y} absolute, or {direction, steps} relative.
+            tx, ty = None, None
+            if "x" in body or "y" in body:
+                try:
+                    tx = int(body.get("x"))
+                    ty = int(body.get("y"))
+                except (TypeError, ValueError):
+                    return self._send_json(
+                        {"ok": False, "error": "x/y must be ints"}, 400)
+            elif "direction" in body:
+                d = str(body.get("direction", "")).lower()
+                try:
+                    steps = max(1, min(50, int(body.get("steps", 1))))
+                except (TypeError, ValueError):
+                    return self._send_json(
+                        {"ok": False, "error": "steps must be int"}, 400)
+                delta = {"north": (0, -1), "south": (0, 1),
+                         "east": (1, 0), "west": (-1, 0)}.get(d)
+                if delta is None:
+                    return self._send_json(
+                        {"ok": False,
+                         "error": "direction must be north/south/east/west"},
+                        400)
+                # resolve current position first (under lock below)
+                tx, ty = "relative", (delta, steps)
+            else:
+                return self._send_json(
+                    {"ok": False,
+                     "error": "provide {x,y} or {direction, steps}"}, 400)
+            if PUBLIC_MODE:
+                _vault_lock.acquire()
+            try:
+                n = _ensure_melody_npc()
+                if tx == "relative":
+                    (dx, dy), steps = ty
+                    tx, ty = n["x"] + dx * steps, n["y"] + dy * steps
+                # v5.61: clamp to bounds, then require walkable
+                tx = max(0, min(world.width - 1, tx))
+                ty = max(0, min(world.height - 1, ty))
+                if not _walkable(tx, ty):
+                    return self._send_json(
+                        {"ok": False, "error": "tile not walkable",
+                         "x": n["x"], "y": n["y"]}, 400)
+                n["x"], n["y"] = tx, ty
+                n["animState"] = "walk"
+                _save_npcs(_current_map)
+                _mark_dirty()
+                _log_event(f"melody_prime moved to ({tx},{ty}) by {user}")
+            finally:
+                if PUBLIC_MODE:
+                    _vault_lock.release()
+            return self._send_json({"ok": True, "x": tx, "y": ty,
+                                    "map": _current_map})
+        if path == "/api/melody/player/patrol" and is_post:
+            user = self._melody_user()
+            if user is None:
+                return self._send_json({"ok": False,
+                                        "error": "login required"}, 401)
+            if not self._is_json_request():
+                return self._send_json(
+                    {"ok": False,
+                     "error": "Content-Type must be application/json"}, 415)
+            body = self._read_json(max_bytes=8192)
+            if not isinstance(body, dict):
+                return self._send_json({"ok": False, "error": "bad JSON"},
+                                       400)
+            raw_pts = body.get("points")
+            if not isinstance(raw_pts, list) or len(raw_pts) < 2:
+                return self._send_json(
+                    {"ok": False, "error": "points must be 2+ [x,y] pairs"},
+                    400)
+            pts = []
+            for p in raw_pts:
+                try:
+                    px, py = int(p[0]), int(p[1])
+                except (TypeError, ValueError, IndexError):
+                    return self._send_json(
+                        {"ok": False, "error": "bad point in points"}, 400)
+                pts.append([px, py])
+            if PUBLIC_MODE:
+                _vault_lock.acquire()
+            try:
+                n = _ensure_melody_npc()
+                # v5.61: all waypoints must be walkable
+                for px, py in pts:
+                    if not _walkable(px, py):
+                        return self._send_json(
+                            {"ok": False,
+                             "error": f"waypoint ({px},{py}) not walkable"},
+                            400)
+                # replace her existing patrol, if any (tagged melody: True)
+                _patrols[:] = [p for p in _patrols
+                               if p.get("melody") is not True]
+                pid = _patrol_seq["next"]
+                _patrol_seq["next"] += 1
+                _patrols.append({
+                    "id": pid, "tile_id": n["tile_id"],
+                    "x": n["x"], "y": n["y"],
+                    "points": pts,
+                    "pauses": [{"secs": 0, "mode": "stand"} for _ in pts],
+                    "map": _current_map,
+                    "melody": True,
+                })
+                _save_patrols()
+                _mark_dirty()
+                _log_event(f"melody_prime patrol set ({len(pts)} pts) by {user}")
+            finally:
+                if PUBLIC_MODE:
+                    _vault_lock.release()
+            return self._send_json({"ok": True, "points": pts})
+        if path == "/api/melody/player/position" and not is_post:
+            user = self._melody_user()
+            if user is None:
+                return self._send_json({"ok": False,
+                                        "error": "login required"}, 401)
+            n = _ensure_melody_npc()
+            say = _melody_say_get()
+            return self._send_json({"ok": True, "x": n["x"], "y": n["y"],
+                                    "map": _current_map,
+                                    "say": say})
+        if path == "/api/melody/player/say" and is_post:
+            user = self._melody_user()
+            if user is None:
+                return self._send_json({"ok": False,
+                                        "error": "login required"}, 401)
+            if not self._is_json_request():
+                return self._send_json(
+                    {"ok": False,
+                     "error": "Content-Type must be application/json"}, 415)
+            body = self._read_json(max_bytes=8192)
+            if not isinstance(body, dict):
+                return self._send_json({"ok": False, "error": "bad JSON"},
+                                       400)
+            text = body.get("text", "")
+            if not isinstance(text, str) or not text.strip():
+                return self._send_json({"ok": False,
+                                        "error": "text required"}, 400)
+            import time as _t
+            st = _melody_player_load()
+            st["say"] = {"text": text.strip()[:280], "ts": _t.time()}
+            _melody_player_save(st)
+            _ensure_melody_npc()  # she exists to speak
+            _log_event(f"melody_prime says: {text.strip()[:60]}")
+            return self._send_json({"ok": True})
         return self._send_json({"ok": False, "error": "not found"}, 404)
 
     def handle_one_request(self):
@@ -8144,7 +8392,16 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"ok": True, "items": _items, "cells": cells})
         elif path == "/api/npcs":
             # v5.13: this map's folks
-            self._send_json({"ok": True, "npcs": _npcs})
+            # v5.61: Melody's speech bubble rides her NPC record so the
+            # client can draw it above her sprite.
+            say = _melody_say_get()
+            npcs_out = []
+            for n in _npcs:
+                if n.get("id") == _MELODY_PLAYER_ID and say:
+                    n = dict(n)
+                    n["say"] = say
+                npcs_out.append(n)
+            self._send_json({"ok": True, "npcs": npcs_out})
         elif path == "/api/inv":
             # v5.13: the hero's pack, coin, and hands
             self._send_json(_inv_state())
@@ -10012,6 +10269,12 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/npcs/create":
             # {tile_id, x, y} — put a folk on the map
+            # v5.61: Melody is unique — she cannot be placed as a tile.
+            if body.get("melody"):
+                return self._send_json(
+                    {"ok": False,
+                     "error": "Melody is unique and cannot be duplicated"},
+                    403)
             try:
                 tid = int(body.get("tile_id"))
                 x, y = int(body.get("x")), int(body.get("y"))
@@ -10035,8 +10298,15 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/npcs/update":
             # {id, name?, role?, line?}
+            # v5.61: Melody's identity is locked — id "melody_prime" bypasses
+            # the int() cast. Her name/role cannot be changed.
+            raw_id = body.get("id")
+            if raw_id == _MELODY_PLAYER_ID:
+                return self._send_json(
+                    {"ok": False,
+                     "error": "Melody's identity cannot be changed"}, 403)
             try:
-                nid = int(body.get("id"))
+                nid = int(raw_id)
             except (TypeError, ValueError):
                 return self._send_json({"ok": False, "error": "bad id"}, 400)
             n = _npc_by_id(nid)
@@ -10078,6 +10348,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"ok": True, "npc": n})
 
         if path == "/api/npcs/delete":
+            # v5.61: Melody cannot be deleted — she is unique.
+            if body.get("id") == _MELODY_PLAYER_ID:
+                return self._send_json(
+                    {"ok": False, "error": "Melody cannot be deleted"}, 403)
             try:
                 nid = int(body.get("id"))
             except (TypeError, ValueError):

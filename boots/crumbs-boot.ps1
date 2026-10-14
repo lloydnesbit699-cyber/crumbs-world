@@ -1,225 +1,200 @@
 <#
 .SYNOPSIS
-    crumbs-boot.ps1 — one-command boot for the Crumbs World server on Harley (native Windows).
+    Start, check, or stop the local Crumbs World server on Windows.
 
 .DESCRIPTION
-    Windows rewrite of melody-boot.sh's hardening pattern, for crumbs_hud.py.
-    Runs natively on Windows 11 — no WSL needed. PowerShell 5.1 compatible.
-
-    What it does:
-      1. Checks the CONFIG block below (refuses to run on placeholders).
-      2. Preflight: game directory, server script, Python, Pillow.
-      3. If the server already answers on its port, reports version and
-         tester-shell state, and exits.
-      4. Refuses to double-start (pidfile + live process scan).
-      5. Otherwise starts the server detached (hidden window) with logging,
-         waits up to ~30s for /api/health, and reports success — or prints
-         the log tail and exits 1.
-
-    Environment given to the server: PORT (from $Port below) and every
-    entry in $ExtraEnv (default: CRUMBS_TESTER_SHELL=1). They are set in
-    this session first so the child process inherits them.
+    Uses the game folder containing this script, so it works from any install
+    location. The server remains on its configured loopback interface; this
+    launcher does not expose it to the LAN or internet.
 
 .USAGE
-    .\crumbs-boot.ps1         # boot (or report already-up)
-    .\crumbs-boot.ps1 -Stop   # stop the server
-
-    Exit codes:
-      0  server up (or already up), or stopped cleanly with -Stop
-      1  preflight / start / health-check failure
-
-    Logs live in <GameDir>\logs\crumbs_hud_<timestamp>.out.log (and .err.log).
-    The running PID is kept in <GameDir>\.crumbs_hud.pid.
+    .\crumbs-boot.ps1
+    .\crumbs-boot.ps1 -Check
+    .\crumbs-boot.ps1 -Stop
 #>
 
 [CmdletBinding()]
 param(
-    [switch]$Stop
+    [ValidateRange(1, 65535)]
+    [int]$Port = 8778,
+    [switch]$Stop,
+    [switch]$Check
 )
 
-# ---------------- CONFIG ----------------
-$GameDir    = "C:\Users\lloyd\OneDrive\Desktop\Vault\crumbs-world"
-$Port       = 8778
-$ExtraEnv   = @{
-    "CRUMBS_TESTER_SHELL" = "1"
+$ErrorActionPreference = 'Stop'
+$BootDir = $PSScriptRoot
+$GameDir = (Resolve-Path (Join-Path $BootDir "..")).Path
+$ServerScript = Join-Path $GameDir "crumbs_hud.py"
+$LogDir = Join-Path $GameDir "logs"
+$PidFile = Join-Path $GameDir ".crumbs_hud.pid"
+$VenvPython = Join-Path $GameDir ".venv\Scripts\python.exe"
+$HealthUri = "http://127.0.0.1:$Port/api/health"
+
+function Write-Say([string]$Message) {
+    Write-Host ("crumbs-boot: " + $Message)
 }
-$ServerFile = "crumbs_hud.py"
-# ----------------------------------------
 
-$ErrorActionPreference = 'Continue'
-
-function Write-Say([string]$msg) { Write-Host ("crumbs-boot: " + $msg) }
-function Die([string]$msg) {
-    [Console]::Error.WriteLine("crumbs-boot: ERROR: " + $msg)
+function Die([string]$Message) {
+    [Console]::Error.WriteLine("crumbs-boot: ERROR: " + $Message)
     exit 1
 }
 
-$ServerScript = Join-Path $GameDir $ServerFile
-$LogDir  = Join-Path $GameDir "logs"
-$PidFile = Join-Path $GameDir ".crumbs_hud.pid"
-
-# Never allow a placeholder through.
-if ($GameDir.Contains("[SET ME]")) {
-    Die "CONFIG still has [SET ME] placeholders. Edit the CONFIG block at the top of this script first."
-}
-foreach ($k in $ExtraEnv.Keys) {
-    if (([string]$ExtraEnv[$k]).Contains("[SET ME]")) {
-        Die ("CONFIG placeholder found in ExtraEnv[{0}]. Edit the CONFIG block first." -f $k)
-    }
-}
-
-if (-not (Test-Path $GameDir -PathType Container)) { Die ("game directory not found: " + $GameDir) }
-if (-not (Test-Path $ServerScript -PathType Leaf))   { Die ("server script not found: " + $ServerScript) }
-
-# --------------------------------------------------------------- python ---
-# Prefer the py launcher, then python, then python3.
-$PythonExe = $null
-$PythonArgs = @()
-$pyLauncher = Get-Command py -ErrorAction SilentlyContinue
-if ($pyLauncher) {
-    $PythonExe = $pyLauncher.Source; $PythonArgs = @("-3")
-} else {
-    $pyPlain = Get-Command python -ErrorAction SilentlyContinue
-    if ($pyPlain) { $PythonExe = $pyPlain.Source }
-    else {
-        $py3 = Get-Command python3 -ErrorAction SilentlyContinue
-        if ($py3) { $PythonExe = $py3.Source }
-    }
-}
-if (-not $PythonExe) {
-    Die "no Python found — install it with:  winget install Python.Python.3.12   (then re-open the Terminal)"
-}
-$pyVer = (& $PythonExe @PythonArgs --version 2>&1 | Out-String).Trim()
-Write-Say ("using " + $pyVer)
-
-# Pillow is the game's only dependency.
-& $PythonExe @PythonArgs -c "import PIL; print(PIL.__version__)" 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    if ($pyLauncher) { $pipHint = "py -3 -m pip install pillow" } else { $pipHint = "python -m pip install pillow" }
-    Die ("Pillow (PIL) is not importable — install it with:  " + $pipHint)
-}
-
-# ------------------------------------------------------- health probe -----
 function Get-ServerHealth {
-    param([int]$Port)
     try {
-        $r = Invoke-WebRequest -Uri ("http://127.0.0.1:" + $Port + "/api/health") `
-            -TimeoutSec 3 -UseBasicParsing -ErrorAction Stop
-        if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 500) {
-            try { return ($r.Content | ConvertFrom-Json) }
-            catch { return New-Object PSObject -Property @{ ok = $true; version = "?"; note = "unparsed" } }
-        }
-    } catch { }
+        $response = Invoke-WebRequest -Uri $HealthUri -TimeoutSec 2 `
+            -UseBasicParsing -ErrorAction Stop
+        $health = $response.Content | ConvertFrom-Json -ErrorAction Stop
+        if ($health.ok -eq $true -and $health.version) { return $health }
+    } catch {
+        return $null
+    }
     return $null
 }
 
-function Test-ServerProcessRunning {
-    # Any live python whose command line mentions the server script?
-    $procs = @(Get-CimInstance Win32_Process `
-        -Filter "Name='python.exe' OR Name='pythonw.exe'" `
-        -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -like ("*" + $ServerFile + "*") })
-    return $procs
+function Get-CrumbsProcesses {
+    try {
+        return @(Get-CimInstance Win32_Process `
+            -Filter "Name='python.exe' OR Name='pythonw.exe'" |
+            Where-Object { $_.CommandLine -like ("*" + $ServerScript + "*") })
+    } catch {
+        return @()
+    }
 }
 
-# ------------------------------------------------------------------ -Stop --
+if (-not (Test-Path $ServerScript -PathType Leaf)) {
+    Die ("server script not found beside the launcher: " + $ServerScript)
+}
+
+if ($Check) {
+    $health = Get-ServerHealth
+    if ($null -eq $health) { Die ("server did not answer a valid health check at " + $HealthUri) }
+    Write-Say ("server is healthy (version " + $health.version + ")")
+    exit 0
+}
+
 if ($Stop) {
-    $didSomething = $false
-    if (Test-Path $PidFile) {
-        $oldPid = ((Get-Content $PidFile -ErrorAction SilentlyContinue | Select-Object -First 1) + "").Trim()
+    try {
+        $response = Invoke-WebRequest -Uri $HealthUri -Method Post `
+            -ContentType "application/json" -Body "{}" -TimeoutSec 3 `
+            -UseBasicParsing -ErrorAction Stop
+        $result = $response.Content | ConvertFrom-Json -ErrorAction Stop
+        if ($result.ok -eq $true) {
+            Write-Say "requested graceful save and shutdown"
+            exit 0
+        }
+    } catch {}
+
+    if (Test-Path $PidFile -PathType Leaf) {
+        $oldPid = (Get-Content -LiteralPath $PidFile -TotalCount 1 -ErrorAction SilentlyContinue).Trim()
         if ($oldPid -match '^\d+$') {
-            $p = Get-Process -Id ([int]$oldPid) -ErrorAction SilentlyContinue
-            if ($p) {
-                Write-Say ("stopping server (pid " + $oldPid + ")...")
-                Stop-Process -Id ([int]$oldPid) -Force -ErrorAction SilentlyContinue
-                $didSomething = $true
+            $owned = Get-CrumbsProcesses | Where-Object { $_.ProcessId -eq [int]$oldPid }
+            if ($owned) {
+                Stop-Process -Id ([int]$oldPid) -Force -ErrorAction Stop
+                Write-Say ("stopped verified server process " + $oldPid)
             }
         }
-        Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
     }
-    foreach ($p in (Test-ServerProcessRunning)) {
-        Write-Say ("stopping leftover server process (pid " + $p.ProcessId + ")...")
-        Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
-        $didSomething = $true
-    }
-    if ($didSomething) { Write-Say "server stopped." } else { Write-Say "server is not running. Nothing to do." }
     exit 0
 }
 
-# ------------------------------------------------- already answering? ------
-$health = Get-ServerHealth -Port $Port
-if ($health -ne $null) {
-    $ts = ""
-    if ($health.tester_shell -ne $null) { $ts = (", tester_shell=" + $health.tester_shell) }
-    Write-Say ("server is already UP on port {0} (version {1}{2}). Nothing to do." -f $Port, $health.version, $ts)
+$health = Get-ServerHealth
+if ($null -ne $health) {
+    Write-Say ("server is already UP on port {0} (version {1}, tester_shell={2})" -f
+        $Port, $health.version, $health.tester_shell)
     exit 0
 }
 
-# ------------------------------------------------------- no double-start --
-if (Test-Path $PidFile) {
-    $oldPid = ((Get-Content $PidFile -ErrorAction SilentlyContinue | Select-Object -First 1) + "").Trim()
-    $alive = $false
+if (Test-Path $PidFile -PathType Leaf) {
+    $oldPid = (Get-Content -LiteralPath $PidFile -TotalCount 1 -ErrorAction SilentlyContinue).Trim()
     if ($oldPid -match '^\d+$') {
-        $p = Get-Process -Id ([int]$oldPid) -ErrorAction SilentlyContinue
-        if ($p) {
-            $cmdLine = (Get-CimInstance Win32_Process -Filter ("ProcessId=" + $oldPid) `
-                -ErrorAction SilentlyContinue).CommandLine
-            if ($cmdLine -like ("*" + $ServerFile + "*")) { $alive = $true }
+        $owned = Get-CrumbsProcesses | Where-Object { $_.ProcessId -eq [int]$oldPid }
+        if ($owned) {
+            Die ("server process " + $oldPid + " is running but failed its health check; inspect logs before retrying")
         }
     }
-    if ($alive) {
-        Write-Say ("server process is already running (pid " + $oldPid + "). Nothing to do.")
-        exit 0
+    Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
+}
+
+if (-not (Test-Path $VenvPython -PathType Leaf)) {
+    $python = Get-Command py -ErrorAction SilentlyContinue
+    if ($python) {
+        & $python.Source -3 -m venv (Join-Path $GameDir ".venv")
+    } else {
+        $python = Get-Command python -ErrorAction SilentlyContinue
+        if (-not $python) { $python = Get-Command python3 -ErrorAction SilentlyContinue }
+        if (-not $python) { Die "Python 3 is required; install it and rerun this launcher" }
+        & $python.Source -m venv (Join-Path $GameDir ".venv")
     }
-    Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
-}
-$dupes = @(Test-ServerProcessRunning)
-if ($dupes.Count -gt 0) {
-    Write-Say ("a server process is already running (pid " + ($dupes[0].ProcessId) + "). Nothing to do.")
-    exit 0
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $VenvPython -PathType Leaf)) {
+        Die "could not create the project-local .venv"
+    }
 }
 
-# ------------------------------------------------------------------ start --
-if (-not (Test-Path $LogDir -PathType Container)) {
-    New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+& $VenvPython -c "import PIL" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Say "installing the app's pinned requirements into .venv"
+    & $VenvPython -m pip install -r (Join-Path $GameDir "requirements.txt")
+    if ($LASTEXITCODE -ne 0) { Die "dependency installation failed; see the pip error above" }
 }
-$stamp   = (Get-Date -Format "yyyyMMdd-HHmmss")
-$logOut  = Join-Path $LogDir ("crumbs_hud_" + $stamp + ".out.log")
-$logErr  = Join-Path $LogDir ("crumbs_hud_" + $stamp + ".err.log")
 
-# Environment for the child: PORT follows $Port; ExtraEnv entries on top.
-$env:PORT = "$Port"
-foreach ($k in $ExtraEnv.Keys) { [Environment]::SetEnvironmentVariable($k, [string]$ExtraEnv[$k], "Process") }
+try {
+    if (-not (Test-Path $LogDir -PathType Container)) {
+        New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+    }
+} catch {
+    Die ("cannot create log directory: " + $_.Exception.Message)
+}
 
-$argList = @($PythonArgs | ForEach-Object { $_ }) + @($ServerScript)
-Write-Say ("starting server on port " + $Port + "...")
-$proc = Start-Process -FilePath $PythonExe -ArgumentList $argList `
-    -WorkingDirectory $GameDir -WindowStyle Hidden `
-    -RedirectStandardOutput $logOut -RedirectStandardError $logErr -PassThru
-if (-not $proc) { Die "Start-Process failed to launch the server" }
-$proc.Id | Out-File -FilePath $PidFile -Encoding ascii -NoNewline
+$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$logOut = Join-Path $LogDir ("crumbs_hud_" + $stamp + ".out.log")
+$logErr = Join-Path $LogDir ("crumbs_hud_" + $stamp + ".err.log")
+$oldPort = $env:PORT
+$oldShell = $env:CRUMBS_TESTER_SHELL
+try {
+    $env:PORT = [string]$Port
+    if (-not $env:CRUMBS_TESTER_SHELL) { $env:CRUMBS_TESTER_SHELL = "1" }
+    Write-Say ("starting server on port " + $Port + "...")
+    $proc = Start-Process -FilePath $VenvPython `
+        -ArgumentList ('"' + $ServerScript + '"') `
+        -WorkingDirectory $GameDir -WindowStyle Hidden `
+        -RedirectStandardOutput $logOut -RedirectStandardError $logErr -PassThru
+} catch {
+    Die ("server process could not start: " + $_.Exception.Message)
+} finally {
+    $env:PORT = $oldPort
+    $env:CRUMBS_TESTER_SHELL = $oldShell
+}
 
-# ------------------------------------------------------------- health loop --
-$tries = 0
+$pidTemp = $PidFile + "." + [Guid]::NewGuid().ToString("N") + ".tmp"
+try {
+    [IO.File]::WriteAllText($pidTemp, [string]$proc.Id)
+    Move-Item -LiteralPath $pidTemp -Destination $PidFile -Force
+} catch {
+    Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $pidTemp -Force -ErrorAction SilentlyContinue
+    Die ("could not write PID file: " + $_.Exception.Message)
+}
+
 $up = $null
-while ($tries -lt 30) {
-    $up = Get-ServerHealth -Port $Port
-    if ($up -ne $null) { break }
-    # Bail early if the process died.
+for ($i = 0; $i -lt 30; $i++) {
+    $up = Get-ServerHealth
+    if ($null -ne $up) { break }
     if (-not (Get-Process -Id $proc.Id -ErrorAction SilentlyContinue)) { break }
     Start-Sleep -Seconds 1
-    $tries++
 }
-
-if ($up -ne $null) {
-    $ts = ""
-    if ($up.tester_shell -ne $null) { $ts = (", tester_shell=" + $up.tester_shell) }
-    Write-Say ("server is UP on port {0} (version {1}{2}, pid {3}). Log: {4}" -f $Port, $up.version, $ts, $proc.Id, $logOut)
+if ($null -ne $up) {
+    Write-Say ("server is UP on port {0} (version {1}, tester_shell={2}, pid {3})" -f
+        $Port, $up.version, $up.tester_shell, $proc.Id)
+    Write-Say ("log: " + $logOut)
     exit 0
 }
 
-Write-Say "server did not come up. Last 30 log lines:"
-if (Test-Path $logOut) { Write-Host "--- stdout ---"; Get-Content $logOut -Tail 30 -ErrorAction SilentlyContinue | Write-Host }
-if (Test-Path $logErr) { Write-Host "--- stderr ---"; Get-Content $logErr -Tail 30 -ErrorAction SilentlyContinue | Write-Host }
-Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
+Write-Say "server did not become healthy; recent log output:"
+if (Test-Path $logOut) { Get-Content $logOut -Tail 40 | Write-Host }
+if (Test-Path $logErr) { Get-Content $logErr -Tail 40 | Write-Host }
+if (Get-CrumbsProcesses | Where-Object { $_.ProcessId -eq $proc.Id }) {
+    Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+}
+Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
 exit 1

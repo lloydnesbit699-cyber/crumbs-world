@@ -3,26 +3,29 @@
     tailscale-autobot.ps1 — one-shot Tailscale setup "Autobot" for Windows 11 (Harley).
 
 .DESCRIPTION
-    Windows rewrite of tailscale-autobot.sh (antiX Linux). Target: Harley,
-    Lloyd's Windows 11 PC, native Windows (NOT WSL). Tailnet: tail1044f8.ts.net
+    Native Windows setup for Tailscale. This script installs and connects the
+    device by default. Tailscale SSH and public Funnel are opt-in and require
+    separate interactive confirmations.
 
     PowerShell 5.1 compatible — no PS 7-only syntax.
 
     What it does, end to end:
       1. Installs Tailscale via winget (skipped if tailscale.exe is present).
       2. Ensures the Windows "Tailscale" service is running.
-      3. Runs `tailscale up --ssh` (plus --hostname if given).
-      4. Verifies: tailscale status, netcheck, tailscale ping to a peer, and a
+      3. Runs `tailscale up` to connect without changing exposure settings.
+      4. Explicitly leaves Tailscale SSH disabled unless -SSH is confirmed.
+      5. Verifies status and optional peer connectivity.
+      6. Enables Funnel only when -Funnel <port> is confirmed.
+         Tailscale status, netcheck, tailscale ping to a peer, and a
          real TCP connectivity check — including a specific diagnostic for the
          "half-open" state seen before (node Running + netcheck clean, but no
          TCP data flows to peers).
-      5. Enables Tailscale Funnel on the game port and reports the public URL.
 
     The ONE manual step: authentication. Provide it ONE of these ways:
       a) Key file:  .\tailscale-autobot.ps1 -AuthKeyFile C:\path\to\key.txt
          The file must be readable only by you / Administrators / SYSTEM
-         (the Windows equivalent of mode 600) — otherwise the script refuses
-         to read it.
+         (the Windows equivalent of mode 600). The key is passed by file
+         reference, not exposed in the process command line.
       b) Nothing: the script runs `tailscale up` in the foreground, prints the
          login URL, and waits for you to approve it in a browser.
     The key is never printed, never logged, and never written into any file
@@ -34,12 +37,16 @@
 
 .USAGE
     .\tailscale-autobot.ps1 [-Hostname NAME] [-Peer 100.x.y.z-or-name]
-                            [-AuthKeyFile PATH] [-TcpPort 22]
-                            [-FunnelPort 8778] [-Reup]
+                            [-AuthKeyFile PATH] [-TcpPort 22] [-Reup]
+                            [-SSH] [-Funnel PORT]
 
 .EXAMPLE
     .\tailscale-autobot.ps1 -Hostname harley -Peer 100.82.195.90 `
         -AuthKeyFile "$env:USERPROFILE\.tailscale-authkey"
+
+    .\tailscale-autobot.ps1 -SSH
+    .\tailscale-autobot.ps1 -Funnel 8778
+    .\tailscale-autobot.ps1 -SSH -Funnel 8778
 
     Exit codes:
       0  everything installed, up, and verified
@@ -61,7 +68,9 @@ param(
     [string]$Peer = "",
     [string]$AuthKeyFile = "",
     [int]$TcpPort = 22,
-    [int]$FunnelPort = 8778,
+    [Alias("SSH")]
+    [switch]$EnableSSH,
+    [int]$Funnel = 0,
     [switch]$Reup
 )
 
@@ -113,6 +122,58 @@ function Test-TcpPort {
     } finally {
         $client.Close()
     }
+}
+
+function Test-HttpPort {
+    param([int]$Port, [int]$TimeoutMs = 3000)
+    $request = [System.Net.HttpWebRequest]::Create("http://127.0.0.1:$Port/")
+    $request.Method = "GET"
+    $request.Timeout = $TimeoutMs
+    try {
+        $response = [System.Net.HttpWebResponse]$request.GetResponse()
+        try { return ($response.StatusCode -ge 200 -and [int]$response.StatusCode -lt 500) }
+        finally { $response.Close() }
+    } catch [System.Net.WebException] {
+        if ($_.Exception.Response -is [System.Net.HttpWebResponse]) {
+            $response = [System.Net.HttpWebResponse]$_.Exception.Response
+            try { return ([int]$response.StatusCode -ge 200 -and [int]$response.StatusCode -lt 500) }
+            finally { $response.Close() }
+        }
+        return $false
+    }
+}
+
+function Confirm-Exposure([string]$Description) {
+    if ([Console]::IsInputRedirected) {
+        Die "refusing exposure change without an interactive confirmation: $Description" 1
+    }
+    Write-Host ""
+    Write-Warn $Description
+    $answer = Read-Host "Type YES to continue; anything else cancels this exposure change"
+    return ($answer -ceq "YES")
+}
+
+if ($Funnel -lt 0 -or $Funnel -gt 65535) {
+    Die "-Funnel must be a local TCP port from 1 through 65535" 1
+}
+if ($Funnel -eq 0 -and $PSBoundParameters.ContainsKey("Funnel")) {
+    Die "-Funnel requires a port from 1 through 65535" 1
+}
+
+$EnableSSHConfirmed = $false
+if ($EnableSSH) {
+    $EnableSSHConfirmed = Confirm-Exposure (
+        "This enables Tailscale SSH on this machine. Tailnet policy may allow authorized tailnet users to open remote shell sessions."
+    )
+    if (-not $EnableSSHConfirmed) { Write-Log "SSH enablement cancelled; continuing with SSH disabled" }
+}
+
+$FunnelConfirmed = $false
+if ($Funnel -gt 0) {
+    $FunnelConfirmed = Confirm-Exposure (
+        "This publishes the local HTTP service on port $Funnel to the public internet through Tailscale Funnel. Anyone with its URL may reach it; do not expose private or unreviewed services."
+    )
+    if (-not $FunnelConfirmed) { Write-Log "Funnel enablement cancelled; continuing without a new Funnel" }
 }
 
 # --------------------------------------------------------------- preflight --
@@ -192,7 +253,8 @@ if (($State -eq "Running") -and (-not $Reup)) {
     # Resolve the auth key: file only. Never printed, never logged.
     $authKey = ""
     if ($AuthKeyFile -ne "") {
-        if (-not (Test-Path $AuthKeyFile)) { Die ("authkey file not found: " + $AuthKeyFile) 1 }
+        if (-not (Test-Path $AuthKeyFile -PathType Leaf)) { Die ("authkey file not found: " + $AuthKeyFile) 1 }
+        $AuthKeyFile = (Resolve-Path -LiteralPath $AuthKeyFile).Path
         # Windows equivalent of mode 600: only you, Administrators, SYSTEM.
         $mySid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
         $allowedSids = @($mySid, "S-1-5-32-544", "S-1-5-18")
@@ -208,14 +270,15 @@ if (($State -eq "Running") -and (-not $Reup)) {
         if ($bad.Count -gt 0) {
             Die ("refusing to read key: {0} grants access to {1} — restrict the file to yourself only" -f $AuthKeyFile, ($bad -join ", ")) 1
         }
-        $authKey = ([IO.File]::ReadAllText($AuthKeyFile)).Trim()
-        if ($authKey -eq "") { Die ("authkey file is empty: " + $AuthKeyFile) 1 }
+        if ((Get-Item -LiteralPath $AuthKeyFile).Length -eq 0) {
+            Die ("authkey file is empty: " + $AuthKeyFile) 1
+        }
+        $authKey = "file:" + $AuthKeyFile
         Write-Log "using auth key from file (permissions verified, value never shown)"
     }
 
-    $upArgs = @("up", "--ssh")
-    if ($Hostname -ne "") { $upArgs += ("--hostname=" + $Hostname) }
-    if ($authKey -ne "") { $upArgs += ("--authkey=" + $authKey) }
+    $upArgs = @("up")
+    if ($authKey -ne "") { $upArgs += ("--auth-key=" + $authKey) }
 
     if ($authKey -eq "") {
         $interactive = $false
@@ -226,9 +289,7 @@ if (($State -eq "Running") -and (-not $Reup)) {
         Write-Warn "no auth key provided — 'tailscale up' will print a login URL; approve it in your browser to continue"
     }
 
-    # NOTE: the key itself is passed but never echoed; [...] stands in for it.
-    $shownArgs = @($upArgs | ForEach-Object { if ($_ -like "--authkey=*") { "--authkey=[...]" } else { $_ } })
-    Write-Log ("running: tailscale " + ($shownArgs -join " "))
+    Write-Log ("running: tailscale up" + $(if ($authKey) { " (auth key read from protected file)" } else { "" }))
     & $TailscaleExe @upArgs
     $authKey = $null
     if ($LASTEXITCODE -ne 0) { Die "'tailscale up' failed — check the key / approval and try again" 2 }
@@ -237,6 +298,22 @@ if (($State -eq "Running") -and (-not $Reup)) {
     $State = Get-BackendState
     if ($State -ne "Running") {
         Die ("tailscale up finished but backend state is '{0}', not Running" -f $State) 2
+    }
+}
+
+# `set` changes only this preference, preserving existing routes, tags, and
+# exit-node settings. A declined or absent --SSH explicitly leaves SSH off.
+$sshValue = "false"
+if ($EnableSSHConfirmed) { $sshValue = "true" }
+Write-Log ("setting Tailscale SSH to " + $sshValue)
+& $TailscaleExe set ("--ssh=" + $sshValue)
+if ($LASTEXITCODE -ne 0) {
+    Die "could not set the Tailscale SSH preference; update the Tailscale client and retry" 2
+}
+if ($Hostname -ne "") {
+    & $TailscaleExe set ("--hostname=" + $Hostname)
+    if ($LASTEXITCODE -ne 0) {
+        Die "could not set the requested Tailscale hostname" 2
     }
 }
 
@@ -353,25 +430,30 @@ if ($verifyFailed) {
 }
 
 # ---------------------------------------------------------- 5. funnel ------
-# Publish the game port publicly via Tailscale Funnel.
-Write-Log ("enabling Tailscale Funnel on port " + $FunnelPort)
-$funnelOut = (& $TailscaleExe funnel $FunnelPort 2>&1 | Out-String)
-$funnelCode = $LASTEXITCODE
-Write-Host $funnelOut
-if ($funnelCode -eq 0) {
-    $url = ""
-    if ($funnelOut -match '(https://[^\s"''<>]+)') { $url = $Matches[1] }
-    if ($url -ne "") { Write-Ok ("Funnel is live: " + $url) }
-    else { Write-Ok "Funnel enabled — see the URL in the output above" }
-} else {
-    if ($funnelOut -match 'admin console|not enabled|enable.*funnel|funnel.*enable') {
-        Write-Warn "Tailscale Funnel is not enabled for this tailnet."
-        Write-Host "To fix: open https://login.tailscale.com/admin/settings, turn on Funnel,"
-        Write-Host ("then re-run: .\tailscale-autobot.ps1 -FunnelPort " + $FunnelPort)
-    } else {
-        Write-Warn ("'tailscale funnel {0}' failed (exit {1}) — output above" -f $FunnelPort, $funnelCode)
+if ($FunnelConfirmed) {
+    if (-not (Test-HttpPort -Port $Funnel)) {
+        Die ("refusing to publish port {0}: no valid HTTP response from http://127.0.0.1:{0}/" -f $Funnel) 3
     }
-    $verifyFailed = $true
+    Write-Log ("publishing local port " + $Funnel + " through Tailscale Funnel")
+    $funnelOut = (& $TailscaleExe funnel --bg $Funnel 2>&1 | Out-String)
+    $funnelCode = $LASTEXITCODE
+    Write-Host $funnelOut
+    if ($funnelCode -eq 0) {
+        $url = ""
+        if ($funnelOut -match '(https://[^\s"''<>]+)') { $url = $Matches[1] }
+        if ($url -ne "") { Write-Ok ("Funnel is live: " + $url) }
+        else { Write-Ok "Funnel enabled in the background — see the status above" }
+    } else {
+        Write-Warn ("'tailscale funnel --bg {0}' failed (exit {1}) — output above" -f $Funnel, $funnelCode)
+        $verifyFailed = $true
+    }
+} else {
+    Write-Log "no new Funnel requested; existing Funnel settings, if any, were not changed"
+    $existingFunnel = (& $TailscaleExe funnel status 2>&1 | Out-String).Trim()
+    if ($existingFunnel -and $existingFunnel -notmatch "no serve config|no funnel") {
+        Write-Warn "Funnel status follows. Any pre-existing public Funnel remains configured; this script did not change it."
+        Write-Host $existingFunnel
+    }
 }
 
 if ($verifyFailed) {
@@ -382,9 +464,10 @@ if ($verifyFailed) {
 Write-Host ""
 Write-Host "[OK] Tailscale Autobot finished successfully" -ForegroundColor Green
 Write-Host ("  backend : " + $State)
-Write-Host "  ssh     : enabled (--ssh)"
+Write-Host ("  ssh     : " + $(if ($EnableSSHConfirmed) { "enabled by explicit confirmation" } else { "disabled" }))
 if ($Hostname -ne "") { Write-Host ("  hostname: " + $Hostname) }
 if ($peerIp -ne "") { Write-Host ("  peer    : {0} ({1}), ping pongs {2}/4, TCP {3}" -f $peerName, $peerIp, $pongCount, $tcpResult) }
 Write-Host "  service : the Windows 'Tailscale' service supervises tailscaled"
-Write-Host ("  funnel  : port " + $FunnelPort + " published via Tailscale Funnel")
+if ($FunnelConfirmed) { Write-Host ("  funnel  : local port " + $Funnel + " published to the public internet") }
+else { Write-Host "  funnel  : no new public service enabled (existing configuration unchanged)" }
 exit 0

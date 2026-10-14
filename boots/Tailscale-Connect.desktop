@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Tailscale Connect
+Comment=Install and connect Tailscale; SSH and Funnel stay off by default
+Terminal=true
+Exec=/bin/sh -c "\"$(dirname \"$1\")/tailscale-autobot.sh\"; result=$?; echo; printf 'Press Return to close this window...'; read -r _; exit $result" -- %k
+Categories=Network;

@@ -8582,6 +8582,15 @@ class Handler(BaseHTTPRequestHandler):
                              "tester_shell": TESTER_SHELL,
                              "persistence_warning": _persistence_warning(),
                              "instance": INSTANCE_ID})
+        elif path == "/api/launcher-version":
+            # v5.62: no auth — lets the mobile launchers check for wrapper
+            # updates. Bump LAUNCHER_VERSION_* when shipping a new wrapper;
+            # drop the new APK next to the server as crumbs-world-launcher.apk
+            # (served statically) and point apk_url at it.
+            self._send_json({"ok": True,
+                             "android_version": LAUNCHER_VERSION_ANDROID,
+                             "android_apk_url": LAUNCHER_APK_URL,
+                             "ios_version": LAUNCHER_VERSION_IOS})
         elif path == "/api/auth/me":
             # v5.27: no auth — reports the login state, never 401s.
             u = self._session_user()

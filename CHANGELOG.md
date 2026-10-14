@@ -3,6 +3,19 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.62.0 — 2026-10-13
+
+**Safer updates and deployment warnings.** The Replit Run workflow no longer
+pulls code in parallel with the boot script, which already performs the sync.
+Boot snapshots player data before and after stopping the server; update and
+repair also snapshot before stopping. Data archives are gzip-checked and get
+SHA-256 sidecars; restore verifies the digest and rejects paths outside the
+data folders. Cloud Run now prints and exposes a health warning because this
+build still stores player data on its local
+filesystem. The Cloud Run deployment stanza is disabled until durable storage
+is implemented. The in-app updater now includes Melody's agent and operator
+helpers, including the protected key finder.
+
 ## v5.55.0 — 2026-10-05
 
 **Steph's navigation pass.** Back buttons everywhere, panel history, and a

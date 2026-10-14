@@ -12,7 +12,7 @@
 # private vault. Paths are constructed, never taken from user input.
 #
 # Brain backends (OpenAI-compatible chat completions):
-#   MELODY_BRAIN=groq    (default)  GROQ_API_KEY    -> Qwen on Groq, free tier
+#   MELODY_BRAIN=groq    (default)  GROQ_API_KEY    -> GPT OSS 20B on Groq
 #   MELODY_BRAIN=gemini             GEMINI_API_KEY  -> Google AI Studio, free tier
 #   MELODY_BRAIN=ollama             MELODY_BRAIN_BASE=http://host:11434/v1
 #                                   -> homecoming: Lloyd's own weights, no game changes
@@ -29,10 +29,21 @@ import os
 import random
 import re
 import secrets
+import sys
 import threading
 import time
 import urllib.request
 import urllib.error
+
+# v5.62: load the owner's protected Groq key file before brain_backends()
+# reads GROQ_API_KEY. The finder never prints the key itself.
+try:
+    import melody_keyfinder  # noqa: F401 -- loads GROQ_API_KEY into os.environ
+except (ImportError, SyntaxError) as exc:
+    # Keep Melody's env-key/proxy backends available if the optional local
+    # keyfinder was not copied with this checkout.
+    print("[melody] keyfinder unavailable (%s); using environment settings"
+          % type(exc).__name__, file=sys.stderr)
 
 _USERNAME_RE = re.compile(r"^[a-z0-9_-]{3,24}$")
 _LOCAL_USER = "local"          # single-player session id in local (login-free) mode
@@ -1614,7 +1625,7 @@ def brain_backends():
     groq_key = _env("GROQ_API_KEY")
     groq = ("groq+qwen",
             "https://api.groq.com/openai/v1/chat/completions",
-            groq_key, _env("GROQ_MODEL", "qwen/qwen3.8-27b"))
+            groq_key, _env("GROQ_MODEL", "openai/gpt-oss-20b"))
     gemini = ("gemini",
               "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
               gem_key, _env("GEMINI_MODEL", "gemini-2.5-flash"))
@@ -1630,10 +1641,34 @@ def brain_backends():
 
 def brain_status():
     backs = brain_backends()
+    with _BRAIN_TELEMETRY_LOCK:
+        recent = dict(_BRAIN_TELEMETRY)
     return {"configured": bool(backs),
             "primary": backs[0][0] if backs else None,
             "fallback": backs[1][0] if len(backs) > 1 else None,
-            "mode": _env("MELODY_BRAIN", "groq").lower()}
+            "model": backs[0][3] if backs else None,
+            # Boolean only: never return credentials or secret-file paths.
+            "credential_present": bool(backs and backs[0][2]),
+            "mode": _env("MELODY_BRAIN", "groq").lower(),
+            "last_call": recent}
+
+
+_BRAIN_TELEMETRY_LOCK = threading.Lock()
+_BRAIN_TELEMETRY = {"outcome": "not yet used", "at": None,
+                    "provider": None, "model": None, "latency_ms": None,
+                    "error_type": None, "fallback_used": False}
+
+
+def _record_brain_call(outcome, started, provider=None, model=None,
+                       error_type=None, fallback_used=False):
+    # Store operational metadata only: no prompts, replies, URLs, or secrets.
+    record = {"outcome": outcome,
+              "at": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
+              "provider": provider, "model": model,
+              "latency_ms": max(0, int((time.monotonic() - started) * 1000)),
+              "error_type": error_type, "fallback_used": bool(fallback_used)}
+    with _BRAIN_TELEMETRY_LOCK:
+        _BRAIN_TELEMETRY.update(record)
 
 
 # Groq sits behind Cloudflare, whose browser-integrity check (error 1010)
@@ -1657,11 +1692,14 @@ def _post_json(url, payload, key, timeout=_BRAIN_TIMEOUT):
 
 def brain_chat(messages, tools=None):
     """-> (reply_text, tool_calls, backend_label). Raises RuntimeError if no brain."""
+    started = time.monotonic()
     backs = brain_backends()
     if not backs:
+        _record_brain_call("not configured", started,
+                           error_type="NoBackendConfigured")
         raise RuntimeError("brain not configured")
-    last_err = None
-    for label, url, key, model in backs:
+    last_error_type = None
+    for index, (label, url, key, model) in enumerate(backs):
         payload = {"model": model, "messages": messages,
                    "temperature": 0.7, "max_tokens": 800}
         if tools:
@@ -1670,11 +1708,16 @@ def brain_chat(messages, tools=None):
         try:
             data = _post_json(url, payload, key)
             msg = data["choices"][0]["message"]
+            _record_brain_call("success", started, label, model,
+                               fallback_used=index > 0)
             return (msg.get("content") or "",
                     msg.get("tool_calls") or [], label)
         except Exception as exc:  # network, auth, bad payload — try next
-            last_err = exc
-    raise RuntimeError(f"all brains failed: {last_err}")
+            last_error_type = type(exc).__name__[:60]
+    _record_brain_call("failed", started, backs[0][0], backs[0][3],
+                       error_type=last_error_type)
+    # Do not include provider exception text: it can contain request details.
+    raise RuntimeError("all brains failed (%s)" % (last_error_type or "unknown error"))
 
 
 # -- voice input (STT) ------------------------------------------------------

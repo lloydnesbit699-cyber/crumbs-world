@@ -155,7 +155,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.61.0"
+APP_VERSION = "5.62.0"
 # v5.61: tester-shell feature flag — ENVIRONMENT variable only (Lloyd's
 # 2026-10-07 decision), default OFF. Controls presentation only, never
 # permissions. Stamped into editor.html as %%TESTER_SHELL%% ("1"/"0");
@@ -219,7 +219,8 @@ SERVER_ROLE = _normalize_server_role(SERVER_ROLE)
 UPDATE_REPO = "lloydnesbit699-cyber/crumbs-world"
 UPDATE_BRANCH = "main"
 UPDATE_FILES = ["editor.html", "crumbs_hud.py", "crumbs_core.py",
-                "crumbs_recovery.py"]
+                "crumbs_recovery.py", "melody_agent.py",
+                "melody_keyfinder.py", "melody_inventory.py"]
 # v5.25: the art the thumbnails are painted from. The updater used to ship
 # code only, so phones ended up with registry entries (shared_library.json)
 # pointing at PNGs that never arrived — every one of those tiles painted a
@@ -576,6 +577,16 @@ SCHEMA_VERSION = 2  # v5.29: object-layer cells may be {tid,size,hero,flavor,
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 HTML_PATH = os.path.join(SCRIPT_DIR, "editor.html")
 DEFAULT_SAVE = "hud_map.json"
+
+
+def _persistence_warning():
+    """Explain the known data-loss risk on ephemeral Cloud Run filesystems."""
+    if os.environ.get("K_SERVICE"):
+        return ("Cloud Run detected: this build stores worlds and accounts on "
+                "the container filesystem, which may be replaced during a "
+                "deployment. Treat saves as at risk until durable storage is "
+                "configured; download backups before deploying.")
+    return None
 
 # Phase 2A: persistent recovery lives beside the project, independent of the process.
 _recovery_store = CheckpointStore(SCRIPT_DIR) if CheckpointStore else None
@@ -1531,10 +1542,12 @@ def _vault_id_for(username):
     return username
 
 # PUBLIC_MODE / PUBLIC_WRITE_KEY are set in __main__ (--public / --share-key= / $CRUMBS_SHARE_KEY).
-MAX_JSON_BYTES = 64 * 1024 * 1024   # JSON bodies; base64 inflates bundles
-                                  # ~4/3, and the decoded zip is still capped
-                                  # at MAX_BUNDLE_BYTES below
+MAX_JSON_BYTES = 16 * 1024 * 1024   # ordinary API requests
 MAX_BUNDLE_BYTES = 48 * 1024 * 1024  # .crumbs.zip bundle imports
+MAX_BUNDLE_JSON_BYTES = 65 * 1024 * 1024  # base64 encoding + JSON envelope
+MAX_BUNDLE_ENTRIES = 128
+MAX_BUNDLE_EXPANDED_BYTES = 128 * 1024 * 1024
+MAX_BUNDLE_MANIFEST_BYTES = 1024 * 1024
 MAX_IMAGE_DIM = 2048                 # per-side cap on uploaded tile art
 MAX_IMAGE_PIXELS = 2048 * 2048
 # per-IP sliding-window rate limits: (max hits, window seconds)
@@ -2200,6 +2213,9 @@ def _load_custom_tiles():
             try:
                 entry["scope"] = "local"
                 entry["_from_pack"] = True
+                declared_license = str(doc.get("license") or "").strip()[:160]
+                if declared_license:
+                    entry["_pack_license"] = declared_license
                 if _register_custom_tile(entry, _custom_dir()):
                     _custom_tiles.append(entry)
                     n_pack += 1
@@ -4724,6 +4740,28 @@ def _validate_map():
 _NON_MAPS = {"custom_tiles.json", "sprite_library.json", "shared_library.json",
              "hud_patrols.json", "users.json"}
 
+def _legacy_csv_dimensions(path):
+    """Return dimensions for a valid, bounded legacy CSV map; otherwise None."""
+    try:
+        if os.path.getsize(path) > 8 * 1024 * 1024:
+            return None
+        width = height = 0
+        with open(path, "r", encoding="utf-8-sig") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                cells = line.split(",")
+                if len(cells) > MAP_MAX or height >= MAP_MAX:
+                    return None
+                for cell in cells:
+                    int(cell.strip())
+                width = max(width, len(cells))
+                height += 1
+        return (width, height) if width and height else None
+    except (OSError, UnicodeError, ValueError):
+        return None
+
 def _safe_name(name):
     """Basename-only map filenames; no path traversal."""
     name = os.path.basename(str(name or "")).strip()
@@ -6426,6 +6464,140 @@ def _export_used_tiles(doc):
     return used
 
 
+def _export_preflight(name, target):
+    """Check the active map and report export blockers/warnings with sources."""
+    blockers, warnings, sources = [], [], {}
+    name = _safe_name(name)
+    if target not in ("png", "tiled", "bundle"):
+        return {"ok": False, "blockers": [{"message": "Unknown export type."}],
+                "warnings": [], "sources": []}
+    if not name:
+        blockers.append({"message": "Choose a world before exporting it."})
+        return {"ok": False, "map": name, "blockers": blockers,
+                "warnings": warnings, "sources": []}
+    if _save_state.get("dirty"):
+        blockers.append({"message": "Save the latest edits before exporting."})
+    doc = _export_map_doc(name)
+    if not doc:
+        blockers.append({"message": "The saved map file could not be read."})
+        return {"ok": False, "map": name, "blockers": blockers,
+                "warnings": warnings, "sources": []}
+    if target == "png" and not core.PIL_AVAILABLE:
+        blockers.append({"message": "PNG export needs Pillow image support, which is unavailable in this install."})
+    if doc["w"] != world.width or doc["h"] != world.height:
+        blockers.append({"message": "Saved map dimensions do not match the open world. Save again, then retry."})
+    if name != _current_map and (
+            doc.get("tiles") != world.data
+            or (doc.get("objects") is not None
+                and doc.get("objects") != world.object_layer)
+            or (doc.get("collision") is not None
+                and doc.get("collision") != world.collision_layer)):
+        blockers.append({"message": "The selected export file is not the open world's saved state. Open it and retry."})
+
+    try:
+        for issue in _validate_map():
+            item = {"message": str(issue.get("msg", "Map validation reported an issue."))}
+            if issue.get("kind") in ("bad_layers", "bad_tile"):
+                blockers.append(item)
+            else:
+                warnings.append(item)
+    except Exception as exc:
+        blockers.append({"message": "Map validation could not complete (" +
+                        type(exc).__name__ + ")."})
+
+    try:
+        used = _export_used_tiles(doc)
+    except (KeyError, TypeError):
+        blockers.append({"message": "The saved map has malformed tile layers."})
+        return {"ok": False, "map": name, "blockers": blockers,
+                "warnings": warnings, "sources": []}
+    missing = []
+    custom_sources = set()
+    for raw_tid in used:
+        try:
+            tid = int(raw_tid)
+        except (TypeError, ValueError):
+            missing.append(str(raw_tid))
+            continue
+        tile = assets.tiles.get(tid)
+        if tile is None:
+            missing.append(str(raw_tid))
+            continue
+        ttype = tile.get("type")
+        if ttype != "color" and not (tile.get("frames") or tile.get("image")):
+            missing.append(str(raw_tid))
+            continue
+
+        entry, _scope = _find_custom(tid)
+        if entry is not None:
+            pack = str(entry.get("pack") or "").strip()
+            if _scope == "local" and pack not in ("starter", "utumno"):
+                custom_sources.add(pack or "Imported tile art")
+            declared = str(entry.get("_pack_license") or "").strip()
+            if pack in ("starter", "utumno"):
+                key = "cc0:" + pack
+                sources.setdefault(key, {"name": pack, "license": "CC0",
+                                         "status": "known", "tiles": 0})
+            elif declared:
+                key = "declared:" + (pack or "pack")
+                sources.setdefault(key, {"name": pack or "Installed pack",
+                                         "license": declared,
+                                         "status": "declared", "tiles": 0})
+            else:
+                key = "unknown:" + (pack or "custom-import")
+                sources.setdefault(key, {"name": pack or "Imported tile art",
+                                         "license": "Not recorded",
+                                         "status": "unknown", "tiles": 0})
+            sources[key]["tiles"] += 1
+        elif ttype == "color":
+            continue  # generated solid-color tiles have no external art
+        else:
+            key = "unknown:imported-sprites"
+            label = ("Imported sprite art" if tile.get("filepaths")
+                     else "Untracked tile art")
+            sources.setdefault(key, {"name": label, "license": "Not recorded",
+                                     "status": "unknown", "tiles": 0})
+            sources[key]["tiles"] += 1
+    if missing:
+        sample = ", ".join(missing[:8])
+        suffix = " and more" if len(missing) > 8 else ""
+        blockers.append({"message": f"{len(missing)} used tile(s) are missing art or definitions: {sample}{suffix}."})
+
+    for source in sources.values():
+        if source["status"] == "unknown":
+            warnings.append({"message": f"{source['name']}: rights are not recorded for {source['tiles']} used tile(s). Verify the license before sharing or commercial use."})
+        elif source["status"] == "declared":
+            warnings.append({"message": f"{source['name']} declares ‘{source['license']}’; confirm it permits your intended redistribution."})
+    if target == "tiled":
+        warnings.append({"message": "This download is Tiled JSON only; the companion tileset PNG is included in a Crumbs bundle. Tiled JSON also omits Crumbs collision, rules, missions, and other sidecars."})
+    if target == "bundle":
+        if custom_sources:
+            names = ", ".join(sorted(custom_sources)[:4])
+            warnings.append({"message": f"This bundle does not install custom tile art ({names}); recipients need the same art pack installed."})
+        if not core.PIL_AVAILABLE and used:
+            warnings.append({"message": "Pillow is unavailable, so the bundle will not contain its generated tileset image."})
+        base = name[:-5] if name.endswith(".json") else name
+        for ext in _BUNDLE_EXTS:
+            side_path = _vpath(base + ext)
+            if not os.path.isfile(side_path):
+                continue
+            try:
+                if os.path.getsize(side_path) > MAX_JSON_BYTES:
+                    raise ValueError("sidecar is too large")
+                with open(side_path, encoding="utf-8") as f:
+                    side = json.load(f)
+                migrated = _migrate_sidecar(ext, side)
+                if not isinstance(migrated, dict) or migrated.get("error"):
+                    raise ValueError("unsupported sidecar schema")
+            except (OSError, ValueError, TypeError):
+                warnings.append({"message": f"The {ext.lstrip('.')} sidecar could not be included in the bundle."})
+
+    return {"ok": not blockers, "map": name, "target": target,
+            "dimensions": [doc["w"], doc["h"]], "used_tiles": len(used),
+            "blockers": blockers, "warnings": warnings,
+            "sources": list(sources.values())}
+
+
 def _tiled_doc(name, doc, used):
     """Tiled (mapeditor.org) JSON. gid = index+1 over used tiles; the
     companion crumbs-tileset.png (8 columns of 32px) carries the art."""
@@ -6537,18 +6709,39 @@ def _import_bundle(raw, want_name):
         return False, "bundle too large"
     try:
         zf = zipfile.ZipFile(io.BytesIO(raw))
-        manifest = json.loads(zf.read("manifest.json"))
+        infos = zf.infolist()
+        if len(infos) > MAX_BUNDLE_ENTRIES:
+            return False, "bundle has too many files"
+        names = [info.filename for info in infos]
+        if len(names) != len(set(names)):
+            return False, "bundle contains duplicate filenames"
+        total_size = sum(info.file_size for info in infos)
+        if total_size > MAX_BUNDLE_EXPANDED_BYTES:
+            return False, "bundle expands beyond the size limit"
+        if any(info.file_size > MAX_BUNDLE_EXPANDED_BYTES for info in infos):
+            return False, "bundle entry exceeds the size limit"
+        manifest_info = zf.getinfo("manifest.json")
+        if manifest_info.file_size > MAX_BUNDLE_MANIFEST_BYTES:
+            return False, "bundle manifest is too large"
+        manifest = json.loads(zf.read(manifest_info))
     except Exception as e:
         return False, f"not a crumbs bundle: {e}"
+    if not isinstance(manifest, dict):
+        return False, "bundle manifest must be a JSON object"
     if manifest.get("app") != "crumbs-hud":
         return False, "not a crumbs bundle"
     mschema = manifest.get("schema", 0)
+    if isinstance(mschema, bool) or not isinstance(mschema, int) or mschema < 0:
+        return False, "bundle schema is invalid"
     if mschema > SCHEMA_VERSION:
         return False, (f"bundle needs newer Crumbs "
                        f"(bundle schema {mschema}, this app reads "
                        f"{SCHEMA_VERSION}) — update the app first")
     src_map = manifest.get("map") or "map.json"
-    src_base = src_map[:-5] if src_map.endswith(".json") else src_map
+    if (not isinstance(src_map, str) or not src_map.endswith(".json")
+            or os.path.basename(src_map) != src_map or src_map in ("", ".json")):
+        return False, "bundle map filename is invalid"
+    src_base = src_map[:-5]
     want = _safe_name(want_name) or (src_base + ".json")
     base = want[:-5] if want.endswith(".json") else want
     base = re.sub(r"[^A-Za-z0-9_-]+", "-", base).strip("-") or "imported"
@@ -6557,9 +6750,9 @@ def _import_bundle(raw, want_name):
         candidate, i = f"{base}-{i}.json", i + 1
     dst_base = candidate[:-5]
     allowed = {src_base + ".json"} | {src_base + e for e in _BUNDLE_EXTS}
-    wrote = []
+    staged = {}
     try:
-        for arc in zf.namelist():
+        for arc in names:
             if arc in ("manifest.json",) or arc.endswith(".tiled.json") \
                     or arc == "crumbs-tileset.png":
                 continue
@@ -6571,13 +6764,36 @@ def _import_bundle(raw, want_name):
                 continue
             out = (dst_base + arc[len(src_base):]
                    if arc != src_base + ".json" else candidate)
-            with open(_vpath(out), "w") as f:
-                json.dump(data, f)
-            wrote.append(out)
+            if not isinstance(data, dict):
+                return False, f"bundle entry {arc} must be a JSON object"
+            staged[out] = data
     except Exception as e:
         return False, f"bundle unreadable: {e}"
-    if candidate not in wrote:
+    if candidate not in staged:
         return False, "bundle has no map"
+    wrote = []
+    try:
+        # Names are unique, but recheck immediately before installation.
+        if any(os.path.exists(_vpath(out)) for out in staged):
+            return False, "an import with that name already exists; retry"
+        for out, data in staged.items():
+            target = _vpath(out)
+            tmp = target + ".import-tmp-" + secrets.token_hex(6)
+            try:
+                with open(tmp, "x", encoding="utf-8") as f:
+                    json.dump(data, f)
+                os.replace(tmp, target)
+                wrote.append(out)
+            finally:
+                if os.path.exists(tmp):
+                    os.unlink(tmp)
+    except Exception as e:
+        for out in wrote:
+            try:
+                os.unlink(_vpath(out))
+            except OSError:
+                pass
+        return False, f"bundle install failed: {e}"
     _log_event(f"imported bundle as {candidate}"
                + (" (migrated)" if mschema < SCHEMA_VERSION else ""))
     return True, {"file": candidate, "sidecars": [w for w in wrote
@@ -7428,6 +7644,16 @@ class Handler(BaseHTTPRequestHandler):
                        # Nothing about anyone else is ever exposed here.
                        "user": self._melody_user()})
             return self._send_json(st)
+        if path == "/api/melody/status" and not is_post:
+            user = self._melody_user()
+            if user is None:
+                return self._send_json({"ok": False, "error": "login required"}, 401)
+            if PUBLIC_MODE and not (self._is_owner_session()
+                                    or self._write_key_ok()):
+                return self._send_json({"ok": False, "error": "owner only"}, 403)
+            status = _melody_agent.brain_status()
+            return self._send_json({"ok": True, "brain": status,
+                                    "version": APP_VERSION})
         if path == "/api/melody/diagnostics" and not is_post:
             user = self._melody_user()
             if user is None:
@@ -8345,6 +8571,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"ok": True, "version": APP_VERSION,
                              "public_mode": PUBLIC_MODE,
                              "tester_shell": TESTER_SHELL,
+                             "persistence_warning": _persistence_warning(),
                              "instance": INSTANCE_ID})
         elif path == "/api/auth/me":
             # v5.27: no auth — reports the login state, never 401s.
@@ -8549,6 +8776,11 @@ class Handler(BaseHTTPRequestHandler):
                         w, h = m.get("width"), m.get("height")
                     except (OSError, ValueError):
                         pass
+                else:
+                    dims = _legacy_csv_dimensions(p)
+                    if dims is None:
+                        continue  # don't present arbitrary text/log files as worlds
+                    w, h = dims
                 meta = {}
                 try:
                     meta = (json.load(open(_rules_path(f))) or {}).get("meta") or {}
@@ -8648,6 +8880,12 @@ class Handler(BaseHTTPRequestHandler):
             catalog, granted = _pack_catalog()
             return self._send_json({"ok": True, "granted": sorted(granted),
                                     "catalog": catalog})
+        elif path == "/api/export/preflight":
+            q = parse_qs(urlparse(self.path).query)
+            name = _safe_name((q.get("file") or [""])[0]) or _current_map
+            target = (q.get("target") or [""])[0]
+            report = _export_preflight(name, target)
+            return self._send_json(report, 200 if report.get("ok") else 400)
         elif path == "/api/generation-presets":
             # v5.16: deterministic recipes — same seed, same map, every time.
             return self._send_json({
@@ -8896,7 +9134,9 @@ class Handler(BaseHTTPRequestHandler):
         # (public mode) already enforced session-or-write-key, and local
         # mode skips auth entirely. Update/restart keep their own
         # write-key checks below.
-        body = self._read_json()
+        body = self._read_json(max_bytes=(MAX_BUNDLE_JSON_BYTES
+                                          if path == "/api/bundle/import"
+                                          else MAX_JSON_BYTES))
         if body is None or not isinstance(body, dict):
             # QA 2026-09-19: a JSON list/string/number parsed fine but has no
             # .get — reject it here instead of dying mid-handler with a bare
@@ -11710,6 +11950,59 @@ class Handler(BaseHTTPRequestHandler):
             if os.path.exists(_vpath(name)):
                 return self._send_json({"ok": False,
                                         "error": "name taken"}, 409)
+            beginning = body.get("beginning", "blank")
+            starter_sources = {
+                "village": "starter-village",
+                "dungeon": "starter-dungeon",
+                "maze": "starter-maze",
+            }
+            if not isinstance(beginning, str) or (beginning != "blank" and beginning not in starter_sources):
+                return self._send_json({"ok": False,
+                                        "error": "unknown beginning"}, 400)
+            if beginning != "blank":
+                source = starter_sources[beginning]
+                source_map = os.path.join(SCRIPT_DIR, source + ".json")
+                source_rules = os.path.join(SCRIPT_DIR, source + ".rules.json")
+                target_map, target_rules = _vpath(name), _rules_path(name)
+                created_map = created_rules = False
+                try:
+                    with open(source_map, "r", encoding="utf-8") as f:
+                        starter_data = json.load(f)
+                    starter_rules = {}
+                    try:
+                        with open(source_rules, "r", encoding="utf-8") as f:
+                            starter_rules = json.load(f)
+                    except FileNotFoundError:
+                        pass
+                    if not isinstance(starter_data, dict):
+                        raise ValueError("invalid starter map")
+                    meta = starter_rules.get("meta") if isinstance(starter_rules, dict) else {}
+                    meta = dict(meta) if isinstance(meta, dict) else {}
+                    meta.update({"kind": "overworld", "created": int(time.time()),
+                                 "modified": int(time.time()), "description": ""})
+                    starter_rules["meta"] = meta
+                    with open(target_map, "x", encoding="utf-8") as f:
+                        created_map = True
+                        json.dump(starter_data, f)
+                    with open(target_rules, "x", encoding="utf-8") as f:
+                        created_rules = True
+                        json.dump(_stamp(starter_rules), f)
+                    h, w = len(starter_data.get("tiles", [])), int(starter_data.get("width", 0))
+                except (OSError, ValueError, TypeError, json.JSONDecodeError) as e:
+                    for created, owned in ((target_map, created_map), (target_rules, created_rules)):
+                        if not owned:
+                            continue
+                        try:
+                            os.remove(created)
+                        except OSError:
+                            pass
+                    print(f"[hud] starter creation failed: {e}")
+                    return self._send_json({"ok": False,
+                                            "error": "cannot create starter world"}, 500)
+                _log_event(f"created map {name} from {beginning}")
+                return self._send_json({"ok": True, "file": name,
+                                        "width": w, "height": h, "kind": "overworld",
+                                        "beginning": beginning})
             try:
                 # v5.61.0: Lloyd's call — starter maps default to 500x500.
                 # Big worlds from the first tap.
@@ -12313,6 +12606,9 @@ if __name__ == "__main__":
     threading.Thread(target=_autosave_loop, daemon=True).start()
     print("=" * 52)
     print(f"  Crumbs HUD v{APP_VERSION} — Menu > Check for updates keeps it fresh")
+    storage_warning = _persistence_warning()
+    if storage_warning:
+        print("  !! DATA PERSISTENCE WARNING: " + storage_warning)
     if public:
         ip = _lan_ip()
         print("  PUBLIC mode: anyone on your Wi-Fi can open the HUD (read-only by default).")

@@ -8,6 +8,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Crumbs World">
+<meta name="referrer" content="no-referrer">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon-512.png">
 <link rel="apple-touch-icon" href="/icon-512.png">
@@ -3314,6 +3315,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     background: #26241f; border: 3px solid #c9973f; border-radius: 14px;
     box-shadow: 0 0 0 1px #c9973f; color: #f3ead6; cursor: pointer; min-height: 88px;
   }
+  #shell-root .sh-begin-card[aria-pressed="false"] { opacity: .72; }
   #shell-root .sh-begin-card .sh-bc-ico { font-size: 34px; line-height: 1; flex: none; }
   #shell-root .sh-begin-card b { display: block; font-size: 17px; margin-bottom: 2px; }
   #shell-root .sh-begin-card small { font-size: 14px; color: #cfc6b0; }
@@ -3845,7 +3847,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     <button id="btn-new-interior" title="Create a new interior/pocket map — a direct path to a new inside">+ Interior</button>
     <button id="btn-import-map" title="Load a map JSON someone sent you">Import&hellip;</button>
     <input type="file" id="file-import-map" accept=".json,application/json" hidden>
-    <button id="btn-export-tiled" title="Tiled JSON + tileset PNG for other engines">Tiled&hellip;</button>
+    <button id="btn-export-tiled" title="Download Tiled JSON; use Share to include its tileset PNG">Tiled&hellip;</button>
     <button id="btn-share-bundle" title="Shareable .crumbs.zip of the current map">Share&hellip;</button>
     <button id="btn-import-bundle" title="Install a .crumbs.zip someone shared">Bundle&hellip;</button>
     <input type="file" id="file-import-bundle" accept=".zip,application/zip" hidden>
@@ -4311,6 +4313,13 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
 <script>
 "use strict";
 const WRITE_KEY = (new URLSearchParams(location.search).get("key") || "").trim();
+// Keep the convenience builder link, but remove its credential from the
+// address bar/history as soon as the page has captured it.
+if (WRITE_KEY && window.history && window.history.replaceState) {
+  const clean = new URL(location.href);
+  clean.searchParams.delete("key");
+  window.history.replaceState(null, "", clean.pathname + clean.search + clean.hash);
+}
 // ---- v1.3 remote debug: mirror page errors to the server terminal + on-page
 (function () {
   const dbg = document.getElementById("dbg");
@@ -13808,7 +13817,10 @@ async function restoreLastMap() {
 let loadingMap = false;
 function showVeil(text) { $("veil-text").textContent = text || "Loading…"; $("load-veil").hidden = false; }
 function hideVeil() { $("load-veil").hidden = true; }
-function friendlyName(file) { return String(file || "").replace(/\.(json|txt)$/i, ""); }
+function friendlyName(file) {
+  return String(file || "").replace(/\\/g, "/").split("/").pop()
+    .replace(/\.(json|txt)$/i, "");
+}
 function fmtModified(ts) {
   if (!ts) return "date unknown";
   const d = new Date(ts * 1000);
@@ -14322,17 +14334,63 @@ $("menu-new").onclick = async () => {
   } else { toast("reset failed"); Sfx.error(); }
 };
 $("menu-load").onclick = () => { toggleOverlay("sheet-load"); renderLoadList(); };
-// ---- v5.6: MVP finish — export, slots, validate, collision overlay, server log
-$("menu-export").onclick = () => {
+// ---- Export preflight: save, validate, disclose asset-rights gaps, export.
+let exportPreflightBusy = false;
+async function preflightExport(target) {
+  if (exportPreflightBusy) return;
+  exportPreflightBusy = true;
   closeOverlays();
-  // attachment download — the page stays put
-  window.location.href = "/api/export/png?scale=4";
-  // v5.41: huge maps export at reduced resolution (4096px cap server-side)
-  // instead of a 16GB image that kills the server — say so up front.
-  toast(Math.max(W, H) * 128 > 4096
-    ? "big map — exporting at reduced size…"
-    : "rendering PNG\u2026");
-};
+  try {
+    toast("saving and checking export\u2026");
+    const saved = await api("/api/save", { filename: currentFile });
+    if (!saved || !saved.ok) {
+      alert("Export stopped: the current world could not be saved. Check the server and try again.");
+      return;
+    }
+    setFile(saved.file);
+    rememberLastMap(saved.file);
+    const qs = new URLSearchParams({ file: saved.file, target });
+    const report = await api("/api/export/preflight?" + qs.toString());
+    if (!report || !report.ok) {
+      const blocked = (report && report.blockers || []).map(x => "\u2022 " + x.message);
+      alert("Export blocked:\n\n" + (blocked.join("\n") || "The world could not be checked."));
+      return;
+    }
+    const lines = [];
+    lines.push((report.dimensions || []).join(" \u00d7 ") + " tiles \u00b7 " +
+      report.used_tiles + " used tile types");
+    (report.sources || []).forEach(s => {
+      if (s.status === "known") lines.push("Known art license: " + s.name + " (" + s.license + ")");
+    });
+    (report.warnings || []).forEach(w => lines.push("\u2022 " + w.message));
+    if (report.warnings && report.warnings.length) {
+      if (!confirm("Export check for “" + friendlyName(saved.file) + "”:\n\n" +
+          lines.join("\n") + "\n\nContinue with export?")) return;
+    }
+    let url;
+    if (target === "png") {
+      url = "/api/export/png?scale=4";
+      toast(Math.max(W, H) * 128 > 4096
+        ? "big map \u2014 exporting at reduced size\u2026"
+        : "rendering PNG\u2026");
+    } else if (target === "tiled") {
+      url = "/api/export/tiled?file=" + encodeURIComponent(saved.file);
+      toast("downloading Tiled JSON\u2026");
+    } else {
+      url = "/api/bundle/export?file=" + encodeURIComponent(saved.file);
+      toast("building share bundle\u2026");
+    }
+    window.location.href = url;
+  } catch (e) {
+    toast("export check failed: " + (e.message || "server unavailable"));
+    Sfx.error();
+  } finally {
+    exportPreflightBusy = false;
+  }
+}
+
+// ---- v5.6: MVP finish — export, slots, validate, collision overlay, server log
+$("menu-export").onclick = () => preflightExport("png");
 // ---- v5.16: share key, engine exports, shareable bundles, backups ---------
 $("menu-key").onclick = () => {
   closeOverlays();
@@ -14591,14 +14649,10 @@ $("menu-rollback").onclick = async () => {
   else { toast("rollback failed: " + (r.error || "unknown")); Sfx.error(); }
 };
 $("btn-export-tiled").onclick = () => {
-  // Tiled JSON for other engines; the tileset art strip rides the Share bundle
-  window.location.href = "/api/export/tiled?file=" + encodeURIComponent(currentFile);
-  toast("downloading Tiled JSON\u2026");
+  preflightExport("tiled");
 };
 $("btn-share-bundle").onclick = () => {
-  closeOverlays();
-  window.location.href = "/api/bundle/export?file=" + encodeURIComponent(currentFile);
-  toast("building share bundle\u2026");
+  preflightExport("bundle");
 };
 $("btn-import-bundle").onclick = () => $("file-import-bundle").click();
 $("file-import-bundle").onchange = async e => {
@@ -15847,6 +15901,33 @@ async function melodyInitInner() {
   MELODY.demo = false;
   $("melody-dock").classList.remove("demo");
   $("melody-title").textContent = "Melody";
+  $("melody-status").onclick = async () => {
+    const btn = $("melody-status");
+    btn.disabled = true;
+    try {
+      const r = await fetch("/api/melody/status");
+      const j = await r.json();
+      if (!r.ok || !j.ok) {
+        melodyAdd("mel", r.status === 403 ? "That server status is private to the world owner." : "I couldn't read my server status right now.");
+      } else {
+        const b = j.brain || {};
+        const state = b.configured ? "configured (not live-tested)" : "not configured";
+        const provider = b.primary || b.mode || "none";
+        const model = b.model ? " · " + b.model : "";
+        const credential = b.credential_present ? "Credential detected; validity hasn't been checked." : "No credential detected.";
+        const call = b.last_call || {};
+        const recent = call.at
+          ? " Last call: " + call.outcome + " at " + call.at +
+            (call.latency_ms == null ? "" : " (" + call.latency_ms + " ms)") +
+            (call.provider ? " via " + call.provider + (call.fallback_used ? " after fallback" : "") : "") +
+            (call.error_type ? " [" + call.error_type + "]" : "") + "."
+          : " No provider call has completed since this server started.";
+        melodyAdd("mel", "Server status: brain " + state + " via " + provider + model + ". " + credential + recent + " No key value is shown here.");
+      }
+    } catch (e) {
+      melodyAdd("mel", "I couldn't reach the status check. Is the game server running?");
+    } finally { btn.disabled = false; }
+  };
   $("melody-clear").style.display = "";
   // v5.29: voice — TTS toggle persisted per user, mic for signed-in players
   MEL_TTS.user = h.user || "anon"; melTtsLoad(); melTtsIcon();
@@ -18510,12 +18591,12 @@ async function shellApi(path, body) {
 }
 // ---- Stage 10, Screen 04: Create a World ----
 // The spec's 3-step flow: Name -> Choose a Beginning -> Enter.
-// Minimum behavior: /api/maps/create is the only creation API and no
-// template beginnings ship, so Blank Canvas is the single honest card
-// (the spec forbids faking unavailable templates). Creation errors stay
+// The create API clones only bundled starter maps or creates a blank canvas.
+// Creation errors stay
 // on the screen with Retry and Back — never a blank loading state.
 var _createReturnTo = "home"; // "home" | "worlds"
 var _createName = "";
+var _createBeginning = "blank";
 var _createEsc = null;
 var _createSugg = ["My First World", "Pixel Hollow", "The Quiet Dungeon", "Ember Isles", "Mossy Depths"];
 var _createSuggIdx = 0;
@@ -18588,6 +18669,7 @@ function shellShowCreate(returnTo) {
   _createReturnTo = (returnTo === "worlds") ? "worlds" : "home";
   window.CrumbsShell.state.destination = "create";
   _createName = _createSugg[_createSuggIdx % _createSugg.length];
+  _createBeginning = "blank";
   shellShowCreateStep1();
 }
 function shellShowCreateStep2() {
@@ -18598,11 +18680,12 @@ function shellShowCreateStep2() {
     '<div class="sh-card sh-enter">' + shellCreateSteps(1) +
     '<h2 class="sh-h2">Choose a beginning</h2>' +
     '<p class="sh-sub">Pick how your world starts. You can change everything later.</p>' +
-    '<button class="sh-begin-card" id="sh-cr-begin" aria-pressed="true" ' +
-      'aria-label="Blank Canvas, selected. A fresh 25 by 15 map.">' +
-      '<span class="sh-bc-ico" aria-hidden="true">\u25FB</span>' +
-      '<span><b>Blank Canvas</b><small>A fresh 25\u00D715 map. Everything is yours to build.</small></span>' +
-      '<span class="sh-pc-check" aria-hidden="true">\u2713</span></button>' +
+    '<div role="group" aria-label="Choose a world beginning">' +
+    shellCreateBeginningCard("blank", "\u25FB", "Blank Canvas", "A fresh 25\u00D715 map. Everything is yours to build.") +
+    shellCreateBeginningCard("village", "\uD83C\uDFD8\uFE0F", "Quiet Village", "A peaceful little world, ready to explore.") +
+    shellCreateBeginningCard("dungeon", "\uD83D\uDD25", "Ember Dungeon", "A shadowy maze of rooms and secrets.") +
+    shellCreateBeginningCard("maze", "\uD83E\uDDED", "Stone Maze", "A winding stone labyrinth to get lost in.") +
+    '</div>' +
     '<div class="sh-err" id="sh-cr-err" role="alert" hidden>' +
       '<span class="sh-err-icon" aria-hidden="true">\u26A0</span><span></span></div>' +
     '<button class="sh-btn-primary" id="sh-cr-make">Create World</button>' +
@@ -18612,9 +18695,31 @@ function shellShowCreateStep2() {
   $("sh-cr-menu").onclick = function () { shellOpenMenu($("sh-cr-menu")); };
   $("sh-cr-back").onclick = shellShowCreateStep1;
   $("sh-cr-back2").onclick = shellShowCreateStep1;
+  Array.prototype.forEach.call(document.querySelectorAll("#shell-root .sh-begin-card"), function (card) {
+    card.onclick = function () {
+      _createBeginning = card.getAttribute("data-beginning") || "blank";
+      Array.prototype.forEach.call(document.querySelectorAll("#shell-root .sh-begin-card"), function (item) {
+        var isSelected = item === card;
+        item.setAttribute("aria-pressed", isSelected ? "true" : "false");
+        var title = item.querySelector("b"), detail = item.querySelector("small");
+        item.setAttribute("aria-label", (title ? title.textContent : "Beginning") +
+          (isSelected ? ", selected. " : ". ") + (detail ? detail.textContent : ""));
+        var check = item.querySelector(".sh-pc-check");
+        if (check) check.textContent = isSelected ? "\u2713" : "";
+      });
+    };
+  });
   $("sh-cr-make").onclick = shellCreateDo;
   document.addEventListener("keydown", shellCreateKeys);
   $("sh-cr-make").focus();
+}
+function shellCreateBeginningCard(id, icon, title, description) {
+  var selected = id === _createBeginning;
+  return '<button type="button" class="sh-begin-card" data-beginning="' + id + '" aria-pressed="' + selected + '"' +
+    ' aria-label="' + shellCreateEscName(title + (selected ? ", selected. " : ". ") + description) + '">' +
+    '<span class="sh-bc-ico" aria-hidden="true">' + icon + '</span>' +
+    '<span><b>' + title + '</b><small>' + description + '</small></span>' +
+    '<span class="sh-pc-check" aria-hidden="true">' + (selected ? "\u2713" : "") + '</span></button>';
 }
 async function shellCreateDo() {
   var btn = $("sh-cr-make"), err = $("sh-cr-err");
@@ -18630,7 +18735,7 @@ async function shellCreateDo() {
     btn.focus();
   };
   try {
-    var r = await shellApi("/api/maps/create", { name: _createName, width: 25, height: 15 });
+    var r = await shellApi("/api/maps/create", { name: _createName, width: 25, height: 15, beginning: _createBeginning });
     if (r && r.ok && r.file) { shellShowCreateStep3(r.file); return; }
     var msg = String((r && r.error) || "Couldn't create your world.");
     fail(/name taken|already (exists|used)/i.test(msg)
@@ -20896,6 +21001,7 @@ async function deleteMission(id) {
     <span id="melody-title">Melody</span>
     <span id="melody-quota"></span>
     <button id="melody-speaker" title="Melody's voice">&#128266;</button>
+    <button id="melody-status" title="Private Melody server status">&#9432;</button>
     <button id="melody-voicebtn" title="Choose Melody's voice" style="display:none">&#128483;</button>
     <button id="melody-clear" title="Clear conversation">&#10218;</button>
     <!-- v5.33: workshop moved here from the old Build menu — the dock is the

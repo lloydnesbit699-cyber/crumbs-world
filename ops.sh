@@ -194,6 +194,7 @@ do_update() {
   # pop stash -> start
   git fetch origin || die "git fetch failed — check network"
   check_divergence  # dies on decline; server still up at this point
+  do_backup  # capture durable data before asking the live server to stop
   do_stop
   do_backup  # law of three: snapshot the live data BEFORE the risky part,
              # so a bad update can immediately pull the last working state
@@ -241,7 +242,9 @@ do_boot() {
   # Boot-safe auto-update, wired to Replit's run button (.replit points here).
   # Same shape as update, but it NEVER dies before the server is up: any git
   # failure just means "start with local code" plus a loud warning in the log.
+  do_backup  # boot may pull new code; preserve current worlds/accounts first
   do_stop
+  do_backup  # capture any final autosave completed while stopping
   local synced="no"
   if git fetch origin 2>/dev/null; then
     local dirty=0
@@ -294,6 +297,7 @@ do_repair() {
   [ "$ans" = "REPAIR" ] || die "cancelled — nothing changed"
   local vsnap
   vsnap="$(vault_snapshot)"
+  do_backup
   do_stop
   do_backup  # law of three: every destructive git move gets a backup first
   git reset --hard "origin/$BRANCH" || die "reset failed — fix git state first"
@@ -336,6 +340,41 @@ do_stash() {
 BACKUP_DIR="backups"
 KEEP_BACKUPS=3  # the law of three: three rolling snapshots, no more
 
+backup_checksum() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1"
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1"
+  else
+    die "need sha256sum or shasum to verify data backups"
+  fi
+}
+
+verify_backup_archive() {
+  local file="$1" member saw_data=0
+  [ -f "$file" ] || die "backup is missing: $file"
+  gzip -t "$file" || die "backup gzip check failed: $file"
+  tar -tzf "$file" >/dev/null || die "backup archive is damaged: $file"
+  # Archives are generated here, but still reject unexpected names before
+  # restoring so a corrupt archive cannot write outside the data folders.
+  while IFS= read -r member; do
+    case "$member" in
+      vaults|vaults/*|users.json|.crumbs_secret) saw_data=1 ;;
+      *) die "backup contains an unexpected path: $member" ;;
+    esac
+    case "$member" in
+      /*|../*|*/../*|*/..) die "backup contains an unsafe path: $member" ;;
+    esac
+  done < <(tar -tzf "$file")
+  [ "$saw_data" = 1 ] || die "backup archive is empty"
+  if [ -f "$file.sha256" ]; then
+    backup_checksum "$file" | cmp -s - "$file.sha256" \
+      || die "backup checksum failed: $file"
+  else
+    say "legacy backup has no checksum; archive structure was verified"
+  fi
+}
+
 do_backup() {
   mkdir -p "$BACKUP_DIR"
   local stamp file
@@ -344,6 +383,7 @@ do_backup() {
   # pre-restore snapshot once ate the snapshot it was about to restore).
   stamp="$(date '+%Y%m%d-%H%M%S')-$$"
   file="$BACKUP_DIR/crumbs-data-$stamp.tar.gz"
+  local tmp="$file.tmp"
   # Only pack what actually exists — never fail on a missing piece.
   local items=()
   [ -d vaults ] && items+=(vaults)
@@ -353,13 +393,24 @@ do_backup() {
     say "nothing to back up (no vaults/, users.json, or .crumbs_secret)"
     return 0
   fi
-  tar -czf "$file" "${items[@]}" || die "backup failed"
+  tar -czf "$tmp" "${items[@]}" || die "backup failed"
+  gzip -t "$tmp" || die "backup verification failed; live data is untouched"
+  tar -tzf "$tmp" >/dev/null || die "backup archive verification failed"
+  mv "$tmp" "$file" || die "could not finalize backup"
+  backup_checksum "$file" > "$file.sha256.tmp" \
+    || die "could not checksum backup"
+  mv "$file.sha256.tmp" "$file.sha256" \
+    || die "could not finalize backup checksum"
+  verify_backup_archive "$file"
   say "backup written: $file"
   # Prune to the newest $KEEP_BACKUPS.
   local old
   old="$(ls -t "$BACKUP_DIR"/crumbs-data-*.tar.gz 2>/dev/null | tail -n +$((KEEP_BACKUPS + 1)) || true)"
   if [ -n "$old" ]; then
-    echo "$old" | xargs rm -f
+    while IFS= read -r oldfile; do
+      [ -n "$oldfile" ] || continue
+      rm -f -- "$oldfile" "$oldfile.sha256"
+    done <<< "$old"
     say "pruned older snapshots (keeping $KEEP_BACKUPS)"
   fi
   say "tip: download $file from the file pane to your phone — then your data lives in three places"
@@ -369,6 +420,7 @@ do_rollback() {
   local latest target ans
   latest="$(ls -t "$BACKUP_DIR"/crumbs-data-*.tar.gz 2>/dev/null | head -1 || true)"
   [ -n "$latest" ] || die "no backups in $BACKUP_DIR — run ./ops.sh backup first"
+  verify_backup_archive "$latest"
   echo "!! This OVERWRITES your live data with: $latest"
   echo "!! vaults/, users.json, .crumbs_secret will be replaced."
   printf "Type RESTORE to continue: "
@@ -379,7 +431,8 @@ do_rollback() {
   say "snapshotting current state first (so this rollback is undoable)"
   do_backup >/dev/null 2>&1 || true
   say "restoring from $target"
-  tar -xzf "$target" || die "restore failed — your pre-restore snapshot is the newest file in $BACKUP_DIR"
+  tar -xzf "$target" --no-same-owner \
+    || die "restore failed — your pre-restore snapshot is the newest file in $BACKUP_DIR"
   do_start
   say "rollback done — server is back on the restored data"
 }

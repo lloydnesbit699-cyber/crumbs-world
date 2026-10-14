@@ -20,18 +20,21 @@ Full terms: LICENSE and COMMERCIAL_TERMS.md in the repo root.
 
 - **PNG export** of your map — the finished picture, good for
   print, video overlays, and pitches.
-- **Your map data** (JSON) plus its sidecars (missions, items, NPCs,
-  gear) — the raw material for your own engine work.
+- **Tiled JSON + tileset PNG** — a map format usable by Tiled and a
+  companion tileset image generated from the art used on the map.
+- **`.crumbs.zip` map bundles** — the native map, supported sidecars,
+  Tiled JSON, tileset image, and a versioned manifest in one file.
+- **Raw map data** (JSON) plus sidecars such as missions, items, NPCs,
+  and gear for your own engine pipeline.
 
-## What's coming (v5.16, in progress)
+## Still planned
 
-- **Tiled JSON export** — a format real engines consume.
-- **Godot-ready and Unity-friendly bundles** — after Tiled proves the
-  pipeline.
-- **Shareable map bundles** — map + embedded assets + version stamp in
-  one file. This is the unit of "here, play my level."
-- **Template starter projects** — dungeon-crawler and survival starters
-  so your players get an instant outcome.
+- **Godot-ready and Unity-friendly bundles** — the current bundle is a
+  portable handoff format, not a complete engine project.
+- **Engine starter projects** — Godot and Unity projects that open the
+  exported map with a ready-to-play runtime. The in-app Village, Dungeon,
+  and Maze beginnings create native Crumbs worlds; they are not engine
+  projects.
 
 ## Art licensing in your products
 

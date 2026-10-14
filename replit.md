@@ -31,12 +31,16 @@ your phone is just a browser.
   and restarts by itself (your write key unlocks it; strangers can't).
 - Your maps, tiles, and backups live in the repl's workspace and persist
   across sleeps and restarts. They're yours — never in the git repo.
+- The Run workflow makes a workspace backup before syncing code. Download
+  backups to another device regularly; a backup in the same workspace cannot
+  protect against losing the workspace itself.
 
 ## Don't
 
-- Don't use Replit's **Deploy** button for this: deployments get an
-  ephemeral disk, so your map saves would vanish on restart. The workspace
-  repl is the one that keeps your stuff.
+- Don't use Replit's **Deploy** button for this yet: the app stores worlds,
+  accounts, and its session secret on the server filesystem. A deployment
+  replacement can lose that data. The deployment configuration is disabled
+  until Crumbs uses a durable data store.
 - Don't share the `?key=` URL — anyone with it can edit your dungeon.
 
 ## Project files

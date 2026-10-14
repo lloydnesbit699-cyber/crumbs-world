@@ -1,8 +1,8 @@
 # v1.9: lets Replit (or any cloud host) run the HUD with one click.
 # Import this repo into Replit and it starts by itself — no downloads.
-# v5.22.9: use the workspace repl's webview URL, NOT a Deployment —
-# deployments get an ephemeral disk, so map saves would vanish on
-# restart. The workspace filesystem persists.
+# Player data currently lives on the server filesystem. Run in the persistent
+# workspace; do not configure a Cloud Run deployment until the app uses a
+# durable data store. The deployment stanza is intentionally omitted.
 run = "./ops.sh boot"
 modules = ["python-3.12", "web", "bash"]
 
@@ -22,10 +22,6 @@ author = "agent"
 task = "workflow.run"
 args = "Start application"
 
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Pull"
-
 [[workflows.workflow]]
 name = "Start application"
 author = "agent"
@@ -37,18 +33,6 @@ waitForPort = 5000
 
 [workflows.workflow.metadata]
 outputType = "webview"
-
-[[workflows.workflow]]
-name = "Pull"
-mode = "parallel"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "git pull --rebase origin main"
-
-[workflows.workflow.metadata]
-outputType = "console"
 
 [[workflows.workflow]]
 name = "update"
@@ -67,10 +51,6 @@ externalPort = 5000
 localPort = 8778
 externalPort = 3000
 exposeLocalhost = true
-
-[deployment]
-deploymentTarget = "cloudrun"
-run = "PORT=5000 python3 crumbs_hud.py --public"
 
 [objectStorage]
 defaultBucketID = "replit-objstore-3954851f-4cf0-4549-a1fd-6b0156020c98"

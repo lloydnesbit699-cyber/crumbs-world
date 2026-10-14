@@ -156,6 +156,13 @@ except ImportError:
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
 APP_VERSION = "5.62.0"
+# v5.62: mobile launcher versions. The Android/iOS wrappers check
+# /api/launcher-version on every launch and self-update when these bump.
+# Set CRUMBS_LAUNCHER_APK_URL to the public URL of crumbs-world-launcher.apk
+# (drop the APK next to the server; it is served as a static file).
+LAUNCHER_VERSION_ANDROID = int(os.environ.get("CRUMBS_LAUNCHER_ANDROID", "1"))
+LAUNCHER_VERSION_IOS = int(os.environ.get("CRUMBS_LAUNCHER_IOS", "1"))
+LAUNCHER_APK_URL = os.environ.get("CRUMBS_LAUNCHER_APK_URL", "")
 # v5.61: tester-shell feature flag — ENVIRONMENT variable only (Lloyd's
 # 2026-10-07 decision), default OFF. Controls presentation only, never
 # permissions. Stamped into editor.html as %%TESTER_SHELL%% ("1"/"0");
@@ -1543,6 +1550,8 @@ def _vault_id_for(username):
 
 # PUBLIC_MODE / PUBLIC_WRITE_KEY are set in __main__ (--public / --share-key= / $CRUMBS_SHARE_KEY).
 MAX_JSON_BYTES = 16 * 1024 * 1024   # ordinary API requests
+BUG_REPORT_DIR = "bug-reports"          # v5.63: in-game bug reports land here
+BUG_REPORT_RETENTION_DAYS = 30          # v5.63: prune reports older than this
 MAX_BUNDLE_BYTES = 48 * 1024 * 1024  # .crumbs.zip bundle imports
 MAX_BUNDLE_JSON_BYTES = 65 * 1024 * 1024  # base64 encoding + JSON envelope
 MAX_BUNDLE_ENTRIES = 128
@@ -9202,6 +9211,60 @@ class Handler(BaseHTTPRequestHandler):
                                     "email": rec.get("email", ""),
                                     "totp_enabled": bool(rec.get("totp_enabled"))})
 
+        if path == "/api/bug-report":
+            # v5.63: in-game bug report + 30s replay clip. Logged-in session
+            # required in public mode; local mode accepts (no accounts there —
+            # the game itself is open, so reporting is no more exposure).
+            u = self._session_user()
+            if PUBLIC_MODE and not u:
+                return self._send_json({"ok": False, "error": "log in first"}, 401)
+            text = str(body.get("text") or "").strip()
+            if not text or len(text) > 2000:
+                return self._send_json({"ok": False, "error": "report text must be 1-2000 chars"}, 400)
+            priority = str(body.get("priority") or "annoying").strip().lower()
+            if priority not in ("critical", "annoying", "minor"):
+                priority = "annoying"
+            meta = body.get("meta") if isinstance(body.get("meta"), dict) else {}
+            clip_b64 = body.get("clip_b64") or ""
+            clip_bytes = b""
+            if clip_b64:
+                try:
+                    clip_bytes = base64.b64decode(clip_b64, validate=True)
+                except Exception:
+                    return self._send_json({"ok": False, "error": "bad clip encoding"}, 400)
+                if len(clip_bytes) > 12 * 1024 * 1024:
+                    return self._send_json({"ok": False, "error": "clip too big"}, 413)
+            safe_user = re.sub(r"[^a-z0-9_-]", "_", (u or "local").lower())[:24] or "player"
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            order = {"critical": "1", "annoying": "2", "minor": "3"}[priority]
+            rand = "%04x" % random.randrange(0x10000)
+            base = f"{stamp}-{order}-{priority}-{safe_user}-{rand}"
+            try:
+                os.makedirs(BUG_REPORT_DIR, exist_ok=True)
+                report = {
+                    "id": base, "at": int(time.time()),
+                    "user": u or "local", "priority": priority, "text": text,
+                    "meta": meta, "has_clip": bool(clip_bytes),
+                    "version": APP_VERSION,
+                }
+                with open(os.path.join(BUG_REPORT_DIR, base + ".json"), "w", encoding="utf-8") as f:
+                    json.dump(report, f, indent=1)
+                if clip_bytes:
+                    with open(os.path.join(BUG_REPORT_DIR, base + ".webm"), "wb") as f:
+                        f.write(clip_bytes)
+                # retention: prune reports older than 30 days (best effort)
+                try:
+                    cutoff = time.time() - BUG_REPORT_RETENTION_DAYS * 86400
+                    for fn in os.listdir(BUG_REPORT_DIR):
+                        fp = os.path.join(BUG_REPORT_DIR, fn)
+                        if os.path.isfile(fp) and os.path.getmtime(fp) < cutoff:
+                            os.remove(fp)
+                except Exception:
+                    pass
+            except Exception:
+                return self._send_json({"ok": False, "error": "couldn't save report"}, 500)
+            return self._send_json({"ok": True, "id": base})
+
         if path == "/api/auth/logout":
             self._clear_session()
             return self._send_json({"ok": True})
@@ -12551,7 +12614,7 @@ def _probe_running_hud():
         with urllib.request.urlopen(f"http://{HOST}:{PORT}/",
                                     timeout=2) as r:
             body = r.read(65536).decode("utf-8", "replace")
-        if "<title>Crumbs HUD" not in body:
+        if "<title>Crumbs World" not in body:
             return "something else (not the HUD)"
         return "the Crumbs HUD"
     except Exception:

@@ -12,7 +12,7 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon-512.png">
 <link rel="apple-touch-icon" href="/icon-512.png">
-<title>Crumbs HUD — Tile Painter</title>
+<title>Crumbs World — Tile Painter</title>
 <script>
 // v5.61 tester shell: the server stamps %%TESTER_SHELL%% as "1" (shell on)
 // or "0" (classic). Default OFF — the classic HUD boots unless the server
@@ -506,6 +506,26 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   #splash .load-label { font-size: 12px; color: #cfd2dc; min-height: 16px; }
   #splash .splash-title { font-size: 28px; color: #ffd75f; font-weight: bold; }
   #splash .splash-sub { font-size: 14px; color: #888; }
+/* v5.63: bug report overlay */
+#bug-overlay { position: fixed; inset: 0; z-index: 300; display: none;
+  align-items: center; justify-content: center; background: rgba(5,5,12,.92); }
+#bug-overlay.show { display: flex; }
+#bug-box { background: #14141c; border: 1px solid #2a2a38; border-radius: 12px;
+  padding: 24px; width: min(86vw, 380px); }
+#bug-box h2 { color: #ffd75f; margin: 0 0 8px; font-size: 20px; }
+#bug-box textarea { display: block; width: 100%; box-sizing: border-box;
+  margin: 8px 0; padding: 10px; border-radius: 8px; border: 1px solid #333;
+  background: #0d0d12; color: #eee; font-size: 15px; min-height: 90px; resize: vertical; }
+#bug-box select { display: block; width: 100%; box-sizing: border-box;
+  margin: 8px 0; padding: 10px; border-radius: 8px; border: 1px solid #333;
+  background: #0d0d12; color: #eee; font-size: 15px; }
+#bug-box .bug-row { display: flex; gap: 8px; margin: 8px 0; }
+#bug-box button { padding: 10px 16px; border-radius: 8px; border: 1px solid #333;
+  background: #222; color: #eee; font-size: 15px; cursor: pointer; }
+#bug-box .bug-send { background: #2a4a2a; border-color: #3a6a3a; }
+#bug-box .bug-err { color: #f88; font-size: 13px; min-height: 18px; }
+#bug-box .bug-note { color: #888; font-size: 12px; margin-top: 8px; }
+
   /* v5.27: login overlay + user menu */
   #login-overlay { position: fixed; inset: 0; z-index: 300; display: none;
     align-items: center; justify-content: center; background: rgba(5,5,12,.92); }
@@ -3369,7 +3389,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     <button class="mtop" data-menu="m-play">Play</button>
     <button class="mtop" data-menu="m-anim">Animation</button>
   </div>
-  <span id="title">Crumbs HUD <small>tile painter &middot; v%%CRUMBS_VERSION%%</small></span>
+  <span id="title">Crumbs World <small>tile painter &middot; v%%CRUMBS_VERSION%%</small></span>
   <span id="pills">
     <button id="pill-update" class="pill" title="update status"><span class="pdot grey"></span><span class="ptxt">v&hellip;</span></button>
     <button id="pill-recovery" class="pill" title="recovery status"><span class="pdot grey"></span><span class="ptxt">shield &hellip;</span></button>
@@ -3408,6 +3428,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   <button id="menu-setup">Setup&hellip;</button>
   <button id="menu-key" title="Set the share key for a public HUD">Key&hellip;</button>
   <button id="menu-log" title="Server event log (debugging)">Server log</button>
+  <button id="menu-bug" title="Report a bug (includes last 30s gameplay clip)">&#x1F41B; Report bug</button>
   <hr>
   <button id="menu-update" title="Pull the latest app files over this install">&#128260; Check for updates</button>
   <button id="menu-rollback" title="Restore the app files from before the last update">&#8617; Roll back update</button>
@@ -3994,7 +4015,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   <div id="login-box">
     <!-- v5.61: the shield — no more brick emoji -->
     <img id="login-logo" src="/splash-logo-cw.jpg" alt="Crumbs World">
-    <h2>Crumbs HUD</h2>
+    <h2>Crumbs World</h2>
     <div class="login-tabs">
       <button id="tab-login" class="on">Log in</button>
       <button id="tab-signup">Sign up</button>
@@ -4078,8 +4099,30 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   </div>
 </div>
 
+<!-- v5.63: in-game bug report -->
+<div id="bug-overlay">
+  <div id="bug-box">
+    <h2>&#x1F41B; Report a bug</h2>
+    <label for="bug-text">What happened?</label>
+    <textarea id="bug-text" maxlength="2000" placeholder="What were you doing when it broke?"></textarea>
+    <label for="bug-priority">How bad is it?</label>
+    <select id="bug-priority">
+      <option value="critical">Can't play — blocks me</option>
+      <option value="annoying" selected>Annoying — I can work around it</option>
+      <option value="minor">Minor — cosmetic / small</option>
+    </select>
+    <label><input type="checkbox" id="bug-clip" checked> Include last 30 seconds of gameplay clip</label>
+    <div class="bug-row">
+      <button id="bug-send" class="bug-send">Send report</button>
+      <button id="bug-cancel">Cancel</button>
+    </div>
+    <div id="bug-err" class="bug-err"></div>
+    <div class="bug-note">The clip records only your game screen, stays on your device, and is sent only when you hit Send.</div>
+  </div>
+</div>
+
 <div id="splash">
-  <div class="splash-title">Crumbs HUD</div>
+  <div class="splash-title">Crumbs World</div>
   <div class="splash-sub">tile painter &middot; v%%CRUMBS_VERSION%%</div>
   <div class="load-bar"><i id="splash-fill"></i></div>
   <div class="load-label" id="splash-label">Waking the server&hellip;</div>
@@ -20373,7 +20416,12 @@ async function shellWorldRulesInto(body) {
 async function shellBoot() {
   document.documentElement.setAttribute("data-shell-mode", "simple");
   var spl = document.getElementById("splash");
+  // v5.62: let the splash shield play its full beat (600ms minimum +
+  // fade) before the shell paints over it — no more flash-then-overwrite.
+  var _splashWait = Math.max(0, 600 - (Date.now() - _splashT0));
+  if (_splashWait > 0) await new Promise(function (r) { setTimeout(r, _splashWait); });
   if (spl) spl.classList.add("gone");  // classic splash must not cover the shell
+  await new Promise(function (r) { setTimeout(r, 500); });  // let the fade finish
   shellLoadPrefs();
   shellApplyPrefs();
   shellLoadingScreen("Opening Crumbs World\u2026");
@@ -20631,7 +20679,7 @@ async function shellBoot() {
     if (!localStorage.crumbs_tour) {
       localStorage.crumbs_tour = "1";
       const steps = [
-        "Welcome to Crumbs HUD \u2014 pick a tile from the left tray.",
+        "Welcome to Crumbs World \u2014 pick a tile from the left tray.",
         "Stamp is the hero brush: drag to stamp, lift to commit. Two fingers pan & zoom.",
         "Hold still ~half a second for actions (pick, inspect, undo). \u2022\u2022\u2022 holds the rest.",
         "Menu \u2192 Generate builds a whole map from a seed.",
@@ -21062,5 +21110,132 @@ if ("serviceWorker" in navigator) {
     <div id="phone-popup-body"></div>
   </div>
 </div>
+<script>
+// ---- v5.63: in-game bug report + 30s replay clip ---------------------
+// Rolling recorder: captures the map canvas, keeps only the last 30s.
+// Nothing leaves the device until the player submits a report.
+var bugClipChunks = [];   // [{t, blob}]
+var bugRecorder = null;
+var bugErrLog = [];       // last 20 console errors/warnings
+
+(function bugErrCapture() {
+  function push(kind, args) {
+    try {
+      var msg = Array.prototype.map.call(args, function (a) {
+        try { return typeof a === "string" ? a : JSON.stringify(a); }
+        catch (e) { return String(a); }
+      }).join(" ").slice(0, 300);
+      bugErrLog.push(new Date().toISOString().slice(11, 19) + " " + kind + ": " + msg);
+      if (bugErrLog.length > 20) bugErrLog.shift();
+    } catch (e) {}
+  }
+  var _err = console.error, _warn = console.warn;
+  console.error = function () { push("ERR", arguments); return _err.apply(console, arguments); };
+  console.warn = function () { push("WARN", arguments); return _warn.apply(console, arguments); };
+})();
+
+function bugClipMime() {
+  var types = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm", ""];
+  for (var i = 0; i < types.length; i++) {
+    try {
+      if (!types[i] || (window.MediaRecorder && MediaRecorder.isTypeSupported(types[i]))) return types[i];
+    } catch (e) {}
+  }
+  return "";
+}
+
+function bugClipStart() {
+  try {
+    var canvas = document.getElementById("grid");
+    if (!canvas || !canvas.captureStream || !window.MediaRecorder) return;
+    var stream = canvas.captureStream(10);
+    var mime = bugClipMime();
+    var opts = { videoBitsPerSecond: 500000 };
+    if (mime) opts.mimeType = mime;
+    bugRecorder = new MediaRecorder(stream, opts);
+    bugRecorder.ondataavailable = function (ev) {
+      if (ev.data && ev.data.size > 0) {
+        bugClipChunks.push({ t: Date.now(), blob: ev.data });
+        var cutoff = Date.now() - 30000;
+        while (bugClipChunks.length && bugClipChunks[0].t < cutoff) bugClipChunks.shift();
+      }
+    };
+    bugRecorder.onerror = function () { bugRecorder = null; };
+    bugRecorder.start(1000);
+  } catch (e) { bugRecorder = null; }
+}
+
+function bugShowForm() {
+  $("bug-overlay").classList.add("show");
+  var clipBox = $("bug-clip");
+  if (clipBox) {
+    clipBox.checked = !!(bugRecorder && bugClipChunks.length);
+    clipBox.disabled = !(bugRecorder && bugClipChunks.length);
+  }
+  setTimeout(function () { var t = $("bug-text"); if (t) t.focus(); }, 50);
+}
+function bugHideForm() { $("bug-overlay").classList.remove("show"); }
+
+function bugBlobToB64(blob) {
+  return new Promise(function (resolve, reject) {
+    var r = new FileReader();
+    r.onload = function () {
+      var s = String(r.result || "");
+      resolve(s.indexOf(",") >= 0 ? s.split(",")[1] : s);
+    };
+    r.onerror = reject;
+    r.readAsDataURL(blob);
+  });
+}
+
+async function bugSubmit() {
+  var btn = $("bug-send");
+  var text = ($("bug-text").value || "").trim();
+  if (!text) { $("bug-err").textContent = "Say a little about what happened."; return; }
+  if (text.length > 2000) { $("bug-err").textContent = "Keep it under 2000 characters."; return; }
+  if (btn) btn.disabled = true;
+  $("bug-err").textContent = "Sending…";
+  try {
+    var clipB64 = null;
+    if ($("bug-clip").checked && bugClipChunks.length) {
+      var blob = new Blob(bugClipChunks.map(function (c) { return c.blob; }), { type: "video/webm" });
+      if (blob.size <= 8 * 1024 * 1024) clipB64 = await bugBlobToB64(blob);
+    }
+    var meta = {
+      version: "%%CRUMBS_VERSION%%",
+      userAgent: navigator.userAgent,
+      viewport: window.innerWidth + "x" + window.innerHeight,
+      url: location.pathname,
+      errors: bugErrLog.slice()
+    };
+    var r = await fetch("/api/bug-report", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: text, priority: $("bug-priority").value, meta: meta, clip_b64: clipB64 })
+    });
+    var j = await r.json();
+    if (!j.ok) throw new Error(j.error || "server said no");
+    bugHideForm();
+    $("bug-text").value = "";
+    toast("Bug report sent — thanks! (clip " + (clipB64 ? "attached" : "not attached") + ")");
+  } catch (e) {
+    $("bug-err").textContent = "Couldn't send: " + (e && e.message ? e.message : e);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+(function bugWire() {
+  try {
+    var b = document.getElementById("menu-bug");
+    if (b) b.onclick = bugShowForm;
+    var c = document.getElementById("bug-cancel");
+    if (c) c.onclick = bugHideForm;
+    var s = document.getElementById("bug-send");
+    if (s) s.onclick = bugSubmit;
+    bugClipStart();
+  } catch (e) {}
+})();
+</script>
 </body>
 </html>

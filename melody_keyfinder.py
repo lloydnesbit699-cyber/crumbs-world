@@ -97,9 +97,28 @@ def _parse_key(text):
     return ""
 
 
+def _candidate_paths():
+    """Return configured paths plus named Groq exports in melody/tools."""
+    paths = list(SEARCH_PATHS)
+    if os.name == "nt":
+        tools_dir = os.path.join(_repo_dir, "melody", "tools")
+        try:
+            with os.scandir(tools_dir) as entries:
+                named_exports = [
+                    entry.path for entry in entries
+                    if entry.is_file()
+                    and os.path.splitext(entry.name)[0].casefold()
+                    in ("groq_files", "groq-files")
+                ]
+        except OSError:
+            named_exports = []
+        paths.extend(sorted(named_exports, key=str.casefold))
+    return paths
+
+
 def find_key():
     """Return (path, key) for the first usable key file, else (None, None)."""
-    for path in SEARCH_PATHS:
+    for path in _candidate_paths():
         if not path or not os.path.isfile(path):
             continue
         if not _tighten(path):

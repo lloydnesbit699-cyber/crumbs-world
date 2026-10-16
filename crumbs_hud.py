@@ -99,6 +99,7 @@ Open:  http://127.0.0.1:8778   (same phone's browser)
 import json
 import io
 import glob
+import gzip
 import hashlib
 import hmac
 import os
@@ -583,7 +584,117 @@ SCHEMA_VERSION = 2  # v5.29: object-layer cells may be {tid,size,hero,flavor,
                       # plus height_override + the .portals.json sidecar
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 HTML_PATH = os.path.join(SCRIPT_DIR, "editor.html")
+HTML_MIN_PATH = os.path.join(SCRIPT_DIR, "editor.min.html")
 DEFAULT_SAVE = "hud_map.json"
+
+
+# Bounded, process-local cache for the static editor page. The page itself is
+# shared across authenticated users; account data is only fetched through the
+# separately authenticated API. Cache keys include nanosecond file metadata,
+# version, and shell mode. ETags are hashes of the exact representation sent.
+_EDITOR_CACHE = {}
+_EDITOR_CACHE_LOCK = threading.RLock()
+_EDITOR_CACHE_MAX = 4
+
+
+def _get_editor_payload(shell_on):
+    """Return the stamped editor bytes and their deterministic gzip form."""
+    for candidate in (HTML_MIN_PATH, HTML_PATH):
+        try:
+            if os.path.islink(candidate):
+                continue
+            before = os.stat(candidate)
+            if not os.path.isfile(candidate):
+                continue
+        except OSError:
+            continue
+        key = (candidate, getattr(before, "st_mtime_ns", int(before.st_mtime * 1e9)),
+               before.st_size, APP_VERSION, bool(shell_on))
+        with _EDITOR_CACHE_LOCK:
+            hit = _EDITOR_CACHE.get(key)
+            if hit is not None:
+                return hit
+
+        # A concurrent deploy may replace the file between stat and read.
+        # Retry once if its identity changes, then let the next request retry.
+        try:
+            with open(candidate, "rb") as stream:
+                body = stream.read()
+            after = os.stat(candidate)
+        except OSError:
+            continue
+        before_stamp = (getattr(before, "st_mtime_ns", int(before.st_mtime * 1e9)),
+                        before.st_size)
+        after_stamp = (getattr(after, "st_mtime_ns", int(after.st_mtime * 1e9)),
+                       after.st_size)
+        if before_stamp != after_stamp or len(body) != after.st_size:
+            try:
+                with open(candidate, "rb") as stream:
+                    body = stream.read()
+                after = os.stat(candidate)
+            except OSError:
+                continue
+            if len(body) != after.st_size:
+                continue
+            key = (candidate, getattr(after, "st_mtime_ns", int(after.st_mtime * 1e9)),
+                   after.st_size, APP_VERSION, bool(shell_on))
+
+        if (b"%%CRUMBS_VERSION%%" not in body or
+                b"%%TESTER_SHELL%%" not in body):
+            # A malformed/stale generated file must not mask the readable
+            # source page; source failure below becomes a clear 500 response.
+            if candidate != HTML_PATH:
+                continue
+            return None
+        body = body.replace(b"%%CRUMBS_VERSION%%", APP_VERSION.encode("utf-8"))
+        body = body.replace(b"%%TESTER_SHELL%%", b"1" if shell_on else b"0")
+        gzipped = gzip.compress(body, compresslevel=6, mtime=0)
+        payload = {
+            "body": body,
+            "gzipped": gzipped,
+            "etag_identity": '"cw-%s"' % hashlib.sha256(body).hexdigest(),
+            "etag_gzip": '"cw-%s"' % hashlib.sha256(gzipped).hexdigest(),
+        }
+        with _EDITOR_CACHE_LOCK:
+            _EDITOR_CACHE[key] = payload
+            while len(_EDITOR_CACHE) > _EDITOR_CACHE_MAX:
+                _EDITOR_CACHE.pop(next(iter(_EDITOR_CACHE)), None)
+        return payload
+    return None
+
+
+def _accepts_gzip(header):
+    """Parse Accept-Encoding tokens and honor explicit gzip;q=0."""
+    encodings = {}
+    for item in (header or "").lower().split(","):
+        fields = [part.strip() for part in item.split(";")]
+        coding = fields[0]
+        if not coding:
+            continue
+        quality = 1.0
+        for field in fields[1:]:
+            if field.startswith("q="):
+                try:
+                    quality = float(field[2:])
+                except ValueError:
+                    quality = 0.0
+        encodings[coding] = max(0.0, min(1.0, quality))
+    if "gzip" in encodings:
+        return encodings["gzip"] > 0
+    return encodings.get("*", 0.0) > 0
+
+
+def _etag_matches(header, etag):
+    """Match If-None-Match lists, wildcard, and weak validator syntax."""
+    for candidate in (header or "").split(","):
+        candidate = candidate.strip()
+        if candidate == "*":
+            return True
+        if candidate.startswith("W/"):
+            candidate = candidate[2:].strip()
+        if candidate == etag:
+            return True
+    return False
 
 
 def _persistence_warning():
@@ -8757,31 +8868,36 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _serve_editor(self, shell_on):
-        # v5.61: serve editor.html with build stamps applied. shell_on
-        # controls only the %%TESTER_SHELL%% stamp (presentation, never
-        # permissions).
-        try:
-            with open(HTML_PATH, "rb") as f:
-                body = f.read()
-        except FileNotFoundError:
+        payload = _get_editor_payload(shell_on)
+        if payload is None:
             self.send_response(500)
+            self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(b"editor.html not found next to crumbs_hud.py")
             return
-        # v5.22.6: the banner/splash version used to be hardcoded in the
-        # HTML and went stale on every bump. Stamp the real version here.
-        body = body.replace(b"%%CRUMBS_VERSION%%",
-                            APP_VERSION.encode("utf-8"))
-        # v5.61: tester-shell flag stamp. "1" = shell mode, "0" = classic.
-        body = body.replace(b"%%TESTER_SHELL%%",
-                            b"1" if shell_on else b"0")
+
+        use_gzip = _accepts_gzip(self.headers.get("Accept-Encoding", ""))
+        body = payload["gzipped"] if use_gzip else payload["body"]
+        # Validators describe the actual representation, so gzip and identity
+        # responses cannot incorrectly validate against each other.
+        etag = payload["etag_gzip"] if use_gzip else payload["etag_identity"]
+        cache_control = "private, no-cache, must-revalidate"
+        if _etag_matches(self.headers.get("If-None-Match", ""), etag):
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", cache_control)
+            self.send_header("Vary", "Accept-Encoding")
+            self.end_headers()
+            return
+
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        # v5.21.4: Safari heuristic-caches the page aggressively with no
-        # cache headers, so it can keep serving a stale editor.html after
-        # an update. 180KB over localhost — always fetch it fresh.
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("ETag", etag)
+        self.send_header("Cache-Control", cache_control)
+        self.send_header("Vary", "Accept-Encoding")
+        if use_gzip:
+            self.send_header("Content-Encoding", "gzip")
         self.end_headers()
         self.wfile.write(body)
 
@@ -8863,6 +8979,33 @@ class Handler(BaseHTTPRequestHandler):
                     replies.append({"id": report.get("id"), "category": report.get("category"),
                                     "replies": report.get("replies", [])})
             self._send_json({"ok": True, "notifications": replies, "unread": len(replies)})
+        elif path == "/api/feedback/clip":
+            # v5.66.3: owner-only clip playback for the feedback inbox.
+            # The id is resolved through the report metadata first — the
+            # file path is never built from raw user input.
+            if not self._is_owner_session():
+                return self._send_json({"ok": False, "error": "owner only"}, 403)
+            q = parse_qs(urlparse(self.path).query)
+            rid = str((q.get("id") or [""])[0])[:128]
+            report = next((r for r in _feedback_reports()
+                           if str(r.get("id")) == rid and r.get("has_clip")), None)
+            if not report:
+                return self._send_json({"ok": False, "error": "clip not found"}, 404)
+            ext = str(report.get("clip_ext") or "webm").strip().lower()
+            if ext not in ("mp4", "webm"):
+                ext = "webm"
+            fp = os.path.join(BUG_REPORT_DIR, str(report["id"]) + "." + ext)
+            try:
+                with open(fp, "rb") as f:
+                    data = f.read()
+            except OSError:
+                return self._send_json({"ok": False, "error": "clip not found"}, 404)
+            self.send_response(200)
+            self.send_header("Content-Type",
+                             "video/mp4" if ext == "mp4" else "video/webm")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            return self.wfile.write(data)
         elif path == "/api/auth/users":
             # v5.27: owner-only account list.
             if not self._is_owner_session() and not self._write_key_ok():
@@ -9661,6 +9804,19 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send_json({"ok": False, "error": "bad clip encoding"}, 400)
                 if len(clip_bytes) > 12 * 1024 * 1024:
                     return self._send_json({"ok": False, "error": "clip too big"}, 413)
+            clip_ext = str(body.get("clip_ext") or "webm").strip().lower()
+            if clip_ext not in ("mp4", "webm"):
+                clip_ext = "webm"
+            # v5.66.3: idempotent clip sends — a phone retry after a dropped
+            # response must not file the same clip twice.
+            client_token = str(body.get("client_token") or "").strip()[:64]
+            if client_token:
+                for r in _feedback_reports():
+                    if (r.get("client_token") == client_token
+                            and r.get("user") == (u or "local")
+                            and time.time() - int(r.get("at", 0)) < 3600):
+                        return self._send_json({"ok": True, "report": r,
+                                                "duplicate": True})
             safe_user = re.sub(r"[^a-z0-9_-]", "_", (u or "local").lower())[:24] or "player"
             stamp = time.strftime("%Y%m%d-%H%M%S")
             order = {"critical": "1", "annoying": "2", "minor": "3"}.get(priority, "4")
@@ -9674,12 +9830,13 @@ class Handler(BaseHTTPRequestHandler):
                     "priority": priority, "text": text, "context": context,
                     "keep": keep, "improve": improve,
                     "meta": meta, "has_clip": bool(clip_bytes),
+                    "clip_ext": clip_ext, "client_token": client_token,
                     "version": APP_VERSION, "owner_seen": False,
                     "replies": [], "player_seen": True,
                 }
                 _save_feedback_report(report)
                 if clip_bytes:
-                    clip_path = os.path.join(BUG_REPORT_DIR, base + ".webm")
+                    clip_path = os.path.join(BUG_REPORT_DIR, base + "." + clip_ext)
                     with open(clip_path, "wb") as f:
                         f.write(clip_bytes)
                     _protect_private_file(clip_path)

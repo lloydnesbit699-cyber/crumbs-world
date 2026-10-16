@@ -37,13 +37,14 @@ import urllib.error
 
 # v5.62: load the owner's protected Groq key file before brain_backends()
 # reads GROQ_API_KEY. The finder never prints the key itself.
-try:
-    import melody_keyfinder  # noqa: F401 -- loads GROQ_API_KEY into os.environ
-except (ImportError, SyntaxError) as exc:
-    # Keep Melody's env-key/proxy backends available if the optional local
-    # keyfinder was not copied with this checkout.
-    print("[melody] keyfinder unavailable (%s); using environment settings"
-          % type(exc).__name__, file=sys.stderr)
+if os.environ.get("MELODY_BRAIN", "").strip().lower() != "proxy":
+    try:
+        import melody_keyfinder  # noqa: F401 -- loads GROQ_API_KEY into os.environ
+    except (ImportError, SyntaxError) as exc:
+        # Keep Melody's env-key/proxy backends available if the optional local
+        # keyfinder was not copied with this checkout.
+        print("[melody] keyfinder unavailable (%s); using environment settings"
+              % type(exc).__name__, file=sys.stderr)
 
 _USERNAME_RE = re.compile(r"^[a-z0-9_-]{3,24}$")
 _LOCAL_USER = "local"          # single-player session id in local (login-free) mode

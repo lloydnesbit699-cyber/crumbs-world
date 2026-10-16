@@ -111,13 +111,62 @@ binding only to `127.0.0.1:8778`. The existing Tailscale Funnel proxies to that
 loopback address. Do not use `--public` on Harley; that binds all interfaces
 and exposes the raw port to the LAN.
 
-## 4) Configure recovery delivery
+## 4) Run Melody Prime separately from the game
+
+The game calls a separate Prime process over `127.0.0.1:8765`; Prime forwards
+chat and declared tool calls to Groq. The game receives only a generated bearer
+token. Prime reads the Groq key from a DPAPI-protected file under the current
+Windows user's Local AppData, and the proxy binds to loopback only.
+
+On Harley, from the repository root, run:
+
+```powershell
+.\deployment\configure_melody_prime.ps1
+```
+
+Enter the Groq API key at the hidden prompt (this expects Groq, usually a
+`gsk_` key; an xAI Grok key is a different provider). The wizard encrypts it
+for this Windows account, checks that Groq accepts the key and selected model
+without sending a chat completion, restricts the secret directory ACL,
+installs the separate logon task, points the game at the local proxy, and
+restarts the game task.
+It never writes the key into the repository, game environment, logs, or chat.
+The default Groq model is `openai/gpt-oss-20b`; an alternate model can be
+selected with `-Model`.
+
+Check Prime separately with:
+
+```powershell
+.\deployment\install_melody_prime.ps1 -Status
+```
+
+Prime logs operational outcomes only to `logs\melody-prime.log`; prompts,
+responses, bearer tokens, and the Groq key are not logged. The operations
+sentinel checks the Prime task and loopback health endpoint.
+
+## 5) Configure recovery delivery
 
 Email and SMS recovery are available when configured on Harley. Use a
 send-only SMTP/app-password credential and a restricted Twilio API key with
 Messaging permission. Keep these values in Harley's user environment, never
-in the repository or in chat. Set the following variables for the account
-that runs the scheduled task, then restart the task or reboot:
+in the repository or in chat. From an interactive PowerShell window on Harley,
+run the local wizard as the same Windows account that owns the scheduled tasks:
+
+```powershell
+.\deployment\configure_account_recovery.ps1 -Email
+# or
+.\deployment\configure_account_recovery.ps1 -Sms
+# or configure both providers in one pass
+.\deployment\configure_account_recovery.ps1 -Email -Sms
+```
+
+The wizard hides secret prompts and writes settings to that Windows user's
+environment without displaying values. It validates required fields, the
+SMTP port, and paired SMTP credentials. After setup, gracefully restart the
+server so it inherits the new environment, or reboot Harley. Do not paste
+provider secrets into chat or store them in repository files.
+
+The variables it writes are:
 
 - Email: `CRUMBS_RECOVERY_SMTP_HOST`, `CRUMBS_RECOVERY_SMTP_FROM`, and
   optionally `CRUMBS_RECOVERY_SMTP_PORT` (default 587),
@@ -133,14 +182,15 @@ allow five guesses, and are limited to three sends per destination per hour
 and thirty sends total per hour. Recovery responses don't reveal whether an
 account exists.
 
-Check status or reinstall the task with:
+The sentinel checks provider settings and reports missing or inconsistent
+values without exposing them. Check status or reinstall the tasks with:
 
 ```powershell
 .\deployment\install_harley_autostart.ps1 -Status
 .\deployment\install_harley_autostart.ps1
 ```
 
-## 5) Protect persistent profiles
+## 6) Protect persistent profiles
 
 The installer removes inherited access from
 the existing `users.json`, its retained backups, the server secret, and the

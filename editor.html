@@ -543,6 +543,20 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
 #feedback-inbox-box .feedback-send-reply { background: #2a4a2a; border-color: #3a6a3a; }
 .feedback-badge { color: #ffb75e; font-weight: bold; }
 #menu-update.update-ready { color: #ffd75f; font-weight: bold; box-shadow: inset 3px 0 #ffd75f; }
+/* v5.66.3: voluntary clip review */
+#clip-review-overlay { position: fixed; inset: 0; z-index: 320; display: none;
+  align-items: center; justify-content: center; background: rgba(5,5,12,.92); }
+#clip-review-overlay.show { display: flex; }
+#clip-review-box { background: #14141c; border: 1px solid #2a2a38; border-radius: 12px;
+  padding: 20px; width: min(92vw, 560px); max-height: 88vh; overflow-y: auto; color: #eee; }
+#clip-review-box h2 { color: #ffd75f; margin: 0 0 8px; }
+#clip-review-video { width: 100%; border-radius: 8px; background: #000; margin: 8px 0; }
+#clip-review-box .tray-hint { display: block; margin: 6px 0; }
+#clip-review-note { display: block; width: 100%; box-sizing: border-box; min-height: 52px;
+  margin: 8px 0; padding: 9px; background: #0d0d12; color: #eee; border: 1px solid #333; border-radius: 7px; }
+#clip-review-box button { margin: 4px; padding: 8px 12px; border-radius: 7px; border: 1px solid #444; background: #222; color: #eee; cursor: pointer; }
+#clip-review-box .clip-send { background: #2a4a2a; border-color: #3a6a3a; }
+#clip-review-toobig { color: #ffb75e; margin: 8px 0; }
 
   /* v5.27: login overlay + user menu */
   #login-overlay { position: fixed; inset: 0; z-index: 300; display: none;
@@ -4190,6 +4204,22 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     <h2 id="feedback-inbox-title">Feedback</h2>
     <div id="feedback-inbox-list"></div>
     <button id="feedback-inbox-close">Close</button>
+  </div>
+</div>
+
+<div id="clip-review-overlay" aria-modal="true" role="dialog" aria-labelledby="clip-review-title">
+  <div id="clip-review-box">
+    <h2 id="clip-review-title">Review your clip</h2>
+    <video id="clip-review-video" controls playsinline preload="metadata"></video>
+    <small class="tray-hint" id="clip-review-size"></small>
+    <small class="tray-hint">Nothing leaves your device until you pick below. Clips are game video + game sound only &mdash; no mic, no camera, ever.</small>
+    <textarea id="clip-review-note" maxlength="1200" placeholder="Add a note for Lloyd (optional)"></textarea>
+    <div id="clip-review-toobig" style="display:none"></div>
+    <div>
+      <button id="clip-review-send" class="clip-send">Send to Lloyd</button>
+      <button id="clip-review-share">Share&hellip;</button>
+      <button id="clip-review-delete">Delete</button>
+    </div>
   </div>
 </div>
 
@@ -9107,21 +9137,99 @@ async function finishRecording() {
     toast("\u{1F3AC} clip saved — check Clips when you get a sec");
     return;
   }
-  // iOS share sheet -> TikTok, Messages, Save to Photos
+  // v5.66.3: voluntary sharing — the review overlay first, the sheet
+  // only when the player asks for it.
+  openClipReview(blob, file, ext);
+}
+
+// ---- v5.66.3: voluntary clip sharing --------------------------------------
+// Nothing leaves the device until the player picks a destination on the
+// review overlay. Auto-clips still wait in the gallery (v5.53).
+let reviewBlob = null, reviewFile = null, reviewExt = "webm", reviewUrl = null;
+function openClipReview(blob, file, ext) {
+  reviewBlob = blob; reviewFile = file; reviewExt = ext || "webm";
+  if (reviewUrl) URL.revokeObjectURL(reviewUrl);
+  reviewUrl = URL.createObjectURL(blob);
+  const v = $("clip-review-video");
+  v.src = reviewUrl;
+  $("clip-review-note").value = "";
+  const mb = (blob.size / 1048576).toFixed(1);
+  // 12MB server cap minus base64 inflation (~4/3): ~9MB raw is the wire max.
+  const tooBig = blob.size > 9 * 1024 * 1024;
+  $("clip-review-size").textContent = mb + " MB \u00B7 game video + game sound only";
+  $("clip-review-send").style.display = tooBig ? "none" : "";
+  const tb = $("clip-review-toobig");
+  tb.style.display = tooBig ? "" : "none";
+  if (tooBig) tb.textContent = "Too big to send to Lloyd (" + mb + " MB) \u2014 share it instead, or record a shorter clip.";
+  $("clip-review-overlay").classList.add("show");
+}
+function closeClipReview() {
+  $("clip-review-overlay").classList.remove("show");
+  const v = $("clip-review-video");
+  try { v.pause(); } catch (e) {}
+  v.removeAttribute("src"); v.load();
+  if (reviewUrl) { URL.revokeObjectURL(reviewUrl); reviewUrl = null; }
+  reviewBlob = null; reviewFile = null;
+}
+function blobToB64(blob) {
+  return new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(String(fr.result).split(",")[1] || "");
+    fr.onerror = () => rej(new Error("couldn't read clip"));
+    fr.readAsDataURL(blob);
+  });
+}
+function clipToken() {
   try {
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      await navigator.share({ files: [file], title: "Crumbs World" });
+    const b = new Uint8Array(16);
+    (crypto.getRandomValues ? crypto.getRandomValues(b) : b.map(() => Math.floor(Math.random() * 256)));
+    return Array.from(b, x => x.toString(16).padStart(2, "0")).join("");
+  } catch (e) { return "t" + Date.now().toString(36) + Math.floor(Math.random() * 1e9).toString(36); }
+}
+async function sendClipToLloyd() {
+  if (!reviewBlob) return;
+  const btn = $("clip-review-send");
+  btn.disabled = true; btn.textContent = "Sending\u2026";
+  try {
+    const b64 = await blobToB64(reviewBlob);
+    const note = $("clip-review-note").value.trim();
+    const r = await api("/api/bug-report", {
+      category: "observation",
+      text: note || "playtest clip",
+      context: "sent from the clip review screen",
+      clip_b64: b64,
+      clip_ext: reviewExt,
+      client_token: clipToken()
+    });
+    if (!r || !r.ok) throw new Error((r && r.error) || "send failed");
+    closeClipReview();
+    toast(r.duplicate ? "already sent \u2014 no duplicate" : "clip sent to Lloyd \u{1F4EC}");
+  } catch (e) {
+    toast(e.message || "send failed");
+  } finally {
+    btn.disabled = false; btn.textContent = "Send to Lloyd";
+  }
+}
+async function shareReviewedClip() {
+  if (!reviewFile) return;
+  // iOS share sheet -> TikTok, Messages, Save to Photos, Facebook, Instagram
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [reviewFile] })) {
+      await navigator.share({ files: [reviewFile], title: "Crumbs World" });
       toast("sent to the share sheet");
+      closeClipReview();
       return;
     }
   } catch (e) { /* user cancelled — fall through to download */ }
-  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url; a.download = file.name;
+  a.href = reviewUrl; a.download = reviewFile.name;
   document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
   toast("video saved — share it anywhere");
+  closeClipReview();
 }
+$("clip-review-send").onclick = sendClipToLloyd;
+$("clip-review-share").onclick = shareReviewedClip;
+$("clip-review-delete").onclick = () => { closeClipReview(); toast("clip deleted"); };
 
 // ---- v5.53: auto clips -------------------------------------------------------
 // She films herself. When Melody drops a new build ghost, the game records
@@ -21442,6 +21550,12 @@ async function openFeedbackInbox() {
       (report.replies || []).forEach(reply => {
         const p = document.createElement("p"); p.textContent = "Your reply: " + reply.text; card.appendChild(p);
       });
+      if (report.has_clip) {
+        const watch = document.createElement("button");
+        watch.textContent = "\u25B6 Watch clip";
+        watch.onclick = () => playInboxClip(report.id, card);
+        card.appendChild(watch);
+      }
       const input = document.createElement("textarea"); input.className = "feedback-reply-input";
       input.maxLength = 3000; input.placeholder = "Reply to this player (up to 3000 characters)"; card.appendChild(input);
       const send = document.createElement("button"); send.className = "feedback-send-reply"; send.textContent = "Send reply";
@@ -21463,6 +21577,27 @@ async function openFeedbackInbox() {
   }
 }
 
+// v5.66.3: owner-only clip playback inside the feedback inbox.
+async function playInboxClip(id, card) {
+  let v = card.querySelector("video.inbox-clip");
+  if (v) {
+    const hidden = v.style.display === "none";
+    v.style.display = hidden ? "" : "none";
+    if (!hidden) { try { v.pause(); } catch (e) {} }
+    return;
+  }
+  try {
+    const r = await fetch("/api/feedback/clip?id=" + encodeURIComponent(id), { credentials: "same-origin" });
+    if (!r.ok) throw new Error("clip unavailable");
+    const blob = await r.blob();
+    v = document.createElement("video");
+    v.className = "inbox-clip";
+    v.controls = true; v.playsInline = true; v.preload = "metadata";
+    v.style.cssText = "width:100%;border-radius:8px;margin:8px 0;background:#000";
+    v.src = URL.createObjectURL(blob);
+    card.appendChild(v);
+  } catch (e) { toast(e.message || "couldn't load clip"); }
+}
 async function openFeedbackNotifications() {
   const overlay = $("feedback-inbox-overlay"), list = $("feedback-inbox-list");
   list.replaceChildren(); overlay.classList.add("show");

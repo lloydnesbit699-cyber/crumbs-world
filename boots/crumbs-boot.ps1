@@ -66,9 +66,11 @@ if (-not (Test-Path $ServerScript -PathType Leaf)) {
 }
 
 if ($Check) {
+    Write-Progress -Activity 'Crumbs World boot check' -Status 'Checking local health endpoint' -PercentComplete 70
     $health = Get-ServerHealth
     if ($null -eq $health) { Die ("server did not answer a valid health check at " + $HealthUri) }
     Write-Say ("server is healthy (version " + $health.version + ")")
+    Write-Progress -Activity 'Crumbs World boot check' -Completed
     exit 0
 }
 
@@ -100,6 +102,7 @@ if ($Stop) {
 
 $health = Get-ServerHealth
 if ($null -ne $health) {
+    Write-Progress -Activity 'Crumbs World boot' -Completed
     Write-Say ("server is already UP on port {0} (version {1}, tester_shell={2})" -f
         $Port, $health.version, $health.tester_shell)
     exit 0
@@ -117,6 +120,7 @@ if (Test-Path $PidFile -PathType Leaf) {
 }
 
 if (-not (Test-Path $VenvPython -PathType Leaf)) {
+    Write-Progress -Activity 'Crumbs World boot' -Status 'Preparing isolated Python environment' -PercentComplete 15
     $python = Get-Command py -ErrorAction SilentlyContinue
     if ($python) {
         & $python.Source -3 -m venv (Join-Path $GameDir ".venv")
@@ -133,12 +137,14 @@ if (-not (Test-Path $VenvPython -PathType Leaf)) {
 
 & $VenvPython -c "import PIL" 2>$null
 if ($LASTEXITCODE -ne 0) {
+    Write-Progress -Activity 'Crumbs World boot' -Status 'Installing pinned dependencies' -PercentComplete 35
     Write-Say "installing the app's pinned requirements into .venv"
     & $VenvPython -m pip install -r (Join-Path $GameDir "requirements.txt")
     if ($LASTEXITCODE -ne 0) { Die "dependency installation failed; see the pip error above" }
 }
 
 try {
+    Write-Progress -Activity 'Crumbs World boot' -Status 'Preparing logs and starting the server' -PercentComplete 55
     if (-not (Test-Path $LogDir -PathType Container)) {
         New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
     }
@@ -178,12 +184,14 @@ try {
 
 $up = $null
 for ($i = 0; $i -lt 30; $i++) {
+    Write-Progress -Activity 'Crumbs World boot' -Status ("Waiting for healthy server response ({0}/30)" -f ($i + 1)) -PercentComplete (60 + [int](35 * ($i + 1) / 30))
     $up = Get-ServerHealth
     if ($null -ne $up) { break }
     if (-not (Get-Process -Id $proc.Id -ErrorAction SilentlyContinue)) { break }
     Start-Sleep -Seconds 1
 }
 if ($null -ne $up) {
+    Write-Progress -Activity 'Crumbs World boot' -Completed
     Write-Say ("server is UP on port {0} (version {1}, tester_shell={2}, pid {3})" -f
         $Port, $up.version, $up.tester_shell, $proc.Id)
     Write-Say ("log: " + $logOut)
@@ -191,6 +199,7 @@ if ($null -ne $up) {
 }
 
 Write-Say "server did not become healthy; recent log output:"
+Write-Progress -Activity 'Crumbs World boot' -Completed
 if (Test-Path $logOut) { Get-Content $logOut -Tail 40 | Write-Host }
 if (Test-Path $logErr) { Get-Content $logErr -Tail 40 | Write-Host }
 if (Get-CrumbsProcesses | Where-Object { $_.ProcessId -eq $proc.Id }) {

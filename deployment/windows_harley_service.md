@@ -43,7 +43,7 @@ runtime data.
 ### One-time verified deploy setup
 
 The installer now registers both the always-on server watchdog and verified
-deploy watcher. Make sure Harley's Windows account can run `git fetch origin
+deploy watcher, plus a redacted operations sentinel. Make sure Harley's Windows account can run `git fetch origin
 main`. GitHub Actions must be enabled and the `repo-verify` workflow must be
 allowed to run.
 
@@ -81,6 +81,24 @@ Check the tasks and run a no-change preflight on Harley with:
 .\deployment\harley_verified_deploy.ps1 -Check
 .\boots\crumbs-boot.ps1 -Check
 ```
+
+The sentinel audits required files, Python dependency consistency/imports,
+task states and owner accounts, deploy-key and Melody backend configuration,
+account-recovery delivery settings, checkpoint and user-record integrity,
+recent server error logs, loopback health, Tailscale service/backend, Funnel
+configuration, repository origin/edits, and private-file ACLs. It never prints
+or logs credential values. Run a one-time report with:
+
+```powershell
+.\deployment\crumbs_ops_sentinel.ps1
+```
+
+The installer starts a repeating sentinel at sign-in. It checks every minute
+and appends state changes to `logs\crumbs-ops-sentinel.log`. Boot progress is
+shown by `crumbs-boot.ps1`. The existing watchdog restarts a crashed server;
+the verified deploy watcher rolls back a release that fails live health
+verification. The sentinel reports issues for repair and does not alter
+Tailscale exposure, credentials, user records, or world data.
 
 Deploy logs go to `logs\harley-deploy.log`. A release that fails health checks
 is rolled back and recorded in `.crumbs_deploy_failed`; inspect the logs and

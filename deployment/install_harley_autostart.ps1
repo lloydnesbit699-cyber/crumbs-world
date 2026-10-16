@@ -13,9 +13,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $taskName = 'Crumbs World Harley Server'
 $deployTaskName = 'Crumbs World Verified Deploy'
+$sentinelTaskName = 'Crumbs World Ops Sentinel'
 $repoDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $watchdog = Join-Path $PSScriptRoot 'harley_watchdog.ps1'
 $deployScript = Join-Path $PSScriptRoot 'harley_verified_deploy.ps1'
+$sentinelScript = Join-Path $PSScriptRoot 'crumbs_ops_sentinel.ps1'
 
 if ($Status) {
     $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
@@ -27,6 +29,12 @@ if ($Status) {
     } else {
         Write-Output 'Verified deploy watcher is not installed yet.'
     }
+    $sentinelTask = Get-ScheduledTask -TaskName $sentinelTaskName -ErrorAction SilentlyContinue
+    if ($sentinelTask) {
+        Get-ScheduledTaskInfo -TaskName $sentinelTaskName | Select-Object TaskName,LastRunTime,LastTaskResult,NextRunTime
+    } else {
+        Write-Output 'Operations sentinel is not installed yet.'
+    }
     Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 8778 -State Listen -ErrorAction SilentlyContinue |
         Select-Object LocalAddress,LocalPort,OwningProcess
     exit 0
@@ -37,6 +45,9 @@ if (-not (Test-Path -LiteralPath $watchdog -PathType Leaf)) {
 }
 if (-not (Test-Path -LiteralPath $deployScript -PathType Leaf)) {
     throw "Verified deploy watcher not found: $deployScript"
+}
+if (-not (Test-Path -LiteralPath $sentinelScript -PathType Leaf)) {
+    throw "Operations sentinel not found: $sentinelScript"
 }
 if (-not (Test-Path -LiteralPath (Join-Path $repoDir '.venv\Scripts\python.exe') -PathType Leaf)) {
     throw 'Project .venv is missing. Run boots\crumbs-boot.ps1 once to prepare it.'
@@ -115,11 +126,26 @@ try {
     Register-ScheduledTask -TaskName $deployTaskName -InputObject $deployTask `
         -Force -ErrorAction Stop | Out-Null
     Start-ScheduledTask -TaskName $deployTaskName -ErrorAction Stop
+
+    $sentinelAction = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
+        -Argument "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$sentinelScript`" -Watch" `
+        -WorkingDirectory $repoDir
+    $sentinelTrigger = New-ScheduledTaskTrigger -AtLogOn -User $account
+    $sentinelSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 999 `
+        -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) `
+        -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+    $sentinelTask = New-ScheduledTask -Action $sentinelAction -Trigger $sentinelTrigger `
+        -Principal $deployPrincipal -Settings $sentinelSettings `
+        -Description 'Audits Harley boot, dependencies, credentials presence, recovery, Tailscale, Funnel, tasks, and repository integrity; logs state changes without printing secrets.'
+    Register-ScheduledTask -TaskName $sentinelTaskName -InputObject $sentinelTask `
+        -Force -ErrorAction Stop | Out-Null
+    Start-ScheduledTask -TaskName $sentinelTaskName -ErrorAction Stop
 } catch {
     throw "Could not register/start the scheduled task. Run this installer in an elevated PowerShell session as $account (do not use a different account); the server task remains an at-startup task and the deploy watcher runs at sign-in. $($_.Exception.Message)"
 }
 Write-Output "Installed and started '$taskName' as $account (limited privilege, system startup)."
 Write-Output "Installed and started '$deployTaskName' as $account (limited privilege, starts at sign-in; no password stored)."
+Write-Output "Installed and started '$sentinelTaskName' as $account (limited privilege, starts at sign-in; redacted diagnostic monitor)."
 Write-Output 'The app listens on 127.0.0.1:8778; Tailscale Funnel remains the only public entry point.'
 if (-not $env:CRUMBS_SHARE_KEY) {
     Write-Warning 'Verified deployments are paused until CRUMBS_SHARE_KEY is set for this Windows account and the tasks are restarted.'

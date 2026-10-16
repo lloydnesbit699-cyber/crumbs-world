@@ -3,6 +3,24 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.64.0 — 2026-10-16
+
+**Persistent account hardening.** User database backups are explicitly
+excluded from Git. Newly created and changed passwords now require 6 to
+1024 characters; existing passwords continue to work until changed. User
+database writes use restrictive POSIX permissions where supported, and the
+Harley installer applies Windows ACLs to existing account records and vaults.
+
+## v5.63.0 — 2026-10-16
+
+**Account recovery and always-on Harley service.** Added username recovery
+and password reset using single-use codes delivered to the account's stored
+email or international-format phone number. Codes expire after 10 minutes,
+are attempt-limited and rate-limited, and recovery responses do not disclose
+whether an account exists. SMTP and Twilio SMS delivery are server-configured.
+Harley's persistent Task Scheduler watchdog restarts the authenticated server
+through the existing Tailscale Funnel while binding the app only to loopback.
+
 ## v5.62.0 — 2026-10-13
 
 **Safer updates and deployment warnings.** The Replit Run workflow no longer

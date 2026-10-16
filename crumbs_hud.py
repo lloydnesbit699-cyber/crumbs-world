@@ -111,6 +111,7 @@ import re
 import secrets
 import socket
 import shutil
+import smtplib
 import ssl
 import struct
 import sys
@@ -132,7 +133,7 @@ import urllib.request
 from collections import deque
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, urlencode
 
 import crumbs_core as core
 try:
@@ -155,7 +156,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.62.0"
+APP_VERSION = "5.64.0"
 # v5.62: mobile launcher versions. The Android/iOS wrappers check
 # /api/launcher-version on every launch and self-update when these bump.
 # Set CRUMBS_LAUNCHER_APK_URL to the public URL of crumbs-world-launcher.apk
@@ -626,6 +627,7 @@ def _atomic_write_json(path, doc):
     os.replace(tmp, path)
 
 PUBLIC_MODE = False
+FUNNEL_MODE = False
 PUBLIC_WRITE_KEY = ""
 WRITE_KEY_HEADER = "X-Crumbs-Key"
 WRITE_KEY_QUERY = "key"
@@ -653,7 +655,8 @@ _SESSION_COOKIE = "crumbs_sid"
 _SESSION_DAYS = 30
 _PBKDF2_ROUNDS = 200000
 _USERNAME_RE = re.compile(r"^[a-z0-9_-]{3,24}$")
-_MIN_PASSWORD_LEN = 4
+_MIN_PASSWORD_LEN = 6
+_MAX_PASSWORD_LEN = 1024
 # v5.27: login brute-force armor — 5 attempts per minute per IP, then 429.
 _RL_LOGIN = (5, 60)
 
@@ -757,11 +760,15 @@ def _new_salt():
 
 
 def _hash_password(password, salt_hex):
+    if not isinstance(password, str) or len(password) > _MAX_PASSWORD_LEN:
+        raise ValueError("password is too long")
     return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"),
                                bytes.fromhex(salt_hex), _PBKDF2_ROUNDS).hex()
 
 
 def _verify_password(password, rec):
+    if not isinstance(password, str) or len(password) > _MAX_PASSWORD_LEN:
+        return False
     try:
         want = _hash_password(password, rec["salt"])
     except (KeyError, ValueError):
@@ -797,6 +804,175 @@ def _valid_phone(phone):
         return True
     return (bool(_PHONE_RE.match(phone)) and len(phone) <= 32
             and any(ch.isdigit() for ch in phone))
+
+
+def _normalize_phone(phone):
+    raw = str(phone or "").strip()
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    return ("+" if raw.startswith("+") else "") + digits
+
+
+# Account recovery challenges are short-lived and memory-only. They carry
+# contact hashes and code hashes, never the raw code or delivery credentials.
+_AUTH_RECOVERY_TTL = 600
+_AUTH_RECOVERY_MAX_ATTEMPTS = 5
+_AUTH_RECOVERY_PER_CONTACT = (3, 3600)  # provider-cost guard: sends/hour
+_AUTH_RECOVERY_GLOBAL = (30, 3600)      # keeps SMS/email spend bounded
+_auth_recovery_challenges = {}
+_auth_recovery_sends = {}
+_auth_recovery_lock = threading.Lock()
+
+
+def _recovery_contact(method, value):
+    value = str(value or "").strip()
+    if method == "email":
+        value = value.lower()
+        return value if _valid_email(value) else None
+    if method == "phone":
+        if not _valid_phone(value):
+            return None
+        normalized = _normalize_phone(value)
+        digits = normalized.lstrip("+")
+        return normalized if (normalized.startswith("+")
+                              and digits.isdigit()
+                              and 8 <= len(digits) <= 15) else None
+    return None
+
+
+def _recovery_provider_ready(method):
+    if method == "email":
+        return bool(os.environ.get("CRUMBS_RECOVERY_SMTP_HOST", "").strip()
+                    and os.environ.get("CRUMBS_RECOVERY_SMTP_FROM", "").strip())
+    if method == "phone":
+        return all(os.environ.get(k, "").strip() for k in (
+            "CRUMBS_RECOVERY_TWILIO_ACCOUNT_SID",
+            "CRUMBS_RECOVERY_TWILIO_KEY_SID",
+            "CRUMBS_RECOVERY_TWILIO_KEY_SECRET",
+            "CRUMBS_RECOVERY_TWILIO_FROM"))
+    return False
+
+
+def _recovery_send_allowed(method, contact):
+    now = time.monotonic()
+    digest = hashlib.sha256((method + ":" + contact).encode("utf-8")).hexdigest()
+    key = ("contact", digest)
+    with _auth_recovery_lock:
+        for k, times in list(_auth_recovery_sends.items()):
+            fresh = [t for t in times if now - t < 3600]
+            if fresh:
+                _auth_recovery_sends[k] = fresh
+            else:
+                _auth_recovery_sends.pop(k, None)
+        per_limit, window = _AUTH_RECOVERY_PER_CONTACT
+        global_limit, global_window = _AUTH_RECOVERY_GLOBAL
+        per_contact = _auth_recovery_sends.get(key, [])
+        global_sends = _auth_recovery_sends.get(("global", "all"), [])
+        if len(per_contact) >= per_limit or len(global_sends) >= global_limit:
+            return False
+        per_contact.append(now)
+        global_sends.append(now)
+        _auth_recovery_sends[key] = per_contact
+        _auth_recovery_sends[("global", "all")] = global_sends
+    return True
+
+
+def _send_auth_recovery_code(method, destination, code):
+    message = ("Your Crumbs World verification code is " + code +
+               ". It expires in 10 minutes. If you did not request this, ignore this message.")
+    if method == "email":
+        host = os.environ["CRUMBS_RECOVERY_SMTP_HOST"].strip()
+        sender = os.environ["CRUMBS_RECOVERY_SMTP_FROM"].strip()
+        port = int(os.environ.get("CRUMBS_RECOVERY_SMTP_PORT", "587"))
+        user = os.environ.get("CRUMBS_RECOVERY_SMTP_USER", "")
+        password = os.environ.get("CRUMBS_RECOVERY_SMTP_PASSWORD", "")
+        if bool(user) != bool(password):
+            raise RuntimeError("SMTP credentials must be configured together")
+        from email.message import EmailMessage
+        msg = EmailMessage()
+        msg["Subject"] = "Crumbs World account recovery code"
+        msg["From"] = sender
+        msg["To"] = destination
+        msg.set_content(message)
+        if port == 465:
+            with smtplib.SMTP_SSL(host, port, timeout=12,
+                                  context=ssl.create_default_context()) as smtp:
+                if user:
+                    smtp.login(user, password)
+                smtp.send_message(msg)
+        else:
+            with smtplib.SMTP(host, port, timeout=12) as smtp:
+                smtp.ehlo()
+                smtp.starttls(context=ssl.create_default_context())
+                smtp.ehlo()
+                if user:
+                    smtp.login(user, password)
+                smtp.send_message(msg)
+        return
+    if method == "phone":
+        account_sid = os.environ["CRUMBS_RECOVERY_TWILIO_ACCOUNT_SID"].strip()
+        key_sid = os.environ["CRUMBS_RECOVERY_TWILIO_KEY_SID"].strip()
+        key_secret = os.environ["CRUMBS_RECOVERY_TWILIO_KEY_SECRET"].strip()
+        sender = os.environ["CRUMBS_RECOVERY_TWILIO_FROM"].strip()
+        url = ("https://api.twilio.com/2010-04-01/Accounts/" +
+               account_sid + "/Messages.json")
+        payload = urlencode({"To": destination, "From": sender, "Body": message}).encode()
+        auth = base64.b64encode((key_sid + ":" + key_secret).encode()).decode("ascii")
+        req = urllib.request.Request(url, data=payload, headers={
+            "Authorization": "Basic " + auth,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": "CrumbsWorld-Recovery"})
+        with urllib.request.urlopen(req, timeout=12,
+                                   context=ssl.create_default_context()) as response:
+            if response.status < 200 or response.status >= 300:
+                raise RuntimeError("SMS provider rejected the message")
+        return
+    raise RuntimeError("unsupported recovery delivery method")
+
+
+def _auth_recovery_contact_hash(method, contact):
+    return hashlib.sha256((method + "\0" + contact).encode("utf-8")).hexdigest()
+
+
+def _auth_recovery_issue(kind, usernames, method, contact, code):
+    now = time.monotonic()
+    token = secrets.token_urlsafe(24)
+    rec = {"kind": kind, "usernames": list(usernames), "method": method,
+           "contact_hash": _auth_recovery_contact_hash(method, contact),
+           "code_hash": hashlib.sha256((token + ":" + code).encode()).hexdigest(),
+           "expires": now + _AUTH_RECOVERY_TTL, "attempts": 0}
+    with _auth_recovery_lock:
+        for old, value in list(_auth_recovery_challenges.items()):
+            if now >= value["expires"]:
+                _auth_recovery_challenges.pop(old, None)
+        if len(_auth_recovery_challenges) >= 5000:
+            return None
+        _auth_recovery_challenges[token] = rec
+    return token
+
+
+def _auth_recovery_redeem(token, code):
+    with _auth_recovery_lock:
+        rec = _auth_recovery_challenges.get(token)
+        if not rec or time.monotonic() >= rec["expires"]:
+            _auth_recovery_challenges.pop(token, None)
+            return None
+        rec["attempts"] += 1
+        candidate = hashlib.sha256((token + ":" + str(code or "")).encode()).hexdigest()
+        if not hmac.compare_digest(candidate, rec["code_hash"]):
+            if rec["attempts"] >= _AUTH_RECOVERY_MAX_ATTEMPTS:
+                _auth_recovery_challenges.pop(token, None)
+            return None
+        _auth_recovery_challenges.pop(token, None)
+        return rec
+
+
+def _auth_recovery_delivery_worker(method, destination, code):
+    try:
+        _send_auth_recovery_code(method, destination, code)
+    except Exception as exc:
+        # Provider exceptions can contain destination or request details.
+        # Keep those out of the public response and application log.
+        print("[auth-recovery] delivery failed (" + exc.__class__.__name__ + ")")
 
 
 def _new_totp_secret():
@@ -970,7 +1146,8 @@ def _register_device(users, username, label=None):
 
 def _device_cookie_value(raw_token):
     return (f"{_DEVICE_COOKIE}={raw_token}"
-            f"; HttpOnly; Path=/; SameSite=Lax; Max-Age={_DEVICE_DAYS * 86400}")
+            f"; HttpOnly; Path=/; SameSite=Lax; Max-Age={_DEVICE_DAYS * 86400}"
+            + ("; Secure" if FUNNEL_MODE else ""))
 
 
 def _enroll_issue(username):
@@ -1053,6 +1230,32 @@ def _totp_otpauth_url(username, secret):
             f"&issuer=CrumbsHUD&algorithm=SHA1&digits=6&period=30")
 
 
+def _protect_private_file(path):
+    """Restrict persisted account material to this service account/admins."""
+    try:
+        if os.name != "nt":
+            os.chmod(path, 0o600)
+            return
+        account = os.environ.get("USERDOMAIN", "")
+        username = os.environ.get("USERNAME", "")
+        account = (account + "\\" if account else "") + username
+        if not account:
+            raise OSError("could not determine the Windows service account")
+        icacls = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+                              "System32", "icacls.exe")
+        result = subprocess.run(
+            [icacls, path, "/inheritance:r", "/grant:r", account + ":F",
+             "*S-1-5-18:F", "*S-1-5-32-544:F"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            check=False)
+        if result.returncode:
+            raise OSError("icacls rejected the private-file ACL")
+    except OSError as exc:
+        print("[auth] could not restrict private account file permissions: "
+              + exc.__class__.__name__)
+
+
 def _load_users():
     try:
         with open(_USERS_FILE) as f:
@@ -1072,6 +1275,7 @@ def _save_users(users):
         try:
             import shutil
             shutil.copy2(_USERS_FILE, bak)
+            _protect_private_file(bak)
             # prune old backups, keep 10
             baks = sorted(glob.glob(_USERS_FILE + ".*.bak"))
             for old in baks[:-10]:
@@ -1080,9 +1284,12 @@ def _save_users(users):
         except OSError:
             pass
     tmp = _USERS_FILE + ".tmp"
-    with open(tmp, "w") as f:
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(users, f, indent=1)
+    _protect_private_file(tmp)
     os.replace(tmp, _USERS_FILE)
+    _protect_private_file(_USERS_FILE)
 
 
 def _create_user(username, password, email=None, phone=None, is_owner=False):
@@ -1136,6 +1343,7 @@ def _get_secret():
         with open(_SECRET_FILE, "rb") as f:
             s = f.read().strip()
         if len(s) >= 32:
+            _protect_private_file(_SECRET_FILE)
             return s
     except OSError:
         pass
@@ -1144,6 +1352,7 @@ def _get_secret():
         fd = os.open(_SECRET_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "wb") as f:
             f.write(s)
+        _protect_private_file(_SECRET_FILE)
     except OSError as e:
         print(f"[auth] could not persist server secret: {e}")
     return s
@@ -1183,11 +1392,13 @@ def _verify_session_token(token):
 
 def _session_cookie_value(username, token_version):
     return (f"{_SESSION_COOKIE}={_make_session_token(username, token_version)}"
-            f"; HttpOnly; Path=/; SameSite=Lax; Max-Age={_SESSION_DAYS * 86400}")
+            f"; HttpOnly; Path=/; SameSite=Lax; Max-Age={_SESSION_DAYS * 86400}"
+            + ("; Secure" if FUNNEL_MODE else ""))
 
 
-_CLEAR_COOKIE = (f"{_SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Lax; "
-                 "Max-Age=0")
+def _clear_session_cookie_value():
+    return (f"{_SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0"
+            + ("; Secure" if FUNNEL_MODE else ""))
 
 
 # -- vault state switching ------------------------------------------------------
@@ -7463,7 +7674,7 @@ class Handler(BaseHTTPRequestHandler):
             if rec is not None:
                 rec["token_version"] = int(rec.get("token_version", 0)) + 1
                 _save_users(users)
-        self._outgoing_cookies.append(_CLEAR_COOKIE)
+        self._outgoing_cookies.append(_clear_session_cookie_value())
 
     # -- v5.30: 2FA code check ----------------------------------------------
     # Accepts a current TOTP code, or burns one single-use recovery code.
@@ -7497,7 +7708,7 @@ class Handler(BaseHTTPRequestHandler):
             if rec is not None:
                 rec["token_version"] = int(rec.get("token_version", 0)) + 1
                 _save_users(users)
-        self._outgoing_cookies.append(_CLEAR_COOKIE)
+        self._outgoing_cookies.append(_clear_session_cookie_value())
 
     def _is_owner_session(self):
         u = self._session_user()
@@ -9162,6 +9373,99 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"ok": False, "error": "bad JSON"}, 400)
 
         # ---- v5.27: accounts ------------------------------------------------
+        if path == "/api/auth/recovery/start":
+            kind = str(body.get("kind") or "")
+            method = str(body.get("method") or "")
+            contact = _recovery_contact(method, body.get("contact"))
+            username = str(body.get("username") or "").strip().lower()
+            if kind not in ("username", "password") or not contact:
+                error = ("enter the phone with country code, e.g. +15551234567"
+                         if method == "phone" else
+                         "enter a valid recovery email address")
+                return self._send_json({"ok": False,
+                                        "error": error}, 400)
+            if kind == "password" and not _valid_username(username):
+                return self._send_json({"ok": False,
+                                        "error": "enter the username for password recovery"}, 400)
+            if not _recovery_provider_ready(method):
+                return self._send_json({"ok": False,
+                                        "error": "recovery delivery is not configured on this server"}, 503)
+            if not _recovery_send_allowed(method, contact):
+                return self._send_json({"ok": False,
+                                        "error": "recovery code limit reached; try later"}, 429)
+
+            users = _load_users()
+            if method == "email":
+                matches = [name for name, rec in users.items()
+                           if isinstance(rec, dict)
+                           and str(rec.get("email") or "").strip().lower() == contact]
+            else:
+                matches = [name for name, rec in users.items()
+                           if isinstance(rec, dict)
+                           and _normalize_phone(rec.get("phone")) == contact]
+            if kind == "password":
+                matches = [name for name in matches if name == username]
+
+            challenge = secrets.token_urlsafe(24)
+            if matches:
+                code = f"{secrets.randbelow(1_000_000):06d}"
+                issued = _auth_recovery_issue(kind, matches, method,
+                                              contact, code)
+                if issued:
+                    challenge = issued
+                    threading.Thread(target=_auth_recovery_delivery_worker,
+                                     args=(method, contact, code),
+                                     name="crumbs-auth-recovery-delivery",
+                                     daemon=True).start()
+            # Same response for known and unknown accounts prevents account
+            # discovery; provider readiness is server-wide, not per account.
+            return self._send_json({"ok": True, "challenge": challenge,
+                                    "message": "If the details match an account, a code will be sent. It expires in 10 minutes."}, 202)
+
+        if path == "/api/auth/recovery/confirm":
+            challenge = str(body.get("challenge") or "")
+            code = str(body.get("code") or "").strip()
+            if len(challenge) > 128 or not (code.isdigit() and len(code) == 6):
+                return self._send_json({"ok": False,
+                                        "error": "code invalid or expired; start again"}, 400)
+            new_password = str(body.get("new_password") or "")
+            with _auth_recovery_lock:
+                pending = _auth_recovery_challenges.get(challenge)
+            if pending and pending["kind"] == "password" and not (
+                    _MIN_PASSWORD_LEN <= len(new_password) <= _MAX_PASSWORD_LEN):
+                return self._send_json({"ok": False,
+                                        "error": "new password must be 6-1024 characters"}, 400)
+            rec = _auth_recovery_redeem(challenge, code)
+            if not rec:
+                return self._send_json({"ok": False,
+                                        "error": "code invalid or expired; start again"}, 400)
+
+            users = _load_users()
+            names = [name for name in rec["usernames"]
+                     if isinstance(users.get(name), dict)
+                     and _auth_recovery_contact_hash(
+                         rec["method"], _recovery_contact(
+                             rec["method"], users[name].get(rec["method"])) or "")
+                     == rec["contact_hash"]]
+            if not names:
+                return self._send_json({"ok": False,
+                                        "error": "code invalid or expired; start again"}, 400)
+
+            if rec["kind"] == "username":
+                return self._send_json({"ok": True, "usernames": sorted(names)})
+
+            # Reset the requested account only; the verified challenge is
+            # single-use and session tokens are revoked immediately.
+            username = names[0]
+            account = users[username]
+            salt = _new_salt()
+            account["salt"] = salt
+            account["hash"] = _hash_password(new_password, salt)
+            account["token_version"] = int(account.get("token_version", 0)) + 1
+            _save_users(users)
+            _log_event(f"password reset through verified recovery for {username}")
+            return self._send_json({"ok": True, "username": username})
+
         if path == "/api/auth/login":
             # brute-force armor: 5 tries/min/IP, then 429 with a cooldown.
             # Generic failure — never reveal whether the username exists vs
@@ -9176,7 +9480,10 @@ class Handler(BaseHTTPRequestHandler):
             users = _load_users()
             rec = users.get(username)
             if not isinstance(rec, dict):
-                _hash_password(password, _new_salt())  # dummy work: same cost
+                # Keep nonexistent-user login timing comparable while bounding
+                # work for hostile oversized password fields.
+                _hash_password(password if len(password) <= _MAX_PASSWORD_LEN
+                               else "invalid", _new_salt())
                 ok = False
             else:
                 ok = _verify_password(password, rec)
@@ -9291,8 +9598,8 @@ class Handler(BaseHTTPRequestHandler):
             # slashes, dots, or traversal can ever sneak in.
             if not _valid_username(username):
                 return self._send_json({"ok": False, "error": "username must be 3-24 chars: a-z 0-9 _ -"}, 400)
-            if len(password) < _MIN_PASSWORD_LEN:
-                return self._send_json({"ok": False, "error": "password too short"}, 400)
+            if not (_MIN_PASSWORD_LEN <= len(password) <= _MAX_PASSWORD_LEN):
+                return self._send_json({"ok": False, "error": "password must be 6-1024 characters"}, 400)
             ok, err = _create_user(username, password,
                                    email=str(body.get("email") or ""))
             if not ok:
@@ -9319,8 +9626,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": False, "error": "username must be 3-24 chars: a-z 0-9 _ -"}, 400)
             if not _valid_email(email):
                 return self._send_json({"ok": False, "error": "enter a valid email"}, 400)
-            if len(password) < _MIN_PASSWORD_LEN:
-                return self._send_json({"ok": False, "error": "password too short"}, 400)
+            if not (_MIN_PASSWORD_LEN <= len(password) <= _MAX_PASSWORD_LEN):
+                return self._send_json({"ok": False, "error": "password must be 6-1024 characters"}, 400)
             if phone and not _valid_phone(phone):
                 return self._send_json({"ok": False, "error": "enter a valid phone number"}, 400)
             # dummy work on the taken paths so timing doesn't leak which
@@ -9364,8 +9671,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": False, "error": "username must be 3-24 chars: a-z 0-9 _ -"}, 400)
             if not _valid_email(email):
                 return self._send_json({"ok": False, "error": "enter a valid email"}, 400)
-            if len(password) < _MIN_PASSWORD_LEN:
-                return self._send_json({"ok": False, "error": "password too short"}, 400)
+            if not (_MIN_PASSWORD_LEN <= len(password) <= _MAX_PASSWORD_LEN):
+                return self._send_json({"ok": False, "error": "password must be 6-1024 characters"}, 400)
             if phone and not _valid_phone(phone):
                 return self._send_json({"ok": False, "error": "enter a valid phone number"}, 400)
             # dummy work on the taken paths so timing doesn't leak which
@@ -9444,8 +9751,8 @@ class Handler(BaseHTTPRequestHandler):
             if not _verify_password(str(body.get("old") or ""), rec):
                 return self._send_json({"ok": False, "error": "bad login"}, 401)
             new = str(body.get("new") or "")
-            if len(new) < _MIN_PASSWORD_LEN:
-                return self._send_json({"ok": False, "error": "password too short"}, 400)
+            if not (_MIN_PASSWORD_LEN <= len(new) <= _MAX_PASSWORD_LEN):
+                return self._send_json({"ok": False, "error": "password must be 6-1024 characters"}, 400)
             salt = _new_salt()
             rec["salt"] = salt
             rec["hash"] = _hash_password(new, salt)
@@ -9640,8 +9947,8 @@ class Handler(BaseHTTPRequestHandler):
             rec = users.get(username)
             if not isinstance(rec, dict):
                 return self._send_json({"ok": False, "error": "unknown user"}, 404)
-            if len(new) < _MIN_PASSWORD_LEN:
-                return self._send_json({"ok": False, "error": "password too short"}, 400)
+            if not (_MIN_PASSWORD_LEN <= len(new) <= _MAX_PASSWORD_LEN):
+                return self._send_json({"ok": False, "error": "password must be 6-1024 characters"}, 400)
             salt = _new_salt()
             rec["salt"] = salt
             rec["hash"] = _hash_password(new, salt)
@@ -12640,7 +12947,11 @@ if __name__ == "__main__":
         raise SystemExit(2)
     _recover_startup()
     _install_lifecycle_markers()  # Phase 3B: AFTER startup read the old evidence
-    public = "--public" in args  # v1.9: serve the Wi-Fi network
+    public = "--public" in args or "--funnel" in args
+    funnel_only = "--funnel" in args
+    FUNNEL_MODE = funnel_only
+    if "--public" in args and funnel_only:
+        raise SystemExit("Use either --public (all interfaces) or --funnel (loopback only), not both.")
     share_key = (os.environ.get("CRUMBS_SHARE_KEY") or "").strip()
     for a in args:
         if a.startswith("--share-key="):
@@ -12655,7 +12966,10 @@ if __name__ == "__main__":
     if public:
         _get_secret()  # persisted session secret, created once (0600)
         _ensure_owner()
-    host = "0.0.0.0" if public else HOST
+    # Tailscale Funnel proxies to loopback. Keep Harley's authority off every
+    # LAN interface while still using the authenticated public-mode account
+    # system behind the Funnel.
+    host = "0.0.0.0" if "--public" in args else HOST
     try:
         srv = ThreadingHTTPServer((host, PORT), Handler)
     except OSError as e:
@@ -12683,7 +12997,9 @@ if __name__ == "__main__":
         print("  !! DATA PERSISTENCE WARNING: " + storage_warning)
     if public:
         ip = _lan_ip()
-        print("  PUBLIC mode: anyone on your Wi-Fi can open the HUD (read-only by default).")
+        print("  PUBLIC mode: authenticated accounts enabled; writes require the write key.")
+        if funnel_only:
+            print("  Funnel mode: listening on loopback only (127.0.0.1).")
         print(f"  Write key: {PUBLIC_WRITE_KEY}")
         if ip:
             print(f"  Friend opens:  http://{ip}:{PORT}")

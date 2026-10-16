@@ -504,6 +504,8 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   #splash .load-bar i { display: block; height: 100%; width: 4%; border-radius: 3px;
     background: linear-gradient(90deg,#ff5a5a,#ffd75f,#5aa2ff); transition: width .3s ease; }
   #splash .load-label { font-size: 12px; color: #cfd2dc; min-height: 16px; }
+  #splash .splash-logo { width: min(42vw, 230px); height: min(42vh, 300px);
+    object-fit: contain; filter: drop-shadow(0 0 18px rgba(90,140,255,.35)); }
   #splash .splash-title { font-size: 28px; color: #ffd75f; font-weight: bold; }
   #splash .splash-sub { font-size: 14px; color: #888; }
 /* v5.63: bug report overlay */
@@ -539,6 +541,12 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     border: 1px solid #2a2a38;
     box-shadow: 0 0 22px rgba(255,90,90,.28), 0 0 22px rgba(90,140,255,.28); }
   #login-box .login-sub { color: #888; font-size: 12px; margin-bottom: 14px; }
+  #login-box .login-recovery-link { border: 0; background: none; color: #8fd0ff;
+    font-size: 12px; padding: 6px; cursor: pointer; }
+  #login-box .recovery-method { display: block; width: 100%; box-sizing: border-box;
+    margin: 8px 0; padding: 10px; border-radius: 8px; border: 1px solid #333;
+    background: #0d0d12; color: #eee; font-size: 15px; }
+  #login-box .recovery-msg { color: #bbb; font-size: 12px; min-height: 18px; margin-top: 8px; }
   #login-box input:not([type=checkbox]) { display: block; width: 100%; box-sizing: border-box;
     margin: 8px 0; padding: 10px; border-radius: 8px; border: 1px solid #333;
     background: #0d0d12; color: #eee; font-size: 16px; }
@@ -1631,6 +1639,8 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     gap: 6px; padding: 28px 20px; text-align: center; margin-bottom: 18px;
   }
   #shell-root .sh-brand .sh-mark { font-size: 40px; line-height: 1; color: #c9973f; position: relative; }
+  #shell-root .sh-brand .sh-logo { width: 96px; height: 112px; object-fit: contain;
+    position: relative; filter: drop-shadow(0 0 12px rgba(90,140,255,.3)); }
   #shell-root .sh-brand h1 { font-size: 30px; margin: 0; color: #f3ead6; position: relative; }
   #shell-root .sh-brand .sh-tag { font-size: 14px; color: #d8cdb4; position: relative; margin: 0; }
   #shell-root .sh-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
@@ -1673,6 +1683,8 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     gap: 10px; padding: 24px 8px;
   }
   #shell-root .sh-welcome-inner .sh-mark { font-size: 56px; line-height: 1; color: #c9973f; }
+  #shell-root .sh-welcome-inner .sh-logo { width: 112px; height: 136px;
+    object-fit: contain; filter: drop-shadow(0 0 14px rgba(90,140,255,.3)); }
   #shell-root .sh-welcome-inner h1 { font-size: 34px; margin: 0; color: #f3ead6; }
   #shell-root .sh-promise { font-size: 17px; color: #d8cdb4; margin: 0 0 12px; }
   #shell-root .sh-welcome-enter { max-width: 340px; margin-left: auto; margin-right: auto; }
@@ -4016,7 +4028,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     <!-- v5.61: the shield — no more brick emoji -->
     <img id="login-logo" src="/splash-logo-cw.jpg" alt="Crumbs World">
     <h2>Crumbs World</h2>
-    <div class="login-tabs">
+    <div class="login-tabs" id="login-tabs">
       <button id="tab-login" class="on">Log in</button>
       <button id="tab-signup">Sign up</button>
     </div>
@@ -4026,12 +4038,14 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
       <input id="login-pass" type="password" placeholder="password" autocomplete="current-password">
       <button id="login-go">Log in</button>
       <div id="login-err"></div>
+      <div><button id="recover-user-open" class="login-recovery-link">Forgot username?</button>
+      <button id="recover-password-open" class="login-recovery-link">Forgot password?</button></div>
     </div>
     <div id="pane-signup" hidden>
       <div class="login-sub">Create your vault — email required, phone optional</div>
       <input id="su-user" type="text" placeholder="username (3-24 chars)" autocomplete="username" autocapitalize="none" autocorrect="off">
       <input id="su-email" type="email" placeholder="email" autocomplete="email" autocapitalize="none" autocorrect="off">
-      <input id="su-pass" type="password" placeholder="password (min 4 chars)" autocomplete="new-password">
+      <input id="su-pass" type="password" placeholder="password (6+ characters)" autocomplete="new-password">
       <input id="su-phone" type="tel" placeholder="phone (optional)" autocomplete="tel" autocapitalize="none" autocorrect="off">
       <label class="login-2fa-opt"><input type="checkbox" id="su-2fa"> Protect with authenticator app</label>
       <button id="su-go">Create account</button>
@@ -4060,6 +4074,22 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
       <button id="dev-back" class="login-demo-btn">Back</button>
       <div id="dev-err"></div>
     </div>
+    <div id="pane-recovery" hidden>
+      <div class="login-sub" id="recovery-title">Recover account</div>
+      <input id="recovery-username" type="text" placeholder="username" autocomplete="username" hidden>
+      <select id="recovery-method" class="recovery-method" aria-label="Send verification code by">
+        <option value="email">Email</option><option value="phone">Phone with country code (if added)</option>
+      </select>
+      <input id="recovery-contact" type="email" placeholder="account email" autocomplete="email" autocapitalize="none" autocorrect="off">
+      <button id="recovery-send">Send verification code</button>
+      <div id="recovery-code-step" hidden>
+        <input id="recovery-code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code" maxlength="6">
+      <input id="recovery-new-password" type="password" autocomplete="new-password" placeholder="new password (6+ characters)" hidden>
+        <button id="recovery-confirm">Verify code</button>
+      </div>
+      <div id="recovery-msg" class="recovery-msg" role="status" aria-live="polite"></div>
+      <button id="recovery-back" class="login-demo-btn">Back to sign in</button>
+    </div>
     <div class="login-hint">Two-factor auth is optional — add it at signup or later in Setup.</div>
     <div class="login-hint"><button id="login-newdevice" class="login-linkbtn">new device? register it here</button></div>
     <button id="login-demo" class="login-demo-btn">&#10024; Try Melody — free demo</button>
@@ -4080,7 +4110,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     <div class="users-head"><h2>&#x1F465; Users</h2><button id="users-close">&#x2715;</button></div>
     <div class="users-create">
       <input id="nu-user" type="text" placeholder="new username" autocomplete="off" autocapitalize="none" autocorrect="off">
-      <input id="nu-pass" type="password" placeholder="password (min 4 chars)" autocomplete="new-password">
+      <input id="nu-pass" type="password" placeholder="password (6+ characters)" autocomplete="new-password">
       <button id="nu-go">Create user</button>
       <div id="nu-err"></div>
     </div>
@@ -4122,6 +4152,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
 </div>
 
 <div id="splash">
+  <img class="splash-logo" src="/splash-logo-cw.jpg" alt="Crumbs World shield">
   <div class="splash-title">Crumbs World</div>
   <div class="splash-sub">tile painter &middot; v%%CRUMBS_VERSION%%</div>
   <div class="load-bar"><i id="splash-fill"></i></div>
@@ -4750,6 +4781,8 @@ function showLogin(msg) {
 }
 // ---- v5.30: Log in / Sign up tabs + the 2FA step ---------------------------
 function loginTab(which) {
+  $("login-tabs").hidden = false;
+  $("pane-recovery").hidden = true;
   $("tab-login").classList.toggle("on", which === "login");
   $("tab-signup").classList.toggle("on", which === "signup");
   $("pane-login").hidden = which !== "login";
@@ -4760,6 +4793,88 @@ function loginTab(which) {
   $("su-err").textContent = "";
   $("tfa-err").textContent = "";
 }
+let _recoveryChallenge = "", _recoveryKind = "username";
+function openLoginRecovery(kind) {
+  loginTab("login");
+  _recoveryKind = kind === "password" ? "password" : "username";
+  _recoveryChallenge = "";
+  $("login-tabs").hidden = true;
+  ["pane-login", "pane-signup", "pane-2fa", "pane-signup-2fa", "pane-device"]
+    .forEach(id => { $(id).hidden = true; });
+  $("pane-recovery").hidden = false;
+  $("recovery-title").textContent = _recoveryKind === "username" ?
+    "Recover your username" : "Reset your password";
+  $("recovery-username").hidden = _recoveryKind !== "password";
+  $("recovery-contact").value = "";
+  $("recovery-username").value = "";
+  $("recovery-code").value = "";
+  $("recovery-new-password").value = "";
+  $("recovery-new-password").hidden = _recoveryKind !== "password";
+  $("recovery-code-step").hidden = true;
+  $("recovery-msg").textContent = "";
+  $("recovery-method").value = "email";
+  $("recovery-contact").type = "email";
+  $("recovery-contact").placeholder = "account email";
+  $("recovery-confirm").textContent = _recoveryKind === "username" ?
+    "Verify code" : "Verify code & reset password";
+}
+async function recoveryRequest(kind, payload) {
+  // Deliberately no automatic retry: an uncertain timeout must not send a
+  // second paid SMS/email. The server response itself is account-agnostic.
+  const r = await fetch("/api/auth/recovery/" + kind, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  let data = {};
+  try { data = await r.json(); } catch (e) {}
+  if (!r.ok) throw new Error(data.error || "Recovery request failed.");
+  return data;
+}
+$("recover-user-open").onclick = () => openLoginRecovery("username");
+$("recover-password-open").onclick = () => openLoginRecovery("password");
+$("recovery-back").onclick = () => loginTab("login");
+$("recovery-method").onchange = () => {
+  const phone = $("recovery-method").value === "phone";
+  $("recovery-contact").type = phone ? "tel" : "email";
+  $("recovery-contact").placeholder = phone ? "account phone number" : "account email";
+};
+$("recovery-send").onclick = async () => {
+  const btn = $("recovery-send"), msg = $("recovery-msg");
+  btn.disabled = true; msg.textContent = "Requesting a code…";
+  try {
+    const result = await recoveryRequest("start", {
+      kind: _recoveryKind, method: $("recovery-method").value,
+      contact: $("recovery-contact").value.trim(),
+      username: $("recovery-username").value.trim().toLowerCase()
+    });
+    _recoveryChallenge = result.challenge || "";
+    $("recovery-code-step").hidden = false;
+    msg.textContent = result.message || "If the details match an account, a code will be sent.";
+  } catch (e) {
+    msg.textContent = e.message || "Couldn't request a code. Try again later.";
+  } finally { btn.disabled = false; }
+};
+$("recovery-confirm").onclick = async () => {
+  const btn = $("recovery-confirm"), msg = $("recovery-msg");
+  btn.disabled = true; msg.textContent = "Checking the code…";
+  try {
+    const payload = { challenge: _recoveryChallenge, code: $("recovery-code").value.trim() };
+    if (_recoveryKind === "password") payload.new_password = $("recovery-new-password").value;
+    const result = await recoveryRequest("confirm", payload);
+    if (_recoveryKind === "username") {
+      msg.textContent = "Your username" + (result.usernames.length === 1 ? " is: " : "s are: ") +
+        result.usernames.join(", ");
+      $("recovery-code-step").hidden = true;
+    } else {
+      const username = result.username || $("recovery-username").value.trim();
+      loginTab("login");
+      $("login-user").value = username;
+      $("login-err").textContent = "Password changed. Sign in with your new password.";
+    }
+  } catch (e) {
+    msg.textContent = e.message || "Code invalid or expired. Start again.";
+  } finally { btn.disabled = false; }
+};
 $("tab-login").onclick = () => loginTab("login");
 $("tab-signup").onclick = () => loginTab("signup");
 // one funnel for every successful auth (login, 2FA, signup)
@@ -4783,7 +4898,7 @@ async function doSignup() {
   if (!u || !e || !p) return err("fill in username, email, and password");
   if (!_USERNAME_RE.test(u)) return err("username: 3-24 chars, a-z 0-9 _ -");
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) return err("that email doesn't look right");
-  if (p.length < 4) return err("password too short (min 4)");
+  if (p.length < 6 || p.length > 1024) return err("password must be 6-1024 characters");
   if (ph && !/^[+]?[0-9().\-\s]+$/.test(ph)) return err("that phone number doesn't look right");
   err("");
   if ($("su-2fa").checked) { doSignup2fa(u, e, p, ph); return; }  // v5.36
@@ -5280,7 +5395,7 @@ $("btn-world-switch").onclick = async () => {
 $("btn-change-pass").onclick = async () => {
   const oldp = prompt("Current password:");
   if (oldp === null) return;
-  const np = prompt("New password (min 8 chars):");
+  const np = prompt("New password (6-1024 characters):");
   if (np === null) return;
   try {
     const r = await api("/api/auth/change-password", { old: oldp, new: np });
@@ -5493,7 +5608,7 @@ async function createUser() {
     err.textContent = "username: 3–24 chars, a–z 0–9 _ - only";
     return;
   }
-  if (pw.length < 4) { err.textContent = "password: min 4 chars"; return; }
+  if (pw.length < 6 || pw.length > 1024) { err.textContent = "password must be 6-1024 characters"; return; }
   let r;
   try { r = await api("/api/auth/register", { username: uname, password: pw }); }
   catch (e) {
@@ -5506,7 +5621,7 @@ async function createUser() {
   refreshUsers();
 }
 async function resetUserPw(username) {
-  const np = prompt("New password for " + username + " (min 4 chars):");
+  const np = prompt("New password for " + username + " (6-1024 characters):");
   if (np === null) return;
   try {
     const r = await api("/api/auth/reset-password", { username: username, new: np });
@@ -15030,7 +15145,7 @@ function splashStep(frac, label) {
 function splashDone() {
   window._splashDone = true;
   splashStep(100, "Ready");
-  const wait = Math.max(0, 600 - (Date.now() - _splashT0));  // never flash by
+  const wait = Math.max(0, 1600 - (Date.now() - _splashT0));  // show the brand before fading
   setTimeout(() => { const sp = $("splash"); if (sp) sp.classList.add("gone"); }, wait);
   setTimeout(() => { const sp = $("splash"); if (sp) sp.remove(); }, wait + 700);
 }
@@ -17940,7 +18055,7 @@ function shellShowAccount() {
   shellShow(
   '<div class="sh-screen"><div class="sh-scroll"><div class="sh-wrap">' +
     '<div class="sh-brand"><div class="sh-scene" aria-hidden="true"></div>' +
-      '<div class="sh-mark" aria-hidden="true">\u25FC</div>' +
+      '<img class="sh-logo" src="/splash-logo-cw.jpg" alt="Crumbs World shield">' +
       "<h1>Crumbs World</h1>" +
       '<p class="sh-tag">Build it. Explore it. Bring it to life.</p>' +
     "</div>" +
@@ -17968,6 +18083,8 @@ function shellShowAccount() {
         shellField("sh-login-pass", "Password", "password", "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
           { autocomplete: "current-password" }) +
         '<button class="sh-btn-primary" id="sh-login-go">Sign In</button>' +
+        '<div><button class="sh-linkbtn" id="sh-forgot-user">Forgot username?</button> ' +
+          '<button class="sh-linkbtn" id="sh-forgot-password">Forgot password?</button></div>' +
       "</div>" +
     "</div>" +
     '<div class="sh-foot"><p>Your worlds stay private to your account. ' +
@@ -17978,6 +18095,8 @@ function shellShowAccount() {
   $("sh-tab-login").onclick = function () { shellAuthTab("login"); };
   $("sh-su-go").onclick = function () { shellSubmitAuth("signup"); };
   $("sh-login-go").onclick = function () { shellSubmitAuth("login"); };
+  $("sh-forgot-user").onclick = function () { openLoginRecovery("username"); };
+  $("sh-forgot-password").onclick = function () { openLoginRecovery("password"); };
   var enterSubmits = function (kind) {
     return function (e) { if (e.key === "Enter") { e.preventDefault(); shellSubmitAuth(kind); } };
   };
@@ -18092,7 +18211,7 @@ function shellShowWelcome() {
   shellShow(
   '<div class="sh-screen sh-welcome"><div class="sh-scene" aria-hidden="true"></div>' +
     '<div class="sh-welcome-inner sh-enter">' +
-      '<div class="sh-mark" aria-hidden="true">\u25FC</div>' +
+      '<img class="sh-logo" src="/splash-logo-cw.jpg" alt="Crumbs World shield">' +
       "<h1>Crumbs World</h1>" +
       '<p class="sh-promise">Build it. Explore it. Bring it to life.</p>' +
       '<button class="sh-btn-primary sh-welcome-enter" id="sh-welcome-enter">Enter Crumbs World</button>' +
@@ -20416,9 +20535,9 @@ async function shellWorldRulesInto(body) {
 async function shellBoot() {
   document.documentElement.setAttribute("data-shell-mode", "simple");
   var spl = document.getElementById("splash");
-  // v5.62: let the splash shield play its full beat (600ms minimum +
+  // Keep the splash visible long enough for the shield and title to register (1.6s +
   // fade) before the shell paints over it — no more flash-then-overwrite.
-  var _splashWait = Math.max(0, 600 - (Date.now() - _splashT0));
+  var _splashWait = Math.max(0, 1600 - (Date.now() - _splashT0));
   if (_splashWait > 0) await new Promise(function (r) { setTimeout(r, _splashWait); });
   if (spl) spl.classList.add("gone");  // classic splash must not cover the shell
   await new Promise(function (r) { setTimeout(r, 500); });  // let the fade finish

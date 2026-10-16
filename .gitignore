@@ -52,3 +52,19 @@ vaults/
 # v5.29.3: ops.sh backup snapshots — local safety net, never in the repo
 backups/
 semantic_defaults.json
+# BEGIN CRUMBS MAINTENANCE SAFETY RULES
+.crumbs_hud.pid
+logs/
+*.log
+.venv/
+.pytest_cache/
+.crumbs_last_deployed
+.crumbs_deploy.lock
+# END CRUMBS MAINTENANCE SAFETY RULES
+# BEGIN CRUMBS MAINTENANCE SAFETY RULES
+.crumbs_deploy_failed
+backup-keep/
+cleanup-root.py
+finish-rename.py
+kill-crumbs.ps1
+# END CRUMBS MAINTENANCE SAFETY RULES

@@ -12,13 +12,21 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $taskName = 'Crumbs World Harley Server'
+$deployTaskName = 'Crumbs World Verified Deploy'
 $repoDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $watchdog = Join-Path $PSScriptRoot 'harley_watchdog.ps1'
+$deployScript = Join-Path $PSScriptRoot 'harley_verified_deploy.ps1'
 
 if ($Status) {
     $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     if (-not $task) { Write-Output 'Harley autostart task is not installed.'; exit 1 }
     Get-ScheduledTaskInfo -TaskName $taskName | Select-Object TaskName,LastRunTime,LastTaskResult,NextRunTime
+    $deployTask = Get-ScheduledTask -TaskName $deployTaskName -ErrorAction SilentlyContinue
+    if ($deployTask) {
+        Get-ScheduledTaskInfo -TaskName $deployTaskName | Select-Object TaskName,LastRunTime,LastTaskResult,NextRunTime
+    } else {
+        Write-Output 'Verified deploy watcher is not installed yet.'
+    }
     Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 8778 -State Listen -ErrorAction SilentlyContinue |
         Select-Object LocalAddress,LocalPort,OwningProcess
     exit 0
@@ -26,6 +34,9 @@ if ($Status) {
 
 if (-not (Test-Path -LiteralPath $watchdog -PathType Leaf)) {
     throw "Watchdog script not found: $watchdog"
+}
+if (-not (Test-Path -LiteralPath $deployScript -PathType Leaf)) {
+    throw "Verified deploy watcher not found: $deployScript"
 }
 if (-not (Test-Path -LiteralPath (Join-Path $repoDir '.venv\Scripts\python.exe') -PathType Leaf)) {
     throw 'Project .venv is missing. Run boots\crumbs-boot.ps1 once to prepare it.'
@@ -78,6 +89,12 @@ $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowe
     -WorkingDirectory $repoDir
 $trigger = New-ScheduledTaskTrigger -AtStartup
 $principal = New-ScheduledTaskPrincipal -UserId $account -LogonType S4U -RunLevel Limited
+$deployCredential = Get-Credential -UserName $account -Message 'Enter the Harley account password once so the deploy watcher can reach GitHub while nobody is signed in.'
+if (-not $deployCredential) {
+    throw 'Verified deploy task setup cancelled; no new startup task was registered.'
+}
+$deployPassword = $deployCredential.GetNetworkCredential().Password
+$deployPrincipal = New-ScheduledTaskPrincipal -UserId $account -LogonType Password -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 999 `
     -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) `
     -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
@@ -86,8 +103,30 @@ $task = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principa
 try {
     Register-ScheduledTask -TaskName $taskName -InputObject $task -Force -ErrorAction Stop | Out-Null
     Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
+
+    $deployAction = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
+        -Argument "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$deployScript`"" `
+        -WorkingDirectory $repoDir
+    $deployTrigger = New-ScheduledTaskTrigger -AtStartup
+    $deploySettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 999 `
+        -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) `
+        -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+    $deployTask = New-ScheduledTask -Action $deployAction -Trigger $deployTrigger `
+        -Principal $deployPrincipal -Settings $deploySettings `
+        -Description 'Polls GitHub main and deploys only commits with a successful repo-verify check; rolls back if local health verification fails.'
+    Register-ScheduledTask -TaskName $deployTaskName -InputObject $deployTask `
+        -User $account -Password $deployPassword -Force -ErrorAction Stop | Out-Null
+    Start-ScheduledTask -TaskName $deployTaskName -ErrorAction Stop
 } catch {
+    $deployPassword = $null
+    $deployCredential = $null
     throw "Could not register/start the system-startup task. Run this installer once as Administrator; the server itself will still run as $account with limited privilege. $($_.Exception.Message)"
 }
+$deployPassword = $null
+$deployCredential = $null
 Write-Output "Installed and started '$taskName' as $account (limited privilege, system startup)."
+Write-Output "Installed and started '$deployTaskName' as $account (limited privilege, system startup)."
 Write-Output 'The app listens on 127.0.0.1:8778; Tailscale Funnel remains the only public entry point.'
+if (-not $env:CRUMBS_SHARE_KEY) {
+    Write-Warning 'Verified deployments are paused until CRUMBS_SHARE_KEY is set for this Windows account and the tasks are restarted.'
+}

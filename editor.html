@@ -527,6 +527,22 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
 #bug-box .bug-send { background: #2a4a2a; border-color: #3a6a3a; }
 #bug-box .bug-err { color: #f88; font-size: 13px; min-height: 18px; }
 #bug-box .bug-note { color: #888; font-size: 12px; margin-top: 8px; }
+/* v5.66: persistent feedback inbox and reply notifications */
+#feedback-inbox-overlay { position: fixed; inset: 0; z-index: 310; display: none;
+  align-items: center; justify-content: center; background: rgba(5,5,12,.92); }
+#feedback-inbox-overlay.show { display: flex; }
+#feedback-inbox-box { background: #14141c; border: 1px solid #2a2a38; border-radius: 12px;
+  padding: 20px; width: min(92vw, 680px); max-height: 88vh; overflow-y: auto; color: #eee; }
+#feedback-inbox-box h2 { color: #ffd75f; margin: 0 0 12px; }
+.feedback-card { border: 1px solid #333; border-radius: 8px; padding: 12px; margin: 10px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.feedback-card.unread { border-color: #ffd75f; }
+.feedback-card small { color: #aaa; }
+.feedback-reply-input { display: block; width: 100%; box-sizing: border-box; min-height: 58px;
+  margin: 8px 0; padding: 9px; background: #0d0d12; color: #eee; border: 1px solid #333; border-radius: 7px; }
+#feedback-inbox-box button { margin: 4px; padding: 8px 12px; border-radius: 7px; border: 1px solid #444; background: #222; color: #eee; cursor: pointer; }
+#feedback-inbox-box .feedback-send-reply { background: #2a4a2a; border-color: #3a6a3a; }
+.feedback-badge { color: #ffb75e; font-weight: bold; }
+#menu-update.update-ready { color: #ffd75f; font-weight: bold; box-shadow: inset 3px 0 #ffd75f; }
 
   /* v5.27: login overlay + user menu */
   #login-overlay { position: fixed; inset: 0; z-index: 300; display: none;
@@ -3436,6 +3452,8 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     <button id="btn-logout" title="Log out">&#x23FB; Log out</button>
   </div>
   <button id="menu-users" hidden title="Create accounts, reset passwords">&#x1F465; Users&hellip;</button>
+  <button id="menu-feedback-inbox" hidden title="New player feedback and replies">&#x1F4EC; Feedback inbox</button>
+  <button id="menu-feedback-notifications" hidden title="Replies to your feedback">&#x1F514; Replies</button>
   <hr>
   <button id="menu-setup">Setup&hellip;</button>
   <button id="menu-key" title="Set the share key for a public HUD">Key&hellip;</button>
@@ -4164,6 +4182,14 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     </div>
     <div id="bug-err" class="bug-err"></div>
     <div class="bug-note">The optional clip records only the game canvas and is sent only when you choose to send. Browser version, screen size, and recent app errors are included to help diagnose issues.</div>
+  </div>
+</div>
+
+<div id="feedback-inbox-overlay" aria-modal="true" role="dialog" aria-labelledby="feedback-inbox-title">
+  <div id="feedback-inbox-box">
+    <h2 id="feedback-inbox-title">Feedback</h2>
+    <div id="feedback-inbox-list"></div>
+    <button id="feedback-inbox-close">Close</button>
   </div>
 </div>
 
@@ -5276,6 +5302,11 @@ function updateUserMenu() {
   // else; the server re-checks owner on the panel's API calls too.
   const usersBtn = $("menu-users");
   if (usersBtn) usersBtn.hidden = !(ME && ME.is_owner);
+  const inboxBtn = $("menu-feedback-inbox");
+  if (inboxBtn) inboxBtn.hidden = !(ME && ME.is_owner);
+  const replyBtn = $("menu-feedback-notifications");
+  if (replyBtn) replyBtn.hidden = !(ME && !ME.is_owner);
+  if (ME) refreshFeedbackNotice();
   if (!ME) { sec.hidden = true; return; }
   sec.hidden = false;
   $("user-name").textContent = (ME.is_owner ? "\u2B50 " : "") +
@@ -14588,6 +14619,8 @@ function syncRollback(r) {
   const b = $("menu-rollback");
   if (b) b.disabled = !(r && r.ok && r.can_rollback);
 }
+let _serverVersionSeen = null;
+let _serverReloadVersion = null;
 async function updateCheck() {
   let r;
   try { r = await api("/api/update/check"); }
@@ -14601,6 +14634,8 @@ async function updateCheck() {
     toast("update check failed: " + (r.error || "unknown") + (r.hint ? " — " + r.hint : ""));
     Sfx.error(); return null;
   }
+  const updateButton = $("menu-update");
+  if (updateButton) updateButton.classList.toggle("update-ready", !!r.available || !!_serverReloadVersion);
   return r;
 }
 // v5.24: wait for a NEW server instance after an update/restart/rollback.
@@ -14644,10 +14679,29 @@ function writeKeyHelpHtml() {
 $("menu-update").onclick = async () => {
   closeOverlays();
   $("btn-update-install").style.display = "";  // v5.24: reset after a failed-restart state hid it
+  $("btn-update-later").textContent = "Later";
+  if (_serverReloadVersion) {
+    if (!confirm("Harley has updated to v" + _serverReloadVersion + ". Save your current work and reload the game now?")) return;
+    try {
+      const saved = await api("/api/save", { filename: currentFile });
+      if (!saved || !saved.ok) { toast((saved && saved.error) || "couldn't save before reloading"); return; }
+    } catch (e) { toast("couldn't save before reloading"); return; }
+    location.reload();
+    return;
+  }
   toast("checking for updates\u2026");
   const r = await updateCheck();
   if (!r) return;
   if (!r.available) { toast("already on v" + r.current + " \u2014 you're up to date"); return; }
+  if (PUBLIC_MODE && ME && !ME.is_owner) {
+    $("update-title").textContent = "v" + r.latest + " is ready";
+    $("update-notes").innerHTML = "<div class='tray-hint'>The game server is still running v" + escHtml(r.current) + ". The owner needs to install the update on Harley; once Harley restarts, reload this page to play the new version.</div>";
+    $("btn-update-install").style.display = "none";
+    $("btn-update-later").textContent = "Okay";
+    $("btn-update-later").onclick = () => closeOverlays();
+    toggleOverlay("sheet-update");
+    return;
+  }
   let notes = [];
   try {
     const c = await api("/api/update/changelog");
@@ -14713,7 +14767,13 @@ $("menu-update").onclick = async () => {
       const gh = "https://raw.githubusercontent.com/lloydnesbit699-cyber/crumbs-world/main/";
       // v5.22.2: keep in step with the server's UPDATE_FILES — a file the
       // page doesn't fetch can never arrive via a page-side install.
-      const names = ["editor.html", "crumbs_hud.py", "crumbs_core.py", "crumbs_recovery.py"];
+      const names = [
+        "editor.html",
+        "crumbs_hud.py",
+        "crumbs_core.py",
+        "crumbs_recovery.py",
+        "melody_agent.py",
+      ];
       // v5.25: keep in step with the server's UPDATE_ART_FILES — the art
       // rides the same install as base64 data URLs (binary can't survive
       // the JSON text encoding).
@@ -15106,6 +15166,22 @@ function setPill(which, dotCls, text, title) {
 async function pollStatus() {
   try {
     const s = await api("/api/status");
+    if (s.version) {
+      if (_serverVersionSeen && s.version !== _serverVersionSeen) {
+        _serverReloadVersion = s.version;
+        const updateButton = $("menu-update");
+        if (updateButton) {
+          updateButton.classList.add("update-ready");
+          updateButton.textContent = "\u{1F504} Reload game for v" + s.version;
+          updateButton.title = "Harley is updated; save and reload this game page";
+        }
+        const fileMenu = document.querySelector('.mtop[data-menu="m-file"]');
+        if (fileMenu && !fileMenu.querySelector(".upd-dot"))
+          fileMenu.insertAdjacentHTML("beforeend", ' <span class="upd-dot" title="new game version is live">&#9679;</span>');
+        toast("Harley updated to v" + s.version + " — use File → Reload game to switch versions.");
+      }
+      _serverVersionSeen = s.version;
+    }
     dirtyFlag = !!s.dirty;   // v2.0: server is the source of truth
     // v5.25: a boot-time art backfill can land after the strip first
     // painted — when it flips to done, reload the customs so the "?"
@@ -20785,6 +20861,8 @@ async function shellBoot() {
         syncRollback(r);
         if (r && r.ok) {
           patchVersionPlaceholder(r.current);
+          const updateButton = $("menu-update");
+          if (updateButton) updateButton.classList.toggle("update-ready", !!r.available || !!_serverReloadVersion);
           // v5.22.8: update pill — version always visible, dot says the state.
           setPill("update", r.available ? "gold" : "g", "v" + r.current,
             r.available ? "v" + r.latest + " is ready \u2014 tap for updates"
@@ -20798,7 +20876,7 @@ async function shellBoot() {
           const dotTip = isRepair ? "missing files — repair available"
                                   : "v" + escHtml(r.latest) + " is ready";
           const toastMsg = isRepair ? "missing app files — File \u2192 Check for updates to repair"
-                                    : "v" + r.latest + " is ready \u2014 File \u2192 Check for updates when you want it";
+                                    : "v" + r.latest + " is ready \u2014 open File \u2192 Check for updates";
           const fb = document.querySelector('.mtop[data-menu="m-file"]');
           if (fb && !fb.querySelector(".upd-dot")) {
             fb.insertAdjacentHTML("beforeend", ' <span class="upd-dot" title="' + dotTip + '">&#9679;</span>');
@@ -21315,6 +21393,100 @@ function feedbackKindChanged() {
   var isBug = $("feedback-kind").value === "bug";
   $("bug-impact-wrap").hidden = !isBug;
 }
+
+let _feedbackNoticeTimer = null;
+async function refreshFeedbackNotice() {
+  if (!ME) return;
+  const owner = !!ME.is_owner;
+  const button = $(owner ? "menu-feedback-inbox" : "menu-feedback-notifications");
+  if (!button) return;
+  try {
+    const r = await api(owner ? "/api/feedback/inbox" : "/api/feedback/notifications");
+    if (!r || !r.ok) return;
+    const count = Number(r.unread || 0);
+    button.innerHTML = owner
+      ? "&#x1F4EC; Feedback inbox" + (count ? ' <span class="feedback-badge">(' + count + ")</span>" : "")
+      : "&#x1F514; Replies" + (count ? ' <span class="feedback-badge">(' + count + ")</span>" : "");
+    button.title = count ? (owner ? count + " new player feedback item(s)" : count + " unread reply/replies") :
+      (owner ? "Player feedback inbox" : "Replies to your feedback");
+  } catch (e) { /* offline: unread state remains persisted on the server */ }
+}
+
+function feedbackCard(label, body, unread) {
+  const card = document.createElement("section");
+  card.className = "feedback-card" + (unread ? " unread" : "");
+  const head = document.createElement("small"); head.textContent = label; card.appendChild(head);
+  const text = document.createElement("div"); text.textContent = body || "(no text)"; card.appendChild(text);
+  return card;
+}
+
+async function openFeedbackInbox() {
+  const overlay = $("feedback-inbox-overlay"), list = $("feedback-inbox-list");
+  list.replaceChildren(); overlay.classList.add("show");
+  const loading = document.createElement("p"); loading.textContent = "Loading feedback…"; list.appendChild(loading);
+  try {
+    const r = await api("/api/feedback/inbox");
+    if (!r || !r.ok) throw new Error(r && r.error || "couldn't load inbox");
+    list.replaceChildren();
+    if (!r.reports.length) { const p = document.createElement("p"); p.textContent = "No feedback yet."; list.appendChild(p); }
+    r.reports.forEach(report => {
+      const card = document.createElement("article");
+      card.className = "feedback-card" + (!report.owner_seen ? " unread" : "");
+      const heading = document.createElement("small");
+      heading.textContent = (report.category || "feedback") + " · " + (report.user || "player") + " · " + new Date((report.at || 0) * 1000).toLocaleString();
+      card.appendChild(heading);
+      [["Thought", report.text], ["Context", report.context], ["Keep", report.keep], ["Improve", report.improve]].forEach(pair => {
+        if (!pair[1]) return;
+        const p = document.createElement("p"); p.textContent = pair[0] + ": " + pair[1]; card.appendChild(p);
+      });
+      (report.replies || []).forEach(reply => {
+        const p = document.createElement("p"); p.textContent = "Your reply: " + reply.text; card.appendChild(p);
+      });
+      const input = document.createElement("textarea"); input.className = "feedback-reply-input";
+      input.maxLength = 3000; input.placeholder = "Reply to this player (up to 3000 characters)"; card.appendChild(input);
+      const send = document.createElement("button"); send.className = "feedback-send-reply"; send.textContent = "Send reply";
+      send.onclick = async () => {
+        send.disabled = true;
+        try {
+          const sent = await api("/api/feedback/reply", { id: report.id, text: input.value });
+          if (!sent || !sent.ok) throw new Error(sent && sent.error || "reply failed");
+          input.value = ""; toast("Reply sent — the player will see it in Notifications.");
+          openFeedbackInbox();
+        } catch (e) { toast(e.message || "reply failed"); send.disabled = false; }
+      };
+      card.appendChild(send); list.appendChild(card);
+    });
+    await api("/api/feedback/inbox/seen", {});
+    await refreshFeedbackNotice();
+  } catch (e) {
+    list.replaceChildren(); const p = document.createElement("p"); p.textContent = e.message || "Couldn't load feedback."; list.appendChild(p);
+  }
+}
+
+async function openFeedbackNotifications() {
+  const overlay = $("feedback-inbox-overlay"), list = $("feedback-inbox-list");
+  list.replaceChildren(); overlay.classList.add("show");
+  const loading = document.createElement("p"); loading.textContent = "Loading replies…"; list.appendChild(loading);
+  try {
+    const r = await api("/api/feedback/notifications");
+    if (!r || !r.ok) throw new Error(r && r.error || "couldn't load notifications");
+    list.replaceChildren();
+    if (!r.notifications.length) { const p = document.createElement("p"); p.textContent = "No new replies."; list.appendChild(p); }
+    r.notifications.forEach(item => (item.replies || []).forEach(reply => {
+      list.appendChild(feedbackCard("Reply to your " + (item.category || "feedback"), reply.text,
+        Number(reply.at || 0) >= Date.now() / 1000 - 86400 * 30));
+    }));
+    await api("/api/feedback/notifications/seen", {});
+    await refreshFeedbackNotice();
+  } catch (e) {
+    list.replaceChildren(); const p = document.createElement("p"); p.textContent = e.message || "Couldn't load replies."; list.appendChild(p);
+  }
+}
+
+$("menu-feedback-inbox").onclick = openFeedbackInbox;
+$("menu-feedback-notifications").onclick = openFeedbackNotifications;
+$("feedback-inbox-close").onclick = () => $("feedback-inbox-overlay").classList.remove("show");
+if (!_feedbackNoticeTimer) _feedbackNoticeTimer = setInterval(refreshFeedbackNotice, 30000);
 
 function bugBlobToB64(blob) {
   return new Promise(function (resolve, reject) {

@@ -1,0 +1,38 @@
+name: repo-verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repo-verify:
+    name: repo-verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the requested commit
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install runtime dependency
+        run: python -m pip install -r requirements.txt
+      - name: Check release metadata and safety ignores
+        run: python tools/repo_guard.py --check
+      - name: Compile Python modules
+        run: python -m py_compile crumbs_hud.py crumbs_core.py crumbs_recovery.py melody_agent.py
+      - name: Test repo guard repair and rejection cases
+        run: python tools/repo_guard_test.py
+      - name: Test account security helpers
+        run: python auth_test.py
+      - name: Test checkpoint recovery
+        run: python recovery_smoke_test.py
+      - name: Test game core smoke cases
+        run: python core_smoke_test.py

@@ -16,35 +16,72 @@ task at system startup. Its watchdog restarts the server with a backoff if it
 exits and writes logs under `logs\`. It continues across sign-out and starts
 after power returns, once Windows boots.
 
-## 2) Routine repo update
+## 2) Verified push and deploy flow
 
-After committing and pushing changes from the development checkout, update
-Harley from an elevated PowerShell window in its repo folder:
+From the development checkout, the push helper runs release consistency
+repairs, the selected smoke tests, commits, and pushes. Pass `-ReleaseNotes`
+for an app release; it bumps `APP_VERSION` and adds a matching changelog entry
+(patch by default, or `-VersionBump minor|major`). It stages tracked edits and
+its allowlisted automation files. Pass other new files with `-Include`; it
+leaves unknown untracked files out:
 
 ```powershell
-git status --short
-git pull --ff-only origin main
+.\tools\crumbs_push.ps1 -Message "Describe the change" -ReleaseNotes "Describe what changed for players." -Include "docs\new-guide.md"
 ```
 
-For this profile-hardening release, run the installer once after the pull so
-it applies the new ACL policy to existing profile data:
+GitHub Actions runs `repo-verify` for pushes to `main` and pull requests. On
+Harley, the verified deploy watcher checks the result for the exact `main`
+commit. It waits for a successful check, refuses non-fast-forward or locally
+edited tracked trees, pulls the verified commit, asks the server to save and
+restart, and confirms the new version through the loopback health endpoint.
+If health verification fails, it restores the previous commit and holds that
+failed commit for review. It never changes profiles, vaults, or other ignored
+runtime data.
+
+### One-time verified deploy setup
+
+The installer now registers both the always-on server watchdog and verified
+deploy watcher. Make sure Harley's Windows account can run `git fetch origin
+main`. GitHub Actions must be enabled and the `repo-verify` workflow must be
+allowed to run.
+
+Set `CRUMBS_SHARE_KEY` in that account's Windows user environment to the
+server's stable share key. The deploy watcher uses it only for the local
+loopback restart request; it is never put in Git or sent to GitHub. If the
+repository is private, also set `CRUMBS_GITHUB_TOKEN` to a fine-grained token
+with read-only Contents and Checks access. Public repositories do not need
+that API token. Store credentials in Harley's Windows account / Git credential
+manager, not in the repo or in chat.
+
+Then, in Harley's repository folder, run once as the service account with the
+elevation required to register the startup tasks:
 
 ```powershell
 .\deployment\install_harley_autostart.ps1
 ```
 
-Then use the game's **Restart server** control. It saves dirty world state and
-re-executes the server into the pulled code while the watchdog remains active.
-Confirm the version with:
+The installer asks once for Harley's Windows account password for the deploy
+watcher. The server watchdog remains the limited S4U task; the separate deploy
+task uses a password logon because Windows S4U tasks cannot access GitHub over
+the network. Task Scheduler stores that credential; it is not written to the
+repository. If the prompt is canceled, the deploy watcher is not installed.
+
+For the initial manually managed profile-hardening release, this installer
+also applies ACLs to existing profiles. After setup, code-only releases deploy
+automatically after CI passes; do not rerun the installer for each push.
+Rerun it only after changes to task setup or profile ACL policy.
+
+Check the tasks and run a no-change preflight on Harley with:
 
 ```powershell
+.\deployment\install_harley_autostart.ps1 -Status
+.\deployment\harley_verified_deploy.ps1 -Check
 .\boots\crumbs-boot.ps1 -Check
 ```
 
-For ordinary future code-only pushes, the installer does not need to run
-again; pull the repo and use **Restart server**. Re-run the installer only
-after changes to the task setup or profile ACL policy. Before pulling, check
-`git status --short` and preserve any Harley-local edits to tracked code.
+Deploy logs go to `logs\harley-deploy.log`. A release that fails health checks
+is rolled back and recorded in `.crumbs_deploy_failed`; inspect the logs and
+correct the issue before removing that marker to retry the same commit.
 
 ## 3) Keep the public entry point private
 

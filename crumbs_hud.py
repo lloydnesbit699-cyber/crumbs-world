@@ -156,7 +156,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.65.0"
+APP_VERSION = "5.66.2"
 # v5.62: mobile launcher versions. The Android/iOS wrappers check
 # /api/launcher-version on every launch and self-update when these bump.
 # Set CRUMBS_LAUNCHER_APK_URL to the public URL of crumbs-world-launcher.apk
@@ -227,8 +227,7 @@ SERVER_ROLE = _normalize_server_role(SERVER_ROLE)
 UPDATE_REPO = "lloydnesbit699-cyber/crumbs-world"
 UPDATE_BRANCH = "main"
 UPDATE_FILES = ["editor.html", "crumbs_hud.py", "crumbs_core.py",
-                "crumbs_recovery.py", "melody_agent.py",
-                "melody_keyfinder.py", "melody_inventory.py"]
+                "crumbs_recovery.py", "melody_agent.py"]
 # v5.25: the art the thumbnails are painted from. The updater used to ship
 # code only, so phones ended up with registry entries (shared_library.json)
 # pointing at PNGs that never arrived — every one of those tiles painted a
@@ -1763,6 +1762,39 @@ def _vault_id_for(username):
 MAX_JSON_BYTES = 16 * 1024 * 1024   # ordinary API requests
 BUG_REPORT_DIR = "bug-reports"          # v5.63: player feedback lands here
 BUG_REPORT_RETENTION_DAYS = 30          # v5.63: prune reports older than this
+
+
+def _feedback_reports():
+    """Load stored feedback metadata, newest first; never expose clip files."""
+    reports = []
+    try:
+        for name in os.listdir(BUG_REPORT_DIR):
+            if not name.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(BUG_REPORT_DIR, name), encoding="utf-8") as f:
+                    row = json.load(f)
+                if isinstance(row, dict) and row.get("id"):
+                    reports.append(row)
+            except (OSError, ValueError):
+                continue
+    except OSError:
+        pass
+    return sorted(reports, key=lambda r: int(r.get("at", 0)), reverse=True)
+
+
+def _save_feedback_report(report):
+    """Atomically persist one feedback record and restrict its ACL."""
+    os.makedirs(BUG_REPORT_DIR, exist_ok=True)
+    path = os.path.join(BUG_REPORT_DIR, str(report.get("id", "")) + ".json")
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(report, f, ensure_ascii=False, indent=1)
+        f.flush()
+        os.fsync(f.fileno())
+    _protect_private_file(tmp)
+    os.replace(tmp, path)
+    _protect_private_file(path)
 MAX_BUNDLE_BYTES = 48 * 1024 * 1024  # .crumbs.zip bundle imports
 MAX_BUNDLE_JSON_BYTES = 65 * 1024 * 1024  # base64 encoding + JSON envelope
 MAX_BUNDLE_ENTRIES = 128
@@ -8815,6 +8847,22 @@ class Handler(BaseHTTPRequestHandler):
                                  "world": rec.get("world", "private"),
                                  "email": rec.get("email", ""),
                                  "totp_enabled": bool(rec.get("totp_enabled"))})
+        elif path == "/api/feedback/inbox":
+            if not self._is_owner_session():
+                return self._send_json({"ok": False, "error": "owner only"}, 403)
+            reports = _feedback_reports()
+            self._send_json({"ok": True, "reports": reports,
+                             "unread": sum(1 for r in reports if not r.get("owner_seen"))})
+        elif path == "/api/feedback/notifications":
+            username = self._session_user()
+            if not username:
+                return self._send_json({"ok": False, "error": "login required"}, 401)
+            replies = []
+            for report in _feedback_reports():
+                if report.get("user") == username and report.get("replies") and not report.get("player_seen"):
+                    replies.append({"id": report.get("id"), "category": report.get("category"),
+                                    "replies": report.get("replies", [])})
+            self._send_json({"ok": True, "notifications": replies, "unread": len(replies)})
         elif path == "/api/auth/users":
             # v5.27: owner-only account list.
             if not self._is_owner_session() and not self._write_key_ok():
@@ -9527,6 +9575,51 @@ class Handler(BaseHTTPRequestHandler):
                                     "email": rec.get("email", ""),
                                     "totp_enabled": bool(rec.get("totp_enabled"))})
 
+        if path == "/api/feedback/inbox/seen":
+            if not self._is_owner_session():
+                return self._send_json({"ok": False, "error": "owner only"}, 403)
+            for report in _feedback_reports():
+                if not report.get("owner_seen"):
+                    report["owner_seen"] = True
+                    _save_feedback_report(report)
+            return self._send_json({"ok": True})
+
+        if path == "/api/feedback/notifications/seen":
+            username = self._session_user()
+            if not username:
+                return self._send_json({"ok": False, "error": "login required"}, 401)
+            for report in _feedback_reports():
+                if report.get("user") == username and report.get("replies") and not report.get("player_seen"):
+                    report["player_seen"] = True
+                    _save_feedback_report(report)
+            return self._send_json({"ok": True})
+
+        if path == "/api/feedback/reply":
+            if not self._is_owner_session():
+                return self._send_json({"ok": False, "error": "owner only"}, 403)
+            report_id = str(body.get("id") or "")
+            reply_text = str(body.get("text") or "").strip()
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", report_id):
+                return self._send_json({"ok": False, "error": "invalid feedback id"}, 400)
+            if not reply_text or len(reply_text) > 3000:
+                return self._send_json({"ok": False, "error": "reply must be 1–3000 characters"}, 400)
+            report_path = os.path.join(BUG_REPORT_DIR, report_id + ".json")
+            try:
+                with open(report_path, encoding="utf-8") as f:
+                    report = json.load(f)
+            except (OSError, ValueError):
+                return self._send_json({"ok": False, "error": "feedback not found"}, 404)
+            replies = report.get("replies") if isinstance(report.get("replies"), list) else []
+            replies.append({"text": reply_text, "at": int(time.time()),
+                            "by": self._session_user() or "owner"})
+            report["replies"] = replies[-20:]
+            report["player_seen"] = False
+            try:
+                _save_feedback_report(report)
+            except OSError:
+                return self._send_json({"ok": False, "error": "couldn't save reply"}, 500)
+            return self._send_json({"ok": True})
+
         if path == "/api/bug-report":
             # v5.65: bugs, playtest observations, ideas, keep notes + optional clip.
             # Logged-in session
@@ -9581,19 +9674,33 @@ class Handler(BaseHTTPRequestHandler):
                     "priority": priority, "text": text, "context": context,
                     "keep": keep, "improve": improve,
                     "meta": meta, "has_clip": bool(clip_bytes),
-                    "version": APP_VERSION,
+                    "version": APP_VERSION, "owner_seen": False,
+                    "replies": [], "player_seen": True,
                 }
-                with open(os.path.join(BUG_REPORT_DIR, base + ".json"), "w", encoding="utf-8") as f:
-                    json.dump(report, f, indent=1)
+                _save_feedback_report(report)
                 if clip_bytes:
-                    with open(os.path.join(BUG_REPORT_DIR, base + ".webm"), "wb") as f:
+                    clip_path = os.path.join(BUG_REPORT_DIR, base + ".webm")
+                    with open(clip_path, "wb") as f:
                         f.write(clip_bytes)
+                    _protect_private_file(clip_path)
                 # retention: prune reports older than 30 days (best effort)
                 try:
                     cutoff = time.time() - BUG_REPORT_RETENTION_DAYS * 86400
                     for fn in os.listdir(BUG_REPORT_DIR):
                         fp = os.path.join(BUG_REPORT_DIR, fn)
-                        if os.path.isfile(fp) and os.path.getmtime(fp) < cutoff:
+                        if not os.path.isfile(fp) or os.path.getmtime(fp) >= cutoff:
+                            continue
+                        meta_path = fp if fn.endswith(".json") else os.path.splitext(fp)[0] + ".json"
+                        try:
+                            with open(meta_path, encoding="utf-8") as rf:
+                                saved = json.load(rf)
+                            pending = (not saved.get("owner_seen") or
+                                       (saved.get("replies") and not saved.get("player_seen")))
+                        except (OSError, ValueError):
+                            pending = False
+                        # Unopened submissions and unread replies are durable;
+                        # age-based cleanup applies only after both sides viewed them.
+                        if not pending:
                             os.remove(fp)
                 except Exception:
                     pass

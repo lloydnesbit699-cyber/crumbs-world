@@ -3,6 +3,32 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.66.2 — 2026-10-16
+
+Add release checks and gated Harley deployment.
+
+## v5.66.1 — 2026-10-16
+
+Add release checks and gated Harley deployment.
+
+## v5.66.0 — 2026-10-16
+
+**Persistent feedback inbox and update notices.** Players can receive
+owner replies in an in-game notification inbox that stays unread until opened.
+The owner sees new submissions in a persistent feedback inbox and can reply
+to the submitting account. Unopened submissions and unread replies are kept
+past normal feedback retention. A newer GitHub release lights the update
+control; visitors are told the owner must install it on Harley, and open game
+pages flag the new server version after restart so players can save and reload.
+
+**Verified release and Harley deployment bot.** The local push helper repairs
+known updater and ignore-rule drift, runs the release smoke checks, then
+can bump `APP_VERSION` and the changelog together before it commits and pushes.
+GitHub verifies commits on `main`; Harley's limited
+startup task deploys only a green fast-forward commit, health-checks the new
+version, and rolls back a failed start. Persistent profile data stays outside
+Git.
+
 ## v5.65.0 — 2026-10-16
 
 **Feedback for every kind of playtest thought.** The menu action is now

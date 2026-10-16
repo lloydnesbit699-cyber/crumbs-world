@@ -89,12 +89,7 @@ $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowe
     -WorkingDirectory $repoDir
 $trigger = New-ScheduledTaskTrigger -AtStartup
 $principal = New-ScheduledTaskPrincipal -UserId $account -LogonType S4U -RunLevel Limited
-$deployCredential = Get-Credential -UserName $account -Message 'Enter the Harley account password once so the deploy watcher can reach GitHub while nobody is signed in.'
-if (-not $deployCredential) {
-    throw 'Verified deploy task setup cancelled; no new startup task was registered.'
-}
-$deployPassword = $deployCredential.GetNetworkCredential().Password
-$deployPrincipal = New-ScheduledTaskPrincipal -UserId $account -LogonType Password -RunLevel Limited
+$deployPrincipal = New-ScheduledTaskPrincipal -UserId $account -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 999 `
     -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) `
     -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
@@ -107,7 +102,10 @@ try {
     $deployAction = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
         -Argument "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$deployScript`"" `
         -WorkingDirectory $repoDir
-    $deployTrigger = New-ScheduledTaskTrigger -AtStartup
+    # Use the signed-in user's interactive token. This supports passwordless
+    # Microsoft accounts and avoids storing a Windows password in Task Scheduler.
+    # The server itself remains an at-startup S4U task; deployments begin at logon.
+    $deployTrigger = New-ScheduledTaskTrigger -AtLogOn -User $account
     $deploySettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 999 `
         -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) `
         -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
@@ -115,17 +113,13 @@ try {
         -Principal $deployPrincipal -Settings $deploySettings `
         -Description 'Polls GitHub main and deploys only commits with a successful repo-verify check; rolls back if local health verification fails.'
     Register-ScheduledTask -TaskName $deployTaskName -InputObject $deployTask `
-        -User $account -Password $deployPassword -Force -ErrorAction Stop | Out-Null
+        -Force -ErrorAction Stop | Out-Null
     Start-ScheduledTask -TaskName $deployTaskName -ErrorAction Stop
 } catch {
-    $deployPassword = $null
-    $deployCredential = $null
-    throw "Could not register/start the system-startup task. Run this installer once as Administrator; the server itself will still run as $account with limited privilege. $($_.Exception.Message)"
+    throw "Could not register/start the scheduled task. Run this installer as $account; the server task remains an at-startup task and the deploy watcher runs at sign-in. $($_.Exception.Message)"
 }
-$deployPassword = $null
-$deployCredential = $null
 Write-Output "Installed and started '$taskName' as $account (limited privilege, system startup)."
-Write-Output "Installed and started '$deployTaskName' as $account (limited privilege, system startup)."
+Write-Output "Installed and started '$deployTaskName' as $account (limited privilege, starts at sign-in; no password stored)."
 Write-Output 'The app listens on 127.0.0.1:8778; Tailscale Funnel remains the only public entry point.'
 if (-not $env:CRUMBS_SHARE_KEY) {
     Write-Warning 'Verified deployments are paused until CRUMBS_SHARE_KEY is set for this Windows account and the tasks are restarted.'

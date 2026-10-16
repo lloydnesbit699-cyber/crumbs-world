@@ -4,14 +4,14 @@ This is the authoritative Windows-side setup for the real game server.
 
 ## 1) Install always-on startup
 
-On Harley, from the repository, run PowerShell:
+On Harley, from the repository, run PowerShell as the same account that owns
+the game profiles (currently `HARLEY\lloyd`):
 
 ```powershell
 .\deployment\install_harley_autostart.ps1
 ```
 
-Run this once for initial setup, elevated as Harley's normal service account
-(currently `HARLEY\lloyd`). This registers a limited-privilege Task Scheduler
+Run this once for initial setup. This registers a limited-privilege Task Scheduler
 task at system startup. Its watchdog restarts the server with a backoff if it
 exits and writes logs under `logs\`. It continues across sign-out and starts
 after power returns, once Windows boots.
@@ -53,18 +53,18 @@ with read-only Contents and Checks access. Public repositories do not need
 that API token. Store credentials in Harley's Windows account / Git credential
 manager, not in the repo or in chat.
 
-Then, in Harley's repository folder, run once as the service account with the
-elevation required to register the startup tasks:
+Then, in Harley's repository folder, run once as the service account:
 
 ```powershell
 .\deployment\install_harley_autostart.ps1
 ```
 
-The installer asks once for Harley's Windows account password for the deploy
-watcher. The server watchdog remains the limited S4U task; the separate deploy
-task uses a password logon because Windows S4U tasks cannot access GitHub over
-the network. Task Scheduler stores that credential; it is not written to the
-repository. If the prompt is canceled, the deploy watcher is not installed.
+The server watchdog remains a limited S4U task and starts with Windows even
+when nobody is signed in. The deploy watcher uses the interactive sign-in token
+and starts when `HARLEY\lloyd` signs in; it needs no password and stores no
+Windows credential. It continues while the session is locked, but stops at
+sign-out and resumes at the next sign-in. Therefore pushes made while signed
+out are deployed after the next sign-in.
 
 For the initial manually managed profile-hardening release, this installer
 also applies ACLs to existing profiles. After setup, code-only releases deploy

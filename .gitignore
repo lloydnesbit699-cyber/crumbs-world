@@ -61,6 +61,15 @@ logs/
 .crumbs_last_deployed
 .crumbs_deploy.lock
 # END CRUMBS MAINTENANCE SAFETY RULES
+# Locally generated release bundles and signing material stay out of Git.
+/release-artifacts/
+/crumbs-world-launchers-kit.zip
+/crumbs-world-player-kit.zip
+/crumbs-world.zip
+/crumbs-world-launchers-kit/crumbs-world-launchers/android/crumbs-release.keystore
+/crumbs-world-launchers-kit/crumbs-world-launchers/android/build/*.apk
+/crumbs-world-launchers-kit/crumbs-world-launchers/ios/*.mobileconfig
+/desktop.ini
 # BEGIN CRUMBS MAINTENANCE SAFETY RULES
 .crumbs_deploy_failed
 backup-keep/

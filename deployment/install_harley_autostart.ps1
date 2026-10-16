@@ -7,7 +7,8 @@
 #>
 [CmdletBinding()]
 param(
-    [switch]$Status
+    [switch]$Status,
+    [switch]$InstallOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -108,7 +109,7 @@ $task = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principa
     -Settings $settings -Description 'Keeps the authenticated Harley authority available through the existing Tailscale Funnel; server binds only to loopback.'
 try {
     Register-ScheduledTask -TaskName $taskName -InputObject $task -Force -ErrorAction Stop | Out-Null
-    Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
+    if (-not $InstallOnly) { Start-ScheduledTask -TaskName $taskName -ErrorAction Stop }
 
     $deployAction = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
         -Argument "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$deployScript`"" `
@@ -125,7 +126,7 @@ try {
         -Description 'Polls GitHub main and deploys only commits with a successful repo-verify check; rolls back if local health verification fails.'
     Register-ScheduledTask -TaskName $deployTaskName -InputObject $deployTask `
         -Force -ErrorAction Stop | Out-Null
-    Start-ScheduledTask -TaskName $deployTaskName -ErrorAction Stop
+    if (-not $InstallOnly) { Start-ScheduledTask -TaskName $deployTaskName -ErrorAction Stop }
 
     $sentinelAction = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
         -Argument "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$sentinelScript`" -Watch" `
@@ -139,13 +140,18 @@ try {
         -Description 'Audits Harley boot, dependencies, credentials presence, recovery, Tailscale, Funnel, tasks, and repository integrity; logs state changes without printing secrets.'
     Register-ScheduledTask -TaskName $sentinelTaskName -InputObject $sentinelTask `
         -Force -ErrorAction Stop | Out-Null
-    Start-ScheduledTask -TaskName $sentinelTaskName -ErrorAction Stop
+    if (-not $InstallOnly) { Start-ScheduledTask -TaskName $sentinelTaskName -ErrorAction Stop }
 } catch {
     throw "Could not register/start the scheduled task. Run this installer in an elevated PowerShell session as $account (do not use a different account); the server task remains an at-startup task and the deploy watcher runs at sign-in. $($_.Exception.Message)"
 }
-Write-Output "Installed and started '$taskName' as $account (limited privilege, system startup)."
-Write-Output "Installed and started '$deployTaskName' as $account (limited privilege, starts at sign-in; no password stored)."
-Write-Output "Installed and started '$sentinelTaskName' as $account (limited privilege, starts at sign-in; redacted diagnostic monitor)."
+if ($InstallOnly) {
+    Write-Output "Registered '$taskName' as $account; it will start at system startup."
+    Write-Output "Registered '$deployTaskName' and '$sentinelTaskName'; they will start at sign-in."
+} else {
+    Write-Output "Installed and started '$taskName' as $account (limited privilege, system startup)."
+    Write-Output "Installed and started '$deployTaskName' as $account (limited privilege, starts at sign-in; no password stored)."
+    Write-Output "Installed and started '$sentinelTaskName' as $account (limited privilege, starts at sign-in; redacted diagnostic monitor)."
+}
 Write-Output 'The app listens on 127.0.0.1:8778; Tailscale Funnel remains the only public entry point.'
 if (-not $env:CRUMBS_SHARE_KEY) {
     Write-Warning 'Verified deployments are paused until CRUMBS_SHARE_KEY is set for this Windows account and the tasks are restarted.'

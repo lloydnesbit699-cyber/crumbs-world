@@ -15,6 +15,17 @@ if (-not (Test-Path -LiteralPath $server -PathType Leaf)) {
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 $env:PORT = [string]$port
 $env:CRUMBS_SERVER_ROLE = 'harley'
+# Load only the game-side proxy settings from the signed-in account. Prime's
+# Groq key is deliberately excluded; it is decrypted only by its own task.
+foreach ($name in @('MELODY_BRAIN','MELODY_PROXY_URL','MELODY_PROXY_TOKEN','MELODY_PROXY_MODEL')) {
+    $value = [Environment]::GetEnvironmentVariable($name, 'User')
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        Remove-Item -LiteralPath ("Env:" + $name) -ErrorAction SilentlyContinue
+    } else {
+        [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+    }
+}
+Remove-Item Env:\GROQ_API_KEY -ErrorAction SilentlyContinue
 $delay = 5
 
 while ($true) {

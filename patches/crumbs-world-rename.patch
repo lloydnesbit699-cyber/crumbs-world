@@ -1,0 +1,172 @@
+From 3a20de506a61739b9e7c3e7c22c02fb04e8258a5 Mon Sep 17 00:00:00 2001
+From: Wren <wren@local>
+Date: Wed, 14 Oct 2026 00:38:28 -0400
+Subject: [PATCH] in-game rename: Crumbs HUD -> Crumbs World (player-visible
+ strings only); add /api/launcher-version
+
+---
+ crumbs_hud.py | 22 +++++++++++++++++++---
+ editor.html   | 26 +++++++++++++-------------
+ 2 files changed, 32 insertions(+), 16 deletions(-)
+
+diff --git a/crumbs_hud.py b/crumbs_hud.py
+index bdb0174..b3c89a7 100644
+--- a/crumbs_hud.py
++++ b/crumbs_hud.py
+@@ -156,6 +156,13 @@ except ImportError:
+ 
+ HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
+ APP_VERSION = "5.61.0"
++# v5.62: mobile launcher versions. The Android/iOS wrappers check
++# /api/launcher-version on every launch and self-update when these bump.
++# Set CRUMBS_LAUNCHER_APK_URL to the public URL of crumbs-world-launcher.apk
++# (drop the APK next to the server; it is served as a static file).
++LAUNCHER_VERSION_ANDROID = int(os.environ.get("CRUMBS_LAUNCHER_ANDROID", "1"))
++LAUNCHER_VERSION_IOS = int(os.environ.get("CRUMBS_LAUNCHER_IOS", "1"))
++LAUNCHER_APK_URL = os.environ.get("CRUMBS_LAUNCHER_APK_URL", "")
+ # v5.61: tester-shell feature flag — ENVIRONMENT variable only (Lloyd's
+ # 2026-10-07 decision), default OFF. Controls presentation only, never
+ # permissions. Stamped into editor.html as %%TESTER_SHELL%% ("1"/"0");
+@@ -8346,6 +8353,15 @@ class Handler(BaseHTTPRequestHandler):
+                              "public_mode": PUBLIC_MODE,
+                              "tester_shell": TESTER_SHELL,
+                              "instance": INSTANCE_ID})
++        elif path == "/api/launcher-version":
++            # v5.62: no auth — lets the mobile launchers check for wrapper
++            # updates. Bump LAUNCHER_VERSION_* when shipping a new wrapper;
++            # drop the new APK next to the server as crumbs-world-launcher.apk
++            # (served statically) and point apk_url at it.
++            self._send_json({"ok": True,
++                             "android_version": LAUNCHER_VERSION_ANDROID,
++                             "android_apk_url": LAUNCHER_APK_URL,
++                             "ios_version": LAUNCHER_VERSION_IOS})
+         elif path == "/api/auth/me":
+             # v5.27: no auth — reports the login state, never 401s.
+             u = self._session_user()
+@@ -12258,9 +12274,9 @@ def _probe_running_hud():
+         with urllib.request.urlopen(f"http://{HOST}:{PORT}/",
+                                     timeout=2) as r:
+             body = r.read(65536).decode("utf-8", "replace")
+-        if "<title>Crumbs HUD" not in body:
+-            return "something else (not the HUD)"
+-        return "the Crumbs HUD"
++        if "<title>Crumbs World" not in body:
++            return "something else (not the World)"
++        return "the Crumbs World"
+     except Exception:
+         return ""
+ 
+diff --git a/editor.html b/editor.html
+index 5f9787f..1b3a5d7 100644
+--- a/editor.html
++++ b/editor.html
+@@ -11,7 +11,7 @@
+ <link rel="manifest" href="/manifest.webmanifest">
+ <link rel="icon" href="/icon-512.png">
+ <link rel="apple-touch-icon" href="/icon-512.png">
+-<title>Crumbs HUD — Tile Painter</title>
++<title>Crumbs World — Tile Painter</title>
+ <script>
+ // v5.61 tester shell: the server stamps %%TESTER_SHELL%% as "1" (shell on)
+ // or "0" (classic). Default OFF — the classic HUD boots unless the server
+@@ -3367,7 +3367,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
+     <button class="mtop" data-menu="m-play">Play</button>
+     <button class="mtop" data-menu="m-anim">Animation</button>
+   </div>
+-  <span id="title">Crumbs HUD <small>tile painter &middot; v%%CRUMBS_VERSION%%</small></span>
++  <span id="title">Crumbs World <small>tile painter &middot; v%%CRUMBS_VERSION%%</small></span>
+   <span id="pills">
+     <button id="pill-update" class="pill" title="update status"><span class="pdot grey"></span><span class="ptxt">v&hellip;</span></button>
+     <button id="pill-recovery" class="pill" title="recovery status"><span class="pdot grey"></span><span class="ptxt">shield &hellip;</span></button>
+@@ -3404,13 +3404,13 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
+   <button id="menu-users" hidden title="Create accounts, reset passwords">&#x1F465; Users&hellip;</button>
+   <hr>
+   <button id="menu-setup">Setup&hellip;</button>
+-  <button id="menu-key" title="Set the share key for a public HUD">Key&hellip;</button>
++  <button id="menu-key" title="Set the share key for a public world">Key&hellip;</button>
+   <button id="menu-log" title="Server event log (debugging)">Server log</button>
+   <hr>
+   <button id="menu-update" title="Pull the latest app files over this install">&#128260; Check for updates</button>
+   <button id="menu-rollback" title="Restore the app files from before the last update">&#8617; Roll back update</button>
+-  <button id="btn-restart" title="Restart the HUD server">Restart server</button>
+-  <button id="btn-stop" class="danger" title="Stop the HUD server">Stop server</button>
++  <button id="btn-restart" title="Restart the World server">Restart server</button>
++  <button id="btn-stop" class="danger" title="Stop the World server">Stop server</button>
+ </div>
+ <div id="m-edit" class="menu-drop">
+   <button id="btn-undo" title="Undo">Undo</button>
+@@ -3992,7 +3992,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
+   <div id="login-box">
+     <!-- v5.61: the shield — no more brick emoji -->
+     <img id="login-logo" src="/splash-logo-cw.jpg" alt="Crumbs World">
+-    <h2>Crumbs HUD</h2>
++    <h2>Crumbs World</h2>
+     <div class="login-tabs">
+       <button id="tab-login" class="on">Log in</button>
+       <button id="tab-signup">Sign up</button>
+@@ -4077,7 +4077,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
+ </div>
+ 
+ <div id="splash">
+-  <div class="splash-title">Crumbs HUD</div>
++  <div class="splash-title">Crumbs World</div>
+   <div class="splash-sub">tile painter &middot; v%%CRUMBS_VERSION%%</div>
+   <div class="load-bar"><i id="splash-fill"></i></div>
+   <div class="load-label" id="splash-label">Waking the server&hellip;</div>
+@@ -4617,7 +4617,7 @@ let rerouteId = null;      // v5.0: patrol id being re-routed (replaced on Done)
+ let savedBrush = null;     // v5.4: brush stashed while the patrol flow borrows selTile
+ let walkingAnchors = new Set();  // v5.0: "x,y" cells whose placed character is walking in play mode
+ 
+-let crumbsKey = "";  // v5.16: share key for a public HUD (localStorage, this device only)
++let crumbsKey = "";  // v5.16: share key for a public world (localStorage, this device only)
+ try { crumbsKey = localStorage.getItem("crumbsKey") || ""; } catch (e) {}
+ 
+ async function api(path, body) {
+@@ -14132,7 +14132,7 @@ $("btn-resize").onclick = async () => {
+ };
+ // v1.8: stop the server from the page — saves first, then your a-Shell prompt comes back
+ $("btn-stop").onclick = async () => {
+-  if (!confirm("Stop the HUD server? The page goes dead until you restart it.")) return;
++  if (!confirm("Stop the World server? The page goes dead until you restart it.")) return;
+   try { await api("/api/shutdown", {}); } catch (e) { /* server is going away */ }
+   toast("server stopping — restart it in a-Shell when ready");
+ };
+@@ -14141,7 +14141,7 @@ $("btn-stop").onclick = async () => {
+ // v5.24: wait for a NEW instance id, not any 200 — the old process answers
+ // during the restart gap, and that answer is not "back".
+ $("btn-restart").onclick = async () => {
+-  if (!confirm("Restart the HUD server? Dirty work is saved first.")) return;
++  if (!confirm("Restart the World server? Dirty work is saved first.")) return;
+   let rr = null;
+   try { rr = await api("/api/restart", {}); } catch (e) { /* server is going away */ }
+   if (rr && !rr.ok && /write key/i.test(rr.error || "")) {
+@@ -14430,7 +14430,7 @@ $("menu-update").onclick = async () => {
+     $("btn-update-install").textContent = "Restart server";
+     $("btn-update-install").onclick = async () => {
+       closeOverlays();
+-      if (!confirm("Restart the HUD server? Dirty work is saved first.")) return;
++      if (!confirm("Restart the World server? Dirty work is saved first.")) return;
+       let rr = null;
+       try { rr = await api("/api/restart", {}); } catch (e) { /* server is going away */ }
+       toast("restarting — waiting for the NEW server instance\u2026");
+@@ -20526,7 +20526,7 @@ async function shellBoot() {
+     if (!localStorage.crumbs_tour) {
+       localStorage.crumbs_tour = "1";
+       const steps = [
+-        "Welcome to Crumbs HUD \u2014 pick a tile from the left tray.",
++        "Welcome to Crumbs World \u2014 pick a tile from the left tray.",
+         "Stamp is the hero brush: drag to stamp, lift to commit. Two fingers pan & zoom.",
+         "Hold still ~half a second for actions (pick, inspect, undo). \u2022\u2022\u2022 holds the rest.",
+         "Menu \u2192 Generate builds a whole map from a seed.",
+@@ -20880,7 +20880,7 @@ async function deleteMission(id) {
+ }
+ 
+   } catch (e) {
+-    toast("can't reach the HUD server — is crumbs_hud.py running?");
++    toast("can't reach the World server — is crumbs_hud.py running?");
+     const spl = $("splash-label"); if (spl) spl.textContent = "Couldn't reach the server.";
+     const sp = $("splash"); if (sp) sp.classList.add("gone");
+   }
+-- 
+2.43.0
+

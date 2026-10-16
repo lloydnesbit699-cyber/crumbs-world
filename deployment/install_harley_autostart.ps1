@@ -116,7 +116,7 @@ try {
         -Force -ErrorAction Stop | Out-Null
     Start-ScheduledTask -TaskName $deployTaskName -ErrorAction Stop
 } catch {
-    throw "Could not register/start the scheduled task. Run this installer as $account; the server task remains an at-startup task and the deploy watcher runs at sign-in. $($_.Exception.Message)"
+    throw "Could not register/start the scheduled task. Run this installer in an elevated PowerShell session as $account (do not use a different account); the server task remains an at-startup task and the deploy watcher runs at sign-in. $($_.Exception.Message)"
 }
 Write-Output "Installed and started '$taskName' as $account (limited privilege, system startup)."
 Write-Output "Installed and started '$deployTaskName' as $account (limited privilege, starts at sign-in; no password stored)."

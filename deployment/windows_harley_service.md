@@ -11,8 +11,10 @@ the game profiles (currently `HARLEY\lloyd`):
 .\deployment\install_harley_autostart.ps1
 ```
 
-Run this once for initial setup. This registers a limited-privilege Task Scheduler
-task at system startup. Its watchdog restarts the server with a backoff if it
+Run this once for initial setup from an elevated PowerShell session while signed
+in as that same account. Accept the UAC prompt; do not choose a different
+administrator account. This registers a limited-privilege Task Scheduler task
+at system startup. Its watchdog restarts the server with a backoff if it
 exits and writes logs under `logs\`. It continues across sign-out and starts
 after power returns, once Windows boots.
 
@@ -53,7 +55,8 @@ with read-only Contents and Checks access. Public repositories do not need
 that API token. Store credentials in Harley's Windows account / Git credential
 manager, not in the repo or in chat.
 
-Then, in Harley's repository folder, run once as the service account:
+Then, in Harley's repository folder, run once from elevated PowerShell as the
+service account (accept the UAC prompt; do not use a different account):
 
 ```powershell
 .\deployment\install_harley_autostart.ps1

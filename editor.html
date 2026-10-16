@@ -508,16 +508,16 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     object-fit: contain; filter: drop-shadow(0 0 18px rgba(90,140,255,.35)); }
   #splash .splash-title { font-size: 28px; color: #ffd75f; font-weight: bold; }
   #splash .splash-sub { font-size: 14px; color: #888; }
-/* v5.63: bug report overlay */
+/* v5.65: player feedback overlay */
 #bug-overlay { position: fixed; inset: 0; z-index: 300; display: none;
   align-items: center; justify-content: center; background: rgba(5,5,12,.92); }
 #bug-overlay.show { display: flex; }
 #bug-box { background: #14141c; border: 1px solid #2a2a38; border-radius: 12px;
-  padding: 24px; width: min(86vw, 380px); }
+  padding: 24px; width: min(86vw, 480px); max-height: 88vh; overflow-y: auto; }
 #bug-box h2 { color: #ffd75f; margin: 0 0 8px; font-size: 20px; }
 #bug-box textarea { display: block; width: 100%; box-sizing: border-box;
   margin: 8px 0; padding: 10px; border-radius: 8px; border: 1px solid #333;
-  background: #0d0d12; color: #eee; font-size: 15px; min-height: 90px; resize: vertical; }
+  background: #0d0d12; color: #eee; font-size: 15px; min-height: 64px; resize: vertical; }
 #bug-box select { display: block; width: 100%; box-sizing: border-box;
   margin: 8px 0; padding: 10px; border-radius: 8px; border: 1px solid #333;
   background: #0d0d12; color: #eee; font-size: 15px; }
@@ -3440,7 +3440,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   <button id="menu-setup">Setup&hellip;</button>
   <button id="menu-key" title="Set the share key for a public HUD">Key&hellip;</button>
   <button id="menu-log" title="Server event log (debugging)">Server log</button>
-  <button id="menu-bug" title="Report a bug (includes last 30s gameplay clip)">&#x1F41B; Report bug</button>
+  <button id="menu-bug" title="Send a bug report, playtest observation, or game idea">&#x1F4AC; Feedback &amp; bug report</button>
   <hr>
   <button id="menu-update" title="Pull the latest app files over this install">&#128260; Check for updates</button>
   <button id="menu-rollback" title="Restore the app files from before the last update">&#8617; Roll back update</button>
@@ -4129,25 +4129,41 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   </div>
 </div>
 
-<!-- v5.63: in-game bug report -->
+<!-- v5.65: in-game player feedback -->
 <div id="bug-overlay">
   <div id="bug-box">
-    <h2>&#x1F41B; Report a bug</h2>
-    <label for="bug-text">What happened?</label>
-    <textarea id="bug-text" maxlength="2000" placeholder="What were you doing when it broke?"></textarea>
-    <label for="bug-priority">How bad is it?</label>
-    <select id="bug-priority">
-      <option value="critical">Can't play — blocks me</option>
-      <option value="annoying" selected>Annoying — I can work around it</option>
-      <option value="minor">Minor — cosmetic / small</option>
+    <h2>&#x1F4AC; Share feedback</h2>
+    <label for="feedback-kind">What kind of feedback is this?</label>
+    <select id="feedback-kind">
+      <option value="observation" selected>Playtest observation</option>
+      <option value="bug">Bug or something broken</option>
+      <option value="idea">Improvement idea</option>
+      <option value="keep">Something we should keep</option>
+      <option value="general">Other thought</option>
     </select>
-    <label><input type="checkbox" id="bug-clip" checked> Include last 30 seconds of gameplay clip</label>
+    <label for="bug-text">What did you notice or want us to know?</label>
+    <textarea id="bug-text" maxlength="5000" placeholder="Share the thought in your own words. It can be rough or incomplete."></textarea>
+    <label for="feedback-context">What were you doing or testing? <small>(optional)</small></label>
+    <textarea id="feedback-context" maxlength="1200" placeholder="The area, feature, or steps you were trying"></textarea>
+    <label for="feedback-keep">What worked well or should stay? <small>(optional)</small></label>
+    <textarea id="feedback-keep" maxlength="2000" placeholder="A mechanic, look, sound, flow, or anything you don't want lost"></textarea>
+    <label for="feedback-improve">What could be better or worth exploring? <small>(optional)</small></label>
+    <textarea id="feedback-improve" maxlength="2000" placeholder="A change, rough idea, concern, or question"></textarea>
+    <div id="bug-impact-wrap" hidden>
+      <label for="bug-priority">How much does this bug affect play?</label>
+      <select id="bug-priority">
+        <option value="critical">Can't play — blocks me</option>
+        <option value="annoying" selected>Annoying — I can work around it</option>
+        <option value="minor">Minor — cosmetic / small</option>
+      </select>
+    </div>
+    <label><input type="checkbox" id="bug-clip"> Attach the last 30 seconds of gameplay, if available</label>
     <div class="bug-row">
-      <button id="bug-send" class="bug-send">Send report</button>
+      <button id="bug-send" class="bug-send">Send feedback</button>
       <button id="bug-cancel">Cancel</button>
     </div>
     <div id="bug-err" class="bug-err"></div>
-    <div class="bug-note">The clip records only your game screen, stays on your device, and is sent only when you hit Send.</div>
+    <div class="bug-note">The optional clip records only the game canvas and is sent only when you choose to send. Browser version, screen size, and recent app errors are included to help diagnose issues.</div>
   </div>
 </div>
 
@@ -21288,12 +21304,17 @@ function bugShowForm() {
   $("bug-overlay").classList.add("show");
   var clipBox = $("bug-clip");
   if (clipBox) {
-    clipBox.checked = !!(bugRecorder && bugClipChunks.length);
+    clipBox.checked = false;
     clipBox.disabled = !(bugRecorder && bugClipChunks.length);
   }
   setTimeout(function () { var t = $("bug-text"); if (t) t.focus(); }, 50);
 }
 function bugHideForm() { $("bug-overlay").classList.remove("show"); }
+
+function feedbackKindChanged() {
+  var isBug = $("feedback-kind").value === "bug";
+  $("bug-impact-wrap").hidden = !isBug;
+}
 
 function bugBlobToB64(blob) {
   return new Promise(function (resolve, reject) {
@@ -21310,8 +21331,12 @@ function bugBlobToB64(blob) {
 async function bugSubmit() {
   var btn = $("bug-send");
   var text = ($("bug-text").value || "").trim();
-  if (!text) { $("bug-err").textContent = "Say a little about what happened."; return; }
-  if (text.length > 2000) { $("bug-err").textContent = "Keep it under 2000 characters."; return; }
+  var context = ($("feedback-context").value || "").trim();
+  var keep = ($("feedback-keep").value || "").trim();
+  var improve = ($("feedback-improve").value || "").trim();
+  if (!text && !context && !keep && !improve) {
+    $("bug-err").textContent = "Add a thought in any of the boxes above."; return;
+  }
   if (btn) btn.disabled = true;
   $("bug-err").textContent = "Sending…";
   try {
@@ -21330,13 +21355,27 @@ async function bugSubmit() {
     var r = await fetch("/api/bug-report", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: text, priority: $("bug-priority").value, meta: meta, clip_b64: clipB64 })
+      body: JSON.stringify({
+        category: $("feedback-kind").value,
+        text: text,
+        context: context,
+        keep: keep,
+        improve: improve,
+        priority: $("bug-priority").value,
+        meta: meta,
+        clip_b64: clipB64
+      })
     });
     var j = await r.json();
     if (!j.ok) throw new Error(j.error || "server said no");
     bugHideForm();
     $("bug-text").value = "";
-    toast("Bug report sent — thanks! (clip " + (clipB64 ? "attached" : "not attached") + ")");
+    $("feedback-context").value = "";
+    $("feedback-keep").value = "";
+    $("feedback-improve").value = "";
+    $("feedback-kind").value = "observation";
+    feedbackKindChanged();
+    toast("Feedback sent — thanks!" + (clipB64 ? " (clip attached)" : ""));
   } catch (e) {
     $("bug-err").textContent = "Couldn't send: " + (e && e.message ? e.message : e);
   } finally {
@@ -21348,6 +21387,8 @@ async function bugSubmit() {
   try {
     var b = document.getElementById("menu-bug");
     if (b) b.onclick = bugShowForm;
+    var kind = document.getElementById("feedback-kind");
+    if (kind) { kind.onchange = feedbackKindChanged; feedbackKindChanged(); }
     var c = document.getElementById("bug-cancel");
     if (c) c.onclick = bugHideForm;
     var s = document.getElementById("bug-send");

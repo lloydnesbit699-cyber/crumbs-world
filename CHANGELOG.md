@@ -3,6 +3,14 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.65.0 — 2026-10-16
+
+**Feedback for every kind of playtest thought.** The menu action is now
+“Feedback & bug report.” Players can send a bug, observation, improvement
+idea, keep/preserve note, or general thought, with separate optional context,
+what worked, and what could improve fields. Gameplay clips remain optional;
+feedback reports are ignored by Git.
+
 ## v5.64.0 — 2026-10-16
 
 **Persistent account hardening.** User database backups are explicitly

@@ -156,7 +156,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.64.0"
+APP_VERSION = "5.65.0"
 # v5.62: mobile launcher versions. The Android/iOS wrappers check
 # /api/launcher-version on every launch and self-update when these bump.
 # Set CRUMBS_LAUNCHER_APK_URL to the public URL of crumbs-world-launcher.apk
@@ -1761,7 +1761,7 @@ def _vault_id_for(username):
 
 # PUBLIC_MODE / PUBLIC_WRITE_KEY are set in __main__ (--public / --share-key= / $CRUMBS_SHARE_KEY).
 MAX_JSON_BYTES = 16 * 1024 * 1024   # ordinary API requests
-BUG_REPORT_DIR = "bug-reports"          # v5.63: in-game bug reports land here
+BUG_REPORT_DIR = "bug-reports"          # v5.63: player feedback lands here
 BUG_REPORT_RETENTION_DAYS = 30          # v5.63: prune reports older than this
 MAX_BUNDLE_BYTES = 48 * 1024 * 1024  # .crumbs.zip bundle imports
 MAX_BUNDLE_JSON_BYTES = 65 * 1024 * 1024  # base64 encoding + JSON envelope
@@ -9528,18 +9528,36 @@ class Handler(BaseHTTPRequestHandler):
                                     "totp_enabled": bool(rec.get("totp_enabled"))})
 
         if path == "/api/bug-report":
-            # v5.63: in-game bug report + 30s replay clip. Logged-in session
+            # v5.65: bugs, playtest observations, ideas, keep notes + optional clip.
+            # Logged-in session
             # required in public mode; local mode accepts (no accounts there —
             # the game itself is open, so reporting is no more exposure).
             u = self._session_user()
             if PUBLIC_MODE and not u:
                 return self._send_json({"ok": False, "error": "log in first"}, 401)
+            category = str(body.get("category") or "bug").strip().lower()
+            if category not in ("bug", "observation", "idea", "keep", "general"):
+                return self._send_json({"ok": False,
+                                        "error": "unknown feedback category"}, 400)
             text = str(body.get("text") or "").strip()
-            if not text or len(text) > 2000:
-                return self._send_json({"ok": False, "error": "report text must be 1-2000 chars"}, 400)
+            context = str(body.get("context") or "").strip()
+            keep = str(body.get("keep") or "").strip()
+            improve = str(body.get("improve") or "").strip()
+            if not any((text, context, keep, improve)):
+                return self._send_json({"ok": False,
+                                        "error": "add feedback in at least one field"}, 400)
+            limits = (("text", text, 5000), ("context", context, 1200),
+                      ("keep", keep, 2000), ("improve", improve, 2000))
+            for field_name, value, max_chars in limits:
+                if len(value) > max_chars:
+                    return self._send_json({"ok": False,
+                                            "error": f"{field_name} must be at most {max_chars} characters"}, 400)
             priority = str(body.get("priority") or "annoying").strip().lower()
-            if priority not in ("critical", "annoying", "minor"):
-                priority = "annoying"
+            if category == "bug":
+                if priority not in ("critical", "annoying", "minor"):
+                    priority = "annoying"
+            else:
+                priority = None
             meta = body.get("meta") if isinstance(body.get("meta"), dict) else {}
             clip_b64 = body.get("clip_b64") or ""
             clip_bytes = b""
@@ -9552,14 +9570,16 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send_json({"ok": False, "error": "clip too big"}, 413)
             safe_user = re.sub(r"[^a-z0-9_-]", "_", (u or "local").lower())[:24] or "player"
             stamp = time.strftime("%Y%m%d-%H%M%S")
-            order = {"critical": "1", "annoying": "2", "minor": "3"}[priority]
+            order = {"critical": "1", "annoying": "2", "minor": "3"}.get(priority, "4")
             rand = "%04x" % random.randrange(0x10000)
-            base = f"{stamp}-{order}-{priority}-{safe_user}-{rand}"
+            base = f"{stamp}-{order}-{category}-{safe_user}-{rand}"
             try:
                 os.makedirs(BUG_REPORT_DIR, exist_ok=True)
                 report = {
                     "id": base, "at": int(time.time()),
-                    "user": u or "local", "priority": priority, "text": text,
+                    "user": u or "local", "category": category,
+                    "priority": priority, "text": text, "context": context,
+                    "keep": keep, "improve": improve,
                     "meta": meta, "has_clip": bool(clip_bytes),
                     "version": APP_VERSION,
                 }

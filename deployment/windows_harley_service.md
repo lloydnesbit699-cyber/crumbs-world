@@ -88,9 +88,10 @@ The installer removes inherited access from
 the existing `users.json`, its retained backups, the server secret, and the
 vault tree, granting access to the service account, SYSTEM, and local
 Administrators. New account database writes apply the same Windows ACL before
-the atomic replace; POSIX installs use mode `0600`. Keep the repository and
-profile directories on Harley's local disk and keep `users.json.*.bak` out of
-Git.
+the atomic replace; POSIX installs use mode `0600`. The installer permits
+Microsoft Cloud Files reparse tags (used by OneDrive Files On-Demand) and
+still rejects symlinks, junctions, and unknown reparse tags. Keep
+`users.json.*.bak` out of Git.
 
 New accounts and password changes require 6-1024 characters. Existing
 passwords remain valid until changed, so account owners should update weak

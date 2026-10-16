@@ -48,7 +48,19 @@ foreach ($privatePath in $privatePaths) {
     if (-not (Test-Path -LiteralPath $privatePath)) { continue }
     $attributes = [System.IO.File]::GetAttributes($privatePath)
     if (($attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
-        throw "Refusing to apply profile ACLs through a reparse point: $privatePath"
+        # OneDrive Files On-Demand marks cloud-managed files/directories as
+        # reparse points too. Allow only the documented Cloud Files tag family
+        # (0x9000001A..0x9000F01A); continue refusing symlinks/junctions and
+        # unknown tags so ACL changes cannot be redirected elsewhere.
+        $fsutil = Join-Path $env:SystemRoot 'System32\fsutil.exe'
+        $reparseInfo = (& $fsutil reparsepoint query $privatePath 2>&1 | Out-String)
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not verify the reparse tag for profile data: $privatePath"
+        }
+        $tagMatch = [regex]::Match($reparseInfo, '0x[0-9A-Fa-f]{8}')
+        if (-not $tagMatch.Success -or $tagMatch.Value -notmatch '^0x9000[0-9A-Fa-f]01[Aa]$') {
+            throw "Refusing an unsupported reparse point in profile data: $privatePath"
+        }
     }
     $aclArgs = @($privatePath, '/inheritance:r', '/grant:r',
         "${account}:F", '*S-1-5-18:F', '*S-1-5-32-544:F')

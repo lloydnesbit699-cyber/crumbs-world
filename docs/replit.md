@@ -41,6 +41,8 @@ your phone is just a browser.
   accounts, and its session secret on the server filesystem. A deployment
   replacement can lose that data. The deployment configuration is disabled
   until Crumbs uses a durable data store.
+- Deployments also use an ephemeral disk, so map saves can disappear after a
+  restart. Keep using the workspace repl until the app has durable storage.
 - Don't share the `?key=` URL — anyone with it can edit your dungeon.
 
 ## Project files

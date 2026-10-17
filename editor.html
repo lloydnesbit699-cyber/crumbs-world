@@ -21858,6 +21858,15 @@ var TOOLS=[
   {id:"select",label:"Select",ico:"⌖",btn:"btn-select",hint:"Tap anything placed on the map to inspect it."},
   {id:"paint",label:"Paint",ico:"🖌",brush:"paint",hint:"Pick a tile from a category on the left, then paint the map."},
   {id:"eraser",label:"Eraser",ico:"🧽",btn:"btn-eraser",hint:"Toggles the eraser — tap again to hand your brush back."},
+/* v5.67 stage 4: the six brush modes that lived only in the floating brush bar /
+   ••• more-sheet now have tool-grid cells (same brush: + setBrushTool pattern
+   as Paint). Nothing removed — the brush bar and more-sheet keep working. */
+  {id:"stamp",label:"Stamp",ico:"🏷",brush:"stamp",hint:"Multi-tile stamp brush — the hero default. Pick a tile, stamp footprints."},
+  {id:"fill",label:"Fill",ico:"🪣",brush:"fill",hint:"Bucket-fill a matching area with the selected tile."},
+  {id:"eyedropper",label:"Eyedropper",ico:"💧",brush:"eyedropper",hint:"Pick a tile right off the map."},
+  {id:"line",label:"Line",ico:"📏",brush:"line",hint:"Press-drag-release a straight line."},
+  {id:"rect",label:"Rectangle",ico:"◭",brush:"rect",hint:"Press-drag-release a box (fill on/off toggle lives in the ••• sheet)."},
+  {id:"scatter",label:"Scatter",ico:"🎲",brush:"scatter",hint:"Random texture from your scatter mix."},
   {id:"height",label:"Height",ico:"⛰",btn:"btn-height",opts:[["raise","Raise"],["lower","Lower"],["flatten","Flatten"]],optTitle:"Sculpt mode"},
   {id:"portal",label:"Portal",ico:"🌀",btn:"btn-portal",hint:"Tap a door/cave tile, then tap its destination."},
   {id:"patrol",label:"Patrol",ico:"🚶",btn:"btn-patrol",hint:"Tap one of your placed characters, then his stops, then Done ✓."},

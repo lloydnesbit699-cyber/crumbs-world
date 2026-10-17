@@ -3912,6 +3912,25 @@ def _mission_by_id(mid):
     return next((m for m in _missions if m["id"] == mid), None)
 
 
+def _mission_public(mission):
+    """Copy a mission for API responses without revealing secret locations."""
+    out = copy.deepcopy(mission)
+    objectives = out.get("objectives")
+    if isinstance(objectives, list):
+        for objective in objectives:
+            if isinstance(objective, dict) and objective.get("kind") == "treasure":
+                objective.pop("cache_x", None)
+                objective.pop("cache_y", None)
+    return out
+
+
+def _mission_summary(mission):
+    public = _mission_public(mission)
+    keys = ("id", "name", "preset", "difficulty", "reward", "objectives",
+            "hazard_count", "active", "won", "best_medal", "best_steps")
+    return {key: public[key] for key in keys if key in public}
+
+
 # Melody's Tier-0 voice: deterministic lines (picked by mission id so she's
 # consistent, not random). Warm, a little playful — Lloyd's kid.
 _MELODY_LINES = {
@@ -4046,6 +4065,9 @@ def _mission_start_run(mission):
         "objectives": copy.deepcopy(mission["objectives"]),
         "tick0": _tick_n,
         "inv0": dict(_inv),
+        "steps": 0,
+        "cache_found": False,
+        "cache_hint": "No cache clues yet.",
         "won": False,
         "failed": False,
     }
@@ -4066,6 +4088,8 @@ def _check_mission(x, y):
     mission = _mission_by_id(mission_run["mission_id"])
     if mission is None:
         return events
+    if any(o.get("kind") == "treasure" for o in mission_run["objectives"]):
+        mission_run["steps"] = mission_run.get("steps", 0) + 1
     danger = {tuple(c) for c in mission.get("danger", [])}
     if (x, y) in danger:
         # v5.13: a drawn weapon keeps hazard ground at bay; a ward charm
@@ -4147,9 +4171,52 @@ def _check_mission(x, y):
             if elapsed >= o["ticks"]:
                 o["done"] = True
                 events.append({"t": "toast", "text": "❤ survived!"})
+        elif k == "treasure":
+            if not mission_run.get("cache_found"):
+                distance = abs(x - o["cache_x"]) + abs(y - o["cache_y"])
+                if distance <= 2:
+                    mission_run["cache_hint"] = "Something is very close."
+                elif o.get("last_cache_distance") is None:
+                    mission_run["cache_hint"] = "The cache is hidden nearby."
+                elif distance < o["last_cache_distance"]:
+                    mission_run["cache_hint"] = "The cache trail is warming."
+                elif distance > o["last_cache_distance"]:
+                    mission_run["cache_hint"] = "The cache trail is cooling."
+                else:
+                    mission_run["cache_hint"] = "No change — try another route."
+                o["last_cache_distance"] = distance
+                if (x, y) == (o["cache_x"], o["cache_y"]):
+                    mission_run["cache_found"] = True
+                    mission_run["cache_hint"] = "Secret cache found!"
+                    events.append({"t": "toast",
+                                   "text": "🗝 You found the hidden cache!"})
+            if (x, y) == (o["x"], o["y"]):
+                o["done"] = True
+                events.append({"t": "toast", "text": "🎯 destination reached!"})
     if all(o.get("done") for o in mission_run["objectives"]):
         mission_run["won"] = True
         mission["won"] = True
+        treasure = next((o for o in mission_run["objectives"]
+                         if o.get("kind") == "treasure"), None)
+        if treasure:
+            steps = mission_run.get("steps", 0)
+            medal = core.treasure_medal(
+                steps, treasure["speed_goal"],
+                mission_run.get("cache_found", False))
+            medal_rank = {"bronze": 1, "silver": 2, "gold": 3}
+            best_medal = mission.get("best_medal")
+            if medal_rank[medal] > medal_rank.get(best_medal, 0):
+                mission["best_medal"] = medal
+            best_steps = mission.get("best_steps")
+            if not isinstance(best_steps, int) or steps < best_steps:
+                mission["best_steps"] = steps
+            mission_run["result"] = {
+                "medal": medal,
+                "steps": steps,
+                "cache_found": bool(mission_run.get("cache_found")),
+                "best_medal": mission.get("best_medal"),
+                "best_steps": mission.get("best_steps"),
+            }
         _save_missions(_current_map)
         reward = mission.get("reward") or "bragging rights"
         msg = _melody_says("won", mission["id"], name=mission["name"],
@@ -4174,6 +4241,8 @@ def _mission_run_text():
     tmp = dict(m)
     tmp["objectives"] = mission_run["objectives"]
     txt, _, _ = core.mission_progress_text(tmp)
+    if any(o.get("kind") == "treasure" for o in mission_run["objectives"]):
+        txt += " · " + mission_run.get("cache_hint", "No cache clues yet.")
     return txt
 
 
@@ -9130,11 +9199,9 @@ class Handler(BaseHTTPRequestHandler):
             })
         elif path == "/api/missions":
             # v5.12: missions for this map
-            self._send_json({"ok": True, "missions": [
-                {k: m[k] for k in ("id", "name", "preset", "difficulty",
-                                   "reward", "objectives", "hazard_count",
-                                   "active", "won")}
-                for m in _missions]})
+            self._send_json({"ok": True,
+                             "missions": [_mission_summary(m)
+                                          for m in _missions]})
         elif path == "/api/items":
             # v5.13: this map's item library + what's lying on the ground
             cells = []
@@ -9163,12 +9230,15 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({
                 "ok": True,
                 "active": ({k: active[k] for k in
-                            ("id", "name", "preset", "difficulty", "reward")}
+                            ("id", "name", "preset", "difficulty", "reward",
+                             "best_medal", "best_steps") if k in active}
                            if active else None),
                 "progress": _mission_run_text(),
                 "danger": active.get("danger", []) if active else [],
                 "won": bool(mission_run and mission_run["won"]),
                 "failed": bool(mission_run and mission_run["failed"]),
+                "result": (mission_run.get("result")
+                           if mission_run else None),
             })
         elif path.startswith("/api/thumb/"):
             # v5.29: single serving path — vault-scoped snapshot + lock-free
@@ -11123,7 +11193,7 @@ class Handler(BaseHTTPRequestHandler):
             _log_event(f"mission created: {m['name']}")
             diff = _DIFF_WORDS[m["difficulty"]]
             return self._send_json({
-                "ok": True, "mission": m,
+                "ok": True, "mission": _mission_public(m),
                 "melody_says": _melody_says("built", m["id"], name=m["name"],
                                             diff=diff)})
 
@@ -11150,7 +11220,8 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 says = _melody_says("tested_ok", m["id"], name=m["name"],
                                     hazards=placed)
-            return self._send_json({"ok": True, "mission": m,
+            return self._send_json({"ok": True,
+                                    "mission": _mission_public(m),
                                     "hazards": placed, "danger": danger,
                                     "issues": issues, "melody_says": says})
 

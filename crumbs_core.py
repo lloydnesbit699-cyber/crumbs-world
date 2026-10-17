@@ -1815,6 +1815,9 @@ MISSION_PRESETS = [
     {"id": "timed", "label": "Beat the clock",
      "hint": "Reach the mark before time runs out.",
      "fields": ["target", "ticks", "difficulty", "reward"]},
+    {"id": "treasure", "label": "Treasure run",
+     "hint": "Reach the goal, find an optional hidden cache, and earn replay medals.",
+     "fields": ["target", "cache", "speed_goal", "difficulty", "reward"]},
 ]
 MISSION_PRESET_IDS = [p["id"] for p in MISSION_PRESETS]
 
@@ -1842,7 +1845,8 @@ def _mission_xy(v, name):
 def build_mission(preset_id, answers):
     """Build a mission dict from a preset + questionnaire answers.
     answers: {name?, difficulty? (1-5), reward?, target? [x,y],
-              targets? [[x,y]...], what? ("wood"/"food"), count?, ticks?}
+              targets? [[x,y]...], cache? [x,y], speed_goal?,
+              what? ("wood"/"food"), count?, ticks?}
     Returns a mission dict with objectives (all done=False). Raises
     ValueError on the first bad answer."""
     if preset_id not in MISSION_PRESET_IDS:
@@ -1856,6 +1860,8 @@ def build_mission(preset_id, answers):
     name = str(answers.get("name", "")).strip()[:32] or \
         next(p["label"] for p in MISSION_PRESETS if p["id"] == preset_id)
     reward = str(answers.get("reward", "")).strip()[:48]
+    if preset_id == "treasure" and not reward:
+        reward = "25 gold"
 
     objectives = []
     if preset_id in ("reach", "timed"):
@@ -1894,6 +1900,20 @@ def build_mission(preset_id, answers):
             raise ValueError("ticks must be a number")
         objectives.append({"kind": "survive", "ticks": ticks, "elapsed": 0,
                            "done": False})
+    elif preset_id == "treasure":
+        x, y = _mission_xy(answers.get("target"), "target")
+        cache_x, cache_y = _mission_xy(answers.get("cache"), "cache")
+        if (x, y) == (cache_x, cache_y):
+            raise ValueError("treasure goal and hidden cache must be different cells")
+        try:
+            speed_goal = max(20, min(600, int(answers.get("speed_goal", 120))))
+        except (TypeError, ValueError):
+            raise ValueError("speed goal must be a number from 20-600")
+        objectives.append({
+            "kind": "treasure", "x": x, "y": y,
+            "cache_x": cache_x, "cache_y": cache_y,
+            "speed_goal": speed_goal, "done": False,
+        })
     return {"name": name, "preset": preset_id, "difficulty": difficulty,
             "reward": reward, "objectives": objectives,
             "hazard_count": DIFFICULTY_TIERS[difficulty]["hazards"],
@@ -1905,6 +1925,8 @@ def mission_target_cells(mission):
     cells = []
     for o in mission["objectives"]:
         if o["kind"] in ("reach", "timed"):
+            cells.append((o["x"], o["y"]))
+        elif o["kind"] == "treasure":
             cells.append((o["x"], o["y"]))
     return cells
 
@@ -1918,13 +1940,19 @@ def mission_playtest(world, mission, spawn, walkable, path_exists):
     if not walkable(sx, sy):
         return ["no walkable spawn — Melody can't even start the run"]
     for o in mission["objectives"]:
+        targets = []
         if o["kind"] in ("reach", "timed"):
-            if not (0 <= o["x"] < world.width and 0 <= o["y"] < world.height):
-                issues.append(f"target ({o['x']},{o['y']}) is off the map")
-            elif not walkable(o["x"], o["y"]):
-                issues.append(f"target ({o['x']},{o['y']}) can't be stood on")
-            elif not path_exists(sx, sy, o["x"], o["y"]):
-                issues.append(f"target ({o['x']},{o['y']}) can't be reached "
+            targets.append(("target", o["x"], o["y"]))
+        elif o["kind"] == "treasure":
+            targets.extend((("goal", o["x"], o["y"]),
+                            ("hidden cache", o["cache_x"], o["cache_y"])))
+        for label, x, y in targets:
+            if not (0 <= x < world.width and 0 <= y < world.height):
+                issues.append(f"{label} ({x},{y}) is off the map")
+            elif not walkable(x, y):
+                issues.append(f"{label} ({x},{y}) can't be stood on")
+            elif not path_exists(sx, sy, x, y):
+                issues.append(f"{label} ({x},{y}) can't be reached "
                               f"from spawn — a cliff or wall cuts it off")
         # collect/survive need no path check — the land and the clock decide
     return issues
@@ -1951,7 +1979,24 @@ def mission_progress_text(mission):
         elif o["kind"] == "survive":
             bits.append("❤ survive %d/%d%s" % (o.get("elapsed", 0), o["ticks"],
                                                " ✓" if o["done"] else ""))
+        elif o["kind"] == "treasure":
+            bits.append("🎯 destination (%d,%d)%s · 🗝 optional secret cache" % (
+                o["x"], o["y"], " ✓" if o["done"] else ""))
     return "; ".join(bits), done, total
+
+
+def treasure_medal(steps, speed_goal, cache_found):
+    """Return the best treasure-run medal earned by this finished run."""
+    try:
+        steps = max(0, int(steps))
+        speed_goal = max(1, int(speed_goal))
+    except (TypeError, ValueError):
+        raise ValueError("steps and speed goal must be integers")
+    if steps <= speed_goal and cache_found:
+        return "gold"
+    if steps <= speed_goal:
+        return "silver"
+    return "bronze"
 
 
 # ---- v5.13: gear — weapons, tools, and things to carry -----------------------

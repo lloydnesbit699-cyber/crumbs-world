@@ -17,6 +17,12 @@ completed step checks off. Win or fail messages appear when the mission
 resolves. Watch out for hazard ground (costs health) and patrolling
 critters — difficulty 1–5 sets how mean the map is.
 
+Treasure runs add a clear destination and an optional hidden cache. Follow
+the cache clues to get close, but the HUD will never give away its exact
+location. Reach the destination to finish: bronze is for completion, silver
+is for beating the step goal, and gold also requires finding the cache. Your
+best medal and fastest finish stay on that map's mission card when you replay.
+
 ## Your pack
 
 - **Items:** pick up gear from the ground by walking onto it (or tapping

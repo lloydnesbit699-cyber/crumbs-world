@@ -3420,6 +3420,55 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   html.sh-high-contrast #shell-root .sh-menu-help p b { color: #f3ead6; }
 
 </style>
+<style>
+/* v5.67 stage 1: new-console layout shell — ADDITIVE ONLY.
+   Every selector below is nwc- prefixed. No existing rule is altered.
+   Stage 2 wires live tile/tool data into this shell. */
+#nwc-palette-dock{position:fixed;left:0;right:0;bottom:0;z-index:60;background:#14161d;
+  border-top:1px solid #2c3145;padding:8px;min-height:128px;}
+#nwc-palette-dock.nwc-collapsed{display:none;}
+#nwc-palette{display:flex;flex-direction:column;width:340px;max-width:92vw;
+  background:rgba(20,22,29,.97);border:1px solid #2c3145;border-radius:12px;}
+#nwc-palette.nwc-floating{position:fixed;z-index:80;max-height:70vh;
+  box-shadow:0 12px 40px rgba(0,0,0,.6);}
+#nwc-palette.nwc-docked{width:100%;max-width:none;border:none;border-radius:0;background:transparent;}
+#nwc-palette.nwc-docked #nwc-palette-body{resize:none;min-height:0;max-height:180px;}
+#nwc-palette.nwc-docked .nwc-pgrid{display:flex;overflow-x:auto;padding-bottom:4px;}
+#nwc-palette.nwc-docked .nwc-ptile{flex:0 0 76px;}
+#nwc-palette[hidden]{display:none;}
+#nwc-palette-head{display:flex;align-items:center;gap:8px;padding:8px 10px;
+  border-bottom:1px solid #2c3145;cursor:grab;touch-action:none;}
+#nwc-palette-head:active{cursor:grabbing;}
+.nwc-grip{color:#9aa0b5;font-size:16px;letter-spacing:2px;}
+#nwc-palette-title{flex:1;font-size:14px;font-weight:600;color:#e8eaf2;}
+#nwc-palette-hide,#nwc-palette-dockbtn{background:none;border:1px solid #2c3145;color:#e8eaf2;
+  border-radius:8px;width:32px;height:32px;font-size:16px;cursor:pointer;}
+#nwc-palette-body{overflow:auto;resize:both;min-width:220px;min-height:110px;max-height:56vh;padding:10px;}
+#nwc-palette-body .nwc-pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:8px;}
+.nwc-ptile{background:#1f2330;border:2px solid #2c3145;border-radius:8px;padding:4px;
+  cursor:pointer;text-align:center;}
+.nwc-ptile.on{border-color:#ff4d5e;}
+.nwc-ptile .nwc-pi{font-size:26px;line-height:1.4;}
+.nwc-ptile .nwc-pl{font-size:10.5px;color:#9aa0b5;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.nwc-phint{font-size:13px;color:#9aa0b5;padding:6px 2px;}
+.nwc-popt{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+.nwc-popt button{background:#1f2330;color:#e8eaf2;border:2px solid #2c3145;border-radius:8px;
+  padding:10px 14px;font-size:14px;cursor:pointer;}
+.nwc-popt button.on{border-color:#4da3ff;}
+.nwc-thumbgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.nwc-cell{background:#1f2330;border:2px solid #2c3145;border-radius:10px;padding:6px 2px 5px;
+  text-align:center;cursor:pointer;min-height:62px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:3px;color:#e8eaf2;}
+.nwc-cell.on{border-color:#4da3ff;box-shadow:0 0 0 1px #4da3ff;}
+.nwc-cell .nwc-ico{font-size:24px;line-height:1.2;}
+.nwc-cell .nwc-lbl{font-size:11px;line-height:1.15;}
+.nwc-cell:active{transform:scale(.96);}
+.nwc-sec-label{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#9aa0b5;margin:10px 4px 2px;}
+#nwc-palette-fab{position:fixed;right:12px;bottom:12px;z-index:80;background:#4da3ff;color:#06121f;
+  border:none;border-radius:999px;padding:12px 18px;font-size:14px;font-weight:700;cursor:pointer;
+  box-shadow:0 6px 20px rgba(77,163,255,.4);}
+#nwc-palette-fab[hidden]{display:none;}
+</style>
 </head>
 <body>
 
@@ -3641,6 +3690,9 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
 
 <aside class="tray" id="tray-left">
   <div class="tray-head">Tiles<span class="tray-hint" id="layer-hint">paint the ground</span></div>
+  <!-- v5.67 stage 1: category thumbnails — shell only; taps fill the nwc palette bar -->
+  <div class="nwc-sec-label">Categories</div>
+  <div class="nwc-thumbgrid" id="nwc-cat-grid"></div>
   <!-- v5.37: live animator preview — upper portion only; the selected card,
        import, and palette keep their scroll below it. -->
   <div id="anim-preview">
@@ -3767,6 +3819,9 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
 
 <aside class="tray" id="tray-right">
   <div class="tray-head">Tools</div>
+  <!-- v5.67 stage 1: tool thumbnails — shell only; taps fill the nwc palette bar -->
+  <div class="nwc-sec-label">Tools</div>
+  <div class="nwc-thumbgrid" id="nwc-tool-grid"></div>
   <!-- v5.35: Phase 2 — the tray morphs into a traits editor for the current
        selection. Hidden (and layout-neutral) when nothing is selected. -->
   <div id="traits-morph" hidden></div>
@@ -3788,6 +3843,16 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   <button id="menu-npcs" title="Villagers and merchants">&#129489; Folks&hellip;</button>
 </aside>
 
+<!-- v5.67 stage 1: palette bar — docked bottom strip; drag ⠿ to float.
+     Shell only: it never owns editor state, it is purely a control surface.
+     Stage 2 wires live tiles/tools into it. -->
+<div id="nwc-palette-dock">
+  <div id="nwc-palette" class="nwc-docked">
+    <div id="nwc-palette-head"><span class="nwc-grip">⠿⠿</span><span id="nwc-palette-title">Palette</span><button id="nwc-palette-dockbtn" title="dock / float">⤢</button><button id="nwc-palette-hide" title="hide (Esc)">×</button></div>
+    <div id="nwc-palette-body"></div>
+  </div>
+</div>
+<button id="nwc-palette-fab" hidden>🎨 Palette</button>
 <div id="sheet-inspect" class="sheet">
   <div class="grab"></div>
   <div class="tray-head">Inspect <span id="inspect-xy" class="tray-hint"></span></div>
@@ -15328,8 +15393,8 @@ $("pill-recovery").onclick = () => $("menu-recovery").click();
 // v5.17.1: melody state lives up here — the map tap handler can fire while
 // init() is still awaiting, and these used to be in the temporal dead zone.
 let melodyPresets = [], melodyDiffs = [];
-let melodyForm = null;    // {preset, name, difficulty, reward, target, targets, what, count, ticks}
-let melodyPick = null;    // "target" | "waypoint" — next map tap marks it
+let melodyForm = null;    // {preset, name, difficulty, reward, target, cache, targets, what, count, ticks, speed_goal}
+let melodyPick = null;    // "target" | "cache" | "waypoint" — next map tap marks it
 // v5.18.1: same tap-during-boot race — itemPlace/npcPlace are read by the map
 // tap handler, so they live up here too instead of down in the v5.13 section.
 let itemPlace = null, npcPlace = false;
@@ -15370,7 +15435,10 @@ async function syncMissionHud() {
   }
   missionDanger = new Set((r.danger || []).map(c => c[0] + "," + c[1]));
   hud.hidden = false;
-  hud.innerHTML = `<b>💜 ${esc(r.active.name)}</b><span>${esc(r.progress || "")}</span>`;
+  const result = r.result && r.result.medal
+    ? `<span>🏅 This run: ${esc(r.result.medal)} · ${esc(r.result.steps)} steps${r.result.cache_found ? " · cache found" : ""} · best: ${esc(r.result.best_medal)}</span>`
+    : "";
+  hud.innerHTML = `<b>💜 ${esc(r.active.name)}</b><span>${esc(r.progress || "")}</span>${result}`;
 }
 
 // ---- v5.13: gear — items on the ground, packs on backs, folks in town --------
@@ -21204,9 +21272,12 @@ async function loadMelodyMissions() {
   box.innerHTML = ms.map(m => {
     const p = melodyPresets.find(p => p.id === m.preset);
     const d = melodyDiffs.find(d => d.n === m.difficulty);
+    const record = m.best_medal
+      ? ` · best ${esc(m.best_medal)}${Number.isInteger(m.best_steps) ? ` · ${esc(m.best_steps)} steps` : ""}`
+      : "";
     return `<div class="mrow${m.active ? " on" : ""}">
       <div class="mrow-main"><b>${esc(m.name)}</b>
-        <span class="mrow-sub">${p ? p.label : m.preset} · ${"★".repeat(m.difficulty)}${d ? " " + d.label : ""}${m.won ? " · 🏆 won" : ""}</span>
+        <span class="mrow-sub">${p ? p.label : m.preset} · ${"★".repeat(m.difficulty)}${d ? " " + d.label : ""}${m.won ? " · 🏆 won" : ""}${record}</span>
       </div>
       <button data-act="apply" data-id="${m.id}" title="Melody builds the enemy flows and playtests">Build</button>
       <button data-act="del" data-id="${m.id}" class="ghost" title="Delete">✕</button>
@@ -21226,24 +21297,32 @@ $("melody-new").onclick = () => {
 };
 function targetPickerHtml(kind) {
   const multi = kind === "targets";
-  return `<div class="mlab">${multi ? "Waypoints (tap 2–4)" : "Target"}<div class="row2">
-    <button id="mf-pick">📍 Tap map${multi ? " to add" : ""}</button>
-    <button id="mf-suggest" class="ghost">✨ Melody picks</button>
-    ${multi ? `<button id="mf-clear" class="ghost">Clear</button>` : ""}
-  </div><div id="mf-targetlab" class="tray-hint">none yet</div></div>`;
+  const label = multi ? "Waypoints (tap 2–4)"
+    : kind === "cache" ? "Hidden cache (only the builder sees its location)" : "Goal";
+  return `<div class="mlab">${label}<div class="row2">
+    <button id="mf-pick-${kind}">📍 Tap map${multi ? " to add" : ""}</button>
+    <button id="mf-suggest-${kind}" class="ghost">✨ Melody picks</button>
+    ${multi ? `<button id="mf-clear-${kind}" class="ghost">Clear</button>` : ""}
+  </div><div id="mf-targetlab-${kind}" class="tray-hint">none yet</div></div>`;
 }
-function updateTargetLab() {
-  const lab = $("mf-targetlab");
+function updateTargetLab(kind) {
+  const lab = $(`mf-targetlab-${kind}`);
   if (!lab || !melodyForm) return;
-  if (melodyForm.target) lab.textContent = `target: (${melodyForm.target[0]}, ${melodyForm.target[1]})`;
-  else if (melodyForm.targets.length) lab.textContent = `waypoints: ${melodyForm.targets.map(t => `(${t[0]},${t[1]})`).join(" ")}`;
-  else lab.textContent = "none yet";
+  if (kind === "targets" && melodyForm.targets.length) {
+    lab.textContent = `waypoints: ${melodyForm.targets.map(t => `(${t[0]},${t[1]})`).join(" ")}`;
+  } else {
+    const point = melodyForm[kind];
+    lab.textContent = point ? `${kind === "cache" ? "hidden cache" : "goal"} set`
+      : (kind === "cache" ? "not set — hidden from players" : "none yet");
+  }
 }
 function showMissionForm(pid) {
   const p = melodyPresets.find(p => p.id === pid);
   if (!p) return;
-  melodyForm = { preset: pid, name: "", difficulty: 2, reward: "",
-                 target: null, targets: [], what: "wood", count: 5, ticks: 90 };
+  melodyForm = { preset: pid, name: "", difficulty: 2,
+                 reward: pid === "treasure" ? "25 gold" : "",
+                 target: null, cache: null, targets: [], what: "wood",
+                 count: 5, ticks: 90, speed_goal: 120 };
   const f = $("melody-form");
   f.hidden = false; $("melody-presets").hidden = true;
   let h = `<div class="tray-head">${esc(p.label)} <span class="tray-hint">${esc(p.hint)}</span></div>`;
@@ -21252,13 +21331,16 @@ function showMissionForm(pid) {
        melodyDiffs.map(d => `<button data-n="${d.n}" class="${d.n === 2 ? "on" : ""}">${d.n}★</button>`).join("") +
        `</div><div id="mf-difflab" class="tray-hint">${diffLabel(2)}</div></div>`;
   if (p.fields.includes("target")) h += targetPickerHtml("target");
+  if (p.fields.includes("cache")) h += targetPickerHtml("cache");
   if (p.fields.includes("targets")) h += targetPickerHtml("targets");
   if (p.fields.includes("what"))
     h += `<div class="mlab">Gather<div id="mf-what" class="seg"><button data-w="wood" class="on">🪵 wood</button><button data-w="food">🍎 food</button></div></div>
           <label class="mlab">How many<input id="mf-count" type="number" value="5" min="1" max="20"></label>`;
   if (p.fields.includes("ticks"))
     h += `<label class="mlab">Ticks<input id="mf-ticks" type="number" value="${pid === "timed" ? 120 : 90}" min="20" max="600"></label>`;
-  h += `<label class="mlab">Reward<input id="mf-reward" type="text" maxlength="48" placeholder="e.g. 100 gold stars"></label>`;
+  if (p.fields.includes("speed_goal"))
+    h += `<label class="mlab">Steps for a speed medal<input id="mf-speed-goal" type="number" value="120" min="20" max="600"></label>`;
+  h += `<label class="mlab">Reward<input id="mf-reward" type="text" maxlength="48" value="${esc(melodyForm.reward)}" placeholder="e.g. 100 gold stars"></label>`;
   h += `<div class="row2"><button id="mf-create">✨ Create mission</button><button id="mf-cancel" class="ghost">Cancel</button></div>`;
   f.innerHTML = h;
   $("mf-name").oninput = e => melodyForm.name = e.target.value;
@@ -21278,37 +21360,50 @@ function showMissionForm(pid) {
   if (cnt) cnt.oninput = e => melodyForm.count = Math.max(1, Math.min(20, +e.target.value || 5));
   const tks = $("mf-ticks");
   if (tks) tks.oninput = e => melodyForm.ticks = Math.max(20, Math.min(600, +e.target.value || 90));
-  const pk = $("mf-pick");
-  if (pk) pk.onclick = () => {
-    melodyPick = p.fields.includes("targets") ? "waypoint" : "target";
-    toast(melodyPick === "target" ? "tap the map to set the target" : "tap the map to add a waypoint");
+  ["target", "cache", "targets"].forEach(kind => {
+    if (!p.fields.includes(kind)) return;
+    const pk = $(`mf-pick-${kind}`);
+    pk.onclick = () => {
+      melodyPick = kind === "targets" ? "waypoint" : kind;
+      toast(kind === "cache" ? "tap the map to hide the cache"
+        : kind === "targets" ? "tap the map to add a waypoint"
+        : "tap the map to set the goal");
+    };
+    const sg = $(`mf-suggest-${kind}`);
+    sg.onclick = async () => {
+      const r = await api("/api/missions/suggest-target", {
+        n: kind === "targets" ? 3 : 1,
+      });
+      const tg = (r.ok && r.targets) || [];
+      if (!tg.length) { toast("no good spots — the map might be all walls"); return; }
+      if (kind === "targets") melodyForm.targets = tg.slice(0, 4);
+      else melodyForm[kind] = tg[0];
+      updateTargetLab(kind);
+      melodySay(kind === "cache"
+        ? "I picked a secret spot; only the builder can see where it is."
+        : "Picked a good spot — tap Create when you're ready.");
+    };
+    const cl = $(`mf-clear-${kind}`);
+    if (cl) cl.onclick = () => { melodyForm.targets = []; updateTargetLab(kind); };
+  });
+  const speedGoal = $("mf-speed-goal");
+  if (speedGoal) speedGoal.oninput = e => {
+    melodyForm.speed_goal = Math.max(20, Math.min(600, +e.target.value || 120));
   };
-  const sg = $("mf-suggest");
-  if (sg) sg.onclick = async () => {
-    const n = p.fields.includes("targets") ? 3 : 1;
-    const r = await api("/api/missions/suggest-target", { n });
-    const tg = (r.ok && r.targets) || [];
-    if (!tg.length) { toast("no good spots — the map might be all walls"); return; }
-    if (p.fields.includes("targets")) melodyForm.targets = tg.slice(0, 4);
-    else melodyForm.target = tg[0];
-    updateTargetLab();
-    melodySay("Picked my favorites — far from spawn, nicely spread. Tap Build when you're ready.");
-  };
-  const cl = $("mf-clear");
-  if (cl) cl.onclick = () => { melodyForm.targets = []; updateTargetLab(); };
   $("mf-cancel").onclick = () => { f.hidden = true; $("melody-new").hidden = false; melodyForm = null; melodyPick = null; };
   $("mf-create").onclick = createMission;
 }
 function melodyPickTap(cell) {
   if (!melodyForm) { melodyPick = null; return; }
-  if (melodyPick === "target") {
-    melodyForm.target = [cell.x, cell.y];
-  } else {
+  if (melodyPick === "target" || melodyPick === "cache") {
+    melodyForm[melodyPick] = [cell.x, cell.y];
+    updateTargetLab(melodyPick);
+  } else if (melodyPick === "waypoint") {
     if (melodyForm.targets.length >= 4) { toast("4 waypoints max"); return; }
     melodyForm.targets.push([cell.x, cell.y]);
+    updateTargetLab("targets");
   }
   melodyPick = null;
-  updateTargetLab();
   toast("marked ✓");
 }
 async function createMission() {
@@ -21318,6 +21413,11 @@ async function createMission() {
   if (p.fields.includes("target")) {
     if (!f.target) { toast("pick a target first 📍"); return; }
     answers.target = f.target;
+  }
+  if (p.fields.includes("cache")) {
+    if (!f.cache) { toast("pick a hidden cache location first 📍"); return; }
+    answers.cache = f.cache;
+    answers.speed_goal = f.speed_goal;
   }
   if (p.fields.includes("targets")) {
     if (f.targets.length < 2) { toast("add at least 2 waypoints 📍"); return; }
@@ -21702,6 +21802,251 @@ async function bugSubmit() {
     if (s) s.onclick = bugSubmit;
     bugClipStart();
   } catch (e) {}
+})();
+</script>
+<script>
+// v5.67 stage 2: live wiring for the new-console layout.
+// Wrapped in an IIFE; touches only nwc-* element ids plus REAL editor controls
+// (layer tabs, subcat chips, tool buttons) via .click() — the same code paths a
+// manual tap takes. The palette bar stays a control surface: it never owns
+// editor state, it mirrors and drives the real one.
+(function(){
+"use strict";
+var pal=document.getElementById("nwc-palette");
+if(!pal){return;} /* shell not mounted — bail without touching anything */
+var palBody=document.getElementById("nwc-palette-body"),
+    palTitle=document.getElementById("nwc-palette-title"),
+    fab=document.getElementById("nwc-palette-fab"),
+    dockEl=document.getElementById("nwc-palette-dock"),
+    dockBtn=document.getElementById("nwc-palette-dockbtn"),
+    catsEl=document.getElementById("nwc-cat-grid"),
+    toolsEl=document.getElementById("nwc-tool-grid");
+
+/* v5.67 stage 2: live mapping — each category drives the real layer tab +
+   subcategory chip (audit §7), then mirrors the real strip swatches. */
+var CATS=[
+  {id:"walls",label:"Walls",ico:"🧱",layer:"tiles",chip:"Walls"},
+  {id:"floors",label:"Floors",ico:"🟩",layer:"tiles",chip:"Floors"},
+  {id:"objects",label:"Objects",ico:"📦",layer:"objects",chip:"All"},
+  {id:"characters",label:"Characters",ico:"🧑",layer:"characters",chip:"All"},
+  {id:"creatures",label:"Creatures",ico:"👾",layer:"characters",chip:"Creatures"},
+  {id:"colors",label:"Colors",ico:"🎨",layer:"colors",chip:null},
+  {id:"collision",label:"Collision",ico:"🚧",layer:"collision",chip:null}
+];
+/* v5.67 stage 2: each tool delegates to its real handler (audit §8). Paint has
+   no button — painting is the default brush — so it calls setBrushTool.
+   Brush size has no real counterpart in the editor (no brush-size variable
+   exists), so Paint/Eraser carry hints instead of size options. */
+var TOOLS=[
+  {id:"select",label:"Select",ico:"⌖",btn:"btn-select",hint:"Tap anything placed on the map to inspect it."},
+  {id:"paint",label:"Paint",ico:"🖌",brush:"paint",hint:"Pick a tile from a category on the left, then paint the map."},
+  {id:"eraser",label:"Eraser",ico:"🧽",btn:"btn-eraser",hint:"Toggles the eraser — tap again to hand your brush back."},
+  {id:"height",label:"Height",ico:"⛰",btn:"btn-height",opts:[["raise","Raise"],["lower","Lower"],["flatten","Flatten"]],optTitle:"Sculpt mode"},
+  {id:"portal",label:"Portal",ico:"🌀",btn:"btn-portal",hint:"Tap a door/cave tile, then tap its destination."},
+  {id:"patrol",label:"Patrol",ico:"🚶",btn:"btn-patrol",hint:"Tap one of your placed characters, then his stops, then Done ✓."},
+  {id:"pan",label:"Pan",ico:"✋",btn:"btn-pan",hint:"Drag the map to move around."}
+];
+
+function markOn(sel,el,id){
+  var ns=el.querySelectorAll(sel),i;
+  for(i=0;i<ns.length;i++){ns[i].classList.toggle("on",ns[i].getAttribute("data-id")===id);}
+}
+function dockPalette(){
+  pal.classList.remove("nwc-floating");pal.classList.add("nwc-docked");
+  dockEl.appendChild(pal);pal.style.left="";pal.style.top="";
+  dockEl.classList.remove("nwc-collapsed");
+  dockBtn.textContent="⤢";dockBtn.title="float the palette";
+}
+function floatPalette(x,y){
+  document.body.appendChild(pal);
+  pal.classList.remove("nwc-docked");pal.classList.add("nwc-floating");
+  if(x!==undefined){pal.style.left=x+"px";pal.style.top=Math.max(0,y)+"px";}
+  dockBtn.textContent="⇲";dockBtn.title="dock the palette";
+}
+function openPalette(){pal.hidden=false;dockEl.classList.remove("nwc-collapsed");fab.hidden=true;}
+function hidePalette(){pal.hidden=true;dockEl.classList.add("nwc-collapsed");fab.hidden=false;}
+document.getElementById("nwc-palette-hide").onclick=hidePalette;
+dockBtn.onclick=function(){
+  if(pal.classList.contains("nwc-docked")){floatPalette(Math.max(0,window.innerWidth/2-170),120);}
+  else{dockPalette();}
+};
+fab.onclick=openPalette;
+document.addEventListener("keydown",function(e){if(e.key==="Escape"){hidePalette();}});
+/* v5.67 stage 1: drag the header — undocks a docked palette, moves a floating one */
+(function(){
+  var head=document.getElementById("nwc-palette-head"),sx,sy,sl,st;
+  head.addEventListener("pointerdown",function(e){
+    if(e.target.closest("button")){return;}
+    if(pal.classList.contains("nwc-docked")){
+      var r0=pal.getBoundingClientRect();floatPalette(r0.left,r0.top);
+    }
+    sx=e.clientX;sy=e.clientY;
+    var r=pal.getBoundingClientRect();sl=r.left;st=r.top;
+    try{head.setPointerCapture(e.pointerId);}catch(err){}
+    function mv(ev){pal.style.left=(sl+ev.clientX-sx)+"px";pal.style.top=Math.max(0,st+ev.clientY-sy)+"px";}
+    function up(){head.removeEventListener("pointermove",mv);head.removeEventListener("pointerup",up);}
+    head.addEventListener("pointermove",mv);
+    head.addEventListener("pointerup",up);
+  });
+})();
+
+/* v5.67 stage 2: drive the REAL layer tab + subcategory chip — exactly what a
+   manual tap does. The tray strip rebuilds itself; the palette then mirrors it. */
+function clickSubChip(prefix){
+  var chips=document.querySelectorAll("#subcat-row .subcat-chip"),i,tx;
+  for(i=0;i<chips.length;i++){
+    tx=(chips[i].textContent||"").trim();
+    if(tx===prefix||tx.indexOf(prefix+" ")===0||tx.indexOf(prefix+"(")===0){chips[i].click();return true;}
+  }
+  return false;
+}
+var nwcCurCat=null;
+function activateCategory(cat){
+  nwcCurCat=cat;
+  var si=document.getElementById("strip-search");
+  if(si&&si.value){si.value="";si.dispatchEvent(new Event("input",{bubbles:true}));}
+  var lb=document.querySelector('#layer-seg button[data-layer="'+cat.layer+'"]');
+  if(lb){lb.click();}
+  if(cat.chip){clickSubChip(cat.chip);}
+  renderLiveTiles(cat);
+  openPalette();
+}
+/* v5.67 stage 2: the palette shows the REAL tiles — clones of the tray strip's
+   own swatches (same thumbnails, same order). A tap on a clone fires the
+   ORIGINAL swatch's onclick, so the outcome is identical to tapping the tray
+   strip (one selectTile path, audit §7). cloneNode never copies the onclick
+   property, so clones are clean slates we wire ourselves. */
+function liveSwatchSource(cat){
+  return cat.layer==="collision"
+    ? document.querySelectorAll("#collide-palette .sw")
+    : document.querySelectorAll("#paint-strip .sw");
+}
+function renderLiveTiles(cat){
+  palBody.innerHTML="";
+  palTitle.textContent=cat.label+" — tap a tile";
+  var wrap=document.createElement("div");wrap.className="nwc-pgrid";
+  var src=liveSwatchSource(cat),i;
+  for(i=0;i<src.length;i++){
+    (function(orig){
+      var c=orig.cloneNode(true);
+      c.removeAttribute("id");
+      c.classList.add("nwc-ptile");
+      c.classList.toggle("on",orig.classList.contains("sel"));
+      c.onclick=function(){
+        if(typeof orig.onclick==="function"){orig.onclick();}
+        syncLiveSel(cat,wrap);
+      };
+      wrap.appendChild(c);
+    })(src[i]);
+  }
+  palBody.appendChild(wrap);
+  var h=document.createElement("div");h.className="nwc-phint";
+  h.textContent=src.length?(src.length+" tiles — the same tiles as the tray strip"):"no tiles here yet";
+  palBody.appendChild(h);
+}
+function syncLiveSel(cat,wrap){
+  /* the real onclick rebuilt the strip synchronously — mirror its .sel */
+  var fresh=liveSwatchSource(cat),
+      tiles=wrap.querySelectorAll(".nwc-ptile"),k,selIdx=-1;
+  if(fresh.length!==tiles.length){renderLiveTiles(cat);return;}
+  for(k=0;k<fresh.length;k++){if(fresh[k].classList.contains("sel")){selIdx=k;break;}}
+  for(k=0;k<tiles.length;k++){tiles[k].classList.toggle("on",k===selIdx);}
+}
+/* v5.67 stage 2: tool cells delegate to the real handlers — a tap here IS a
+   tap on the tray's own button (audit §8). */
+function activateTool(tool){
+  if(tool.btn){
+    var b=document.getElementById(tool.btn);
+    if(b){b.click();}
+  }else if(tool.brush&&window.setBrushTool){
+    window.setBrushTool(tool.brush);
+  }
+  renderToolPalette(tool);
+  openPalette();
+}
+/* v5.67 stage 2: Height +/−/× labels live in the main script (const
+   HEIGHT_MODE_LABEL, script-scoped) — the palette reads the real button's text
+   and cycles it through real clicks until the wanted mode lands. */
+var NWC_HEIGHT_LABELS={raise:"Height +",lower:"Height \u2212",flatten:"Height \u00d7"};
+function setHeightMode(mode){
+  var b=document.getElementById("btn-height");if(!b){return;}
+  if(!b.classList.contains("on")){b.click();}
+  var target=NWC_HEIGHT_LABELS[mode],k;
+  for(k=0;k<4;k++){
+    if(b.textContent===target){break;}
+    b.click();
+  }
+  markHeightOpt();
+}
+function markHeightOpt(){
+  var b=document.getElementById("btn-height");if(!b){return;}
+  var btns=palBody.querySelectorAll("[data-nwc-hmode]"),k;
+  for(k=0;k<btns.length;k++){
+    btns[k].classList.toggle("on",NWC_HEIGHT_LABELS[btns[k].getAttribute("data-nwc-hmode")]===b.textContent);
+  }
+}
+function renderToolPalette(tool){
+  palBody.innerHTML="";
+  palTitle.textContent=tool.label+" — options";
+  var h,row,i;
+  if(tool.opts){
+    h=document.createElement("div");h.className="nwc-phint";h.textContent=tool.optTitle;
+    palBody.appendChild(h);
+    row=document.createElement("div");row.className="nwc-popt";
+    for(i=0;i<tool.opts.length;i++){
+      (function(key,label){
+        var bb=document.createElement("button");
+        bb.textContent=label;bb.setAttribute("data-nwc-hmode",key);
+        bb.onclick=function(){setHeightMode(key);};
+        row.appendChild(bb);
+      })(tool.opts[i][0],tool.opts[i][1]);
+    }
+    palBody.appendChild(row);
+    markHeightOpt();
+  }
+  if(tool.hint){
+    h=document.createElement("div");h.className="nwc-phint";h.textContent=tool.hint;
+    palBody.appendChild(h);
+  }
+}
+/* v5.67 stage 2: the new surface follows the menubar's owner rule —
+   #menu-users stays hidden unless ME.is_owner (updateUserMenu). Mirror it, and
+   watch it, so testers never get the new tool surface. */
+function nwcSecLabel(el){return el&&el.previousElementSibling;}
+function applyNwcGating(){
+  var ownerBtn=document.getElementById("menu-users");
+  var owner=!!(ownerBtn&&!ownerBtn.hidden);
+  var hide=function(el,on){if(el){el.hidden=!!on;}};
+  hide(catsEl,!owner);hide(nwcSecLabel(catsEl),!owner);
+  hide(toolsEl,!owner);hide(nwcSecLabel(toolsEl),!owner);
+  hide(dockEl,!owner);
+  if(!owner){hide(fab,true);}else{fab.hidden=pal.hidden;}
+}
+function buildCell(kind,item){
+  var d=document.createElement("div");d.className="nwc-cell";d.setAttribute("data-id",item.id);
+  var ico=document.createElement("div");ico.className="nwc-ico";ico.textContent=item.ico;
+  var lb=document.createElement("div");lb.className="nwc-lbl";lb.textContent=item.label;
+  d.appendChild(ico);d.appendChild(lb);
+  d.onclick=function(){
+    if(kind==="cat"){markOn(".nwc-cell",catsEl,item.id);markOn(".nwc-cell",toolsEl,null);activateCategory(item);}
+    else{markOn(".nwc-cell",toolsEl,item.id);markOn(".nwc-cell",catsEl,null);activateTool(item);}
+  };
+  return d;
+}
+(function init(){
+  var i;
+  for(i=0;i<CATS.length;i++){catsEl.appendChild(buildCell("cat",CATS[i]));}
+  for(i=0;i<TOOLS.length;i++){toolsEl.appendChild(buildCell("tool",TOOLS[i]));}
+  palTitle.textContent="Palette";
+  var h=document.createElement("div");h.className="nwc-phint";
+  h.textContent="Tap a tile category (left) or a tool (right) — this strip becomes its palette. Drag ⠿ to float it, × to hide it.";
+  palBody.appendChild(h);
+  applyNwcGating();
+  var mu=document.getElementById("menu-users");
+  if(mu&&window.MutationObserver){
+    new MutationObserver(applyNwcGating).observe(mu,{attributes:true,attributeFilter:["hidden"]});
+  }
+})();
 })();
 </script>
 </body>

@@ -125,7 +125,7 @@ On Harley, from the repository root, run:
 ```
 
 The wizard loads the key from the extensionless `melody\not_trash` file in
-the OneDrive Desktop checkout through `melody_keyfinder.py` (a Groq `gsk_`
+the OneDrive Desktop checkout through `tools\melody_keyfinder.py` (a Groq `gsk_`
 credential is expected; an xAI Grok key is a different provider). It checks
 that Groq accepts the key and selected model without sending a chat completion,
 encrypts it for this Windows account, restricts the secret directory ACL,

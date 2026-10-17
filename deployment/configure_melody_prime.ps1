@@ -8,7 +8,7 @@ param([string]$Model = 'openai/gpt-oss-20b')
 $ErrorActionPreference = 'Stop'
 $repoDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $python = Join-Path $repoDir '.venv\Scripts\python.exe'
-$keyFinder = Join-Path $repoDir 'melody_keyfinder.py'
+$keyFinder = Join-Path $repoDir 'tools\melody_keyfinder.py'
 $proxy = Join-Path $repoDir 'tools\melody_prime_proxy.py'
 $secretDir = Join-Path $env:LOCALAPPDATA 'CrumbsWorld\secrets'
 $secretFile = Join-Path $secretDir 'groq-api-key.dpapi'
@@ -19,7 +19,7 @@ foreach ($path in @($python,$keyFinder,$proxy)) {
 
 # Ask the existing finder for the key through a captured process pipe. The
 # value is never printed to the terminal or sent to a log.
-$keyPlain = (& $python -c "import melody_keyfinder,os,sys; sys.stdout.write(os.environ.get('GROQ_API_KEY',''))") -join ''
+$keyPlain = (& $python -c "import os,sys; sys.path.insert(0, os.path.join(r'$repoDir', 'tools')); import melody_keyfinder; sys.stdout.write(os.environ.get('GROQ_API_KEY',''))") -join ''
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($keyPlain)) {
     Remove-Variable keyPlain -ErrorAction SilentlyContinue
     throw 'melody_keyfinder.py did not find a usable key. Check its protected source file and configured search paths.'

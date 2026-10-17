@@ -545,7 +545,7 @@ def _update_changelog(current, limit=5):
     # v5.21: newest-first CHANGELOG.md sections strictly newer than
     # `current`, for the update dialog — Lloyd decides with the notes in
     # front of him.
-    raw = _update_fetch("CHANGELOG.md").decode("utf-8", "replace")
+    raw = _update_fetch("docs/CHANGELOG.md").decode("utf-8", "replace")
     entries, cur = [], None
     cur_v = _ver_tuple(current)
 
@@ -12695,8 +12695,8 @@ class Handler(BaseHTTPRequestHandler):
                                         "error": "unknown beginning"}, 400)
             if beginning != "blank":
                 source = starter_sources[beginning]
-                source_map = os.path.join(SCRIPT_DIR, source + ".json")
-                source_rules = os.path.join(SCRIPT_DIR, source + ".rules.json")
+                source_map = os.path.join(SCRIPT_DIR, "content", "maps", source + ".json")
+                source_rules = os.path.join(SCRIPT_DIR, "content", "maps", source + ".rules.json")
                 target_map, target_rules = _vpath(name), _rules_path(name)
                 created_map = created_rules = False
                 try:

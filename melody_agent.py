@@ -39,6 +39,9 @@ import urllib.error
 # reads GROQ_API_KEY. The finder never prints the key itself.
 if os.environ.get("MELODY_BRAIN", "").strip().lower() != "proxy":
     try:
+        _tools_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools")
+        if _tools_dir not in sys.path:
+            sys.path.insert(0, _tools_dir)
         import melody_keyfinder  # noqa: F401 -- loads GROQ_API_KEY into os.environ
     except (ImportError, SyntaxError) as exc:
         # Keep Melody's env-key/proxy backends available if the optional local

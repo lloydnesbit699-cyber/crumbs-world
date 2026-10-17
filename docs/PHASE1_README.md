@@ -15,7 +15,7 @@ Prove the core property:
 ## Test
 
 ```text
-python3 recovery_smoke_test.py
+python3 tests/recovery_smoke_test.py
 ```
 
 Expected:

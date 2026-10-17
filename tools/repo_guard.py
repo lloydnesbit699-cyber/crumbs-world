@@ -63,7 +63,7 @@ def inspect(root: Path = ROOT) -> list[str]:
     errors: list[str] = []
     py_path = root / "crumbs_hud.py"
     html_path = root / "editor.html"
-    changelog_path = root / "CHANGELOG.md"
+    changelog_path = root / "docs" / "CHANGELOG.md"
     try:
         py = py_path.read_text(encoding="utf-8")
         html = html_path.read_text(encoding="utf-8")
@@ -150,7 +150,7 @@ def create_release(root: Path, notes: str, bump: str = "patch") -> str:
     if not notes or not notes.strip():
         raise ValueError("release notes are required for a version bump")
     py_path = root / "crumbs_hud.py"
-    changelog_path = root / "CHANGELOG.md"
+    changelog_path = root / "docs" / "CHANGELOG.md"
     py = py_path.read_text(encoding="utf-8")
     changelog = changelog_path.read_text(encoding="utf-8")
     app_match = re.search(r'(?m)^APP_VERSION\s*=\s*["\'](\d+)\.(\d+)\.(\d+)["\']', py)

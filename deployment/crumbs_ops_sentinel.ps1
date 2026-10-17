@@ -56,7 +56,7 @@ function Get-OpsSnapshot {
     } else {
         Add-Check $items 'Python dependencies' 'FAIL' '.venv\Scripts\python.exe missing; run boots\crumbs-boot.ps1'
     }
-    $keyfinder = Join-Path $repoDir 'melody_keyfinder.py'
+    $keyfinder = Join-Path $repoDir 'tools\melody_keyfinder.py'
     $brainMode = [Environment]::GetEnvironmentVariable('MELODY_BRAIN', 'User')
     if (-not $brainMode) { $brainMode = [Environment]::GetEnvironmentVariable('MELODY_BRAIN', 'Process') }
     if (Test-Path -LiteralPath $keyfinder -PathType Leaf) {
@@ -97,7 +97,7 @@ function Get-OpsSnapshot {
         default {
             $brainReady = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable('GROQ_API_KEY', 'User')) -or
                 -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable('GROQ_API_KEY', 'Process'))
-            if (-not $brainReady -and (Test-Path -LiteralPath (Join-Path $repoDir 'melody_keyfinder.py') -PathType Leaf)) {
+            if (-not $brainReady -and (Test-Path -LiteralPath (Join-Path $repoDir 'tools\melody_keyfinder.py') -PathType Leaf)) {
                 $brainReady = $true
             }
             if (-not $brainReady) { $brainMissing += 'GROQ_API_KEY' }

@@ -3468,6 +3468,21 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   border:none;border-radius:999px;padding:12px 18px;font-size:14px;font-weight:700;cursor:pointer;
   box-shadow:0 6px 20px rgba(77,163,255,.4);}
 #nwc-palette-fab[hidden]{display:none;}
+/* v5.67 stage 3: legacy controls replaced by the new surface. Kept in the DOM
+   (Stage 2 drives them via .click()) — hidden only, fully reversible. */
+#paint-strip,#strip-search-row,#subcat-row,#collide-palette,
+#btn-select,#btn-eraser,#btn-height,#btn-portal,#btn-patrol,#btn-pan,
+#btn-traits,#btn-link,#btn-clear{display:none!important;}
+/* v5.67 stage 3: palette detail area — contextual home for the moved nodes
+   (anim preview, selection card, tile edit form). */
+#nwc-detail{border-top:1px solid #2c3145;max-height:38vh;overflow:auto;padding:8px 10px;}
+#nwc-detail[hidden]{display:none;}
+#nwc-detail .nwc-dlabel{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#9aa0b5;margin:2px 0 6px;}
+/* v5.67 stage 3: palette search + sub-category chips (clones of the real tray chips). */
+#nwc-search{width:100%;margin:0 0 8px;padding:10px 12px;font-size:14px;color:#e8eaf2;background:#1f2330;border:1px solid #2c3145;border-radius:8px;}
+.nwc-chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;}
+.nwc-chip{flex:none;padding:8px 12px;font-size:13px;color:#e8eaf2;background:#1f2330;border:2px solid #2c3145;border-radius:999px;cursor:pointer;}
+.nwc-chip.on{border-color:#4da3ff;box-shadow:0 0 0 1px #4da3ff;}
 </style>
 </head>
 <body>
@@ -3850,6 +3865,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   <div id="nwc-palette" class="nwc-docked">
     <div id="nwc-palette-head"><span class="nwc-grip">⠿⠿</span><span id="nwc-palette-title">Palette</span><button id="nwc-palette-dockbtn" title="dock / float">⤢</button><button id="nwc-palette-hide" title="hide (Esc)">×</button></div>
     <div id="nwc-palette-body"></div>
+    <div id="nwc-detail" hidden></div>
   </div>
 </div>
 <button id="nwc-palette-fab" hidden>🎨 Palette</button>
@@ -21820,7 +21836,8 @@ var palBody=document.getElementById("nwc-palette-body"),
     dockEl=document.getElementById("nwc-palette-dock"),
     dockBtn=document.getElementById("nwc-palette-dockbtn"),
     catsEl=document.getElementById("nwc-cat-grid"),
-    toolsEl=document.getElementById("nwc-tool-grid");
+    toolsEl=document.getElementById("nwc-tool-grid"),
+    detailEl=document.getElementById("nwc-detail");
 
 /* v5.67 stage 2: live mapping — each category drives the real layer tab +
    subcategory chip (audit §7), then mirrors the real strip swatches. */
@@ -21844,8 +21861,13 @@ var TOOLS=[
   {id:"height",label:"Height",ico:"⛰",btn:"btn-height",opts:[["raise","Raise"],["lower","Lower"],["flatten","Flatten"]],optTitle:"Sculpt mode"},
   {id:"portal",label:"Portal",ico:"🌀",btn:"btn-portal",hint:"Tap a door/cave tile, then tap its destination."},
   {id:"patrol",label:"Patrol",ico:"🚶",btn:"btn-patrol",hint:"Tap one of your placed characters, then his stops, then Done ✓."},
-  {id:"pan",label:"Pan",ico:"✋",btn:"btn-pan",hint:"Drag the map to move around."}
+  {id:"pan",label:"Pan",ico:"✋",btn:"btn-pan",hint:"Drag the map to move around."},
+  {id:"traits",label:"Traits",ico:"✨",btn:"btn-traits",hint:"Stamp nature traits: hot, cold, sharp, wood, food."},
+  {id:"link",label:"Collision stamp",ico:"🔗",btn:"btn-link",dynHint:nwcLinkHint},
+  {id:"clear",label:"Clear layer",ico:"🗑",btn:"btn-clear",hint:"Clears the current layer (asks first, undoable)."}
 ];
+/* v5.67 stage 3: live state read for the collision-stamp toggle cell. */
+function nwcLinkHint(){var b=document.getElementById("btn-link");return b?("Now: "+b.textContent):"";}
 
 function markOn(sel,el,id){
   var ns=el.querySelectorAll(sel),i;
@@ -21901,8 +21923,10 @@ function clickSubChip(prefix){
   return false;
 }
 var nwcCurCat=null;
+var nwcSearchText="";
 function activateCategory(cat){
   nwcCurCat=cat;
+  nwcSearchText="";
   var si=document.getElementById("strip-search");
   if(si&&si.value){si.value="";si.dispatchEvent(new Event("input",{bubbles:true}));}
   var lb=document.querySelector('#layer-seg button[data-layer="'+cat.layer+'"]');
@@ -21910,6 +21934,7 @@ function activateCategory(cat){
   if(cat.chip){clickSubChip(cat.chip);}
   renderLiveTiles(cat);
   openPalette();
+  refreshDetail();
 }
 /* v5.67 stage 2: the palette shows the REAL tiles — clones of the tray strip's
    own swatches (same thumbnails, same order). A tap on a clone fires the
@@ -21921,10 +21946,65 @@ function liveSwatchSource(cat){
     ? document.querySelectorAll("#collide-palette .sw")
     : document.querySelectorAll("#paint-strip .sw");
 }
+/* v5.67 stage 3: the palette carries its own search box — it drives the real
+   #strip-search filter, then the grid re-clones (same tiles, same order). */
 function renderLiveTiles(cat){
   palBody.innerHTML="";
   palTitle.textContent=cat.label+" — tap a tile";
-  var wrap=document.createElement("div");wrap.className="nwc-pgrid";
+  var si=document.createElement("input");
+  si.id="nwc-search";si.setAttribute("placeholder","search tiles…");
+  si.setAttribute("autocomplete","off");si.value=nwcSearchText;
+  si.addEventListener("input",function(){
+    nwcSearchText=si.value;
+    var real=document.getElementById("strip-search");
+    if(real){real.value=si.value;real.dispatchEvent(new Event("input",{bubbles:true}));}
+    refreshTileGrid(cat);
+  });
+  si.addEventListener("keydown",function(e){e.stopPropagation();});
+  palBody.appendChild(si);
+  renderChipRow(cat);
+  var wrap=document.createElement("div");wrap.className="nwc-pgrid";wrap.id="nwc-pgrid";
+  palBody.appendChild(wrap);
+  refreshTileGrid(cat);
+  var h=document.createElement("div");h.className="nwc-phint";
+  h.textContent="the same tiles as the tray strip — tap one to select it";
+  palBody.appendChild(h);
+}
+/* v5.67 stage 3: sub-category chips live in the palette now (the tray row is
+   hidden). Clones of the real chips — a tap IS a tap on the real chip.
+   Index-matched at tap time because the main script re-renders the row. */
+function renderChipRow(cat){
+  var chips=document.querySelectorAll("#subcat-row .subcat-chip");
+  if(!chips.length){return;}
+  var row=document.createElement("div");row.className="nwc-chips";row.id="nwc-chips";
+  var i;
+  for(i=0;i<chips.length;i++){
+    (function(idx){
+      var c=document.createElement("button");
+      c.type="button";
+      c.className="nwc-chip"+(chips[idx].classList.contains("on")?" on":"");
+      c.textContent=(chips[idx].textContent||"").trim();
+      c.onclick=function(){
+        var fresh=document.querySelectorAll("#subcat-row .subcat-chip");
+        if(fresh[idx]){fresh[idx].click();}
+        markChipRow();refreshTileGrid(cat);
+      };
+      row.appendChild(c);
+    })(i);
+  }
+  palBody.appendChild(row);
+}
+function markChipRow(){
+  var origs=document.querySelectorAll("#subcat-row .subcat-chip"),
+      clones=document.querySelectorAll("#nwc-chips .nwc-chip"),k;
+  for(k=0;k<clones.length&&k<origs.length;k++){
+    clones[k].classList.toggle("on",origs[k].classList.contains("on"));
+  }
+}
+function refreshTileGrid(cat){
+  var wrap=document.getElementById("nwc-pgrid");
+  if(!wrap){return;}
+  wrap.innerHTML="";
   var src=liveSwatchSource(cat),i;
   for(i=0;i<src.length;i++){
     (function(orig){
@@ -21935,14 +22015,12 @@ function renderLiveTiles(cat){
       c.onclick=function(){
         if(typeof orig.onclick==="function"){orig.onclick();}
         syncLiveSel(cat,wrap);
+        refreshDetail();
       };
       wrap.appendChild(c);
     })(src[i]);
   }
-  palBody.appendChild(wrap);
-  var h=document.createElement("div");h.className="nwc-phint";
-  h.textContent=src.length?(src.length+" tiles — the same tiles as the tray strip"):"no tiles here yet";
-  palBody.appendChild(h);
+  markChipRow();
 }
 function syncLiveSel(cat,wrap){
   /* the real onclick rebuilt the strip synchronously — mirror its .sel */
@@ -21955,6 +22033,7 @@ function syncLiveSel(cat,wrap){
 /* v5.67 stage 2: tool cells delegate to the real handlers — a tap here IS a
    tap on the tray's own button (audit §8). */
 function activateTool(tool){
+  nwcCurCat=null;
   if(tool.btn){
     var b=document.getElementById(tool.btn);
     if(b){b.click();}
@@ -21963,6 +22042,7 @@ function activateTool(tool){
   }
   renderToolPalette(tool);
   openPalette();
+  refreshDetail();
 }
 /* v5.67 stage 2: Height +/−/× labels live in the main script (const
    HEIGHT_MODE_LABEL, script-scoped) — the palette reads the real button's text
@@ -22004,8 +22084,9 @@ function renderToolPalette(tool){
     palBody.appendChild(row);
     markHeightOpt();
   }
-  if(tool.hint){
-    h=document.createElement("div");h.className="nwc-phint";h.textContent=tool.hint;
+  var hintText=(typeof tool.dynHint==="function")?tool.dynHint():tool.hint;
+  if(hintText){
+    h=document.createElement("div");h.className="nwc-phint";h.textContent=hintText;
     palBody.appendChild(h);
   }
 }
@@ -22020,6 +22101,10 @@ function applyNwcGating(){
   hide(catsEl,!owner);hide(nwcSecLabel(catsEl),!owner);
   hide(toolsEl,!owner);hide(nwcSecLabel(toolsEl),!owner);
   hide(dockEl,!owner);
+  /* v5.67 stage 3: probe diagnostic + import/sheet buttons are owner-only too. */
+  hide(document.getElementById("palette-probe"),!owner);
+  hide(document.getElementById("btn-import"),!owner);
+  hide(document.getElementById("btn-sheet"),!owner);
   if(!owner){hide(fab,true);}else{fab.hidden=pal.hidden;}
 }
 function buildCell(kind,item){
@@ -22033,6 +22118,31 @@ function buildCell(kind,item){
   };
   return d;
 }
+/* v5.67 stage 3: orphaned tray sections get palette-contextual homes. The nodes
+   move (ids + handlers intact — nothing references them via a tray-scoped
+   selector); the main script's own show/hide logic keeps working. */
+function moveOrphans(){
+  if(!detailEl){return;}
+  var ids=["anim-preview","sel-card","sel-empty","tile-edit-form"],i,el;
+  for(i=0;i<ids.length;i++){
+    el=document.getElementById(ids[i]);
+    if(el&&el.parentNode!==detailEl){detailEl.appendChild(el);}
+  }
+  if(!detailEl.querySelector(".nwc-dlabel")){
+    var lb=document.createElement("div");lb.className="nwc-dlabel";lb.textContent="Selection";
+    detailEl.insertBefore(lb,detailEl.firstChild);
+  }
+}
+/* v5.67 stage 3: the detail area shows when its content is relevant — a tile
+   category is active (anim preview), a character is selected, or the tile
+   editor opened. Otherwise it stays out of the way. */
+function refreshDetail(){
+  if(!detailEl){return;}
+  var show=!!nwcCurCat;
+  var sc=document.getElementById("sel-card"),tef=document.getElementById("tile-edit-form");
+  if((sc&&!sc.hidden)||(tef&&!tef.hidden)){show=true;}
+  detailEl.hidden=!show;
+}
 (function init(){
   var i;
   for(i=0;i<CATS.length;i++){catsEl.appendChild(buildCell("cat",CATS[i]));}
@@ -22042,9 +22152,15 @@ function buildCell(kind,item){
   h.textContent="Tap a tile category (left) or a tool (right) — this strip becomes its palette. Drag ⠿ to float it, × to hide it.";
   palBody.appendChild(h);
   applyNwcGating();
-  var mu=document.getElementById("menu-users");
-  if(mu&&window.MutationObserver){
-    new MutationObserver(applyNwcGating).observe(mu,{attributes:true,attributeFilter:["hidden"]});
+  moveOrphans();refreshDetail();
+  if(window.MutationObserver){
+    var mu=document.getElementById("menu-users");
+    if(mu){new MutationObserver(applyNwcGating).observe(mu,{attributes:true,attributeFilter:["hidden"]});}
+    /* v5.67 stage 3: the detail area follows the card / edit form. */
+    ["sel-card","tile-edit-form"].forEach(function(id){
+      var n=document.getElementById(id);
+      if(n){new MutationObserver(refreshDetail).observe(n,{attributes:true,attributeFilter:["hidden"]});}
+    });
   }
 })();
 })();

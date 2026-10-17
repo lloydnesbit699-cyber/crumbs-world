@@ -31,8 +31,8 @@ jobs:
       - name: Test repo guard repair and rejection cases
         run: python tools/repo_guard_test.py
       - name: Test account security helpers
-        run: python auth_test.py
+        run: python tests/auth_test.py
       - name: Test checkpoint recovery
-        run: python recovery_smoke_test.py
+        run: python tests/recovery_smoke_test.py
       - name: Test game core smoke cases
-        run: python core_smoke_test.py
+        run: python tests/core_smoke_test.py

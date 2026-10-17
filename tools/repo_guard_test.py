@@ -11,13 +11,14 @@ class RepoGuardTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="crumbs-repo-guard-")
         self.root = Path(self.temp.name)
         (self.root / "tools").mkdir()
+        (self.root / "docs").mkdir()
         (self.root / "crumbs_hud.py").write_text(
             'APP_VERSION = "1.2.3"\nUPDATE_FILES = ["editor.html", "crumbs_hud.py"]\n'
             'UPDATE_ART_FILES = ["logo.png"]\n', encoding="utf-8")
         (self.root / "editor.html").write_text(
             'const names = ["editor.html"];\nconst artNames = ["logo.png"];\n',
             encoding="utf-8")
-        (self.root / "CHANGELOG.md").write_text(
+        (self.root / "docs" / "CHANGELOG.md").write_text(
             "# Changes\n\n## v1.2.3 — today\n", encoding="utf-8")
         (self.root / ".gitignore").write_text("# local files\n", encoding="utf-8")
         for name in ("editor.html", "crumbs_hud.py", "logo.png"):
@@ -38,7 +39,7 @@ class RepoGuardTests(unittest.TestCase):
         self.assertEqual(repo_guard.fix(self.root), [])
 
     def test_check_rejects_version_changelog_mismatch(self):
-        (self.root / "CHANGELOG.md").write_text("# Changes\n\n## v1.2.2 — old\n", encoding="utf-8")
+        (self.root / "docs" / "CHANGELOG.md").write_text("# Changes\n\n## v1.2.2 — old\n", encoding="utf-8")
         self.assertTrue(any("CHANGELOG top version" in item for item in repo_guard.inspect(self.root)))
 
     def test_check_rejects_tracked_private_profile_data(self):
@@ -55,7 +56,7 @@ class RepoGuardTests(unittest.TestCase):
         version = repo_guard.create_release(self.root, "Add a safe release test.", "minor")
         self.assertEqual(version, "1.3.0")
         py = (self.root / "crumbs_hud.py").read_text(encoding="utf-8")
-        log = (self.root / "CHANGELOG.md").read_text(encoding="utf-8")
+        log = (self.root / "docs" / "CHANGELOG.md").read_text(encoding="utf-8")
         self.assertIn('APP_VERSION = "1.3.0"', py)
         self.assertTrue(log.startswith("# Changes\n\n## v1.3.0 — "))
         repo_guard.fix(self.root)

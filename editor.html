@@ -3471,8 +3471,11 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
 /* v5.67 stage 3: legacy controls replaced by the new surface. Kept in the DOM
    (Stage 2 drives them via .click()) — hidden only, fully reversible. */
 #paint-strip,#strip-search-row,#subcat-row,#collide-palette,
-#btn-select,#btn-eraser,#btn-height,#btn-portal,#btn-patrol,#btn-pan,
+#btn-select,#btn-eraser,#btn-height,#btn-portal,#btn-patrol,
 #btn-traits,#btn-link,#btn-clear{display:none!important;}
+/* v5.67.0: #btn-pan is NOT in the hide list on purpose — Lloyd's call:
+   the Move (pan) toggle lives in the zoom cluster where it always did,
+   visible for everyone, not only inside the new-console Pan cell. */
 /* v5.67 stage 3: palette detail area — contextual home for the moved nodes
    (anim preview, selection card, tile edit form). */
 #nwc-detail{border-top:1px solid #2c3145;max-height:38vh;overflow:auto;padding:8px 10px;}
@@ -4409,7 +4412,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   <button id="zoom-out" title="Zoom out">&minus;</button>
   <button id="zoom-in" title="Zoom in">+</button>
   <button id="zoom-fit" title="Fit map to screen">Fit</button>
-  <button id="btn-pan" title="Pan the map instead of painting">Move</button>
+  <button id="btn-pan" title="Move: pan the map instead of painting (arrow keys pan too)">Move</button>
 </div>
 
 <!-- v5.61.0: dynamic minimap with static toggle — Lloyd's call. Bottom-left
@@ -8824,6 +8827,48 @@ $("btn-pan").onclick = () => {
   $("btn-pan").classList.toggle("on", panMode);
   toast(panMode ? "move mode — drag the map to pan" : "paint mode");
 };
+
+// ---- v5.67.0: keyboard movement — Lloyd's split ---------------------------
+// Arrow keys move the MAP (pan the camera, one tile per press, in the
+// arrow's direction). WASD moves the CHARACTER, in Play mode only, riding
+// the exact same doStep() the D-pad and gamepad use. Nothing here fires
+// while you're typing in a field, and Ctrl/Meta/Alt combos stay the
+// browser's. The D-pad, tap-to-walk, and controller paths are untouched.
+function kbTypingTarget(t) {
+  return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" ||
+                 t.tagName === "SELECT" || t.isContentEditable === true);
+}
+function panMapByTiles(dx, dy) {
+  if (!W) return;
+  panX -= dx * tilePx;
+  panY -= dy * tilePx;
+  clampPan(); layout();
+}
+let kbStepCool = 0;   // v5.67.0: WASD step cooldown, mirrors the gamepad's padCool
+function kbCharStep(dx, dy) {
+  const now = performance.now();
+  if (now < kbStepCool) return;
+  kbStepCool = now + Math.max((typeof RULES !== "undefined" && RULES.walk_ms) || 140, 150);
+  doStep(dx, dy, false);
+}
+function onKbMove(e) {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (kbTypingTarget(e.target)) return;
+  let handled = true;
+  switch (e.key) {
+    case "ArrowLeft":  panMapByTiles(-1, 0); break;
+    case "ArrowRight": panMapByTiles(1, 0); break;
+    case "ArrowUp":    panMapByTiles(0, -1); break;
+    case "ArrowDown":  panMapByTiles(0, 1); break;
+    case "w": case "W": if (playMode) kbCharStep(0, -1); else handled = false; break;
+    case "s": case "S": if (playMode) kbCharStep(0, 1); else handled = false; break;
+    case "a": case "A": if (playMode) kbCharStep(-1, 0); else handled = false; break;
+    case "d": case "D": if (playMode) kbCharStep(1, 0); else handled = false; break;
+    default: handled = false;
+  }
+  if (handled) e.preventDefault();
+}
+document.addEventListener("keydown", onKbMove);
 
 // ---- playtest ---------------------------------------------------------------
 let playOver = false;   // v3.9: a win/lose freezes movement until Play again

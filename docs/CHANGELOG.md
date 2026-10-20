@@ -3,6 +3,10 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v5.67.0 — 2026-10-20
+
+**New-console layout + keyboard movement.** The v5.67 new-console surface (stages 1–4, already on main) ships as a release: category/tool palette that drives the real editor controls, brush modes in the tool grid, and a contextual selection detail area. The Move (pan) toggle is restored to the zoom cluster for everyone — v5.67 stage 3 had hidden it, Lloyd called it back. Keyboard movement, Lloyd's split: arrow keys pan the map one tile per press, WASD moves the character in Play mode through the same step path as the D-pad and gamepad (typing in any field is never stolen, browser shortcuts untouched). Verified: keyboard_move_client_test 18/18, repo-verify suite green.
+
 ## v5.66.2 — 2026-10-16
 
 Add release checks and gated Harley deployment.

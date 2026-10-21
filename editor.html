@@ -5028,7 +5028,19 @@ async function api(path, body) {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const r = await fetch(path, opt);
-      const j = await r.json();
+      // v6.1: read as text first. During a server restart the Funnel
+      // answers with an HTML error page, and r.json() on it throws a
+      // bare Safari SyntaxError ("did not match the expected pattern")
+      // that reads like a game bug and hides the real cause. Name it.
+      const raw = await r.text();
+      let j;
+      try { j = JSON.parse(raw); }
+      catch (parseErr) {
+        const err = new Error("server sent a non-JSON reply (HTTP " +
+          r.status + ") — likely a restart in progress");
+        err.nonJson = true;
+        throw err;
+      }
       // v5.27: Lloyd's firm direction — players NEVER deal with the share
       // key. The old auto-prompt dialog is gone for good: in public mode
       // an unauthenticated visitor gets the login overlay (see authGate /
@@ -9471,7 +9483,15 @@ async function playTap(cell) {
       Math.max(Math.abs(n.x - hero.x), Math.abs(n.y - hero.y)) <= 1);
     if (w) { fireWalkerInteract(w); return; }
   }
-  const r = await api("/api/play/move", { x: cell.x, y: cell.y });
+  let r;
+  try { r = await api("/api/play/move", { x: cell.x, y: cell.y }); }
+  catch (e) {   // v6.1: a restart mid-tap used to escape as a raw
+    // "unhandled rejection" JS toast. The server banner already owns
+    // the "server away" story — just don't walk. (House style: the
+    // keyboard step caller wraps its api call the same way.)
+    toast("that tap didn't reach the server — try again in a moment");
+    return;
+  }
   if (!r.ok) { toast("play failed"); return; }
   if (r.edge_warp && !r.warp) r.warp = r.edge_warp;  // v5.42: edge crossing
   if (r.warp) { await warpRefresh(r); return; }   // v5.29: stepped through a portal

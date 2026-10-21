@@ -7285,11 +7285,21 @@ def _import_bundle(raw, want_name):
             try:
                 with open(tmp, "x", encoding="utf-8") as f:
                     json.dump(data, f)
-                os.replace(tmp, target)
+                # Hard-link creation is atomic and fails if another process
+                # created the destination after the collision check. Unlike
+                # os.replace(), it can never overwrite that file.
+                os.link(tmp, target)
                 wrote.append(out)
             finally:
                 if os.path.exists(tmp):
                     os.unlink(tmp)
+    except FileExistsError:
+        for out in wrote:
+            try:
+                os.unlink(_vpath(out))
+            except OSError:
+                pass
+        return False, "an import with that name already exists; retry"
     except Exception as e:
         for out in wrote:
             try:

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// keyboard_move_client_test.js — v5.67.0 keyboard movement (Lloyd's split).
-// Arrow keys pan the MAP; WASD moves the CHARACTER in Play mode only.
+// keyboard_move_client_test.js — keyboard movement (Lloyd's split).
+// Build arrows pan the MAP; Play arrows + WASD move the CHARACTER.
 // Also guards the restored Move toggle: #btn-pan must NOT be in the
 // v5.67 stage-3 hide list, and its zoom-cluster button + handler must exist.
 // Run: node tests/keyboard_move_client_test.js
@@ -35,29 +35,33 @@ check("keyboard block found", start >= 0 && end > start);
 const src = html.slice(start, end + endMarker.length);
 
 // stubbed globals the block rides on
-let W = 20, tilePx = 32, panX = 0, panY = 0, playMode = false;
+let W = 20, tilePx = 32;
 let RULES = { walk_ms: 140 };
 let layoutCalls = 0, clampCalls = 0;
-function clampPan() { clampCalls++; panX = Math.max(-500, Math.min(500, panX)); panY = Math.max(-500, Math.min(500, panY)); }
+function clampPan() { clampCalls++; state.panX = Math.max(-500, Math.min(500, state.panX)); state.panY = Math.max(-500, Math.min(500, state.panY)); }
 function layout() { layoutCalls++; }
 let steps = [];
 function doStep(dx, dy, repeat) { steps.push([dx, dy, repeat]); }
+const state = { panX: 0, panY: 0, playMode: false, buildBreak: false };
+let selectedInstance = null, objects = [];
+function moveTap() {}
+function zoomCenter() {}
+function playInteract() {}
+let testNow = 1000;
+const testPerformance = { now: () => testNow };
 let kbHandler = null;
 const documentStub = { addEventListener: (ev, fn) => { if (ev === "keydown") kbHandler = fn; } };
 
-// panX/panY/playMode live in module scope in the real page — the test
-// rebinds them through a shared state object so presses can be observed:
-const state = { panX: 0, panY: 0, playMode: false };
+// Rebind page state through a shared object so presses can be observed.
 const src2 = src
-  .replace("panX -= dx * tilePx;", "state.panX -= dx * tilePx;")
-  .replace("panY -= dy * tilePx;", "state.panY -= dy * tilePx;")
-  .replace("if (playMode) kbCharStep(0, -1)", "if (state.playMode) kbCharStep(0, -1)")
-  .replace("if (playMode) kbCharStep(0, 1)", "if (state.playMode) kbCharStep(0, 1)")
-  .replace("if (playMode) kbCharStep(-1, 0)", "if (state.playMode) kbCharStep(-1, 0)")
-  .replace("if (playMode) kbCharStep(1, 0)", "if (state.playMode) kbCharStep(1, 0)");
-clampPan = function () { state.panX = Math.max(-500, Math.min(500, state.panX)); state.panY = Math.max(-500, Math.min(500, state.panY)); };
+  .replace(/\bpanX\b/g, "state.panX")
+  .replace(/\bpanY\b/g, "state.panY")
+  .replace(/\bplayMode\b/g, "state.playMode")
+  .replace(/\bbuildBreak\b/g, "state.buildBreak");
 const api = new Function("W", "tilePx", "state", "RULES", "clampPan", "layout", "doStep", "document", "performance",
-  src2 + "\nreturn { onKbMove, kbTypingTarget };")(W, tilePx, state, RULES, clampPan, layout, doStep, documentStub, performance);
+  "selectedInstance", "objects", "moveTap", "zoomCenter", "playInteract",
+  src2 + "\nreturn { onKbMove, kbTypingTarget };")(W, tilePx, state, RULES, clampPan, layout, doStep, documentStub, testPerformance,
+  selectedInstance, objects, moveTap, zoomCenter, playInteract);
 check("keydown listener registered", typeof kbHandler === "function" || typeof api.onKbMove === "function");
 const onKbMove = api.onKbMove;
 
@@ -68,7 +72,7 @@ function key(k, target, mods) {
   return prevented;
 }
 
-// arrows pan the camera one tile, in the arrow's direction
+// In Build mode arrows pan the camera one tile, in the arrow's direction
 state.panX = 0; state.panY = 0;
 check("ArrowRight handled + prevented", key("ArrowRight") === true);
 check("ArrowRight moves view right (panX -= tile)", state.panX === -32 && state.panY === 0,
@@ -77,12 +81,14 @@ key("ArrowLeft"); check("ArrowLeft moves view back", state.panX === 0);
 key("ArrowDown"); check("ArrowDown moves view down", state.panY === -32);
 key("ArrowUp"); check("ArrowUp moves view back", state.panY === 0);
 
-// WASD does nothing outside Play mode
+// WASD does nothing outside Play mode when no object is selected
 steps = [];
 check("W ignored in edit mode", key("w") === false && steps.length === 0);
 
-// WASD moves the character in Play mode
+// Both arrow keys and WASD move the character in Play mode
 state.playMode = true;
+key("ArrowRight"); check("Right arrow steps hero right", steps.length === 1 && steps[0][0] === 1 && steps[0][1] === 0, JSON.stringify(steps));
+steps = []; state.playMode = false; key("w"); state.playMode = true; testNow += 200;
 key("w"); check("W steps hero up", steps.length === 1 && steps[0][0] === 0 && steps[0][1] === -1, JSON.stringify(steps));
 // cooldown: an immediate second press is swallowed (gamepad-style throttle)
 // (walk_ms 140 -> cool 150ms; real time has not advanced)

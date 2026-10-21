@@ -8,7 +8,7 @@
 // size, while every HUD chrome rule is fixed-px CSS with zero tilePx
 // references. This suite locks that invariant in:
 //   1. static: no tilePx in the stylesheet; no CSS `zoom` on HUD; HUD buttons fixed px
-//   2. live: zoomAt keeps the tile under the cursor anchored; tilePx clamps [8, maxTilePx]
+//   2. live: zoomAt keeps the tile under the cursor anchored; tilePx clamps [1, maxTilePx]
 //   3. live: clampPan bounds hold at min and max zoom; layout() folds pan into a translate
 //   4. static: hero / NPC / Melody sprites are drawn from tile coords × tilePx
 //             (map content scales with zoom — correctly — and never drifts)
@@ -75,7 +75,7 @@ ${extract("zoomAt")}
   const out={};
   tilePx=32; panX=0; panY=0;
   zoomAt(683,350,200); out.clampMax=tilePx;   // maxTilePx for 64x64 is 64
-  zoomAt(683,350,1);   out.clampMin=tilePx;   // floor is 8
+  zoomAt(683,350,1);   out.clampMin=tilePx;   // floor is 1
   // anchor invariance: the tile under the cursor is identical before/after
   tilePx=16; panX=0; panY=0;
   const ax=683, ay=350-48;
@@ -84,9 +84,9 @@ ${extract("zoomAt")}
   const tx1=(ax-((1366-64*48)/2+panX))/48, ty1=(ay-((700-64*48)/2+panY))/48;
   out.anchorTx=Math.abs(tx1-tx0)<1e-9; out.anchorTy=Math.abs(ty1-ty0)<1e-9;
   out.zoomedTo=48;
-  // clampPan bounds at min zoom (tilePx=8) and max zoom (tilePx=64)
-  tilePx=8; panX=1e6; panY=-1e6; clampPan();
-  out.panMinX=panX===(1366+64*8)/2; out.panMinY=panY===-(700+64*8)/2;
+  // clampPan bounds at min zoom (tilePx=1) and max zoom (tilePx=64)
+  tilePx=1; panX=1e6; panY=-1e6; clampPan();
+  out.panMinX=panX===(1366+64)/2; out.panMinY=panY===-(700+64)/2;
   tilePx=64; panX=1e6; panY=0; clampPan();
   out.panMaxX=panX===(1366+64*64)/2;
   // layout() folds the pan into a plain translate — no scale, ever
@@ -99,7 +99,7 @@ ${extract("zoomAt")}
 eval(driver);
 const zr = globalThis.__zr;
 check("zoomAt clamps to maxTilePx (64 on a 64x64 map)", zr.clampMax === 64, "got " + zr.clampMax);
-check("zoomAt clamps to the 8px floor", zr.clampMin === 8, "got " + zr.clampMin);
+check("zoomAt clamps to the 1px floor", zr.clampMin === 1, "got " + zr.clampMin);
 check("zoomAt lands on the requested tile size", zr.zoomedTo === 48);
 check("zoomAt keeps the tile under the cursor anchored (x)", zr.anchorTx);
 check("zoomAt keeps the tile under the cursor anchored (y)", zr.anchorTy);
@@ -202,8 +202,8 @@ ${html.match(/canvas\.addEventListener\("wheel", onCanvasWheel, \{ passive: fals
   // direction: pinch-out (negative deltaY) zooms in, pinch-in zooms out
   tilePx=32; _pinchAccum=0; onCanvasWheel(mk(-60)); out.dirIn=tilePx===40;
   tilePx=32; _pinchAccum=0; onCanvasWheel(mk(60)); out.dirOut=tilePx===24;
-  // clamps ride zoomAt: floor 8, and maxTilePx (64 on a 64x64 map)
-  tilePx=8; _pinchAccum=0; onCanvasWheel(mk(500)); out.clampMin=tilePx===8;
+  // clamps ride zoomAt: floor 1, and maxTilePx (64 on a 64x64 map)
+  tilePx=1; _pinchAccum=0; onCanvasWheel(mk(500)); out.clampMin=tilePx===1;
   tilePx=64; _pinchAccum=0; onCanvasWheel(mk(-500)); out.clampMax=tilePx===64;
   return out;
 })();

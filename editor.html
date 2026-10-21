@@ -275,6 +275,8 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
      identically at every zoom level, no browser scroll quirks */
   #stage { position: fixed; top: 48px; left: 0; right: 0; bottom: 0; overflow: hidden;
            background: #0a0a0a; touch-action: none; }
+  body.play-follow #grid { transition: transform 120ms linear; }
+  @media (prefers-reduced-motion: reduce) { body.play-follow #grid { transition: none; } }
   /* v5.61 Stage 4: shell-frame trim — /classic?shellframe=1 is the tester
      shell's Canvas Home view. Hides workshop chrome so the map fills the
      viewport; pan/zoom/edit internals are untouched. Additive only: the
@@ -3574,11 +3576,16 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   border:none;border-radius:999px;padding:12px 18px;font-size:14px;font-weight:700;cursor:pointer;
   box-shadow:0 6px 20px rgba(77,163,255,.4);}
 #nwc-palette-fab[hidden]{display:none;}
-/* v5.67 stage 3: legacy controls replaced by the new surface. Kept in the DOM
-   (Stage 2 drives them via .click()) — hidden only, fully reversible. */
+/* Legacy layer/tool controls stay wired as the source of truth, but the trays
+   show the compact grids; contextual controls move into the shared palette. */
 #paint-strip,#strip-search-row,#subcat-row,#collide-palette,
 #btn-select,#btn-eraser,#btn-height,#btn-portal,#btn-patrol,
 #btn-traits,#btn-link,#btn-clear{display:none!important;}
+#tray-left > #layer-seg,#tray-left > #theme-row,#tray-left > .grp-label,
+#tray-left > #stamp-row,#tray-left > #scatter-row,#tray-left > #palette-probe,
+#tray-right > hr,#tray-right > #menu-rules,#tray-right > #menu-world,
+#tray-right > #menu-items,#tray-right > #menu-npcs{display:none!important;}
+#tray-right > #btn-patrol-done{display:none!important;}
 /* v5.67.0: #btn-pan is NOT in the hide list on purpose — Lloyd's call:
    the Move (pan) toggle lives in the zoom cluster where it always did,
    visible for everyone, not only inside the new-console Pan cell. */
@@ -3972,7 +3979,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
      Stage 2 wires live tiles/tools into it. -->
 <div id="nwc-palette-dock">
   <div id="nwc-palette" class="nwc-docked">
-    <div id="nwc-palette-head"><span class="nwc-grip">⠿⠿</span><span id="nwc-palette-title">Palette</span><button id="nwc-palette-dockbtn" title="dock / float">⤢</button><button id="nwc-palette-hide" title="hide (Esc)">×</button></div>
+  <div id="nwc-palette-head"><span class="nwc-grip">⠿⠿</span><span id="nwc-palette-title">Palette</span><button id="nwc-palette-dockbtn" title="dock palette">⇲</button><button id="nwc-palette-hide" title="hide (Esc)">×</button></div>
     <div id="nwc-palette-body"></div>
     <div id="nwc-detail" hidden></div>
   </div>
@@ -4710,6 +4717,8 @@ if (WRITE_KEY && window.history && window.history.replaceState) {
 const $ = id => document.getElementById(id);
 const canvas = $("grid"), ctx = canvas.getContext("2d");
 const stage = $("stage");
+let objectDrag = null;              // build-only drag of an existing placed object
+let objectDragFrame = 0;
 
 let W = 25, H = 15;                 // map dims from server
 let tiles = [], objects = [], coll = [];
@@ -4777,14 +4786,18 @@ let tilePx = 32;
 let manualZoom = false;   // v1.5: until the user zooms, tiles auto-fit the screen
 function fitTiles() {
   if (manualZoom || !W) return;
-  const w = $("stage").clientWidth - 16;
-  if (w > 0) tilePx = Math.max(8, Math.min(40, maxTilePx(), Math.floor(w / W)));
+  const stageEl = $("stage");
+  const w = stageEl.clientWidth - 16, h = stageEl.clientHeight - 16;
+  if (w > 0 && h > 0) {
+    const fit = Math.floor(Math.min(w / Math.max(W, 1), h / Math.max(H, 1)));
+    tilePx = Math.max(1, Math.min(40, maxTilePx(), fit));
+  }
 }
-// v5.41: canvas memory guard — the full-map backing canvas must stay ≤4096px
-// per side (67MB), the largest dimension safe on every iOS Safari. On a
-// 500×500 map that means 8px tiles max; smaller maps are unaffected.
+// v5.41: canvas memory guard — the full-map backing canvas stays ≤4096px
+// per side. Large maps can zoom down to one pixel per tile while this cap
+// still bounds the canvas; smaller maps can zoom in up to 64px per tile.
 const MAX_CANVAS_DIM = 4096;
-function maxTilePx() { return Math.max(8, Math.min(64, Math.floor(MAX_CANVAS_DIM / Math.max(W, H, 1)))); }
+function maxTilePx() { return Math.max(1, Math.min(64, Math.floor(MAX_CANVAS_DIM / Math.max(W, H, 1)))); }
 window.addEventListener("resize", () => { fitTiles(); clampPan(); clampDpad(); render(); maybeHintPageZoomSoon(); });
 // v2.2 camera: the canvas is absolutely positioned; layout() centers it in
 // the stage and applies the pan offset. No scroll container is involved, so
@@ -4899,7 +4912,7 @@ function initMinimap() {
   });
 }
 function zoomAt(clientX, clientY, newPx) {
-  newPx = Math.max(8, Math.min(maxTilePx(), newPx));
+  newPx = Math.max(1, Math.min(maxTilePx(), newPx));
   if (newPx === tilePx || !W) return;
   const r = stage.getBoundingClientRect();
   const ax = clientX - r.left, ay = clientY - r.top;
@@ -7192,12 +7205,14 @@ function render() {
     // for wall cells, a glowing dashed route for patrol joins.
     drawSuggestGhost();
     // v4.8: the working selection wears a gold dashed outline on the map
-    const _sel = moveArmed || (selectTool && inspectPos);
+    const _sel = (objectDrag && objectDrag.to) || moveArmed || (selectTool && inspectPos);
     if (_sel) {
       ctx.save();
       ctx.strokeStyle = "#ffd75f"; ctx.lineWidth = Math.max(2, tilePx * 0.08);
       ctx.setLineDash([tilePx * 0.28, tilePx * 0.16]);
-      ctx.strokeRect(_sel.x * tilePx + 3, _sel.y * tilePx + 3, tilePx - 6, tilePx - 6);
+      const inset = Math.min(3, tilePx * 0.12);
+      ctx.strokeRect(_sel.x * tilePx + inset, _sel.y * tilePx + inset,
+        Math.max(0, tilePx - inset * 2), Math.max(0, tilePx - inset * 2));
       ctx.restore();
     }
   }
@@ -7297,10 +7312,30 @@ function render() {
       if (!visGrid[y][x]) ctx.fillRect(x * tilePx, y * tilePx, tilePx, tilePx);
     }
   }
+  if (objectDrag && objectDrag.moved && objectDrag.to) {
+    const source = objects[objectDrag.from.y] && objects[objectDrag.from.y][objectDrag.from.x];
+    const im = source == null ? null : tileFrameImage(objTid(source));
+    const size = source == null ? 1 : objSize(source);
+    const gx = objectDrag.to.x * tilePx, gy = objectDrag.to.y * tilePx;
+    ctx.save(); ctx.globalAlpha = 0.72;
+    if (im) ctx.drawImage(im, gx, gy + tilePx - tilePx * size, tilePx * size, tilePx * size);
+    else { ctx.fillStyle = "rgba(255,215,95,.55)"; ctx.fillRect(gx, gy, tilePx, tilePx); }
+    ctx.restore();
+  }
   if (playMode && worldWeather !== "clear") drawWeather();  // v4.1: the sky performs
   if (clipCaption) drawClipCaption();   // v5.53: auto-clip subtitles — her words on the film
+  followPlayHero();                    // center the active character, only during play
   layout();   // v2.2: re-center + apply pan offset after every draw
   if (typeof renderMinimap === "function") renderMinimap();  // v5.61.0: throttled live minimap
+}
+
+// The camera is expressed in stage-local pixels, so centering the controlled
+// character here is independent of the browser window's origin or HUD height.
+function followPlayHero() {
+  if (!playMode || buildBreak || !hero || !W || !H) return;
+  panX = (W / 2 - hero.x - 0.5) * tilePx;
+  panY = (H / 2 - hero.y - 0.5) * tilePx;
+  clampPan();
 }
 
 // ---- painting -------------------------------------------------------------
@@ -7310,6 +7345,51 @@ function evCell(e) {
   const y = Math.floor((e.clientY - r.top) / tilePx);
   if (x < 0 || y < 0 || x >= W || y >= H) return null;
   return { x, y };
+}
+function updateObjectDrag(x, y) {
+  if (!objectDrag) return;
+  objectDrag.x = x; objectDrag.y = y;
+  if (!objectDrag.moved && Math.hypot(x - objectDrag.startX, y - objectDrag.startY) >= 6) {
+    objectDrag.moved = true;
+    objectDrag.to = evCell({ clientX: x, clientY: y });
+  }
+  if (objectDrag.moved) {
+    objectDrag.to = evCell({ clientX: x, clientY: y });
+    queueRender();
+    if (!objectDragFrame) objectDragFrame = requestAnimationFrame(objectDragAutoPan);
+  }
+}
+function objectDragAutoPan() {
+  objectDragFrame = 0;
+  const drag = objectDrag;
+  if (!drag || !drag.moved) return;
+  const r = stage.getBoundingClientRect(), edge = 48;
+  const speed = d => Math.ceil(3 * Math.min(1, Math.max(0, d / edge)));
+  let dx = drag.x < r.left + edge ? speed(r.left + edge - drag.x)
+    : drag.x > r.right - edge ? -speed(drag.x - (r.right - edge)) : 0;
+  let dy = drag.y < r.top + edge ? speed(r.top + edge - drag.y)
+    : drag.y > r.bottom - edge ? -speed(drag.y - (r.bottom - edge)) : 0;
+  if (!dx && !dy) return;
+  const px = panX, py = panY;
+  panX += dx; panY += dy;
+  clampPan();
+  if (panX === px && panY === py) return;
+  layout();                         // canvas bounds now include the new pan offset
+  drag.to = evCell({ clientX: drag.x, clientY: drag.y });
+  queueRender();
+  objectDragFrame = requestAnimationFrame(objectDragAutoPan);
+}
+async function finishObjectDrag(e, cancelled) {
+  const drag = objectDrag;
+  if (!drag || drag.pointerId !== e.pointerId) return;
+  if (objectDragFrame) cancelAnimationFrame(objectDragFrame);
+  objectDragFrame = 0; objectDrag = null;
+  if (cancelled) { queueRender(); return; }
+  if (!drag.moved) { await inspectTap(drag.from); return; }
+  const to = evCell(e);
+  if (!to || (to.x === drag.from.x && to.y === drag.from.y)) { queueRender(); return; }
+  moveArmed = drag.from;
+  await moveTap(to);
 }
 function brushValue() {
   if (paintLayer() === "collision") return erasing ? false : selCollide;
@@ -8654,6 +8734,8 @@ canvas.addEventListener("pointerdown", async e => {
   try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
   if (ptrs.size === 2) {
     // v2.1: second finger down — drop any in-progress paint, gesture takes over
+    if (objectDragFrame) cancelAnimationFrame(objectDragFrame);
+    objectDragFrame = 0; objectDrag = null;
     gesture = null;
     if (stroke) { stroke = null; hideScope(); queueRender(); }  // v5.45: ghost-only — nothing was written
     if (hstroke) { hstroke = null; queueRender(); }  // v5.45.2: ghost-only — grid untouched, no refresh needed
@@ -8666,6 +8748,18 @@ canvas.addEventListener("pointerdown", async e => {
     return;
   }
   const cell = evCell(e); if (!cell) return;
+  // Existing objects can be grabbed directly while building. A tap still
+  // opens the normal inspector; a drag moves the same server-owned instance.
+  if ((!playMode || buildBreak) && !erasing &&
+      (selectTool || paintLayer() === "objects") &&
+      !(buildBreak && hero && cell.x === hero.x && cell.y === hero.y) &&
+      objects[cell.y] && objects[cell.y][cell.x] != null) {
+    selectedInstance = { x: cell.x, y: cell.y };
+    inspectPos = { x: cell.x, y: cell.y };
+    objectDrag = { pointerId: e.pointerId, from: cell, to: cell,
+      startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY, moved: false };
+    return;
+  }
   // v5.61 Stage 5: shell drawer outside-tap. A confirmed map tap with no tool
   // armed tells the parent shell to close the Build Drawer. The parent reads
   // live iframe state (itemPlace/npcPlace/brush) so an active placement never
@@ -8753,7 +8847,7 @@ function onGestureMove() {
   // v2.4: quantize zoom to whole px — at 64x64 a redraw paints 4096 tiles, so
   // only re-render when the integer size actually changes. Finger tremor no
   // longer spams redraws; panning stays cheap (layout only, no redraw).
-  const newPx = Math.max(8, Math.min(64, Math.round(gesture.startPx * dist / gesture.startDist)));
+  const newPx = Math.max(1, Math.min(maxTilePx(), Math.round(gesture.startPx * dist / gesture.startDist)));
   if (newPx !== tilePx) { manualZoom = true; zoomAt(mid.x, mid.y, newPx); }
   panX += mid.x - gesture.lastMid.x;
   panY += mid.y - gesture.lastMid.y;
@@ -8763,6 +8857,9 @@ function onGestureMove() {
 canvas.addEventListener("pointermove", e => {
   if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (ptrs.size >= 2) { e.preventDefault(); onGestureMove(); return; }
+  if (objectDrag && objectDrag.pointerId === e.pointerId) {
+    e.preventDefault(); updateObjectDrag(e.clientX, e.clientY); return;
+  }
   if (panMode) {
     if (!panStart) return;
     e.preventDefault();
@@ -8886,12 +8983,14 @@ function endStroke() {
 }
 canvas.addEventListener("pointerup", e => {
   const mine = e.pointerId === lpId;   // v5.45.1: the long-press-tracked finger
+  if (objectDrag && objectDrag.pointerId === e.pointerId) finishObjectDrag(e, false);
   ptrs.delete(e.pointerId);
   if (ptrs.size < 2) gesture = null;
   if (mine) { firePendingTap(e); disarmLongPress(); }   // v5.45.1: one-shot tools commit on the quick lift
   if (ptrs.size === 0) { touchDrag = false; endStroke(); endHeightStroke(); queueRender(); }  // v5.29; v5.36.1: one catch-up redraw
 });
 canvas.addEventListener("pointercancel", e => {
+  if (objectDrag && objectDrag.pointerId === e.pointerId) finishObjectDrag(e, true);
   ptrs.delete(e.pointerId);
   touchDrag = false;   // v5.36.1
   gesture = null; panStart = null;
@@ -8907,22 +9006,22 @@ canvas.addEventListener("pointercancel", e => {
 // the browser's page zoom and the gesture routes into the existing zoomAt(),
 // anchored at the cursor, exactly like the HUD's + / − buttons. Plain wheel
 // keeps today's behavior (nothing is bound to it — there is no scroll
-// container), keyboard Ctrl+Plus stays the browser's (the v5.51.2 hint covers
-// it), and touch pinch keeps its own Pointer Events path.
+// container), and touch pinch keeps its own Pointer Events path.
 let _pinchAccum = 0;   // v5.51.3: accumulated ctrl+wheel delta between zoom steps
 function onCanvasWheel(e) {
   if (!e.ctrlKey) return;              // plain wheel: no binding today — untouched
   e.preventDefault();                  // block the browser's page zoom
   const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;  // wheel lines -> px
   _pinchAccum += dy;
-  // v5.51.3: sweep continuously — apply in the same 8px steps as the +/−
-  // buttons so one pinch sweeps smoothly instead of jumping; zoomAt clamps.
+  // v5.51.3: sweep continuously — use fine steps in the compact range so
+  // large maps retain useful control all the way down to 1px tiles.
   const THRESH = 50;
   const steps = Math.trunc(_pinchAccum / THRESH);
   if (steps) {
     _pinchAccum -= steps * THRESH;
     manualZoom = true;
-    zoomAt(e.clientX, e.clientY, tilePx - steps * 8);  // pinch-out (dy<0) zooms in
+    const step = tilePx <= 8 ? 1 : 8;
+    zoomAt(e.clientX, e.clientY, tilePx - steps * step);  // pinch-out (dy<0) zooms in
   }
 }
 canvas.addEventListener("wheel", onCanvasWheel, { passive: false });
@@ -8935,10 +9034,9 @@ $("btn-pan").onclick = () => {
 };
 
 // ---- v5.67.0: keyboard movement — Lloyd's split ---------------------------
-// Arrow keys move the MAP (pan the camera, one tile per press, in the
-// arrow's direction). WASD moves the CHARACTER, in Play mode only, riding
-// the exact same doStep() the D-pad and gamepad use. Nothing here fires
-// while you're typing in a field, and Ctrl/Meta/Alt combos stay the
+// In build mode, arrows pan the MAP and WASD moves the selected placed object.
+// In play mode both key groups move the controlled character through doStep().
+// Nothing here fires while you're typing in a field, and Meta/Alt combos stay the
 // browser's. The D-pad, tap-to-walk, and controller paths are untouched.
 function kbTypingTarget(t) {
   return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" ||
@@ -8957,20 +9055,54 @@ function kbCharStep(dx, dy) {
   kbStepCool = now + Math.max((typeof RULES !== "undefined" && RULES.walk_ms) || 140, 150);
   doStep(dx, dy, false);
 }
+function kbMoveSelectedObject(dx, dy) {
+  if (!selectedInstance || !objects[selectedInstance.y] ||
+      objects[selectedInstance.y][selectedInstance.x] == null) return false;
+  if (buildBreak && hero && selectedInstance.x === hero.x && selectedInstance.y === hero.y) return true;
+  const now = performance.now();
+  if (now < kbStepCool) return true;
+  const to = { x: selectedInstance.x + dx, y: selectedInstance.y + dy };
+  if (to.x < 0 || to.y < 0 || to.x >= W || to.y >= H) return true;
+  kbStepCool = now + 150;
+  moveArmed = { x: selectedInstance.x, y: selectedInstance.y };
+  moveTap(to);
+  return true;
+}
 function onKbMove(e) {
-  if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (kbTypingTarget(e.target)) return;
+  if (e.ctrlKey && !e.metaKey && !e.altKey) {
+    const key = e.key.toLowerCase();
+    const zoomIn = key === "+" || key === "=" || e.code === "NumpadAdd";
+    const zoomOut = key === "-" || key === "_" || e.code === "NumpadSubtract";
+    if (zoomIn || zoomOut) {
+      e.preventDefault();
+      zoomCenter(zoomIn ? 8 : -8);
+    }
+    return;
+  }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const activePlay = playMode && !buildBreak;
+  if (activePlay && e.code === "Space") {
+    e.preventDefault(); playInteract(); return;
+  }
   let handled = true;
   switch (e.key) {
-    case "ArrowLeft":  panMapByTiles(-1, 0); break;
-    case "ArrowRight": panMapByTiles(1, 0); break;
-    case "ArrowUp":    panMapByTiles(0, -1); break;
-    case "ArrowDown":  panMapByTiles(0, 1); break;
-    case "w": case "W": if (playMode) kbCharStep(0, -1); else handled = false; break;
-    case "s": case "S": if (playMode) kbCharStep(0, 1); else handled = false; break;
-    case "a": case "A": if (playMode) kbCharStep(-1, 0); else handled = false; break;
-    case "d": case "D": if (playMode) kbCharStep(1, 0); else handled = false; break;
+    case "ArrowLeft":  if (activePlay) kbCharStep(-1, 0); else panMapByTiles(-1, 0); break;
+    case "ArrowRight": if (activePlay) kbCharStep(1, 0); else panMapByTiles(1, 0); break;
+    case "ArrowUp":    if (activePlay) kbCharStep(0, -1); else panMapByTiles(0, -1); break;
+    case "ArrowDown":  if (activePlay) kbCharStep(0, 1); else panMapByTiles(0, 1); break;
+    case "w": case "W": if (activePlay) kbCharStep(0, -1); else handled = false; break;
+    case "s": case "S": if (activePlay) kbCharStep(0, 1); else handled = false; break;
+    case "a": case "A": if (activePlay) kbCharStep(-1, 0); else handled = false; break;
+    case "d": case "D": if (activePlay) kbCharStep(1, 0); else handled = false; break;
+    case " ": if (activePlay) { e.preventDefault(); playInteract(); } else handled = false; break;
     default: handled = false;
+  }
+  if (!activePlay && !handled) {
+    const key = e.key.toLowerCase();
+    const delta = key === "w" ? [0, -1] : key === "s" ? [0, 1]
+      : key === "a" ? [-1, 0] : key === "d" ? [1, 0] : null;
+    if (delta) handled = kbMoveSelectedObject(delta[0], delta[1]);
   }
   if (handled) e.preventDefault();
 }
@@ -9071,6 +9203,19 @@ async function playTap(cell) {
   };
   heroTimer = setTimeout(step, 0);
 }
+function playInteract() {
+  if (!playMode || buildBreak || !hero || playOver) return;
+  if (melodyNpc &&
+      Math.max(Math.abs(melodyNpc.x - hero.x), Math.abs(melodyNpc.y - hero.y)) <= 2) {
+    openMelDock(); return;
+  }
+  const nearby = walkerNear(hero.x, hero.y)
+    .filter(n => n.interactive !== false)
+    .sort((a, b) => Math.max(Math.abs(a.x - hero.x), Math.abs(a.y - hero.y)) -
+                    Math.max(Math.abs(b.x - hero.x), Math.abs(b.y - hero.y)));
+  if (nearby.length) { fireWalkerInteract(nearby[0]); return; }
+  toast("nothing nearby to interact with");
+}
 // v5.47: the always-visible Play — the menu button and the floating FAB
 // share this one toggle. Entering snapshots camera + selection; exiting
 // hands both back exactly (restoreCameraSel).
@@ -9082,7 +9227,7 @@ async function togglePlay() {
     buildBreakUIOff();   // v5.29: a fresh run never starts mid-break
     const r = await api("/api/play/start", {});
     if (!r.ok) { toast("play failed"); return; }
-    playMode = true; hero = { x: r.x, y: r.y };
+    playMode = true; document.body.classList.add("play-follow"); hero = { x: r.x, y: r.y };
     walkerShown = new Set();   // v5.40: fresh hellos for a fresh run
     // v5.29: the flagged PC leads this run — his sprite and his size.
     // No flags: the tile pick (or the gold circle, as before).
@@ -9123,7 +9268,7 @@ async function togglePlay() {
   } else {
     await api("/api/play/stop", {});
     if (buildBreak) buildBreakUIOff();   // v5.29: leaving play ends the break too (timers already cleared below)
-    playMode = false; hero = null; heroSwimming = false; heroInDeep = false;
+    playMode = false; document.body.classList.remove("play-follow"); hero = null; heroSwimming = false; heroInDeep = false;
     playHeroTid = null; playHeroSize = 1.0;   // v5.29: run's hero pick rests
     if (heroTimer) { clearInterval(heroTimer); heroTimer = null; }
     if (npcTimer) { clearInterval(npcTimer); npcTimer = null; }   // v3.4: walkers rest
@@ -14221,7 +14366,10 @@ function zoomCenter(d) {
   if (d > 0 && tilePx >= maxTilePx() && maxTilePx() < 64)
     { toast("max zoom-in for a " + W + "×" + H + " map"); return; }
   const r = stage.getBoundingClientRect();
-  zoomAt(r.left + r.width / 2, r.top + r.height / 2, tilePx + d);
+  // Keep familiar 8px steps at normal zoom, but use 1px steps in the
+  // compact range so a large map can be zoomed smoothly from 8px down to 1px.
+  const step = tilePx <= 8 ? 1 : 8;
+  zoomAt(r.left + r.width / 2, r.top + r.height / 2, tilePx + Math.sign(d) * step);
 }
 $("zoom-in").onclick  = () => zoomCenter(8);
 $("zoom-out").onclick = () => zoomCenter(-8);
@@ -22185,7 +22333,12 @@ var TOOLS=[
   {id:"pan",label:"Pan",ico:"✋",btn:"btn-pan",hint:"Drag the map to move around."},
   {id:"traits",label:"Traits",ico:"✨",btn:"btn-traits",hint:"Stamp nature traits: hot, cold, sharp, wood, food."},
   {id:"link",label:"Collision stamp",ico:"🔗",btn:"btn-link",dynHint:nwcLinkHint},
-  {id:"clear",label:"Clear layer",ico:"🗑",btn:"btn-clear",hint:"Clears the current layer (asks first, undoable)."}
+  {id:"clear",label:"Clear layer",ico:"🗑",btn:"btn-clear",hint:"Clears the current layer (asks first, undoable)."},
+  {id:"edit-tiles",label:"Edit tiles",ico:"✏️",btn:"btn-custom-edit",hint:"Rename, recategorize, or remove a custom tile."},
+  {id:"rules",label:"Rules",ico:"📜",btn:"menu-rules"},
+  {id:"world",label:"World",ico:"🌦️",btn:"menu-world"},
+  {id:"items",label:"Items",ico:"🎒",btn:"menu-items"},
+  {id:"folks",label:"Folks",ico:"🧑",btn:"menu-npcs"}
 ];
 /* v5.67 stage 3: live state read for the collision-stamp toggle cell. */
 function nwcLinkHint(){var b=document.getElementById("btn-link");return b?("Now: "+b.textContent):"";}
@@ -22198,38 +22351,45 @@ function dockPalette(){
   pal.classList.remove("nwc-floating");pal.classList.add("nwc-docked");
   dockEl.appendChild(pal);pal.style.left="";pal.style.top="";
   dockEl.classList.remove("nwc-collapsed");
-  dockBtn.textContent="⤢";dockBtn.title="float the palette";
+  dockBtn.hidden=true;dockBtn.textContent="⤢";dockBtn.title="drag the handle to float";
 }
 function floatPalette(x,y){
   document.body.appendChild(pal);
   pal.classList.remove("nwc-docked");pal.classList.add("nwc-floating");
+  dockEl.classList.add("nwc-collapsed");
   if(x!==undefined){pal.style.left=x+"px";pal.style.top=Math.max(0,y)+"px";}
-  dockBtn.textContent="⇲";dockBtn.title="dock the palette";
+  dockBtn.hidden=false;dockBtn.textContent="⇲";dockBtn.title="dock the palette";
 }
-function openPalette(){pal.hidden=false;dockEl.classList.remove("nwc-collapsed");fab.hidden=true;}
+function openPalette(){pal.hidden=false;if(pal.classList.contains("nwc-docked")){dockEl.classList.remove("nwc-collapsed");}fab.hidden=true;}
 function hidePalette(){pal.hidden=true;dockEl.classList.add("nwc-collapsed");fab.hidden=false;}
 document.getElementById("nwc-palette-hide").onclick=hidePalette;
 dockBtn.onclick=function(){
-  if(pal.classList.contains("nwc-docked")){floatPalette(Math.max(0,window.innerWidth/2-170),120);}
-  else{dockPalette();}
+  if(!pal.classList.contains("nwc-docked")){dockPalette();}
 };
 fab.onclick=openPalette;
 document.addEventListener("keydown",function(e){if(e.key==="Escape"){hidePalette();}});
 /* v5.67 stage 1: drag the header — undocks a docked palette, moves a floating one */
 (function(){
-  var head=document.getElementById("nwc-palette-head"),sx,sy,sl,st;
+  var head=document.getElementById("nwc-palette-head"),sx,sy,sl,st,wasDocked,dragging;
   head.addEventListener("pointerdown",function(e){
     if(e.target.closest("button")){return;}
-    if(pal.classList.contains("nwc-docked")){
-      var r0=pal.getBoundingClientRect();floatPalette(r0.left,r0.top);
-    }
     sx=e.clientX;sy=e.clientY;
     var r=pal.getBoundingClientRect();sl=r.left;st=r.top;
+    wasDocked=pal.classList.contains("nwc-docked");dragging=false;
     try{head.setPointerCapture(e.pointerId);}catch(err){}
-    function mv(ev){pal.style.left=(sl+ev.clientX-sx)+"px";pal.style.top=Math.max(0,st+ev.clientY-sy)+"px";}
-    function up(){head.removeEventListener("pointermove",mv);head.removeEventListener("pointerup",up);}
+    function mv(ev){
+      if(!dragging&&Math.hypot(ev.clientX-sx,ev.clientY-sy)<6){return;}
+      if(!dragging&&wasDocked){floatPalette(sl,st);}
+      dragging=true;
+      var maxL=Math.max(0,window.innerWidth-pal.offsetWidth),maxT=Math.max(0,window.innerHeight-56);
+      pal.style.left=Math.max(0,Math.min(maxL,sl+ev.clientX-sx))+"px";
+      pal.style.top=Math.max(0,Math.min(maxT,st+ev.clientY-sy))+"px";
+      ev.preventDefault();
+    }
+    function up(){head.removeEventListener("pointermove",mv);head.removeEventListener("pointerup",up);head.removeEventListener("pointercancel",up);}
     head.addEventListener("pointermove",mv);
     head.addEventListener("pointerup",up);
+    head.addEventListener("pointercancel",up);
   });
 })();
 
@@ -22243,10 +22403,11 @@ function clickSubChip(prefix){
   }
   return false;
 }
-var nwcCurCat=null;
+var nwcCurCat=null,nwcCurTool=null;
 var nwcSearchText="";
 function activateCategory(cat){
   nwcCurCat=cat;
+  nwcCurTool=null;
   nwcSearchText="";
   var si=document.getElementById("strip-search");
   if(si&&si.value){si.value="";si.dispatchEvent(new Event("input",{bubbles:true}));}
@@ -22355,6 +22516,7 @@ function syncLiveSel(cat,wrap){
    tap on the tray's own button (audit §8). */
 function activateTool(tool){
   nwcCurCat=null;
+  nwcCurTool=tool.id;
   if(tool.btn){
     var b=document.getElementById(tool.btn);
     if(b){b.click();}
@@ -22419,14 +22581,16 @@ function applyNwcGating(){
   var ownerBtn=document.getElementById("menu-users");
   var owner=!!(ownerBtn&&!ownerBtn.hidden);
   var hide=function(el,on){if(el){el.hidden=!!on;}};
-  hide(catsEl,!owner);hide(nwcSecLabel(catsEl),!owner);
-  hide(toolsEl,!owner);hide(nwcSecLabel(toolsEl),!owner);
-  hide(dockEl,!owner);
+  // Tile/tool grids and their shared palette are the normal editor surface;
+  // account ownership gates only the privileged import/diagnostic actions.
+  hide(catsEl,false);hide(nwcSecLabel(catsEl),false);
+  hide(toolsEl,false);hide(nwcSecLabel(toolsEl),false);
+  hide(dockEl,false);
   /* v5.67 stage 3: probe diagnostic + import/sheet buttons are owner-only too. */
   hide(document.getElementById("palette-probe"),!owner);
   hide(document.getElementById("btn-import"),!owner);
   hide(document.getElementById("btn-sheet"),!owner);
-  if(!owner){hide(fab,true);}else{fab.hidden=pal.hidden;}
+  fab.hidden=pal.hidden;
 }
 function buildCell(kind,item){
   var d=document.createElement("div");d.className="nwc-cell";d.setAttribute("data-id",item.id);
@@ -22444,7 +22608,7 @@ function buildCell(kind,item){
    selector); the main script's own show/hide logic keeps working. */
 function moveOrphans(){
   if(!detailEl){return;}
-  var ids=["anim-preview","sel-card","sel-empty","tile-edit-form"],i,el;
+  var ids=["anim-preview","sel-card","sel-empty","tile-edit-form","theme-row","stamp-row","scatter-row","traits-morph","btn-patrol-done"],i,el;
   for(i=0;i<ids.length;i++){
     el=document.getElementById(ids[i]);
     if(el&&el.parentNode!==detailEl){detailEl.appendChild(el);}
@@ -22459,13 +22623,14 @@ function moveOrphans(){
    editor opened. Otherwise it stays out of the way. */
 function refreshDetail(){
   if(!detailEl){return;}
-  var show=!!nwcCurCat;
+  var show=!!nwcCurCat||!!nwcCurTool;
   var sc=document.getElementById("sel-card"),tef=document.getElementById("tile-edit-form");
   if((sc&&!sc.hidden)||(tef&&!tef.hidden)){show=true;}
   detailEl.hidden=!show;
 }
 (function init(){
   var i;
+  dockBtn.hidden=true;
   for(i=0;i<CATS.length;i++){catsEl.appendChild(buildCell("cat",CATS[i]));}
   for(i=0;i<TOOLS.length;i++){toolsEl.appendChild(buildCell("tool",TOOLS[i]));}
   palTitle.textContent="Palette";

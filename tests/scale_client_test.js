@@ -45,8 +45,8 @@ W = 256; H = 256;
 check("256x256 -> 16px tiles", maxTilePx() === 16, "got " + maxTilePx());
 W = 100; H = 500;
 check("uses the larger dimension", maxTilePx() === 8, "got " + maxTilePx());
-W = 4096; H = 4096;   // beyond the cap — never less than 8
-check("never below 8", maxTilePx() === 8, "got " + maxTilePx());
+W = 4096; H = 4096;   // at the cap — 1px tiles keep the backing canvas bounded
+check("never below 1", maxTilePx() === 1, "got " + maxTilePx());
 
 console.log("== visibleTiles ==");
 W = 500; H = 500; tilePx = 8; panX = 0; panY = 0;

@@ -7445,12 +7445,30 @@ def _default_value(layer):
 
 
 def _map_state():
-    return {"width": world.width, "height": world.height,
-            "tiles": world.data, "objects": world.object_layer,
-            "collision": world.collision_layer,
+    # v6.1: consistency guard — world.load()/resize() set the dims before
+    # the grids, and this server is threaded, so a poll landing mid-switch
+    # could pair the new map's dims with the old map's shorter grids. The
+    # client trusted the header and its stroke commit threw on the missing
+    # rows, losing the stroke. Advertise the dims of the grids actually
+    # being sent, and fit the writable layers to them; the post-switch
+    # refresh corrects to the new map a beat later.
+    tiles = world.data or []
+    gh = len(tiles)
+    gw = len(tiles[0]) if gh else world.width
+
+    def _fit(grid, fill):
+        rows = [list(r[:gw]) + [fill] * max(0, gw - len(r))
+                for r in (grid or [])[:gh] if isinstance(r, list)]
+        while len(rows) < gh:
+            rows.append([fill] * gw)
+        return rows
+
+    return {"width": gw, "height": gh,
+            "tiles": tiles, "objects": _fit(world.object_layer, None),
+            "collision": _fit(world.collision_layer, False),
             # v5.46: semantic tags + hazard overlay + rule controls
-            "semantic": world.semantic_layer,
-            "hazard": world.hazard_layer,
+            "semantic": _fit(world.semantic_layer, None),
+            "hazard": _fit(world.hazard_layer, False),
             "sem_settings": world.semantic_settings,
             "semantic_seed": _sem_effective_seed()}
 

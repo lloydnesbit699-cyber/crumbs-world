@@ -7753,7 +7753,9 @@ function commitStrokeCells(s) {
     let x0 = W, y0 = H, x1 = -1, y1 = -1;
     for (const c of s.cells.values()) {
       if (c.x < 0 || c.y < 0 || c.x >= W || c.y >= H) continue;
-      coll[c.y][c.x] = bh[0];
+      const crow = coll[c.y];   // v6.1: torn-snapshot guard (see below)
+      if (!crow || c.x >= crow.length) continue;
+      crow[c.x] = bh[0];
       if (hazGrid.length === H && hazGrid[c.y]) hazGrid[c.y][c.x] = bh[1];
       if (c.x < x0) x0 = c.x; if (c.y < y0) y0 = c.y;
       if (c.x > x1) x1 = c.x; if (c.y > y1) y1 = c.y;
@@ -7769,7 +7771,14 @@ function commitStrokeCells(s) {
   let x0 = W, y0 = H, x1 = -1, y1 = -1;
   for (const c of s.cells.values()) {
     if (c.x < 0 || c.y < 0 || c.x >= W || c.y >= H) continue;
-    g[c.y][c.x] = c.pv;
+    // v6.1: guard on the grid itself, not just W/H — a torn /api/map
+    // snapshot (map switch or resize landing mid-poll on the threaded
+    // server) can pair new dims with old, shorter grids. The old code
+    // threw here, which also killed the paintQueue save in endStroke:
+    // the whole stroke vanished. Skip cells the grid doesn't have.
+    const row = g[c.y];
+    if (!row || c.x >= row.length) continue;
+    row[c.x] = c.pv;
     // v5.46: optimistic tag grid for meaning strokes — the server echo
     // reconciles tiles, collision, hazard, and decor right after.
     if (s.semTerrain !== undefined && semGrid.length === H && semGrid[c.y])
@@ -7782,7 +7791,9 @@ function commitStrokeCells(s) {
   }
   for (const lc of s.linkCells.values()) {
     if (lc.x < 0 || lc.y < 0 || lc.x >= W || lc.y >= H) continue;
-    coll[lc.y][lc.x] = (lc.pv != null) ? lc.pv : lc.tile_id;
+    const lrow = coll[lc.y];   // v6.1: torn-snapshot guard, as above
+    if (!lrow || lc.x >= lrow.length) continue;
+    lrow[lc.x] = (lc.pv != null) ? lc.pv : lc.tile_id;
   }
   if (x1 >= x0) markBaseDirty(x0 - 1, y0 - 1, x1 + 1, y1 + 1);  // v5.41: dirty-rect
   if (pl === "objects") invalidateHeroes();   // v5.41: hero flags may move

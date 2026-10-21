@@ -73,22 +73,16 @@ check("daily cap hits at 50", not allowed and hit == "daily",
       f"allowed={allowed} hit={hit}")
 check("monthly remaining still 150", remaining == 150, f"remaining={remaining}")
 shutil.rmtree(tmp, ignore_errors=True)
-# monthly exhaustion (use basic's higher daily cap to reach monthly)
+# Monthly exhaustion: seed a valid quota record directly. The test targets
+# quota_check's boundary, not 1,500 redundant filesystem writes.
 tmp = fresh_dir()
-for _ in range(0):
-    pass
-# simulate: bump 1500 times across fake days by resetting day_used
 import time as _t
-for _ in range(1500):
-    ma.quota_bump(tmp, "bob", "basic")
-    # reset daily counter to bypass burst cap for this test
-    import json as _j, os as _o
-    _qp = _o.path.join(tmp, "vaults", "bob", "melody", "quota.json")
-    with open(_qp) as _f:
-        _r = _j.load(_f)
-    _r["day_used"] = 0
-    with open(_qp, "w") as _f:
-        _j.dump(_r, _f)
+import json as _j, os as _o
+_qp = _o.path.join(tmp, "vaults", "bob", "melody", "quota.json")
+_o.makedirs(_o.path.dirname(_qp), exist_ok=True)
+with open(_qp, "w") as _f:
+    _j.dump({"month": _t.strftime("%Y-%m"), "month_used": 1500,
+             "date": _t.strftime("%Y-%m-%d"), "day_used": 0}, _f)
 allowed, remaining, _, _, hit = ma.quota_check(tmp, "bob", "basic")
 check("monthly exhausts at 1500", not allowed and hit == "monthly" and remaining == 0,
       f"allowed={allowed} hit={hit}")

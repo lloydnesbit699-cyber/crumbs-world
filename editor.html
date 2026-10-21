@@ -821,6 +821,30 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
                     color: #ffd75f; }
   #minimap-toggle.static { color: #888; }
 
+  /* v6.1: bounded world lens. It is a read-only overlay; only its frame
+     controls receive pointer input, so map gestures still reach the canvas. */
+  #world-lens { position: fixed; z-index: 40; top: 12px; right: 72px;
+    width: min(300px, calc(100vw - 20px)); height: 220px; background: rgba(15,16,22,.96);
+    border: 1px solid #777; border-radius: 12px; overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0,0,0,.55); color: #eee; pointer-events: none; }
+  #world-lens[hidden] { display: none; }
+  #world-lens-head { display: flex; align-items: center; gap: 6px; height: 32px;
+    padding: 0 8px; cursor: move; touch-action: none; user-select: none;
+    border-bottom: 1px solid #444; color: #ffd75f; font-size: 12px; pointer-events: auto; }
+  #world-lens-head strong { flex: 1; }
+  #world-lens-head button { min-width: 34px; height: 28px; padding: 0 8px;
+    border-radius: 7px; background: #292a32; color: #fff; }
+  #world-lens-cv { display: block; width: 100%; height: calc(100% - 34px);
+    background: #101116; image-rendering: pixelated; pointer-events: none; }
+  #world-lens-resize { position: absolute; right: 0; bottom: 0; width: 22px; height: 22px;
+    pointer-events: auto; cursor: nwse-resize; touch-action: none;
+    background: linear-gradient(135deg, transparent 45%, #aaa 46%, #aaa 51%, transparent 52%,
+      transparent 64%, #aaa 65%, #aaa 70%, transparent 71%); }
+  @media (max-width: 600px) {
+    #world-lens { width: min(300px, calc(100vw - 20px)); }
+  }
+  body.clean #world-lens, body.panels-hidden #world-lens { display: none !important; }
+
   /* v5.45: the brush bar — phone-first painting keeps exactly 4 tools
      visible: Stamp (hero), Paint, Erase, and ••• More. Long-press ••• for
      fill / eyedropper / line / rectangle / scatter. 56px fat-finger
@@ -4522,6 +4546,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
 
 <div id="zoom-cluster">
   <button id="btn-grid" title="Toggle grid lines">&#x25A6;</button>
+  <button id="world-lens-toggle" title="Toggle world lens" aria-label="Toggle world lens">🔎</button>
   <button id="zoom-out" title="Zoom out">&minus;</button>
   <button id="zoom-in" title="Zoom in">+</button>
   <button id="zoom-fit" title="Fit map to screen">Fit</button>
@@ -4534,6 +4559,16 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   <canvas id="minimap-cv" width="120" height="120"></canvas>
   <button id="minimap-toggle" title="Toggle live/static minimap" aria-label="Toggle live or static minimap">⏸</button>
 </div>
+
+<aside id="world-lens" aria-label="World magnifier">
+  <div id="world-lens-head">
+    <strong>World lens</strong>
+    <span id="world-lens-level" aria-live="polite">20px tiles</span>
+    <button id="world-lens-close" type="button" title="Hide lens" aria-label="Hide world lens">×</button>
+  </div>
+  <canvas id="world-lens-cv"></canvas>
+  <div id="world-lens-resize" role="separator" aria-label="Resize world lens" tabindex="0"></div>
+</aside>
 
 <!-- v5.45: the brush bar — exactly 4 tools visible. Stamp is the hero
      (default); ••• opens the more-tools sheet (tap or long-press). -->
@@ -6681,8 +6716,254 @@ function renderBase() {
 // v5.3: render diet — high-frequency paths (paint strokes, NPC movement,
 // weather + animation ticks) coalesce into one render per animation frame
 // instead of one render per event.
+const LENS_ENABLED = true; // v6.1: one-line kill switch; lens is read-only in v1.
+const LENS_MAX_COLS = 26, LENS_MAX_ROWS = 19; // caps redraw work after user resizing.
+const WORLD_LENS_PREF_KEY = "crumbs_world_lens";
+const worldLens = { on: LENS_ENABLED, px: 20, fx: 0, fy: 0, ready: false, lastKey: "", pointer: null };
+let lensWorldStamp = 0;
+function lensFocus(fx, fy) {
+  if (!Number.isFinite(fx) || !Number.isFinite(fy)) return false;
+  const nx = Math.max(0, Math.min(Math.max(0, W - 1), fx));
+  const ny = Math.max(0, Math.min(Math.max(0, H - 1), fy));
+  if (nx !== worldLens.fx || ny !== worldLens.fy) {
+    worldLens.fx = nx; worldLens.fy = ny; worldLens.lastKey = "";
+    return true;
+  }
+  return false;
+}
+function lensWindow(cssW, cssH) {
+  const cols = Math.max(1, Math.ceil(cssW / worldLens.px));
+  const rows = Math.max(1, Math.ceil(cssH / worldLens.px));
+  const width = Math.min(W, cols), height = Math.min(H, rows);
+  const x0 = W <= cols ? 0 : Math.max(0, Math.min(W - width,
+    Math.floor(worldLens.fx - (width - 1) / 2)));
+  const y0 = H <= rows ? 0 : Math.max(0, Math.min(H - height,
+    Math.floor(worldLens.fy - (height - 1) / 2)));
+  return { x0, y0, x1: x0 + width - 1, y1: y0 + height - 1,
+    cols, rows, width, height };
+}
+function lensCellXY(x, y, win, ox, oy) {
+  return { x: ox + (x - win.x0) * worldLens.px,
+    y: oy + (y - win.y0) * worldLens.px };
+}
+function clampLensPanel(left, top) {
+  const panel = $("world-lens"); if (!panel || !stage) return;
+  const bounds = stage.getBoundingClientRect();
+  const box0 = panel.getBoundingClientRect();
+  const maxW = Math.min(bounds.width, LENS_MAX_COLS * worldLens.px + 2);
+  const maxH = Math.min(bounds.height, LENS_MAX_ROWS * worldLens.px + 36);
+  panel.style.width = Math.min(maxW, Math.max(Math.min(220, maxW), box0.width)) + "px";
+  panel.style.height = Math.min(maxH, Math.max(Math.min(150, maxH), box0.height)) + "px";
+  const box = panel.getBoundingClientRect();
+  const maxLeft = Math.max(bounds.left, bounds.right - box.width);
+  const maxTop = Math.max(bounds.top, bounds.bottom - box.height);
+  panel.style.left = Math.max(bounds.left, Math.min(maxLeft, left)) + "px";
+  panel.style.top = Math.max(bounds.top, Math.min(maxTop, top)) + "px";
+  panel.style.right = "auto"; panel.style.bottom = "auto";
+}
+function saveWorldLensLayout() {
+  const panel = $("world-lens"); if (!panel) return;
+  const r = panel.getBoundingClientRect();
+  try { localStorage.setItem(WORLD_LENS_PREF_KEY, JSON.stringify({ x: r.left, y: r.top, w: r.width, h: r.height })); } catch (_) {}
+}
+function restoreWorldLensLayout() {
+  const panel = $("world-lens"); if (!panel) return;
+  let p = null; try { p = JSON.parse(localStorage.getItem(WORLD_LENS_PREF_KEY) || "null"); } catch (_) {}
+  if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return;
+  if (Number.isFinite(p.w)) panel.style.width = Math.max(220, p.w) + "px";
+  if (Number.isFinite(p.h)) panel.style.height = Math.max(150, p.h) + "px";
+  clampLensPanel(p.x, p.y);
+}
+function updateWorldLensFocus() {
+  if (playMode && hero) return lensFocus(hero.x, hero.y);
+  if (objectDrag && objectDrag.to) return lensFocus(objectDrag.to.x, objectDrag.to.y);
+  if (moveArmed) return lensFocus(moveArmed.x, moveArmed.y);
+  if (selectedInstance && objects[selectedInstance.y] && objects[selectedInstance.y][selectedInstance.x] != null) {
+    return lensFocus(selectedInstance.x, selectedInstance.y);
+  }
+  if (selectTool && inspectPos) return lensFocus(inspectPos.x, inspectPos.y);
+  if (worldLens.pointer) {
+    const r = stage.getBoundingClientRect();
+    const ox = (stage.clientWidth - W * tilePx) / 2 + panX;
+    const oy = (stage.clientHeight - H * tilePx) / 2 + panY;
+    return lensFocus(Math.floor((worldLens.pointer.x - r.left - ox) / tilePx),
+      Math.floor((worldLens.pointer.y - r.top - oy) / tilePx));
+  }
+  return false;
+}
+function paintLens() {
+  const panel = $("world-lens"), cv = $("world-lens-cv");
+  if (!LENS_ENABLED || !worldLens.on || !panel || !cv || !tiles.length || !W || !H ||
+      document.body.classList.contains("clean") || document.body.classList.contains("panels-hidden")) return;
+  try {
+    if (!worldLens.ready) lensFocus(W / 2, H / 2);
+    updateWorldLensFocus();
+    const cssW = cv.clientWidth, cssH = cv.clientHeight;
+    if (!(cssW > 0 && cssH > 0)) return;
+    const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+    const bw = Math.round(cssW * dpr), bh = Math.round(cssH * dpr);
+    const key = [lensWorldStamp, worldLens.fx, worldLens.fy, worldLens.px, bw, bh, dpr].join(":");
+    if (key === worldLens.lastKey) return;
+    if (cv.width !== bw || cv.height !== bh) { cv.width = bw; cv.height = bh; }
+    const c = cv.getContext("2d");
+    if (!c) throw new Error("lens canvas unavailable");
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.imageSmoothingEnabled = false;
+    c.clearRect(0, 0, cssW, cssH);
+    c.fillStyle = "#101116"; c.fillRect(0, 0, cssW, cssH);
+    const win = lensWindow(cssW, cssH), S = worldLens.px;
+    const ox = win.width < win.cols ? (cssW - win.width * S) / 2 : 0;
+    const oy = win.height < win.rows ? (cssH - win.height * S) / 2 : 0;
+    // Read map data directly. Never sample canvas/baseCv: those pixels may
+    // represent one world tile each on a 500x500 map.
+    for (let y = win.y0; y <= win.y1; y++) {
+      const row = tiles[y]; if (!row) continue;
+      for (let x = win.x0; x <= win.x1; x++) {
+        const p = lensCellXY(x, y, win, ox, oy), id = row[x];
+        const im = tileFrameImage(id);
+        if (im) c.drawImage(im, p.x, p.y, S, S);
+        else { c.fillStyle = colorOf[id] || "#1c1c1c"; c.fillRect(p.x, p.y, S, S); }
+      }
+    }
+    // Keep the object pass small and region-bounded; omit non-world overlays.
+    for (let y = win.y0; y <= win.y1; y++) {
+      const row = objects[y]; if (!row) continue;
+      for (let x = win.x0; x <= win.x1; x++) {
+        const cell = row[x], id = objTid(cell); if (id == null) continue;
+        if (playMode && walkingAnchors.has(x + "," + y)) continue;
+        const p = lensCellXY(x, y, win, ox, oy), size = objSize(cell), im = tileFrameImage(id);
+        if (im) {
+          c.fillStyle = "rgba(0,0,0,.30)"; c.beginPath();
+          c.ellipse(p.x + S / 2, p.y + S * .88, S * .34 * size, S * .13 * size, 0, 0, Math.PI * 2); c.fill();
+          drawFxTile(c, id, im, p.x + (S - S * size) / 2, p.y + S - S * size, S * size, S * size);
+        } else {
+          const r = S * .28 * size, cx = p.x + S / 2, cy = p.y + S / 2;
+          c.fillStyle = colorOf[id] || "#fff"; c.strokeStyle = "#000"; c.lineWidth = Math.max(1, S / 12);
+          c.beginPath(); c.moveTo(cx, cy-r); c.lineTo(cx+r, cy); c.lineTo(cx, cy+r); c.lineTo(cx-r, cy); c.closePath(); c.fill(); c.stroke();
+        }
+      }
+    }
+    const drawPerson = (x, y, id, state, dir, melody, size, imageOverride) => {
+      const p = lensCellXY(x, y, win, ox, oy);
+      if (x < win.x0 || y < win.y0 || x > win.x1 || y > win.y1) return;
+      size = Number.isFinite(size) ? Math.max(.25, Math.min(4, size)) : 1;
+      const im = imageOverride || (id != null ? rigTileImage(id, state || "idle", dir || "down") : null);
+      if (im) drawFxTile(c, id, im, p.x+(S-S*size)/2, p.y+S-S*size, S*size, S*size);
+      else { c.fillStyle = melody ? "#c99cff" : "#ffd75f"; c.beginPath(); c.arc(p.x+S/2,p.y+S/2,S*.28*size,0,Math.PI*2); c.fill(); }
+      if (melody) {
+        c.strokeStyle = "rgba(190,120,255,.95)"; c.lineWidth = Math.max(1.5, S/16);
+        c.beginPath(); c.arc(p.x+S/2,p.y+S/2,S*.46*size,0,Math.PI*2); c.stroke();
+        c.fillStyle = "#e3c6ff"; c.font = "bold " + Math.max(9, S*.35) + "px sans-serif";
+        c.textAlign = "center"; c.textBaseline = "bottom"; c.fillText("Melody", p.x+S/2, p.y);
+      }
+    };
+    if (playMode && hero) {
+      const pcId = playHeroTid != null ? playHeroTid : primaryHeroTile();
+      drawPerson(hero.x, hero.y, pcId, "idle", "down", false, playHeroSize,
+        pcId != null ? tileFrameImage(pcId) : null);
+    }
+    npcsReal.forEach(n => {
+      if (playMode && walkingAnchors.has(n.x + "," + n.y)) return;
+      drawPerson(n.x, n.y, n.tile_id, "idle", "down", !!n.melody);
+    });
+    if (playMode) npcs.forEach(n => drawPerson(n.x, n.y, n.tile_id,
+      "idle", rigDirFor(n), !!n.melody));
+    if (!playMode && stroke && stroke.cells) stroke.cells.forEach(cell => {
+      if (cell.x < win.x0 || cell.y < win.y0 || cell.x > win.x1 || cell.y > win.y1) return;
+      const p = lensCellXY(cell.x, cell.y, win, ox, oy);
+      drawGhostCell(c, cell.pv, p.x, p.y, S);
+    });
+    if (!playMode && objectDrag && objectDrag.moved && objectDrag.to) {
+      const cell = objectDrag.to;
+      if (cell.x >= win.x0 && cell.y >= win.y0 && cell.x <= win.x1 && cell.y <= win.y1) {
+        const src = objects[objectDrag.from.y] && objects[objectDrag.from.y][objectDrag.from.x];
+        const id = src == null ? null : objTid(src), im = id == null ? null : tileFrameImage(id);
+        const p = lensCellXY(cell.x, cell.y, win, ox, oy), size = src == null ? 1 : objSize(src);
+        c.save(); c.globalAlpha = .72;
+        if (im) drawFxTile(c, id, im, p.x+(S-S*size)/2, p.y+S-S*size, S*size, S*size);
+        else { c.fillStyle = "rgba(255,215,95,.55)"; c.fillRect(p.x,p.y,S,S); }
+        c.restore();
+      }
+    }
+    if (!playMode) {
+      const sel = (objectDrag && objectDrag.to) || moveArmed || (selectTool && inspectPos);
+      if (sel && sel.x >= win.x0 && sel.y >= win.y0 && sel.x <= win.x1 && sel.y <= win.y1) {
+        const p = lensCellXY(sel.x, sel.y, win, ox, oy);
+        c.save(); c.strokeStyle = "#ffd75f"; c.lineWidth = Math.max(1, S * .08);
+        c.setLineDash([S*.28, S*.16]); c.strokeRect(p.x+2, p.y+2, S-4, S-4); c.restore();
+      }
+    }
+    worldLens.lastKey = key; worldLens.ready = true;
+  } catch (err) {
+    worldLens.on = false;
+    if (!worldLens.failed) { worldLens.failed = true; toast("lens unavailable — map unaffected"); }
+    if (panel) panel.hidden = true;
+  }
+}
+function initWorldLens() {
+  const panel = $("world-lens"), head = $("world-lens-head");
+  if (!LENS_ENABLED || !panel) { if (panel) panel.hidden = true; return; }
+  panel.hidden = !worldLens.on;
+  worldLens.px = 20; // fixed readable detail in v1; lens zoom controls are deferred.
+  $("world-lens-toggle").onclick = () => {
+    worldLens.on = !worldLens.on; panel.hidden = !worldLens.on; worldLens.lastKey = "";
+    if (worldLens.on) updateWorldLensFocus();
+    queueRender();
+  };
+  $("world-lens-close").onclick = () => { worldLens.on = false; panel.hidden = true; };
+  panel.addEventListener("wheel", onCanvasWheel, { passive: false });
+  if (head) {
+    let drag = null;
+    head.addEventListener("pointerdown", e => {
+      if (e.target.closest("button")) return;
+      const r = panel.getBoundingClientRect(); drag = { x: e.clientX, y: e.clientY, left: r.left, top: r.top };
+      try { head.setPointerCapture(e.pointerId); } catch (_) {} e.preventDefault();
+    });
+    head.addEventListener("pointermove", e => {
+      if (!drag) return;
+      clampLensPanel(drag.left+e.clientX-drag.x, drag.top+e.clientY-drag.y);
+    });
+    const done = () => { if (drag) saveWorldLensLayout(); drag = null; };
+    head.addEventListener("pointerup", done); head.addEventListener("pointercancel", done);
+  }
+  const resize = $("world-lens-resize");
+  if (resize) {
+    let sizing = null;
+    resize.addEventListener("pointerdown", e => {
+      const r = panel.getBoundingClientRect(); sizing = { x:e.clientX, y:e.clientY, w:r.width, h:r.height };
+      try { resize.setPointerCapture(e.pointerId); } catch (_) {} e.preventDefault(); e.stopPropagation();
+    });
+    resize.addEventListener("pointermove", e => {
+      if (!sizing) return;
+      const bounds = stage.getBoundingClientRect();
+      const r = panel.getBoundingClientRect();
+      panel.style.width = Math.max(Math.min(220,bounds.width), Math.min(bounds.right-r.left,LENS_MAX_COLS*worldLens.px+2,sizing.w+e.clientX-sizing.x)) + "px";
+      panel.style.height = Math.max(Math.min(150,bounds.height), Math.min(bounds.bottom-r.top,LENS_MAX_ROWS*worldLens.px+36,sizing.h+e.clientY-sizing.y)) + "px";
+      worldLens.lastKey = ""; queueRender();
+    });
+    const sizeDone = () => { if (sizing) saveWorldLensLayout(); sizing = null; };
+    resize.addEventListener("pointerup", sizeDone); resize.addEventListener("pointercancel", sizeDone);
+  }
+  stage.addEventListener("pointermove", e => {
+    if (panel.contains(e.target)) return;
+    worldLens.pointer = { x:e.clientX, y:e.clientY };
+    if (!playMode && updateWorldLensFocus() && worldLens.on) queueRender(false);
+  });
+  stage.addEventListener("pointerdown", e => {
+    if (panel.contains(e.target)) return;
+    worldLens.pointer = { x:e.clientX, y:e.clientY };
+    if (!playMode && updateWorldLensFocus() && worldLens.on) queueRender(false);
+  });
+  restoreWorldLensLayout();
+  const initial = panel.getBoundingClientRect(); clampLensPanel(initial.left, initial.top);
+  window.addEventListener("resize", () => {
+    worldLens.lastKey = ""; const r = panel.getBoundingClientRect(); clampLensPanel(r.left, r.top); saveWorldLensLayout();
+  });
+  queueRender();
+}
 let renderQueued = false;
-function queueRender() {
+function queueRender(lensContentChanged) {
+  if (lensContentChanged !== false) lensWorldStamp++;
   if (renderQueued) return;
   renderQueued = true;
   requestAnimationFrame(() => { renderQueued = false; render(); });
@@ -7327,6 +7608,7 @@ function render() {
   followPlayHero();                    // center the active character, only during play
   layout();   // v2.2: re-center + apply pan offset after every draw
   if (typeof renderMinimap === "function") renderMinimap();  // v5.61.0: throttled live minimap
+  paintLens();                         // v6.1: same queued render, local tile window only
 }
 
 // The camera is expressed in stage-local pixels, so centering the controlled
@@ -9009,6 +9291,8 @@ canvas.addEventListener("pointercancel", e => {
 // container), and touch pinch keeps its own Pointer Events path.
 let _pinchAccum = 0;   // v5.51.3: accumulated ctrl+wheel delta between zoom steps
 function onCanvasWheel(e) {
+  if (e.__crumbsLensWheelHandled) return;
+  e.__crumbsLensWheelHandled = true;
   if (!e.ctrlKey) return;              // plain wheel: no binding today — untouched
   e.preventDefault();                  // block the browser's page zoom
   const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;  // wheel lines -> px
@@ -9025,6 +9309,7 @@ function onCanvasWheel(e) {
   }
 }
 canvas.addEventListener("wheel", onCanvasWheel, { passive: false });
+stage.addEventListener("wheel", onCanvasWheel, { passive: false }); // wheel over empty stage/lens still reaches the main camera
 
 // v1.7 camera: Move toggles pan mode, -/+ zoom, Fit re-fits the screen
 $("btn-pan").onclick = () => {
@@ -17641,6 +17926,7 @@ function initPanelSystem() {
   initSheetGrab();    // sheet chrome never moves — wire once, not per mount
   initWheel();        // v5.61.0: color wheel popup
   initMinimap();      // v5.61.0: dynamic minimap with static toggle
+  initWorldLens();    // v6.1: bounded, read-only detail view
   initPlayFab();
   initBudgetStrip();
   initReaderPagers();   // v5.58 (C-2): paged navigation on pilot reader sheets

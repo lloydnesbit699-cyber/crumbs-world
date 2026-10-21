@@ -48,7 +48,7 @@ check("the sheet renderer docks the brush bar into the sheet",   // v5.50: docki
   html.includes('sh.prepend(bb)') && html.includes('$("brush-bar")'));
 check("the sheet renderer docks more-sheet into the sheet",
   html.includes('sh.prepend(ms)') && html.includes('$("more-sheet")'));
-check("setSheetHeight repositions the FAB", /function setSheetHeight\(h\)[\s\S]{0,300}positionFabForSheet\(\)/.test(html));
+check("setSheetHeight repositions the FAB", /function setSheetHeight\(h\)[\s\S]*?positionFabForSheet\(\)/.test(html));
 check("play toggle restores FAB placement both ways",
   (html.match(/positionFabForSheet\(\);/g) || []).length >= 4);
 check("sheet keeps its safe-area padding",

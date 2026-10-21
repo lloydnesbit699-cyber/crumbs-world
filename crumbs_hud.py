@@ -107,6 +107,7 @@ import atexit
 import base64
 import copy
 import hmac
+import logging
 import random
 import re
 import secrets
@@ -119,6 +120,7 @@ import sys
 import uuid
 import threading
 import time
+import traceback
 
 # v5.28: Melody's agent module. Guarded import — a missing or broken
 # melody_agent.py degrades the chat dock, never the game.
@@ -157,7 +159,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "5.67.0"
+APP_VERSION = "6.0.0"
 # v5.62: mobile launcher versions. The Android/iOS wrappers check
 # /api/launcher-version on every launch and self-update when these bump.
 # Set CRUMBS_LAUNCHER_APK_URL to the public URL of crumbs-world-launcher.apk
@@ -165,11 +167,10 @@ APP_VERSION = "5.67.0"
 LAUNCHER_VERSION_ANDROID = int(os.environ.get("CRUMBS_LAUNCHER_ANDROID", "1"))
 LAUNCHER_VERSION_IOS = int(os.environ.get("CRUMBS_LAUNCHER_IOS", "1"))
 LAUNCHER_APK_URL = os.environ.get("CRUMBS_LAUNCHER_APK_URL", "")
-# v5.61: tester-shell feature flag — ENVIRONMENT variable only (Lloyd's
-# 2026-10-07 decision), default OFF. Controls presentation only, never
-# permissions. Stamped into editor.html as %%TESTER_SHELL%% ("1"/"0");
-# /classic always serves the classic HUD for regression testing.
-TESTER_SHELL = os.environ.get("CRUMBS_TESTER_SHELL", "0") == "1"
+# HUD 6: the workflow shell is the default in local, private, public,
+# Replit, and hosted runs. Set CRUMBS_TESTER_SHELL=0 to open the classic HUD
+# during migration or recovery; this flag affects presentation only.
+TESTER_SHELL = os.environ.get("CRUMBS_TESTER_SHELL", "1") != "0"
 # v5.41: single source of truth for the map-size cap (was 64, hardcoded in
 # four places). 500x500 = 250k cells. The client additionally caps tilePx so
 # the full-map backing canvas never exceeds 4096px per side (see editor.html).
@@ -228,7 +229,8 @@ SERVER_ROLE = _normalize_server_role(SERVER_ROLE)
 UPDATE_REPO = "lloydnesbit699-cyber/crumbs-world"
 UPDATE_BRANCH = "main"
 UPDATE_FILES = ["editor.html", "crumbs_hud.py", "crumbs_core.py",
-                "crumbs_recovery.py", "melody_agent.py"]
+                "crumbs_recovery.py", "melody_agent.py",
+                "tools/melody_keyfinder.py"]
 # v5.25: the art the thumbnails are painted from. The updater used to ship
 # code only, so phones ended up with registry entries (shared_library.json)
 # pointing at PNGs that never arrived — every one of those tiles painted a
@@ -5024,6 +5026,75 @@ def _trait_at(x, y):
 # delete-to-trash/import/metadata), play-session save slots.
 
 _events = deque(maxlen=200)
+_RUNTIME_ERROR_LOG = os.path.join(SCRIPT_DIR, "logs", "runtime-errors.jsonl")
+_RUNTIME_ERROR_LOCK = threading.Lock()
+
+
+def _runtime_error_fix(error_type, function):
+    if error_type == "TypeError" and function == "cell_height":
+        return ("object_instance_shape",
+                "Object-layer instances can be dictionaries. Resolve their tile id with core.obj_tid(cell) before asset lookup.")
+    if error_type in ("ImportError", "ModuleNotFoundError"):
+        return ("missing_dependency",
+                "Run the platform boot preflight to install pinned dependencies, then restart the game server.")
+    return ("unclassified_runtime_error",
+            "Use the recorded function and line to reproduce the request, then add a regression check for the failing input.")
+
+
+def _runtime_errors(limit=20):
+    rows = []
+    try:
+        with open(_RUNTIME_ERROR_LOG, "r", encoding="utf-8") as stream:
+            for line in stream:
+                try:
+                    row = json.loads(line)
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(row, dict):
+                    rows.append(row)
+    except OSError:
+        pass
+    return rows[-max(1, min(100, int(limit))):]
+
+
+def _record_runtime_error(method, path, exc, tb):
+    """Persist a redacted request failure with a repair hint; never log body/cookies."""
+    frames = traceback.extract_tb(tb) if tb else []
+    frame = frames[-1] if frames else None
+    function = frame.name if frame else "unknown"
+    code, fix = _runtime_error_fix(type(exc).__name__, function)
+    row = {"at": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
+           "id": uuid.uuid4().hex[:12],
+           "version": APP_VERSION,
+           "method": str(method)[:8],
+           "path": urlparse(str(path or "/")).path[:120],
+           "error_type": type(exc).__name__,
+           "code": code,
+           "location": ("%s:%s (%s)" %
+                        (os.path.basename(frame.filename), frame.lineno, function)
+                        if frame else function),
+           "fix": fix}
+    with _RUNTIME_ERROR_LOCK:
+        try:
+            os.makedirs(os.path.dirname(_RUNTIME_ERROR_LOG), exist_ok=True)
+            if os.path.exists(_RUNTIME_ERROR_LOG) and os.path.getsize(_RUNTIME_ERROR_LOG) > 1024 * 1024:
+                os.replace(_RUNTIME_ERROR_LOG, _RUNTIME_ERROR_LOG + ".1")
+            with open(_RUNTIME_ERROR_LOG, "a", encoding="utf-8") as stream:
+                stream.write(json.dumps(row, ensure_ascii=False) + "\n")
+            if os.name != "nt":
+                os.chmod(_RUNTIME_ERROR_LOG, 0o600)
+        except OSError as log_exc:
+            print("[runtime-error] could not persist error ledger (%s)" %
+                  type(log_exc).__name__, file=sys.stderr)
+    _events.append({"t": time.strftime("%H:%M:%S"),
+                    "msg": "runtime error %s at %s; fix: %s" %
+                           (code, row["location"], fix)})
+    logging.getLogger("crumbs.runtime").error(
+        "request failed method=%s path=%s code=%s location=%s error_type=%s",
+        row["method"], row["path"], code, row["location"], row["error_type"])
+    return row
+
+
 def _log_event(msg):
     _events.append({"t": time.strftime("%H:%M:%S"), "msg": str(msg)[:160]})
 
@@ -7526,6 +7597,8 @@ def _melody_system_diagnostics():
             "dirty": bool(_save_state["dirty"]),
             "last_save": _save_state["last"],
             "play_active": bool(play["active"]),
+            "melody": _melody_agent.brain_status() if _melody_agent else {},
+            "runtime_errors": _runtime_errors(20),
             "recovery": _recovery_status(),
             "recent_events": list(_events)[-40:]}
 
@@ -7545,6 +7618,9 @@ def _melody_agent_diagnostics(snapshot):
     if not isinstance(verification, dict):
         verification = {}
     categories = {}
+    melody = snapshot.get("melody") or {}
+    if not isinstance(melody, dict):
+        melody = {}
     for event in snapshot.get("recent_events") or []:
         if not isinstance(event, dict):
             continue
@@ -7572,6 +7648,17 @@ def _melody_agent_diagnostics(snapshot):
                 "heartbeat_age": recovery.get("heartbeat_age"),
                 "risk": risk.get("level"),
                 "outcome": verification.get("outcome")},
+            "melody": {
+                "configured": melody.get("configured"),
+                "mode": melody.get("mode"),
+                "assets": melody.get("assets", {}),
+                "issues": melody.get("issues", []),
+                "last_call": melody.get("last_call", {})},
+            "runtime_errors": [
+                {key: row.get(key) for key in
+                 ("id", "at", "version", "method", "path", "error_type", "code", "location", "fix")}
+                for row in (snapshot.get("runtime_errors") or [])
+                if isinstance(row, dict)],
             "recent_event_count": len(snapshot.get("recent_events") or []),
             "recent_issue_categories": categories}
 
@@ -8712,6 +8799,22 @@ class Handler(BaseHTTPRequestHandler):
             super().handle_one_request()
         except (BrokenPipeError, ConnectionResetError):
             pass
+        except Exception as exc:
+            row = _record_runtime_error(getattr(self, "command", "?"),
+                                        getattr(self, "path", "/"),
+                                        exc, sys.exc_info()[2])
+            # Keep the response useful without sending exception text, request
+            # bodies, cookies, or credentials back to the client.
+            try:
+                if not hasattr(self, "_outgoing_cookies"):
+                    self._outgoing_cookies = []
+                self._send_json({"ok": False,
+                                 "error": "request failed; see runtime diagnostics",
+                                 "error_id": row["id"],
+                                 "code": row["code"],
+                                 "fix": row["fix"]}, 500)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
 
     # -- helpers -----------------------------------------------------------
     def _send_json(self, obj, status=200):
@@ -9351,6 +9454,10 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 n = 100
             self._send_json({"events": list(_events)[-n:]})
+        elif path == "/api/log/errors":
+            if PUBLIC_MODE and not self._is_owner_session():
+                return self._send_json({"ok": False, "error": "owner only"}, 403)
+            self._send_json({"ok": True, "errors": _runtime_errors(100)})
         elif path == "/api/backups":
             # v5.16: every save rotates a .backup — list them for restore.
             out = []

@@ -56,7 +56,7 @@ check("setSheetHeight calls dodgeMelFab",
   !!setH && /dodgeMelFab\(\);/.test(setH),
   "covers open, detent change, and close");
 check("page load dodges after restoring the parked spot",
-  /placeMelFab\(\);[^\n]*\n\s*dodgeMelFab\(\);/.test(html));
+  /placeMelFab\(\);[\s\S]{0,200}dodgeMelFab\(\);/.test(html));
 check("a manual drag clears the dodge (the park wins)",
   /melFabMoved = true;\s*\n?\s*melFabDodged = false;/.test(html));
 

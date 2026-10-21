@@ -108,3 +108,13 @@ You can talk to me too: tap the microphone button next to my input and speak
 heard in the input box so you can check it before hitting Send. Voice input
 needs a signed-in profile (the free demo taste is text-only), and each voice
 message counts one call against your daily Melody time, same as a chat turn.
+
+## Reporting and diagnosing failures
+Use Menu → Feedback & bug report for player-visible problems. Unexpected
+server request exceptions are stored in `logs/runtime-errors.jsonl` without
+request bodies, cookies, prompts, or credentials. The owner can read the
+latest entries at `GET /api/log/errors` or through Melody's owner-only
+diagnostics. Each entry includes an error id, route, source location, error
+class, and repair hint; include the error id when reporting a failure.
+`GET /api/log` is the short in-memory game event log and is separate from the
+persistent runtime error ledger.

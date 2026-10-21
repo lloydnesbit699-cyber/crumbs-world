@@ -10,6 +10,7 @@
 const fs = require("fs");
 const path = require("path");
 const { execFileSync } = require("child_process");
+const PYTHON = process.env.PYTHON || (process.platform === "win32" ? "python" : "python3");
 
 const html = fs.readFileSync(path.join(__dirname, "..", "editor.html"), "utf8");
 
@@ -49,7 +50,7 @@ for j in jobs:
     out[j["k"]] = fn(*j["args"])
 json.dump(out, sys.stdout)
 `;
-  const res = execFileSync("python3", ["-c", script],
+  const res = execFileSync(PYTHON, ["-c", script],
     { input: JSON.stringify(jobs), encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   return JSON.parse(res);
 }

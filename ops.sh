@@ -51,6 +51,7 @@ if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
 set -u
 
 PORT="${PORT:-5000}"
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # PUBLIC=1 = multi-user server mode (--public), matching Replit's run button.
 # PUBLIC=0 = local single-user mode. Override per-command: PUBLIC=0 ./ops.sh start
 PUBLIC="${PUBLIC:-1}"
@@ -102,13 +103,15 @@ do_start() {
     say "server already running: $(server_pids)"
     return 0
   fi
-  [ -f "$APP" ] || die "can't find $APP — run this from the repo root"
+  [ -f "$ROOT/$APP" ] || die "can't find $APP — run this from the repo root"
+  python3 "$ROOT/tools/boot_preflight.py" ||
+    die "boot preflight failed; repair the Python environment before serving login"
   if [ "$PUBLIC" = "1" ]; then
     say "starting server on port $PORT --public (log: $LOG)"
-    PORT="$PORT" nohup python3 "$APP" --public >>"$LOG" 2>&1 &
+    PORT="$PORT" nohup python3 "$ROOT/$APP" --public >>"$LOG" 2>&1 &
   else
     say "starting server on port $PORT, local single-user mode (log: $LOG)"
-    PORT="$PORT" nohup python3 "$APP" >>"$LOG" 2>&1 &
+    PORT="$PORT" nohup python3 "$ROOT/$APP" >>"$LOG" 2>&1 &
   fi
   sleep 3
   if [ -n "$(server_pids)" ]; then

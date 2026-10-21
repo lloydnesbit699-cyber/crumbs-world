@@ -137,6 +137,14 @@ check("full=True keeps StateSnapshotCommand",
 print("== height-grid cache ==")
 fresh_world(48, 48)
 h._height_cache.clear()
+object_tile = next(iter(h.assets.tiles))
+h.world.object_layer[0][0] = core.make_obj_cell(object_tile, {"size": 1.5})
+check("attributed object contributes tile height",
+      core.obj_tid(h.world.object_layer[0][0]) == object_tile and
+      core.cell_height(h.world, 0, 0) == core.tile_height(h.assets.tiles.get(object_tile)))
+check("height grid handles dict object cell",
+      len(core.height_grid(h.world)) == 48 and len(core.height_grid(h.world)[0]) == 48)
+h.world.object_layer[0][0] = None
 g1 = h._height_grid_cached()
 g2 = h._height_grid_cached()
 check("repeat GET hits cache (same object)", g1 is g2)

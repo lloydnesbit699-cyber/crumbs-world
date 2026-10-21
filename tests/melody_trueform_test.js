@@ -46,7 +46,7 @@ check("the client preloads her 4 sprite frames",
 check("drawNpc draws her true-form sprite when her art is ready",
   /n\.melody && melodySpriteReady\(\)/.test(html));
 check("the sprite animates — frames cycle on a timer",
-  /melodySpriteFrames\[Math\.floor\(Date\.now\(\) \/ 280\) % 4\]/.test(html));
+  /let frameMs = 280/.test(html) && /melodySpriteFrames\[Math\.floor\(Date\.now\(\) \/ frameMs\) % 4\]/.test(html));
 check("the sprite hovers — gentle bob at draw time",
   /Math\.sin\(Date\.now\(\) \/ 650\)/.test(html));
 check("her marker survives — purple ring, heart, nameplate still drawn for her",

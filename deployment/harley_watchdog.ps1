@@ -26,6 +26,18 @@ foreach ($name in @('MELODY_BRAIN','MELODY_PROXY_URL','MELODY_PROXY_TOKEN','MELO
     }
 }
 Remove-Item Env:\GROQ_API_KEY -ErrorAction SilentlyContinue
+
+# Validate the full Python environment on every supervisor boot before the
+# game can serve the login page. The game process never receives Prime's key.
+$dependencyCheck = & $python -m pip check 2>&1
+if ($LASTEXITCODE -ne 0) {
+    throw ("Python dependency check failed: " + (($dependencyCheck | Out-String).Trim()))
+}
+& $python -c "import PIL, crumbs_recovery, melody_agent"
+if ($LASTEXITCODE -ne 0) {
+    throw 'Game/Melody runtime imports failed; repair the project .venv before serving login.'
+}
+Write-Output 'Harley boot preflight passed: dependencies and game/Melody imports are healthy.'
 $delay = 5
 
 while ($true) {

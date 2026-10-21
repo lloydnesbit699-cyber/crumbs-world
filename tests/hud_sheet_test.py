@@ -167,7 +167,7 @@ try:
 
     print("== animation suggestion target + view (v5.47.1) ==")
     _real_find_custom = h._find_custom
-    _real_pending = h._melody_agent.suggestion_pending
+    _real_pending_all = h._melody_agent.suggestions_pending_all
     try:
         h._find_custom = lambda tid: ({"id": tid, "name": "Torch",
                                        "frames": ["f1.png"]}, "local") \
@@ -189,9 +189,9 @@ try:
               h._suggest_animation_target([4, 4]) is None)
         h._find_custom = _real_find_custom
 
-        h._melody_agent.suggestion_pending = lambda d, u: {
+        h._melody_agent.suggestions_pending_all = lambda d, u: [{
             "kind": "animation_preset", "label": "Make it flicker?",
-            "status": "pending", "where_xy": [4, 4], "preset": "pulse"}
+            "status": "pending", "where_xy": [4, 4], "preset": "pulse"}]
         h._find_custom = lambda tid: ({"id": tid, "name": "Torch",
                                        "frames": ["f1.png"]}, "local") \
             if tid == 77 else (None, None)
@@ -200,22 +200,26 @@ try:
               view and view["kind"] == "animation_preset" and
               view["preset"] == "pulse" and view["preset_label"] == "Pulse" and
               view["target"]["tile_id"] == 77, view)
-        h._melody_agent.suggestion_pending = lambda d, u: {
+        h._melody_agent.suggestions_pending_all = lambda d, u: [{
             "kind": "animation_preset", "label": "x", "status": "pending",
-            "where_xy": [4, 4], "preset": "explode"}
-        check("bad preset -> None",
-              h._melody_suggestion_view("alice") is None)
-        h._melody_agent.suggestion_pending = lambda d, u: {
+            "where_xy": [4, 4], "preset": "explode"}]
+        bad_preset = h._melody_suggestion_view("alice")
+        check("bad preset becomes a visible recovery card",
+              bool(bad_preset and bad_preset.get("unmaterializable") and
+                   "tile" in bad_preset.get("reason", "")), bad_preset)
+        h._melody_agent.suggestions_pending_all = lambda d, u: [{
             "kind": "animation_preset", "label": "x", "status": "pending",
-            "where_xy": [0, 0], "preset": "pulse"}
-        check("no target -> None",
-              h._melody_suggestion_view("alice") is None)
-        h._melody_agent.suggestion_pending = lambda d, u: None
+            "where_xy": [0, 0], "preset": "pulse"}]
+        no_target = h._melody_suggestion_view("alice")
+        check("missing target becomes a visible recovery card",
+              bool(no_target and no_target.get("unmaterializable") and
+                   "tile" in no_target.get("reason", "")), no_target)
+        h._melody_agent.suggestions_pending_all = lambda d, u: []
         check("no suggestion -> None",
               h._melody_suggestion_view("alice") is None)
     finally:
         h._find_custom = _real_find_custom
-        h._melody_agent.suggestion_pending = _real_pending
+        h._melody_agent.suggestions_pending_all = _real_pending_all
 finally:
     h.world = old_world
 

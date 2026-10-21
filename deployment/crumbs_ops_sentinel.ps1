@@ -24,7 +24,8 @@ $requiredFiles = @(
     'deployment\harley_verified_deploy.ps1', 'deployment\install_harley_autostart.ps1',
     'deployment\crumbs_ops_sentinel.ps1', 'deployment\configure_account_recovery.ps1',
     'deployment\configure_melody_prime.ps1', 'deployment\install_melody_prime.ps1',
-    'deployment\start_melody_prime.ps1', 'tools\melody_prime_proxy.py'
+    'deployment\start_melody_prime.ps1', 'tools\melody_prime_proxy.py',
+    'tools\boot_preflight.py'
 )
 
 function Add-Check([System.Collections.Generic.List[object]]$Items,
@@ -50,8 +51,8 @@ function Get-OpsSnapshot {
         $pipOutput = & $python -m pip check 2>&1 | Out-String
         if ($LASTEXITCODE -eq 0) { Add-Check $items 'Python dependencies' 'PASS' 'pip check clean' }
         else { Add-Check $items 'Python dependencies' 'FAIL' (($pipOutput.Trim() -replace '[\r\n]+',' ') -replace '\s{2,}',' ') }
-        $moduleOutput = & $python -c "import PIL; import crumbs_recovery" 2>&1 | Out-String
-        if ($LASTEXITCODE -eq 0) { Add-Check $items 'Runtime imports' 'PASS' 'Pillow and recovery core import successfully' }
+        $moduleOutput = & $python -c "import PIL, crumbs_core, crumbs_recovery, melody_agent" 2>&1 | Out-String
+        if ($LASTEXITCODE -eq 0) { Add-Check $items 'Runtime imports' 'PASS' 'Pillow, game core, recovery, and Melody import successfully' }
         else { Add-Check $items 'Runtime imports' 'FAIL' (($moduleOutput.Trim() -replace '[\r\n]+',' ') -replace '\s{2,}',' ') }
     } else {
         Add-Check $items 'Python dependencies' 'FAIL' '.venv\Scripts\python.exe missing; run boots\crumbs-boot.ps1'
@@ -221,14 +222,30 @@ function Get-OpsSnapshot {
         Add-Check $items 'Operational logs' 'PASS' 'logs directory is present'
         $recentErrors = @(Get-ChildItem -LiteralPath $logsPath -Filter 'harley-server-*.err.log' -File -ErrorAction SilentlyContinue |
             Sort-Object LastWriteTime -Descending | Select-Object -First 10)
-        $signalCount = 0
+        $signatures = @{}
         foreach ($logFile in $recentErrors) {
-            $signals = @(Get-Content -LiteralPath $logFile.FullName -Tail 200 -ErrorAction SilentlyContinue |
-                Where-Object { $_ -match 'Traceback|\b(ERROR|FATAL)\b|ModuleNotFoundError|ImportError' })
-            $signalCount += $signals.Count
+            $signals = @(Get-Content -LiteralPath $logFile.FullName -Tail 400 -ErrorAction SilentlyContinue |
+                Where-Object { $_ -match '^([A-Za-z_]+(Error|Exception)):' -or $_ -match '\b(FATAL|ERROR)\b' })
+            foreach ($signal in $signals) { $signatures[$signal.Trim()] = $true }
         }
-        if ($signalCount -eq 0) { Add-Check $items 'Recent server log errors' 'PASS' 'no fatal/error signatures in the 10 newest stderr logs' }
-        else { Add-Check $items 'Recent server log errors' 'WARN' "$signalCount error signature(s) found in the 10 newest stderr logs; inspect logs locally" }
+        $runtimeErrorPath = Join-Path $logsPath 'runtime-errors.jsonl'
+        $runtimeRows = @()
+        if (Test-Path -LiteralPath $runtimeErrorPath -PathType Leaf) {
+            foreach ($line in (Get-Content -LiteralPath $runtimeErrorPath -Tail 100 -ErrorAction SilentlyContinue)) {
+                try { $runtimeRows += ($line | ConvertFrom-Json -ErrorAction Stop) } catch { }
+            }
+        }
+        if ($runtimeRows.Count -gt 0) {
+            $latest = @($runtimeRows | Select-Object -Last 5 | ForEach-Object {
+                "$($_.id) v$($_.version) $($_.code) at $($_.location): $($_.fix)"
+            }) -join ' | '
+            Add-Check $items 'Recent server request errors' 'WARN' "$($runtimeRows.Count) persisted error(s); $latest"
+        } elseif ($signatures.Count -eq 0) {
+            Add-Check $items 'Recent server errors' 'PASS' 'no distinct fatal/error signatures in the 10 newest stderr logs'
+        } else {
+            $examples = @($signatures.Keys | Select-Object -First 5) -join '; '
+            Add-Check $items 'Recent server errors' 'WARN' "$($signatures.Count) distinct error signature(s) in the 10 newest stderr logs: $examples; inspect matching logs for source location"
+        }
     }
 
     $usersFile = Join-Path $repoDir 'users.json'

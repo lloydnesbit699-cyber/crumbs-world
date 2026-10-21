@@ -3,6 +3,10 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v6.0.0 — 2026-10-20
+
+HUD 6.0 workflow shell, resilient boot preflight, and actionable failure diagnostics. The six Build, World, Population, Assets, Play, and System work areas now lead the local/private/public/Replit app, with a desktop studio rail, responsive tablet/phone navigation, and searchable Ctrl+K actions while preserving the full editor. All launcher paths run the same pinned-dependency and runtime-import preflight before serving login, repairing the environment when needed. Runtime request exceptions now return an error id and are safely persisted with route, source location, cause code, and repair guidance; owner diagnostics and the operations sentinel surface the same evidence. Fixed the height-grid crash for attribute-bearing object cells, shipped Melody's key finder through the in-game updater, and routed Replit Run through the single safe boot/sync path. Harley deploy now waits for a healthy version after an ambiguous restart timeout before rolling back. GitHub CI covers boot preflight, the error ledger, and map scale/height-grid regression.
+
 ## v5.67.0 — 2026-10-20
 
 **New-console layout + keyboard movement.** The v5.67 new-console surface (stages 1–4, already on main) ships as a release: category/tool palette that drives the real editor controls, brush modes in the tool grid, and a contextual selection detail area. The Move (pan) toggle is restored to the zoom cluster for everyone — v5.67 stage 3 had hidden it, Lloyd called it back. Keyboard movement, Lloyd's split: arrow keys pan the map one tile per press, WASD moves the character in Play mode through the same step path as the D-pad and gamepad (typing in any field is never stolen, browser shortcuts untouched). Verified: keyboard_move_client_test 18/18, repo-verify suite green.

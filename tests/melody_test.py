@@ -128,7 +128,7 @@ res = ma.handle_chat(tmp, "alice", "what is the airspeed velocity of an unladen 
 check("brain-off ok", res.get("ok") and res.get("source") == "knowledge",
       str(res)[:100])
 check("brain-off honest",
-      "isn't connected" in res.get("reply", ""), res.get("reply", "")[:80])
+      "isn't configured" in res.get("reply", ""), res.get("reply", "")[:80])
 
 print("== chat: stubbed brain with tool call ==")
 calls = []
@@ -197,7 +197,7 @@ check("demo writes no history",
       ma.history_load(tmp4, "alice") == [])
 shutil.rmtree(tmp4, ignore_errors=True)
 
-print("== brain order: Qwen on Groq first (Lloyd's call) ==")
+print("== brain order: GPT OSS on Groq first ==")
 old_env = {k: os.environ.get(k) for k in
            ("MELODY_BRAIN", "GROQ_API_KEY", "GEMINI_API_KEY", "GROQ_MODEL")}
 os.environ["MELODY_BRAIN"] = "groq"
@@ -205,20 +205,20 @@ os.environ["GROQ_API_KEY"] = "test-key"
 os.environ.pop("GEMINI_API_KEY", None)
 os.environ.pop("GROQ_MODEL", None)
 backs = ma.brain_backends()
-check("groq+qwen primary",
-      backs and backs[0][0] == "groq+qwen"
+check("Groq GPT OSS primary",
+      backs and backs[0][0] == "groq+gpt-oss"
       and backs[0][1] == "https://api.groq.com/openai/v1/chat/completions"
-      and backs[0][3] == "qwen/qwen3.8-27b",
+      and backs[0][3] == "openai/gpt-oss-20b",
       str([(b[0], b[3]) for b in backs]))
 check("no llama default anywhere",
       all("llama" not in b[3] for b in backs))
 st = ma.brain_status()
-check("default mode groq", st["mode"] == "groq" and st["primary"] == "groq+qwen")
+check("default mode groq", st["mode"] == "groq" and st["primary"] == "groq+gpt-oss")
 os.environ["MELODY_BRAIN"] = "gemini"
 os.environ["GEMINI_API_KEY"] = "test-key-2"
 backs = ma.brain_backends()
 check("MELODY_BRAIN=gemini flips order",
-      backs[0][0] == "gemini" and backs[1][0] == "groq+qwen")
+      backs[0][0] == "gemini" and backs[1][0] == "groq+gpt-oss")
 for k, v in old_env.items():
     if v is None:
         os.environ.pop(k, None)

@@ -48,7 +48,7 @@ check("plan honors her spot, else visible center",
   !!plan && /where_xy/.test(plan) && /visibleTiles/.test(plan));
 check("unknown room kinds fall through safely",
   !!plan && /boss_arena/.test(plan) && /dungeon_room/.test(plan));
-const ghost = fnBody("drawSuggestGhost");
+const ghost = fnBody("drawOneSuggestGhost");
 check("ghost renders room_draft", !!ghost && /room_draft/.test(ghost));
 check("room ghost draws the plan's cells (preview never lies)",
   !!ghost && /suggestRoomCells\(ghostSug\)/.test(ghost));

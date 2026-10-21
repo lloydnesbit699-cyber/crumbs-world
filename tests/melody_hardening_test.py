@@ -13,6 +13,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root (tests live in tests/)
 sys.path.insert(0, HERE)
@@ -69,8 +70,14 @@ shutil.rmtree(tmp, ignore_errors=True)
 print("== quota exhaustion mid-turn stops honestly ==")
 tmp = fresh_dir()
 os.makedirs(os.path.join(tmp, "vaults", "zed"), exist_ok=True)
-for _ in range(199):  # leave exactly 1 call of budget
-    ma.quota_bump(tmp, "zed", "free")
+# Model a monthly quota with one call left but a fresh daily burst allowance.
+# quota_bump() would also consume today's burst cap, which is a different
+# condition and made this test fail before it reached the mid-turn case.
+quota_path = os.path.join(tmp, "vaults", "zed", "melody", "quota.json")
+os.makedirs(os.path.dirname(quota_path), exist_ok=True)
+with open(quota_path, "w") as quota_file:
+    json.dump({"month": time.strftime("%Y-%m"), "month_used": 199,
+               "date": time.strftime("%Y-%m-%d"), "day_used": 0}, quota_file)
 check("budget at 1", remaining(tmp, "zed") == 1)
 
 

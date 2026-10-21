@@ -114,11 +114,8 @@ if [[ ! -x "$VENV_DIR/bin/python" ]]; then
   "$PYTHON" -m venv "$VENV_DIR" || die "could not create .venv"
 fi
 PYTHON=$VENV_DIR/bin/python
-if ! "$PYTHON" -c 'import PIL' >/dev/null 2>&1; then
-  log "installing the app's pinned Python requirements into .venv"
-  "$PYTHON" -m pip install -r "$GAME_DIR/requirements.txt" ||
-    die "dependency installation failed; see the pip error above"
-fi
+"$PYTHON" "$GAME_DIR/tools/boot_preflight.py" ||
+  die "boot preflight failed; repair the project .venv before serving login"
 
 mkdir -p -- "$LOG_DIR" || die "cannot create log directory $LOG_DIR"
 STAMP=$(date '+%Y%m%d-%H%M%S')

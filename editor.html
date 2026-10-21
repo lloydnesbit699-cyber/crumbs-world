@@ -1835,6 +1835,44 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     background: none; border: 0; border-top: 1px solid #2c2a22; cursor: pointer; text-align: left;
   }
   #shell-root .sh-menu-item .sh-mi { width: 28px; text-align: center; flex: none; }
+  #shell-root .sh-command-wrap {
+    position: fixed; inset: 0; z-index: 750; display: flex; justify-content: center;
+    align-items: flex-start; padding: max(10vh, env(safe-area-inset-top)) 16px 16px;
+    background: rgba(0,0,0,0.72);
+  }
+  #shell-root .sh-command-dialog {
+    width: min(640px, 100%); max-height: min(76vh, 680px); overflow: hidden;
+    background: #24272d; border: 2px solid #e0c56e; border-radius: 16px;
+    box-shadow: 0 20px 70px rgba(0,0,0,0.65);
+  }
+  #shell-root .sh-command-head { padding: 16px; border-bottom: 1px solid #454950; }
+  #shell-root .sh-command-head label { display: block; margin-bottom: 8px; color: #e0c56e; font-weight: 700; }
+  #shell-root .sh-command-search {
+    width: 100%; min-height: 52px; padding: 10px 14px; background: #17191d;
+    border: 2px solid #656a72; border-radius: 10px; color: #fff; font: inherit;
+  }
+  #shell-root .sh-command-search:focus { outline: 3px solid #e0c56e; outline-offset: 2px; }
+  #shell-root .sh-command-list { max-height: min(58vh, 520px); overflow: auto; padding: 8px; }
+  #shell-root .sh-command-item {
+    width: 100%; min-height: 56px; display: flex; align-items: center; gap: 12px;
+    padding: 10px 14px; background: transparent; color: #f4f4f4; border: 2px solid transparent;
+    border-radius: 10px; text-align: left; font: inherit; cursor: pointer;
+  }
+  #shell-root .sh-command-item:hover, #shell-root .sh-command-item:focus-visible {
+    background: #34383f; border-color: #e0c56e; outline: none;
+  }
+  #shell-root .sh-command-group { width: 112px; flex: none; color: #e0c56e; font-size: 14px; }
+  #shell-root .sh-command-empty { padding: 18px; color: #d2d4d8; }
+  html.sh-light #shell-root .sh-command-dialog { background: #fff; border-color: #806615; }
+  html.sh-light #shell-root .sh-command-open { background: #fbf7ec; color: #17191d; border-color: #c6b897; }
+  html.sh-light #shell-root .sh-command-head { border-color: #d7d0be; }
+  html.sh-light #shell-root .sh-command-head label,
+  html.sh-light #shell-root .sh-command-group { color: #5a4810; }
+  html.sh-light #shell-root .sh-command-search { background: #faf8f2; border-color: #777; color: #17191d; }
+  html.sh-light #shell-root .sh-command-item { color: #17191d; }
+  html.sh-light #shell-root .sh-command-item:hover,
+  html.sh-light #shell-root .sh-command-item:focus-visible { background: #f0ead8; border-color: #806615; }
+  html.sh-light #shell-root .sh-command-empty { color: #333; }
   /* ---- Loading / error ---- */
   #shell-root .sh-loading, #shell-root .sh-error { align-items: center; justify-content: center; text-align: center; }
   #shell-root .sh-loading .sh-mark, #shell-root .sh-error .sh-mark {
@@ -1985,10 +2023,16 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     padding: max(6px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 6px max(16px, env(safe-area-inset-left));
     background: rgba(20, 19, 17, 0.94); border-bottom: 1px solid #3a352b;
   }
+  #shell-root .sh-command-open {
+    min-width: 48px; min-height: 48px; padding: 8px 12px; background: #24272d;
+    border: 2px solid #454950; border-radius: 12px; color: #f4f4f4;
+    font: inherit; font-size: 16px; cursor: pointer;
+  }
+  #shell-root .sh-command-open span { display: none; }
   #shell-root .sh-world-chip {
     font-size: 16px; font-weight: 700; color: #f3ead6;
     background: #1e1c18; border: 1px solid #3a352b; border-radius: 999px;
-    padding: 8px 16px; max-width: 62vw; overflow: hidden;
+    padding: 8px 16px; max-width: calc(100vw - 180px); overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap;
   }
   #shell-root .sh-canvas-wrap { flex: 1 1 auto; position: relative; min-height: 0; background: #0a0a0a; }
@@ -2014,10 +2058,14 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     color: #f3ead6; background: #2b2822; border: 3px solid #c9973f; font-weight: 700;
     padding: 5px 5px;
   }
-  /* Computer: same three destinations, same labels and order — centered bar. */
-  @media (min-width: 760px) {
+  #shell-root .sh-navbtn.sh-desktop-only { display: none; }
+  /* The six work areas are available from tablet width up. Phones keep the
+     three primary actions in the bottom dock; secondary work areas remain
+     available from the Menu and command palette. */
+  @media (min-width: 768px) {
     #shell-root .sh-bottomnav { justify-content: center; }
     #shell-root .sh-navbtn { flex: 0 1 200px; flex-direction: row; gap: 10px; font-size: 16px; }
+    #shell-root .sh-navbtn.sh-desktop-only { display: flex; }
     /* Stage 10: tighter computer chrome so the canvas keeps >= 85% of the
        viewport. Targets stay above the 48px floor; only padding/height trim. */
     #shell-root .sh-canvas-topbar {
@@ -2027,6 +2075,33 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     #shell-root .sh-bottomnav {
       padding-top: 4px; padding-bottom: max(6px, env(safe-area-inset-bottom));
     }
+  }
+  @media (min-width: 768px) {
+    #shell-root .sh-world-chip { max-width: 62vw; }
+    #shell-root .sh-command-open span { display: inline; }
+    #shell-root .sh-canvas-topbar { order: 0; }
+    #shell-root .sh-bottomnav { order: 1; }
+    #shell-root .sh-canvas-wrap { order: 2; }
+  }
+  /* HUD 6 desktop studio: persistent work-area rail beside a canvas whose
+     iframe stays mounted while the context drawer opens on the right. */
+  @media (min-width: 1200px) {
+    #shell-root .sh-bottomnav {
+      position: absolute; z-index: 8; top: max(64px, env(safe-area-inset-top));
+      left: 0; bottom: 0; width: 184px; box-sizing: border-box;
+      flex-direction: column; justify-content: flex-start; align-items: stretch;
+      gap: 8px; padding: 12px; border-top: 0; border-right: 1px solid #3a352b;
+    }
+    #shell-root .sh-navbtn { flex: 0 0 56px; width: 100%; justify-content: flex-start; padding: 6px 12px; }
+    #shell-root .sh-canvas-topbar, #shell-root .sh-canvas-wrap { margin-left: 184px; }
+    #shell-root .sh-canvas-screen.sh-panel-open .sh-canvas-wrap { margin-right: min(30vw, 400px); }
+    #shell-root .sh-build-drawer, #shell-root .sh-world-drawer {
+      top: max(64px, env(safe-area-inset-top)); bottom: 0; width: min(30vw, 400px);
+      max-height: none; border-radius: 14px 0 0 14px;
+    }
+    #shell-root .sh-canvas-screen.sh-playing .sh-bottomnav { display: none; }
+    #shell-root .sh-canvas-screen.sh-playing .sh-canvas-topbar,
+    #shell-root .sh-canvas-screen.sh-playing .sh-canvas-wrap { margin-left: 0; margin-right: 0; }
   }
   /* First-entry coach card: overlays the canvas above the nav. */
   #shell-root .sh-coach {
@@ -2853,6 +2928,11 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     padding: 8px 16px; max-width: 62vw; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap;
   }
+  html.sh-light #shell-root .sh-command-open span { display: none; }
+  @media (min-width: 768px) {
+    html.sh-light #shell-root .sh-world-chip { max-width: 62vw; }
+    html.sh-light #shell-root .sh-command-open span { display: inline; }
+  }
   html.sh-light #shell-root .sh-canvas-wrap{ flex: 1 1 auto; position: relative; min-height: 0; background: #f2ecdc; }
   html.sh-light #shell-root .sh-canvas-wrap iframe{
     position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #f2ecdc;
@@ -2876,10 +2956,36 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     color: #2b2517; background: #e9e1cb; border: 3px solid #8a6520; font-weight: 700;
     padding: 5px 5px;
   }
-  /* Computer: same three destinations, same labels and order — centered bar. */
-  @media (min-width: 760px) {
+  html.sh-light #shell-root .sh-navbtn.sh-desktop-only { display: none; }
+  @media (min-width: 768px) {
     html.sh-light #shell-root .sh-bottomnav{ justify-content: center; }
     html.sh-light #shell-root .sh-navbtn{ flex: 0 1 200px; flex-direction: row; gap: 10px; font-size: 16px; }
+    html.sh-light #shell-root .sh-navbtn.sh-desktop-only { display: flex; }
+  }
+  @media (min-width: 768px) {
+    html.sh-light #shell-root .sh-canvas-topbar { order: 0; }
+    html.sh-light #shell-root .sh-bottomnav { order: 1; }
+    html.sh-light #shell-root .sh-canvas-wrap { order: 2; }
+  }
+  @media (min-width: 1200px) {
+    html.sh-light #shell-root .sh-bottomnav {
+      position: absolute; z-index: 8; top: max(64px, env(safe-area-inset-top));
+      left: 0; bottom: 0; width: 184px; box-sizing: border-box;
+      flex-direction: column; justify-content: flex-start; align-items: stretch;
+      gap: 8px; padding: 12px; border-top: 0; border-right: 1px solid #c6b897;
+    }
+    html.sh-light #shell-root .sh-navbtn { flex: 0 0 56px; width: 100%; justify-content: flex-start; padding: 6px 12px; }
+    html.sh-light #shell-root .sh-canvas-topbar,
+    html.sh-light #shell-root .sh-canvas-wrap { margin-left: 184px; }
+    html.sh-light #shell-root .sh-canvas-screen.sh-panel-open .sh-canvas-wrap { margin-right: min(30vw, 400px); }
+    html.sh-light #shell-root .sh-build-drawer,
+    html.sh-light #shell-root .sh-world-drawer {
+      top: max(64px, env(safe-area-inset-top)); bottom: 0; width: min(30vw, 400px);
+      max-height: none; border-radius: 14px 0 0 14px;
+    }
+    html.sh-light #shell-root .sh-canvas-screen.sh-playing .sh-bottomnav { display: none; }
+    html.sh-light #shell-root .sh-canvas-screen.sh-playing .sh-canvas-topbar,
+    html.sh-light #shell-root .sh-canvas-screen.sh-playing .sh-canvas-wrap { margin-left: 0; margin-right: 0; }
   }
   /* First-entry coach card: overlays the canvas above the nav. */
   html.sh-light #shell-root .sh-coach{
@@ -15007,6 +15113,7 @@ $("menu-update").onclick = async () => {
         "crumbs_core.py",
         "crumbs_recovery.py",
         "melody_agent.py",
+        "tools/melody_keyfinder.py",
       ];
       // v5.25: keep in step with the server's UPDATE_ART_FILES — the art
       // rides the same install as base64 data URLs (binary can't survive
@@ -19288,6 +19395,8 @@ function shellOpenMenu(returnTo) {
     'aria-modal="true" aria-label="Menu">' +
     '<div class="sh-grab" aria-hidden="true"></div>' +
     '<p class="sh-menu-user"></p><p class="sh-menu-sub">' + sub + "</p>" +
+    '<button class="sh-menu-item" id="sh-mi-population"><span class="sh-mi" aria-hidden="true">&#9787;</span> Population</button>' +
+    '<button class="sh-menu-item" id="sh-mi-assets"><span class="sh-mi" aria-hidden="true">&#9635;</span> Assets and imports</button>' +
     '<button class="sh-menu-item" id="sh-mi-creator"><span class="sh-mi" aria-hidden="true">\uD83D\uDEE0\uFE0F</span> Creator Tools</button>' +
     '<button class="sh-menu-item" id="sh-mi-settings"><span class="sh-mi" aria-hidden="true">\u2699</span> Settings</button>' +
     '<button class="sh-menu-item" id="sh-mi-help"><span class="sh-mi" aria-hidden="true">\u2139</span> Help</button>' +
@@ -19299,6 +19408,8 @@ function shellOpenMenu(returnTo) {
   "</div></div>";
   root.appendChild(wrap);
   root.querySelector(".sh-menu-user").textContent = who;
+  $("sh-mi-population").onclick = function () { shellCloseMenu(); shellNavGo("population"); };
+  $("sh-mi-assets").onclick = function () { shellCloseMenu(); shellNavGo("assets"); };
   // Stage 8: Creator Tools opens through its gateway, not a raw /classic hop.
   $("sh-mi-creator").onclick = function () { shellEnterCreator(); };
   // Stage 9: Settings opens standalone (menu closes first) so Escape exits
@@ -19369,11 +19480,12 @@ function shellMenuHelp() {
     '<div class="sh-grab" aria-hidden="true"></div>' +
     '<p class="sh-menu-user">Help</p>' +
     '<div class="sh-menu-help">' +
-    "<p><b>Build something.</b><br>Open Build, then pick Paint, Place, or People.</p>" +
+    "<p><b>Build something.</b><br>Open Build, then pick Paint or Place. Population opens people and NPCs; Assets opens art, imports, and animation.</p>" +
     "<p><b>Open another world.</b><br>Open World, then My Worlds.</p>" +
-    "<p><b>Play your world.</b><br>Tap Play in the bottom bar. Exit Play brings you back to building.</p>" +
+    "<p><b>Play your world.</b><br>Choose Play in primary navigation. Exit Play brings you back to building.</p>" +
     "<p><b>Check your world.</b><br>Open World, then World Check, for plain-language results.</p>" +
-    "<p><b>Need more tools?</b><br>Creator Tools opens the full workshop. Return to Simple View brings you back.</p>" +
+    "<p><b>Find an action.</b><br>Use Search at the top of the canvas or press Ctrl+K / Command+K.</p>" +
+    "<p><b>System tools.</b><br>System opens settings, recovery, export, and Creator Tools.</p>" +
     "</div>" +
     '<button class="sh-menu-item" id="sh-mi-back"><span class="sh-mi" aria-hidden="true">\u2190</span> Back</button>';
   $("sh-mi-back").onclick = shellMenuSheetBack;
@@ -19433,8 +19545,8 @@ function shellRememberCanvasFile(file) {
   try { localStorage.setItem("crumbs.lastMap." + shellCurrentUser(), file); }
   catch (e) {}
 }
-function shellNavBtn(dest, icon, label, active) {
-  return '<button type="button" class="sh-navbtn" data-nav="' + dest + '"' +
+function shellNavBtn(dest, icon, label, active, desktopOnly) {
+  return '<button type="button" class="sh-navbtn' + (desktopOnly ? ' sh-desktop-only' : '') + '" data-nav="' + dest + '"' +
     (active ? ' aria-current="page"' : "") + ">" +
     '<span class="sh-nav-ic" aria-hidden="true">' + icon + "</span>" +
     "<span>" + label + "</span></button>";
@@ -19443,7 +19555,10 @@ function shellBottomNav(active) {
   return '<nav class="sh-bottomnav" aria-label="Primary">' +
     shellNavBtn("build", "&#9874;", "Build", active === "build") +
     shellNavBtn("world", "&#9689;", "World", active === "world") +
+    shellNavBtn("population", "&#9787;", "Population", active === "population", true) +
+    shellNavBtn("assets", "&#9635;", "Assets", active === "assets", true) +
     shellNavBtn("play", "&#9654;", "Play", active === "play") +
+    shellNavBtn("system", "&#9881;", "System", active === "system", true) +
     "</nav>";
 }
 function shellWireNav(root) {
@@ -19459,12 +19574,16 @@ function shellWireNav(root) {
 // Drawer. Tapping either while its drawer is open closes it (toggle).
 function shellNavGo(dest) {
   var st = window.CrumbsShell.state;
+  shellNavMark(dest);
   if (dest === "build") {
-    if ($("sh-build-drawer")) { shellCloseBuildDrawer(); return; }
+    if ($("sh-build-drawer")) {
+      if (_buildView !== "home") { shellBuildShow("home"); return; }
+      shellCloseBuildDrawer(); return;
+    }
     shellCloseWorldDrawer();
     var f = window.CrumbsShell.currentFile;
     if (!f) { shellShowHome(); return; }
-    if (st.destination !== "build" || !$("sh-canvas-frame")) shellShowCanvas(f);
+    if (!$("sh-canvas-frame")) shellShowCanvas(f);
     shellOpenBuildDrawer("home");
     return;
   }
@@ -19475,6 +19594,21 @@ function shellNavGo(dest) {
     shellOpenWorldDrawer("home");
     return;
   }
+  if (dest === "population" || dest === "assets") {
+    shellCloseWorldDrawer();
+    shellCloseMenu();
+    var f3 = window.CrumbsShell.currentFile;
+    if (!f3) { shellShowHome(); return; }
+    shellOpenBuildDrawer(dest === "population" ? "population" : "assets");
+    st.destination = dest;
+    return;
+  }
+  if (dest === "system") {
+    shellCloseBuildDrawer();
+    shellCloseWorldDrawer();
+    shellOpenMenu();
+    return;
+  }
   if (st.destination === dest) return;
   st.destination = dest;
   shellCloseBuildDrawer();
@@ -19482,6 +19616,122 @@ function shellNavGo(dest) {
   if (dest === "play") {
     shellEnterPlay();
     return;
+  }
+}
+function shellNavMark(dest) {
+  var nav = document.querySelector("#shell-root .sh-bottomnav");
+  if (!nav) return;
+  var buttons = nav.querySelectorAll("[data-nav]");
+  for (var i = 0; i < buttons.length; i++) {
+    if (buttons[i].getAttribute("data-nav") === dest)
+      buttons[i].setAttribute("aria-current", "page");
+    else buttons[i].removeAttribute("aria-current");
+  }
+}
+var SHELL_COMMANDS = [
+  { group: "Build", label: "Paint terrain", keywords: "brush height collision", run: function () {
+    shellNavGo("build"); shellOpenBuildDrawer("paint");
+  }},
+  { group: "Build", label: "Place objects", keywords: "items decor", run: function () {
+    shellNavGo("build"); shellOpenBuildDrawer("place");
+  }},
+  { group: "Population", label: "Manage people and NPCs", keywords: "villagers patrol", run: function () {
+    shellNavGo("population");
+  }},
+  { group: "Population", label: "Open mission studio", keywords: "objectives rewards", run: function () {
+    shellEnterCreator();
+  }},
+  { group: "Assets", label: "Browse art and animations", keywords: "tiles import library", run: function () {
+    shellNavGo("assets");
+  }},
+  { group: "World", label: "Open world map", keywords: "maps neighbors", run: function () {
+    shellNavGo("world"); shellOpenWorldDrawer("map");
+  }},
+  { group: "World", label: "Manage portals", keywords: "links destinations", run: function () {
+    shellNavGo("world"); shellOpenWorldDrawer("portals");
+  }},
+  { group: "Play", label: "Play this world", keywords: "test game", run: function () {
+    shellNavGo("play");
+  }},
+  { group: "Play", label: "Validate this world", keywords: "check report", run: function () {
+    shellNavGo("world"); shellOpenWorldDrawer("check");
+  }},
+  { group: "System", label: "Open settings and system tools", keywords: "recovery export", run: function () {
+    shellNavGo("system");
+  }},
+  { group: "System", label: "Open the full Creator Tools workspace", keywords: "advanced editor", run: function () {
+    shellEnterCreator();
+  }}
+];
+function shellOpenCommandPalette() {
+  if (document.getElementById("sh-command-wrap")) return;
+  var root = shellRootEl();
+  if (!root) return;
+  var wrap = document.createElement("div");
+  wrap.id = "sh-command-wrap";
+  wrap.className = "sh-command-wrap";
+  wrap.innerHTML = '<section class="sh-command-dialog" role="dialog" aria-modal="true" aria-label="Command palette">' +
+    '<div class="sh-command-head"><label for="sh-command-search">What do you want to do?</label>' +
+    '<input id="sh-command-search" class="sh-command-search" type="search" autocomplete="off" placeholder="Search actions…" aria-controls="sh-command-list"></div>' +
+    '<div id="sh-command-list" class="sh-command-list" role="listbox" aria-label="Actions"></div></section>';
+  root.appendChild(wrap);
+  var input = document.getElementById("sh-command-search");
+  var list = document.getElementById("sh-command-list");
+  function draw() {
+    var query = input.value.trim().toLowerCase();
+    list.textContent = "";
+    var count = 0;
+    for (var i = 0; i < SHELL_COMMANDS.length; i++) {
+      var cmd = SHELL_COMMANDS[i];
+      if (query && (cmd.group + " " + cmd.label + " " + cmd.keywords).toLowerCase().indexOf(query) < 0) continue;
+      var button = document.createElement("button");
+      button.type = "button";
+      button.className = "sh-command-item";
+      button.setAttribute("role", "option");
+      var group = document.createElement("span");
+      group.className = "sh-command-group";
+      group.textContent = cmd.group;
+      var label = document.createElement("span");
+      label.textContent = cmd.label;
+      button.appendChild(group); button.appendChild(label);
+      button.onclick = (function (action) { return function () {
+        shellCloseCommandPalette(); action();
+      }; })(cmd.run);
+      list.appendChild(button); count++;
+    }
+    if (!count) {
+      var empty = document.createElement("div");
+      empty.className = "sh-command-empty";
+      empty.textContent = "No matching actions. Try a tool, world, or system name.";
+      list.appendChild(empty);
+    }
+  }
+  input.addEventListener("input", draw);
+  wrap.addEventListener("click", function (e) { if (e.target === wrap) shellCloseCommandPalette(); });
+  input.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") { e.preventDefault(); shellCloseCommandPalette(); }
+    else if (e.key === "Enter") {
+      var first = list.querySelector("button");
+      if (first) { e.preventDefault(); first.click(); }
+    } else if (e.key === "ArrowDown") {
+      var next = list.querySelector("button");
+      if (next) { e.preventDefault(); next.focus(); }
+    }
+  });
+  document.addEventListener("keydown", shellCommandKeys);
+  draw(); input.focus();
+}
+function shellCommandKeys(e) {
+  if (e.key === "Escape") { e.preventDefault(); shellCloseCommandPalette(); }
+}
+function shellCloseCommandPalette() {
+  var wrap = document.getElementById("sh-command-wrap");
+  if (wrap && wrap.parentNode) wrap.parentNode.removeChild(wrap);
+  document.removeEventListener("keydown", shellCommandKeys);
+}
+function shellGlobalKeys(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+    e.preventDefault(); shellOpenCommandPalette();
   }
 }
 // ---- Stage 4: first-entry coach card (per-world dismissal, device-local) ----
@@ -19520,6 +19770,7 @@ function shellShowCanvas(file) {
     '<div class="sh-screen sh-canvas-screen">' +
       '<div class="sh-canvas-topbar">' +
         '<span class="sh-world-chip" id="sh-canvas-chip"></span>' +
+        '<button type="button" class="sh-command-open" id="sh-command-open" aria-label="Search actions" title="Search actions (Ctrl+K)">&#8981; <span>Search</span></button>' +
         '<button type="button" class="sh-menu-btn" id="sh-canvas-menu" aria-label="Menu" aria-haspopup="dialog">\u2630</button>' +
       "</div>" +
       '<div class="sh-canvas-wrap">' +
@@ -19532,6 +19783,7 @@ function shellShowCanvas(file) {
     "Canvas");
   $("sh-canvas-chip").textContent = friendlyName(file);
   $("sh-canvas-menu").onclick = function () { shellOpenMenu($("sh-canvas-menu")); };
+  $("sh-command-open").onclick = shellOpenCommandPalette;
   shellWireNav(root);
   // Stage 9: honest loading state while the framed map boots (first open can
   // take a few seconds). Hides on iframe load; if it takes too long, say so.
@@ -19598,7 +19850,7 @@ function shellOpenBuildDrawer(view) {
   shellCloseMenu();  // one drawer at a time
   shellCloseWorldDrawer();
   var st = window.CrumbsShell.state;
-  if (st.destination !== "build" || !$("sh-canvas-frame")) {
+    if (!$("sh-canvas-frame")) {
     var f = window.CrumbsShell.currentFile;
     if (!f) { shellShowHome(); return; }
     shellShowCanvas(f);
@@ -19622,6 +19874,8 @@ function shellOpenBuildDrawer(view) {
     "</div>" +
     '<div class="sh-build-body" id="sh-build-body"></div>';
   shellRootEl().appendChild(wrap);
+  var canvasScreen = document.querySelector("#shell-root .sh-canvas-screen");
+  if (canvasScreen) canvasScreen.classList.add("sh-panel-open");
   shellDrawerParkAboveNav(wrap);
   $("sh-build-back").onclick = function () { shellBuildShow("home"); };
   $("sh-build-close").onclick = shellCloseBuildDrawer;
@@ -19633,6 +19887,8 @@ function shellBuildKeys(e) { if (e.key === "Escape") shellCloseBuildDrawer(); }
 function shellCloseBuildDrawer() {
   var d = $("sh-build-drawer");
   if (d && d.parentNode) d.parentNode.removeChild(d);
+  var canvasScreen = document.querySelector("#shell-root .sh-canvas-screen");
+  if (canvasScreen && !$('sh-world-drawer')) canvasScreen.classList.remove("sh-panel-open");
   document.removeEventListener("keydown", shellBuildKeys);
   window.CrumbsShell.state.drawer = "closed";
   _buildSessionArmed = false;
@@ -19647,13 +19903,15 @@ function shellCloseBuildDrawer() {
 }
 
 var SHELL_BUILD_TITLES = { home: "Build", paint: "Paint", place: "Place",
-  people: "People", more: "More", look: "Pick a Look" };
+  people: "People", population: "Population", assets: "Assets",
+  more: "More", look: "Pick a Look" };
 function shellBuildShow(view) {
   _buildView = view;
   var t = $("sh-build-title");
   if (t) t.textContent = SHELL_BUILD_TITLES[view] || "Build";
   var back = $("sh-build-back");
-  if (back) back.style.visibility = (view === "home" || view === "look") ? "hidden" : "visible";
+  if (back) back.style.visibility = (view === "home" || view === "look" ||
+    view === "population" || view === "assets") ? "hidden" : "visible";
   var body = $("sh-build-body");
   if (!body) return;
   body.innerHTML = '<div class="sh-build-empty">Loading&hellip;</div>';
@@ -19662,6 +19920,8 @@ function shellBuildShow(view) {
   else if (view === "paint") shellBuildPaintInto(body);
   else if (view === "place") shellBuildPlaceInto(body);
   else if (view === "people") shellBuildPeopleInto(body);
+  else if (view === "population") shellBuildPeopleInto(body);
+  else if (view === "assets") shellBuildMoreInto(body);
   else if (view === "look") shellBuildLookInto(body);
   else if (view === "more") shellBuildMoreInto(body);
   else shellBuildHomeInto(body);
@@ -19873,14 +20133,16 @@ async function shellBuildPeopleInto(body) {
         esc(n.role === "merchant" ? "\uD83C\uDFEA merchant" : "\uD83E\uDDD1 villager") + "</small></span></div>";
     }
   }
-  h += '<div class="sh-build-row"><button type="button" class="sh-btn-secondary" id="sh-b-npcdetails">Edit Details</button></div>' +
-    '<p class="sh-build-hint">Traits, dialogue, and patrols live in the full workshop.</p>';
+  h += '<div class="sh-build-row"><button type="button" class="sh-btn-secondary" id="sh-b-npcdetails">Edit Details</button>' +
+    '<button type="button" class="sh-btn-secondary" id="sh-b-missions">Mission Studio</button></div>' +
+    '<p class="sh-build-hint">Traits, dialogue, patrols, and mission publishing open in the full workshop.</p>';
   body.innerHTML = h;
   var rows = body.querySelectorAll(".sh-npc-row .sh-npc-meta b");
   for (var b = 0; b < rows.length; b++) rows[b].textContent = npcs[b].name || ("Person " + npcs[b].id);
   $("sh-b-addperson").onclick = function () { shellBuildShow("look"); };
   // Honest bridge: advanced NPC editing stays in the classic workshop.
   $("sh-b-npcdetails").onclick = function () { location.href = "/classic"; };
+  $("sh-b-missions").onclick = function () { shellEnterCreator(); };
   var cancel = $("sh-b-npc-cancel");
   if (cancel) cancel.onclick = function () {
     var f2 = shellFrameWin();
@@ -20073,6 +20335,8 @@ function shellOpenWorldDrawer(view) {
     "</div>" +
     '<div class="sh-world-body" id="sh-world-body"></div>';
   shellRootEl().appendChild(wrap);
+  var canvasScreen = document.querySelector("#shell-root .sh-canvas-screen");
+  if (canvasScreen) canvasScreen.classList.add("sh-panel-open");
   shellDrawerParkAboveNav(wrap);
   $("sh-world-back").onclick = function () { shellWorldShow("home"); };
   $("sh-world-close").onclick = shellCloseWorldDrawer;
@@ -20085,6 +20349,8 @@ function shellCloseWorldDrawer() {
   var d = $("sh-world-drawer");
   if (!d) return;
   if (d.parentNode) d.parentNode.removeChild(d);
+  var canvasScreen = document.querySelector("#shell-root .sh-canvas-screen");
+  if (canvasScreen && !$('sh-build-drawer')) canvasScreen.classList.remove("sh-panel-open");
   document.removeEventListener("keydown", shellWorldKeys);
   // The drawer only ever opens over the canvas, so closing lands on Canvas
   // Home: destination "build", nav highlight to match.
@@ -20862,6 +21128,7 @@ async function shellWorldRulesInto(body) {
 // The shell owns boot when the server enables it. Classic init() below is
 // untouched; /classic always boots the classic HUD.
 async function shellBoot() {
+  document.addEventListener("keydown", shellGlobalKeys);
   document.documentElement.setAttribute("data-shell-mode", "simple");
   var spl = document.getElementById("splash");
   // Keep the splash visible long enough for the shield and title to register (1.6s +

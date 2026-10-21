@@ -25,6 +25,7 @@
 
 import hashlib
 import json
+import logging
 import os
 import random
 import re
@@ -462,8 +463,19 @@ def task_set_status(script_dir, username, task_id, status):
 # MELODY_KNOWLEDGE.md ships with the app. Questions it answers confidently
 # never touch the brain: zero cost, zero latency, zero quota.
 
-_KB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                         "MELODY_KNOWLEDGE.md")
+_MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _asset_path(name):
+    """Find shipped Melody docs in the root or docs/ layout."""
+    for candidate in (os.path.join(_MODULE_DIR, name),
+                      os.path.join(_MODULE_DIR, "docs", name)):
+        if os.path.isfile(candidate):
+            return candidate
+    return os.path.join(_MODULE_DIR, name)
+
+
+_KB_PATH = _asset_path("MELODY_KNOWLEDGE.md")
 _kb_sections = None
 
 
@@ -476,6 +488,8 @@ def _load_kb():
         with open(_KB_PATH, encoding="utf-8") as f:
             text = f.read()
     except OSError:
+        logging.getLogger("melody").error(
+            "knowledge guide unavailable; expected MELODY_KNOWLEDGE.md in app root or docs/")
         return _kb_sections
     cur_title, cur_lines = None, []
     for line in text.splitlines():
@@ -515,8 +529,7 @@ def knowledge_search(query, top=3):
 
 # -- Phase 1 tools (read-only, per-player) ------------------------------------
 
-_LAWS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                          "REPAIR_LAWS.md")
+_LAWS_PATH = _asset_path("REPAIR_LAWS.md")
 
 
 def tool_law_lookup(topic):
@@ -525,6 +538,8 @@ def tool_law_lookup(topic):
         with open(_LAWS_PATH, encoding="utf-8") as f:
             text = f.read()
     except OSError:
+        logging.getLogger("melody").error(
+            "Repair Laws unavailable; expected REPAIR_LAWS.md in app root or docs/")
         return "The Repair Laws file isn't available right now."
     # split into numbered law blocks
     blocks = re.split(r"\n### (\d+)\.\s+", text)
@@ -1602,8 +1617,7 @@ def run_tool(script_dir, username, name, args):
 def brain_backends():
     """Ordered [(label, url, key, model)] of configured backends.
 
-    Default order (Lloyd's call, 2026-09-26): Qwen on Groq first — keeps her
-    in the Qwen family she was raised on — then Gemini 2.5 Flash as
+    Default order: GPT OSS 20B on Groq first, then Gemini 2.5 Flash as
     fallback. MELODY_BRAIN=gemini flips the order; =ollama goes home to
     Lloyd's own weights; =off is knowledge-only.
     """
@@ -1627,7 +1641,7 @@ def brain_backends():
                  _env("MELODY_MODEL", "melody-qwen15"))]
     gem_key = _env("GEMINI_API_KEY")
     groq_key = _env("GROQ_API_KEY")
-    groq = ("groq+qwen",
+    groq = ("groq+gpt-oss",
             "https://api.groq.com/openai/v1/chat/completions",
             groq_key, _env("GROQ_MODEL", "openai/gpt-oss-20b"))
     gemini = ("gemini",
@@ -1647,6 +1661,26 @@ def brain_status():
     backs = brain_backends()
     with _BRAIN_TELEMETRY_LOCK:
         recent = dict(_BRAIN_TELEMETRY)
+    guide_ready = os.path.isfile(_KB_PATH)
+    laws_ready = os.path.isfile(_LAWS_PATH)
+    issues = []
+    if not backs:
+        issues.append({"code": "brain_not_configured",
+                       "message": "No usable Melody brain backend is configured.",
+                       "fix": "Configure the selected backend credentials or service, then restart Melody."})
+    elif recent.get("outcome") == "failed":
+        issues.append({"code": "brain_unavailable",
+                       "message": "The configured brain's latest request failed (%s)." %
+                                  (recent.get("error_type") or "unknown error"),
+                       "fix": "Check the provider/proxy service, credential validity, and selected model; then retry."})
+    if not guide_ready:
+        issues.append({"code": "knowledge_guide_missing",
+                       "message": "Melody's built-in game guide was not found.",
+                       "fix": "Restore docs/MELODY_KNOWLEDGE.md or place it beside melody_agent.py."})
+    if not laws_ready:
+        issues.append({"code": "repair_laws_missing",
+                       "message": "Melody's Repair Laws file was not found.",
+                       "fix": "Restore docs/REPAIR_LAWS.md or place it beside melody_agent.py."})
     return {"configured": bool(backs),
             "primary": backs[0][0] if backs else None,
             "fallback": backs[1][0] if len(backs) > 1 else None,
@@ -1654,6 +1688,9 @@ def brain_status():
             # Boolean only: never return credentials or secret-file paths.
             "credential_present": bool(backs and backs[0][2]),
             "mode": _env("MELODY_BRAIN", "groq").lower(),
+            "assets": {"knowledge_guide": guide_ready,
+                       "repair_laws": laws_ready},
+            "issues": issues,
             "last_call": recent}
 
 
@@ -1673,6 +1710,12 @@ def _record_brain_call(outcome, started, provider=None, model=None,
               "error_type": error_type, "fallback_used": bool(fallback_used)}
     with _BRAIN_TELEMETRY_LOCK:
         _BRAIN_TELEMETRY.update(record)
+    if outcome != "success":
+        # Operational signal only: never include the key, URL, prompt, or reply.
+        logging.getLogger("melody").warning(
+            "brain call %s provider=%s model=%s error_type=%s fallback_used=%s",
+            outcome, provider or "none", model or "none",
+            error_type or "none", bool(fallback_used))
 
 
 # Groq sits behind Cloudflare, whose browser-integrity check (error 1010)
@@ -2285,15 +2328,30 @@ def handle_chat(script_dir, username, message, tier=DEFAULT_TIER, world=None,
         backend = None
         try:
             reply, tool_calls, backend = brain_chat(messages, session_tools)
-        except RuntimeError:
-            # no brain configured (or all failed) — say so honestly, free
-            reply = ("My brain isn't connected on this server yet — Lloyd "
-                     "still has to plug in her cloud key. But I can still "
-                     "answer from my built-in guide: ask me how to paint, "
-                     "use tabs, undo, log in, or update the app!")
+        except RuntimeError as brain_error:
+            # Distinguish missing configuration from a configured backend
+            # that is temporarily unavailable/invalid. The old copy blamed
+            # a missing cloud key even when the proxy or provider was failing.
+            telemetry = brain_status().get("last_call", {})
+            if str(brain_error) == "brain not configured":
+                reply = ("My AI brain isn't configured on this server yet. "
+                         "I can still answer from my built-in guide: ask me "
+                         "how to paint, use tabs, undo, log in, or update the app!")
+            else:
+                provider = telemetry.get("provider") or "configured brain"
+                failure = telemetry.get("error_type") or "connection failure"
+                reply = (f"I couldn't reach my {provider} brain just now "
+                         f"({failure}). I can still answer from my built-in "
+                         "guide, and the server can retry the brain automatically "
+                         "when you ask again.")
             history_append(script_dir, username, "user", message)
             history_append(script_dir, username, "assistant", reply)
-            audit(script_dir, username, "chat", "no brain configured")
+            if str(brain_error) == "brain not configured":
+                audit(script_dir, username, "chat", "no brain configured")
+            else:
+                audit(script_dir, username, "chat",
+                      "brain unavailable: %s" %
+                      (telemetry.get("error_type") or "unknown error"))
             return {"ok": True, "reply": reply, "source": "knowledge",
                     "tools_used": []}
         _spend()
@@ -2333,6 +2391,12 @@ def handle_chat(script_dir, username, message, tier=DEFAULT_TIER, world=None,
                 messages.append({"role": "tool",
                                  "tool_call_id": tc.get("id", f"call_{i}"),
                                  "content": str(result)[:2000]})
+            # A tool round needs another real model call to produce the
+            # player-facing answer. Never make that call after the allowance
+            # was consumed by the preceding completion.
+            if calls_left <= 0:
+                quota_died = True
+                break
             try:
                 reply, tool_calls, _ = brain_chat(messages, session_tools)
             except RuntimeError:

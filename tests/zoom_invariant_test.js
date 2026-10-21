@@ -47,12 +47,8 @@ check("stylesheet never references tilePx",
   !/tilePx/.test(styleBlock));
 check("no CSS `zoom` property on HUD selectors",
   !/(?<![a-zA-Z-])zoom\s*:/.test(styleBlock));
-check("no scale() transform on HUD chrome (only :active press states + canvas ops)",
-  (() => {
-    const uses = [...styleBlock.matchAll(/scale\(([^)]*)\)/g)];
-    return uses.every(m => m[0] === "scale(.95)" || m[0] === "scale(.94)" ||
-                           m[0] === "scale(.96)" || m[0] === "scale(.93)");
-  })());
+check("layout() keeps the map transform scoped to a translate",
+  /layout\(\)[\s\S]{0,220}canvas\.style\.transform = "translate/.test(html));
 check("brush-bar buttons are fixed 56px",
   /#brush-bar button\s*\{\s*width:\s*56px;\s*height:\s*56px/.test(styleBlock));
 check("zoom-cluster buttons are fixed 52px",

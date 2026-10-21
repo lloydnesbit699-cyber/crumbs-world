@@ -18,7 +18,11 @@ function check(name, cond, detail) {
 }
 
 function cssZ(sel) {
-  const m = html.match(new RegExp(sel + " \\{[\\s\\S]*?z-index:\\s*(\\d+);"));
+  const normalized = sel.replace(/\\/g, "");
+  const start = html.lastIndexOf(normalized + " {");
+  if (start < 0) return null;
+  const end = html.indexOf("}", start);
+  const m = html.slice(start, end).match(/z-index:\s*(\d+);/);
   return m ? parseInt(m[1], 10) : null;
 }
 

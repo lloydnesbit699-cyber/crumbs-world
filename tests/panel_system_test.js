@@ -72,8 +72,8 @@ check("tray openView opens the tray via toggleOverlay",
 check("tray close() shuts overlays for play mode",
   !!trays && /close\(\) \{ closeOverlays\(\); \}/.test(trays));
 const tabs = fnBody("renderTrayTabs");
-check("tray tabs skip suggest when there's no ghost (Law 11: no dead buttons)",
-  !!tabs && /m\.id === "suggest" && !ghostSug/.test(tabs));
+check("tray tabs filter modules for the active layer",
+  !!tabs && /const allowed = sheetViewsForLayer\(layer\)/.test(tabs) && /!allowed.includes\(m.id\)/.test(tabs));
 check("tray tabs show only the active module's root",
   !!tabs && /r\.hidden = \(trayTab\[side\] !== m\.id\)/.test(tabs));
 

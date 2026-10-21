@@ -135,13 +135,9 @@ if (-not (Test-Path $VenvPython -PathType Leaf)) {
     }
 }
 
-& $VenvPython -c "import PIL" 2>$null
-if ($LASTEXITCODE -ne 0) {
-    Write-Progress -Activity 'Crumbs World boot' -Status 'Installing pinned dependencies' -PercentComplete 35
-    Write-Say "installing the app's pinned requirements into .venv"
-    & $VenvPython -m pip install -r (Join-Path $GameDir "requirements.txt")
-    if ($LASTEXITCODE -ne 0) { Die "dependency installation failed; see the pip error above" }
-}
+Write-Progress -Activity 'Crumbs World boot' -Status 'Checking and repairing Python dependencies' -PercentComplete 35
+& $VenvPython (Join-Path $GameDir 'tools\boot_preflight.py')
+if ($LASTEXITCODE -ne 0) { Die "boot preflight failed; repair the project .venv before serving login" }
 
 try {
     Write-Progress -Activity 'Crumbs World boot' -Status 'Preparing logs and starting the server' -PercentComplete 55

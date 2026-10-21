@@ -1603,7 +1603,10 @@ def cell_height(world, x, y):
     h = tile_height(tiles.get(world.data[y][x]))
     obj = world.object_layer[y][x]
     if obj:
-        h = max(h, tile_height(tiles.get(obj)))
+        # Object instances may carry attributes as {tid: ..., ...}. Resolve
+        # the tile id through the shared legacy/instance normalizer before
+        # using it as an asset-registry key.
+        h = max(h, tile_height(tiles.get(obj_tid(obj))))
     return h
 
 

@@ -28,6 +28,8 @@ jobs:
         run: python tools/repo_guard.py --check
       - name: Compile Python modules
         run: python -m py_compile crumbs_hud.py crumbs_core.py crumbs_recovery.py melody_agent.py
+      - name: Verify boot dependency preflight
+        run: python tools/boot_preflight.py
       - name: Test repo guard repair and rejection cases
         run: python tools/repo_guard_test.py
       - name: Test account security helpers
@@ -36,3 +38,7 @@ jobs:
         run: python tests/recovery_smoke_test.py
       - name: Test game core smoke cases
         run: python tests/core_smoke_test.py
+      - name: Test map scale and height-grid hardening
+        run: python tests/scale_hardening_test.py
+      - name: Test actionable runtime error ledger
+        run: python tests/runtime_error_ledger_test.py

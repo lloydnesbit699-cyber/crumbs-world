@@ -40,6 +40,12 @@ if os.name == "nt":  # Windows (Harley): same idea, local paths.
         # active Desktop checkout. Search contents, not the filename.
         os.path.join(_windir, "OneDrive", "Desktop", "crumbs-world",
                      "melody", "not_trash"),
+        # The owner's exported key file has also lived directly in the
+        # repo's melody/ folder (including this checkout's Vault location).
+        # Search it by its stable filename rather than assuming a Desktop
+        # checkout path.
+        os.path.join(_repo_dir, "melody", "Groq_Files.txt"),
+        os.path.join(_repo_dir, "melody", "Groq_Files"),
         # Also support a copy stored beside this module.
         os.path.join(_repo_dir, "melody", "not_trash"),
         os.path.join("C:\\Melody", "Melodys_API_Key"),
@@ -101,18 +107,22 @@ def _candidate_paths():
     """Return configured paths plus named Groq exports in melody/tools."""
     paths = list(SEARCH_PATHS)
     if os.name == "nt":
-        tools_dir = os.path.join(_repo_dir, "melody", "tools")
-        try:
-            with os.scandir(tools_dir) as entries:
-                named_exports = [
-                    entry.path for entry in entries
-                    if entry.is_file()
-                    and os.path.splitext(entry.name)[0].casefold()
-                    in ("groq_files", "groq-files")
-                ]
-        except OSError:
-            named_exports = []
-        paths.extend(sorted(named_exports, key=str.casefold))
+        # Support named exports regardless of whether the key was placed in
+        # melody/ or melody/tools/. Keep discovery filename-based; never walk
+        # arbitrary directories or print file contents.
+        for export_dir in (os.path.join(_repo_dir, "melody"),
+                           os.path.join(_repo_dir, "melody", "tools")):
+            try:
+                with os.scandir(export_dir) as entries:
+                    named_exports = [
+                        entry.path for entry in entries
+                        if entry.is_file()
+                        and os.path.splitext(entry.name)[0].casefold()
+                        in ("groq_files", "groq-files")
+                    ]
+            except OSError:
+                named_exports = []
+            paths.extend(sorted(named_exports, key=str.casefold))
     return paths
 
 

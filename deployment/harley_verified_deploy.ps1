@@ -76,10 +76,12 @@ function Request-Restart {
     $headers = @{ 'X-Crumbs-Key' = $env:CRUMBS_SHARE_KEY }
     try {
         Invoke-RestMethod -Uri $restartUri -Method Post -Headers $headers `
-            -ContentType 'application/json' -Body '{}' -TimeoutSec 5 | Out-Null
+            -ContentType 'application/json' -Body '{}' -TimeoutSec 15 | Out-Null
         return $true
     } catch {
-        Write-DeployLog ("Restart request failed: {0}" -f $_.Exception.Message) | Out-Null
+        # The handler deliberately re-execs shortly after scheduling restart;
+        # a dropped response is ambiguous until the new instance is healthy.
+        Write-DeployLog ("Restart response was not confirmed: {0}" -f $_.Exception.Message) | Out-Null
         return $false
     }
 }
@@ -161,11 +163,9 @@ function Invoke-DeployOnce {
     $newVersion = $versionMatch.Groups[1].Value
     Write-DeployLog ("Pulled verified commit {0} (v{1}); asking Harley to save and restart." -f
         $target.Substring(0, 12), $newVersion)
-    if (-not (Request-Restart)) {
-        Invoke-Git @('reset', '--hard', $oldHead) | Out-Null
-        Set-Content -LiteralPath $failedPath -Value $target -Encoding ASCII
-        Write-DeployLog 'Rolled the checkout back because the running server refused restart.'
-        return
+    $restartConfirmed = Request-Restart
+    if (-not $restartConfirmed) {
+        Write-DeployLog 'Checking for the new healthy instance before deciding whether to roll back.'
     }
     if (Wait-ForVersion $newVersion $oldInstance) {
         Set-Content -LiteralPath (Join-Path $repoDir '.crumbs_last_deployed') -Value $target -Encoding ASCII

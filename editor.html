@@ -825,6 +825,14 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
                       background: rgba(42,42,42,.9); border: 1px solid transparent; color: #ddd; cursor: pointer; }
   #sky-panel button.on { border-color: #8cf; color: #8cf; }
   #sky-panel input[type=range] { width: 100%; }
+  #compass { position: fixed; top: calc(56px + env(safe-area-inset-top)); right: 10px; z-index: 60; display: none; align-items: center; gap: 6px;
+             background: rgba(20,20,28,.72); border: 1px solid #3a3a48; border-radius: 999px; padding: 3px 10px 3px 3px; color: #ddd; font-size: 12px; }
+  body.play-follow #compass:not([hidden]) { display: flex; }
+  body.clean #compass { display: none !important; }
+  #compass .cp-dial { position: relative; width: 30px; height: 30px; border-radius: 50%; border: 1px solid #555; }
+  #compass .cp-n { position: absolute; top: -1px; left: 50%; transform: translateX(-50%); font-size: 8px; color: #f66; }
+  #compass .cp-needle { position: absolute; left: 50%; top: 4px; width: 0; height: 22px; transform-origin: 50% 11px; }
+  #compass .cp-needle::after { content: ""; position: absolute; left: -3px; top: 0; border: 3px solid transparent; border-bottom: 10px solid #ffd75f; border-top: 0; }
   #sky-toggle.on { background: #2a5a8a; color: #fff; }
   #lens-badge { font-size: 11px; color: #8cf; padding: 0 8px 0 4px; white-space: nowrap; }
   #lens-full-toggle.on { background: #2a5a8a; color: #fff; }
@@ -4587,6 +4595,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   <button id="btn-pan" title="Move: pan the map instead of painting (arrow keys pan too)">Move</button>
 </div>
 
+<div id="compass" hidden aria-label="Compass"><div class="cp-dial"><span class="cp-n">N</span><div class="cp-needle"></div></div><span class="cp-txt"></span></div>
 <div id="sky-panel" hidden>
   <div class="sky-row" id="sky-wx">
     <button data-w="clear" title="Clear">&#9728;&#65039;</button>
@@ -4602,6 +4611,12 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     <button id="sky-wxs" title="Weather sounds"></button>
   </div>
   <input id="sky-vol" type="range" min="0" max="100" title="Volume">
+  <div class="sky-row">
+    <button id="sky-day" title="Day/night cycle (60 min per day)"></button>
+    <button id="sky-wp" title="Drop a waypoint: tap the map in Play. Tap again to clear."></button>
+    <button id="sky-hud" title="Hide the whole HUD (P)">🙈 HUD</button>
+  </div>
+  <input id="sky-time" type="range" min="0" max="100" title="Time of day">
 </div>
 
 <!-- v5.61.0: dynamic minimap with static toggle — Lloyd's call. Bottom-left
@@ -5206,6 +5221,75 @@ function drawFlightLines() {
     ctx.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1 * 0.75);
     ctx.stroke();
   }
+  ctx.restore();
+}
+// §13 day/night: t is the fraction of a day (0 = midnight, 0.5 = noon).
+function dayPhase(t) {
+  const s = -Math.cos(2 * Math.PI * t);
+  const n = Math.max(0, Math.min(1, (0.1 - s) / 0.55));
+  const night = n * n * (3 - 2 * n);
+  const dusk = Math.max(0, 1 - Math.abs(s) / 0.35) * (1 - night * 0.5);
+  const mix = (a, b, k) => Math.round(a + (b - a) * k);
+  return { dark: night * 0.6 + dusk * 0.14, rgb: [mix(3, 60, dusk), mix(3, 22, dusk), mix(14, 10, dusk)], night, dusk };
+}
+function dayLabel(t) {
+  const s = -Math.cos(2 * Math.PI * t);
+  return s > 0.5 ? "day" : s > 0.1 ? (t < 0.5 ? "morning" : "afternoon") : s > -0.3 ? (t < 0.5 ? "dawn" : "dusk") : "night";
+}
+const DAY_LEN_MS = 60 * 60 * 1000;
+const dayCfg = { on: true, t: 0.4, at: 0 };
+try { Object.assign(dayCfg, JSON.parse(localStorage.getItem("crumbs_day") || "{}")); } catch (e) {}
+dayCfg.at = performance.now();
+function dayNow() {
+  return dayCfg.on ? (dayCfg.t + (performance.now() - dayCfg.at) / DAY_LEN_MS) % 1 : dayCfg.t;
+}
+function daySave() { try { localStorage.setItem("crumbs_day", JSON.stringify({ on: dayCfg.on, t: dayNow() })); } catch (e) {} }
+// §13.2 compass + waypoint ring
+let playWaypoint = null, wpArmed = false;
+function compassHeading(f) {
+  const a = Math.round((Math.atan2(f.dx, -f.dy) * 180 / Math.PI + 360) % 360);
+  return { deg: a, name: ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(a / 45) % 8] };
+}
+function waypointInfo(h, wp) {
+  const dx = wp.x - h.x, dy = wp.y - h.y;
+  return { dist: Math.round(Math.hypot(dx, dy)), ang: Math.atan2(dy, dx) };
+}
+function updateCompass() {
+  const el = document.getElementById("compass");
+  if (!el) return;
+  const on = playMode && !!hero;
+  el.hidden = !on;
+  if (!on) return;
+  const h = compassHeading(playFacing);
+  let txt = h.name;
+  if (playWaypoint) txt += " · 📍" + waypointInfo(hero, playWaypoint).dist;
+  const key = h.deg + txt;
+  if (el._k === key) return;
+  el._k = key;
+  el.querySelector(".cp-needle").style.transform = "rotate(" + h.deg + "deg)";
+  el.querySelector(".cp-txt").textContent = txt;
+}
+function drawWaypointRing() {
+  if (!playWaypoint || !hero || !rgActive) return;
+  const k = rgScale, hx = (hero.x + 0.5 - rgOx) * tilePx * k, hy = (hero.y + 0.5 - rgOy) * tilePx * k;
+  const r = Math.max(tilePx * 1.4, 30) * k, wi = waypointInfo(hero, playWaypoint);
+  ctx.save();
+  ctx.strokeStyle = "rgba(255,215,95,.7)"; ctx.lineWidth = 2 * k; ctx.setLineDash([6 * k, 6 * k]);
+  ctx.beginPath(); ctx.arc(hx, hy, r, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+  if (wi.dist > 0) {
+    const ax = hx + Math.cos(wi.ang) * r, ay = hy + Math.sin(wi.ang) * r, s = 8 * k;
+    ctx.fillStyle = "#ffd75f"; ctx.beginPath();
+    ctx.moveTo(ax + Math.cos(wi.ang) * s, ay + Math.sin(wi.ang) * s);
+    ctx.lineTo(ax + Math.cos(wi.ang + 2.4) * s, ay + Math.sin(wi.ang + 2.4) * s);
+    ctx.lineTo(ax + Math.cos(wi.ang - 2.4) * s, ay + Math.sin(wi.ang - 2.4) * s);
+    ctx.closePath(); ctx.fill();
+  }
+  const px = (playWaypoint.x + 0.5 - rgOx) * tilePx * k, py = (playWaypoint.y + 0.5 - rgOy) * tilePx * k;
+  if (px > 0 && py > 0 && px < canvas.width && py < canvas.height) {
+    ctx.font = Math.round(16 * k) + "px sans-serif"; ctx.textAlign = "center"; ctx.fillText("📍", px, py);
+  }
+  ctx.fillStyle = "#fff"; ctx.font = "bold " + Math.round(11 * k) + "px sans-serif"; ctx.textAlign = "center";
+  ctx.fillText(wi.dist + " tiles", hx, hy + r + 14 * k);
   ctx.restore();
 }
 function playRegionOn() { return playMode && !buildBreak && !!hero && W > 0 && H > 0; }
@@ -8065,7 +8149,8 @@ function render() {
     }
     const d = lightCv.getContext("2d");
     d.clearRect(0, 0, lightCv.width, lightCv.height);
-    d.fillStyle = "rgba(3,3,14," + (darkFor[worldWeather] ?? 0.62) + ")";
+    const _wd = darkFor[worldWeather] ?? 0.62, _dp = dayPhase(dayNow());
+    d.fillStyle = "rgba(" + _dp.rgb.join(",") + "," + (1 - (1 - _wd) * (1 - _dp.dark)).toFixed(3) + ")";
     d.fillRect(0, 0, lightCv.width, lightCv.height);
     d.globalCompositeOperation = "destination-out";
     const g = d.createRadialGradient(hx, hy, tilePx * 0.6 * _k, hx, hy, lr);
@@ -8101,6 +8186,8 @@ function render() {
   if (rgActive) ctx.setTransform(rgScale, 0, 0, rgScale, 0, 0);   // screen space for the sky + captions
   if (playMode && worldWeather !== "clear") drawWeather();  // v4.1: the sky performs
   if (rgActive && playFlight) drawFlightLines();
+  if (rgActive) drawWaypointRing();
+  updateCompass();
   if (clipCaption) drawClipCaption();   // v5.53: auto-clip subtitles — her words on the film
   if (rgActive) { ctx.setTransform(1, 0, 0, 1, 0, 0); playLastMs = performance.now() - _t0; }
   followPlayHero();                    // center the active character, only during play
@@ -9996,6 +10083,7 @@ $("end-again").onclick = async () => {
   toast("back to the start — go again");
 };
 async function playTap(cell) {
+  if (wpArmed) { wpArmed = false; playWaypoint = { x: cell.x, y: cell.y }; skyPaint(); queueRender(); toast("waypoint set"); return; }
   if (heroTimer || playOver) return;  // let the current walk finish first
   playCancelFlight();   // v6.2
   // v5.40: tapping a paused walker while standing next to him = hello, no walk
@@ -15939,7 +16027,22 @@ function skyPaint() {
   $("sky-wxs").textContent = "🌧 " + (Sfx.wxOn() ? "on" : "off"); $("sky-wxs").classList.toggle("on", Sfx.wxOn());
   $("sky-vol").value = Math.round(Sfx.getVol() * 100);
   $("sky-toggle").classList.toggle("on", !$("sky-panel").hidden);
+  $("sky-day").textContent = "🌗 " + (dayCfg.on ? dayLabel(dayNow()) : "held");
+  $("sky-day").classList.toggle("on", dayCfg.on);
+  $("sky-time").value = Math.round(dayNow() * 100);
+  $("sky-wp").textContent = wpArmed ? "📍 tap map…" : playWaypoint ? "📍 clear" : "📍 set";
+  $("sky-wp").classList.toggle("on", wpArmed || !!playWaypoint);
 }
+$("sky-day").onclick = () => { const t = dayNow(); dayCfg.on = !dayCfg.on; dayCfg.t = t; dayCfg.at = performance.now(); daySave(); skyPaint(); queueRender(); };
+$("sky-time").oninput = e => { dayCfg.t = e.target.value / 100; dayCfg.at = performance.now(); daySave(); queueRender(); };
+$("sky-wp").onclick = () => {
+  if (playWaypoint) { playWaypoint = null; wpArmed = false; }
+  else if (playMode) { wpArmed = !wpArmed; if (wpArmed) toast("tap the map to drop a waypoint"); }
+  else toast("waypoints work in Play");
+  skyPaint(); queueRender();
+};
+$("sky-hud").onclick = () => { uiClean = true; applyUiClean(); toast("HUD hidden — press P or ☰ to bring it back"); };
+setInterval(() => { if (playMode && dayCfg.on) { queueRender(); if (!$("sky-panel").hidden) skyPaint(); } }, 2000);
 $("sky-toggle").onclick = () => { $("sky-panel").hidden = !$("sky-panel").hidden; skyPaint(); };
 $("sky-mute").onclick = () => { Sfx.toggleMute(); skyPaint(); };
 $("sky-wind").onclick = () => { Sfx.toggleAmb(); skyPaint(); };

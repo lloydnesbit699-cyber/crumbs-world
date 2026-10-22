@@ -815,6 +815,17 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   #play-modes button { min-height: 0; height: 30px; padding: 0 10px; border-radius: 999px; font-size: 12px;
                        background: transparent; border: 1px solid transparent; color: #ddd; cursor: pointer; }
   #play-modes button.on { border-color: #ffd75f; color: #ffd75f; font-weight: 700; }
+  #sky-panel { position: fixed; right: 62px; bottom: calc(10px + env(safe-area-inset-bottom)); z-index: 101;
+               background: rgba(20,20,28,.9); border: 1px solid #3a3a48; border-radius: 12px; padding: 6px;
+               display: flex; flex-direction: column; gap: 6px; }
+  #sky-panel[hidden] { display: none; }
+  body.clean #sky-panel, body.clean #sky-toggle { display: none !important; }
+  #sky-panel .sky-row { display: flex; gap: 4px; }
+  #sky-panel button { min-height: 0; height: 32px; min-width: 32px; padding: 0 8px; border-radius: 8px; font-size: 14px;
+                      background: rgba(42,42,42,.9); border: 1px solid transparent; color: #ddd; cursor: pointer; }
+  #sky-panel button.on { border-color: #8cf; color: #8cf; }
+  #sky-panel input[type=range] { width: 100%; }
+  #sky-toggle.on { background: #2a5a8a; color: #fff; }
   #lens-badge { font-size: 11px; color: #8cf; padding: 0 8px 0 4px; white-space: nowrap; }
   #lens-full-toggle.on { background: #2a5a8a; color: #fff; }
   #play-mode-badge { font-size: 11px; color: #8f8; padding: 0 8px 0 4px; white-space: nowrap; }
@@ -4568,11 +4579,29 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
 <div id="zoom-cluster">
   <button id="btn-grid" title="Toggle grid lines">&#x25A6;</button>
   <button id="lens-full-toggle" title="Full-screen lens (L)" aria-label="Toggle full-screen lens">⛶</button>
+  <button id="sky-toggle" title="Weather &amp; sounds" aria-label="Weather and sounds">&#127782;&#65039;</button>
   <button id="world-lens-toggle" title="Toggle world lens" aria-label="Toggle world lens">🔎</button>
   <button id="zoom-out" title="Zoom out">&minus;</button>
   <button id="zoom-in" title="Zoom in">+</button>
   <button id="zoom-fit" title="Fit map to screen">Fit</button>
   <button id="btn-pan" title="Move: pan the map instead of painting (arrow keys pan too)">Move</button>
+</div>
+
+<div id="sky-panel" hidden>
+  <div class="sky-row" id="sky-wx">
+    <button data-w="clear" title="Clear">&#9728;&#65039;</button>
+    <button data-w="rain" title="Rain">&#127783;&#65039;</button>
+    <button data-w="fog" title="Fog">&#127787;&#65039;</button>
+    <button data-w="snow" title="Snow">&#10052;&#65039;</button>
+    <button data-w="storm" title="Storm">&#9968;&#65039;</button>
+  </div>
+  <div class="sky-row">
+    <button id="sky-mute" title="Mute everything"></button>
+    <button id="sky-wind" title="Wind"></button>
+    <button id="sky-nat" title="Nature: birds and crickets"></button>
+    <button id="sky-wxs" title="Weather sounds"></button>
+  </div>
+  <input id="sky-vol" type="range" min="0" max="100" title="Volume">
 </div>
 
 <!-- v5.61.0: dynamic minimap with static toggle — Lloyd's call. Bottom-left
@@ -6371,7 +6400,8 @@ $("nu-pass").addEventListener("keydown", e => { if (e.key === "Enter") createUse
 // water splash, and a looped wind ambience. No downloads, works offline.
 const Sfx = (() => {
   let ctx = null, master = null, noiseBuf = null, ambNodes = null, lastTick = 0, recDest = null;
-  const cfg = { muted: false, vol: 0.7, amb: false };
+  const cfg = { muted: false, vol: 0.7, amb: false, nat: false, wx: true };
+  let natTimer = null, wxNodes = null, wxKind = "clear";
   try { Object.assign(cfg, JSON.parse(localStorage.getItem("crumbs_sfx") || "{}")); } catch (e) {}
   const save = () => { try { localStorage.setItem("crumbs_sfx", JSON.stringify(cfg)); } catch (e) {} };
 
@@ -6441,14 +6471,42 @@ const Sfx = (() => {
     lfo.connect(lfoG); lfoG.connect(flt.frequency);
     src.connect(flt); flt.connect(g); g.connect(master);
     src.start(); lfo.start();
-    const timer = setInterval(() => { if (!cfg.muted && Math.random() < 0.5) api.chirp(); }, 9000);
-    ambNodes = { src, lfo, timer };
+    ambNodes = { src, lfo };
   }
   function ambStop() {
     if (!ambNodes) return;
     try { ambNodes.src.stop(); ambNodes.lfo.stop(); } catch (e) {}
-    clearInterval(ambNodes.timer);
     ambNodes = null;
+  }
+  // Nature bed: birdsong by day, with the odd cricket trill.
+  function natStart() {
+    if (natTimer) return;
+    ensure();
+    natTimer = setInterval(() => {
+      if (cfg.muted || !cfg.nat || wxKind === "storm") return;
+      const r = Math.random();
+      if (r < 0.55) api.chirp();
+      else if (r < 0.8) { api.chirp(); setTimeout(api.chirp, 140); setTimeout(api.chirp, 300); }
+      else for (let i = 0; i < 5; i++) api.tone({ f: 4200, d: 0.03, g: 0.025, at: i * 0.06 });
+    }, 3500);
+  }
+  function natStop() { if (natTimer) clearInterval(natTimer); natTimer = null; }
+  // Weather bed: a looping filtered noise per condition.
+  function wxStop() {
+    if (!wxNodes) return;
+    try { wxNodes.src.stop(); } catch (e) {}
+    wxNodes = null;
+  }
+  function wxStart() {
+    wxStop();
+    if (!cfg.wx || wxKind === "clear" || !ensure()) return;
+    const P = { rain: ["highpass", 1800, 0.09], storm: ["bandpass", 700, 0.16], snow: ["lowpass", 500, 0.025], fog: ["lowpass", 260, 0.035] }[wxKind];
+    if (!P) return;
+    const src = ctx.createBufferSource(); src.buffer = noiseBufGet(); src.loop = true;
+    const flt = ctx.createBiquadFilter(); flt.type = P[0]; flt.frequency.value = P[1]; flt.Q.value = 0.5;
+    const g = ctx.createGain(); g.gain.value = P[2];
+    src.connect(flt); flt.connect(g); g.connect(master); src.start();
+    wxNodes = { src };
   }
 
   const api = {
@@ -6476,7 +6534,14 @@ const Sfx = (() => {
         at += d + 0.03 + Math.random() * 0.05;
       }
     },
+    tone,
     isMuted()  { return cfg.muted; },
+    natOn()    { return cfg.nat; },
+    wxOn()     { return cfg.wx; },
+    toggleNat() { cfg.nat = !cfg.nat; if (cfg.nat) natStart(); else natStop(); save(); return cfg.nat; },
+    toggleWx() { cfg.wx = !cfg.wx; wxStart(); save(); return cfg.wx; },
+    setWeather(w) { if (w === wxKind) return; wxKind = w || "clear"; if (ctx) wxStart(); },
+    thunder()  { noise({ d: 1.6, g: 0.3, fc: 160, fc2: 60, q: 0.7, type: "lowpass" }); },
     // v5.53: auto clips — tap the master bus into a MediaStreamDestination so
     // the recorder captures game SFX/music. Melody's speechSynthesis voice is
     // NOT routable (browsers expose no tap for it), so her words burn in as
@@ -6493,7 +6558,7 @@ const Sfx = (() => {
     toggleMute() { cfg.muted = !cfg.muted; ensure(); applyCfg(); save(); return cfg.muted; },
     setVol(v)  { cfg.vol = Math.max(0, Math.min(1, v)); ensure(); applyCfg(); save(); },
     toggleAmb() { cfg.amb = !cfg.amb; ensure(); if (cfg.amb) ambStart(); else ambStop(); save(); return cfg.amb; },
-    syncAmb()  { if (cfg.amb) ambStart(); },
+    syncAmb()  { if (cfg.amb) ambStart(); if (cfg.nat) natStart(); wxStart(); },
   };
   return api;
 })();
@@ -10843,6 +10908,7 @@ function drawWeather() {
     ctx.fillRect(0, 0, wpx, hpx);
     return;
   }
+  if (worldWeather === "storm" && wxFrame % 45 === 0 && Math.random() < 0.3) Sfx.thunder();
   if (worldWeather === "storm" && wxFrame % 45 < 2) {
     ctx.fillStyle = "rgba(240,245,255,0.45)";   // lightning
     ctx.fillRect(0, 0, wpx, hpx);
@@ -11747,6 +11813,8 @@ async function loadWorld() {
   } catch (e) {}
 }
 function paintWorld() {
+  Sfx.setWeather(worldWeather);
+  document.querySelectorAll("#sky-panel [data-w]").forEach(b => b.classList.toggle("on", b.dataset.w === worldWeather));
   document.querySelectorAll("#world-meters button").forEach(b => {
     b.classList.toggle("on", !!meterProfile[b.dataset.m]);
   });
@@ -11776,7 +11844,7 @@ function syncNature(r) {
   meters = n.meters || meters;
   woodCount = (n.inv && n.inv.wood) || 0;
   if (n.profile && n.profile.meters) meterProfile = n.profile.meters;
-  if (n.profile && n.profile.weather) worldWeather = n.profile.weather;  // v4.1
+  if (n.profile && n.profile.weather) { worldWeather = n.profile.weather; Sfx.setWeather(worldWeather); }  // v4.1
   paintMeters();
 }
 function paintMeters() {
@@ -15862,7 +15930,27 @@ $("sfx-mute").onclick = () => { Sfx.toggleMute(); sfxPaintUI(); };
 $("sfx-amb").onclick = () => { Sfx.toggleAmb(); sfxPaintUI(); };
 $("sfx-vol").oninput = (e) => Sfx.setVol(e.target.value / 100);
 $("sfx-test").onclick = () => { Sfx.mumble(); Sfx.chirp(); Sfx.splash(); };
-sfxPaintUI();
+function skyPaint() {
+  sfxPaintUI();
+  $("sky-mute").textContent = Sfx.isMuted() ? "🔇" : "🔊";
+  $("sky-mute").classList.toggle("on", !Sfx.isMuted());
+  $("sky-wind").textContent = "💨 " + (Sfx.ambOn() ? "on" : "off"); $("sky-wind").classList.toggle("on", Sfx.ambOn());
+  $("sky-nat").textContent = "🐦 " + (Sfx.natOn() ? "on" : "off"); $("sky-nat").classList.toggle("on", Sfx.natOn());
+  $("sky-wxs").textContent = "🌧 " + (Sfx.wxOn() ? "on" : "off"); $("sky-wxs").classList.toggle("on", Sfx.wxOn());
+  $("sky-vol").value = Math.round(Sfx.getVol() * 100);
+  $("sky-toggle").classList.toggle("on", !$("sky-panel").hidden);
+}
+$("sky-toggle").onclick = () => { $("sky-panel").hidden = !$("sky-panel").hidden; skyPaint(); };
+$("sky-mute").onclick = () => { Sfx.toggleMute(); skyPaint(); };
+$("sky-wind").onclick = () => { Sfx.toggleAmb(); skyPaint(); };
+$("sky-nat").onclick = () => { Sfx.toggleNat(); skyPaint(); };
+$("sky-wxs").onclick = () => { Sfx.toggleWx(); skyPaint(); };
+$("sky-vol").oninput = e => Sfx.setVol(e.target.value / 100);
+document.querySelectorAll("#sky-wx [data-w]").forEach(b => {
+  b.onclick = async () => { worldWeather = b.dataset.w; paintWorld(); try { await api("/api/world", { weather: worldWeather }); } catch (e) {} };
+});
+$("sfx-mute").addEventListener("click", skyPaint); $("sfx-amb").addEventListener("click", skyPaint);
+sfxPaintUI(); paintWorld(); skyPaint();
 Sfx.syncAmb();   // restore wind if it was on
 $("menu-save").onclick = () => { closeOverlays(); doSave(); };
 $("menu-saveas").onclick = () => { closeOverlays(); doSaveAs(); };

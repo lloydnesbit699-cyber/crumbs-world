@@ -4851,7 +4851,20 @@ function fitTiles() {
 // still bounds the canvas; smaller maps can zoom in up to 64px per tile.
 const MAX_CANVAS_DIM = 4096;
 function maxTilePx() { return Math.max(1, Math.min(64, Math.floor(MAX_CANVAS_DIM / Math.max(W, H, 1)))); }
-window.addEventListener("resize", () => { fitTiles(); clampPan(); clampDpad(); render(); maybeHintPageZoomSoon(); });
+const onViewportChange = () => { fitTiles(); clampPan(); clampDpad(); playQ.scale = 0; render(); maybeHintPageZoomSoon(); };
+window.addEventListener("resize", onViewportChange);
+window.addEventListener("orientationchange", () => setTimeout(onViewportChange, 250));
+// v6.3: the stage itself can change size without a window resize (rotation,
+// mobile URL bar, fullscreen, panel docking) — rescale to whatever device we're on.
+if (window.visualViewport) window.visualViewport.addEventListener("resize", onViewportChange);
+if (window.ResizeObserver) {
+  let _roW = 0, _roH = 0;
+  new ResizeObserver(() => {
+    const w = stage.clientWidth, h = stage.clientHeight;
+    if (w === _roW && h === _roH) return;
+    _roW = w; _roH = h; onViewportChange();
+  }).observe(stage);
+}
 // v2.2 camera: the canvas is absolutely positioned; layout() centers it in
 // the stage and applies the pan offset. No scroll container is involved, so
 // dragging behaves the same at every zoom level.

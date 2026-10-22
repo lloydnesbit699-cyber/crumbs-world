@@ -2080,6 +2080,28 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     padding: max(6px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 6px max(16px, env(safe-area-inset-left));
     background: rgba(20, 19, 17, 0.94); border-bottom: 1px solid #3a352b;
   }
+  /* Simple View menu bar: File / Edit / View / Play / Profile */
+  #shell-root .sh-mbar { display: flex; gap: 2px; flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  #shell-root .sh-mbar::-webkit-scrollbar { display: none; }
+  #shell-root .sh-mtop {
+    flex: 0 0 auto; min-height: 44px; padding: 6px 12px; background: transparent; border: 2px solid transparent;
+    border-radius: 10px; color: #d8cdb4; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  #shell-root .sh-mtop[aria-expanded="true"] { background: #2b2822; border-color: #c9973f; color: #f3ead6; }
+  #sh-mdrop {
+    position: fixed; z-index: 60; min-width: 220px; max-width: calc(100vw - 16px); max-height: calc(100vh - 80px); overflow-y: auto;
+    background: #1e1c18; border: 1px solid #3a352b; border-radius: 12px; padding: 6px; box-shadow: 0 8px 28px rgba(0,0,0,.5);
+  }
+  #sh-mdrop button {
+    display: flex; width: 100%; align-items: center; gap: 10px; min-height: 44px; padding: 8px 12px; background: transparent;
+    border: 0; border-radius: 8px; color: #f3ead6; font: inherit; font-size: 15px; text-align: left; cursor: pointer;
+  }
+  #sh-mdrop button:hover, #sh-mdrop button:focus-visible { background: #2b2822; outline: none; }
+  #sh-mdrop hr { border: 0; border-top: 1px solid #3a352b; margin: 4px 0; }
+  html.sh-light #sh-mdrop { background: #fffdf8; border-color: #cfc6b0; }
+  html.sh-light #sh-mdrop button { color: #2b2517; }
+  html.sh-light #sh-mdrop button:hover { background: #efe7d2; }
+  html.sh-light #shell-root .sh-mtop { color: #4a4332; }
   #shell-root .sh-command-open {
     min-width: 48px; min-height: 48px; padding: 8px 12px; background: #24272d;
     border: 2px solid #454950; border-radius: 12px; color: #f4f4f4;
@@ -20939,6 +20961,113 @@ function shellDismissCoach(file) {
   var c = $("sh-coach");
   if (c) c.hidden = true;
 }
+// ---- Simple View menu bar -------------------------------------------------
+// Every item drives the real classic function/button inside the map frame.
+function shellFrameDo(fn) {
+  var fw = shellFrameWin();
+  if (!fw) { shellToast("The map is still loading \u2014 try again in a moment."); return; }
+  try { fn(fw); } catch (e) { shellToast("That action isn't available yet."); }
+}
+function shellFrameClick(id) {
+  shellFrameDo(function (fw) {
+    var el = fw.document.getElementById(id);
+    if (!el) throw new Error("missing " + id);
+    el.click();
+  });
+}
+function shellMenubarItems(name) {
+  var C = shellFrameClick, F = shellFrameDo;
+  var W = window.CrumbsShell;
+  if (name === "file") return [
+    ["\uD83D\uDCBE Save", function () { C("menu-save"); }],
+    ["Save As\u2026", function () { C("menu-saveas"); }],
+    ["\uD83D\uDCC2 Load\u2026", function () { C("menu-load"); }],
+    ["Save slots\u2026", function () { C("menu-slots"); }],
+    ["My worlds", function () { shellShowWorlds(); }],
+    ["New world\u2026", function () { shellShowCreateStep1(); }],
+    null,
+    ["Export PNG", function () { C("menu-export"); }],
+    ["\uD83C\uDFAC Birth certificate\u2026", function () { C("menu-birth"); }],
+    ["Recovery\u2026", function () { C("menu-recovery"); }]
+  ];
+  if (name === "edit") return [
+    ["\u21A9 Undo", function () { F(function (fw) { fw.doUndo(); }); }],
+    ["\u21AA Redo", function () { F(function (fw) { fw.doRedo(); }); }],
+    null,
+    ["Paint terrain", function () { shellNavGo("build"); shellOpenBuildDrawer("paint"); }],
+    ["Place objects", function () { shellNavGo("build"); shellOpenBuildDrawer("place"); }],
+    ["Population", function () { shellNavGo("population"); }],
+    ["Assets and imports", function () { shellNavGo("assets"); }],
+    ["Animation", function () { F(function (fw) { fw.openSheet("anim"); }); }]
+  ];
+  if (name === "view") return [
+    ["\u26F6 Full-screen lens", function () { F(function (fw) { fw.lensToggle(); }); }],
+    ["\u25A6 Grid lines", function () { C("btn-grid"); }],
+    ["Fit map to screen", function () { C("zoom-fit"); }],
+    ["\uD83C\uDF26 Weather and sounds", function () { C("sky-toggle"); }],
+    ["\uD83D\uDE48 Hide HUD", function () { F(function (fw) { fw.uiClean = true; fw.applyUiClean(); }); }],
+    null,
+    ["World settings", function () { shellNavGo("world"); }],
+    ["Display settings", function () { shellOpenSettings(null); }]
+  ];
+  if (name === "play") return [
+    ["\u25B6 Play", function () { shellNavGo("play"); }],
+    ["Build", function () { shellNavGo("build"); }],
+    ["World", function () { shellNavGo("world"); }]
+  ];
+  return [
+    ["\u2699 Settings", function () { shellOpenSettings(null); }],
+    ["\uD83C\uDF10 Switch world", function () { shellShowWorlds(); }],
+    ["\uD83D\uDD11 Change password", function () { C("btn-change-pass"); }],
+    ["\uD83D\uDD10 Two-factor auth", function () { C("btn-2fa"); }],
+    ["\uD83D\uDEE0 Creator Tools", function () { shellEnterCreator(); }],
+    null,
+    ["\u2139 Help", function () { shellMenuHelp(); }],
+    ["\u26A0 Report a problem", function () { shellMenuReport(); }],
+    ["About this build", function () { shellMenuAbout(); }],
+    null,
+    ["\u2192 Sign out", function () { shellSignOut(); }]
+  ];
+}
+function shellCloseMenubar() {
+  var d = document.getElementById("sh-mdrop");
+  if (d) d.remove();
+  document.removeEventListener("keydown", shellMenubarKeys, true);
+  document.removeEventListener("pointerdown", shellMenubarAway, true);
+  Array.prototype.forEach.call(document.querySelectorAll("#sh-mbar .sh-mtop"), function (b) { b.setAttribute("aria-expanded", "false"); });
+}
+function shellMenubarKeys(e) { if (e.key === "Escape") shellCloseMenubar(); }
+function shellMenubarAway(e) {
+  if (!e.target.closest || (!e.target.closest("#sh-mdrop") && !e.target.closest("#sh-mbar"))) shellCloseMenubar();
+}
+function shellOpenMenubar(btn) {
+  var was = btn.getAttribute("aria-expanded") === "true";
+  shellCloseMenubar();
+  if (was) return;
+  var items = shellMenubarItems(btn.getAttribute("data-m"));
+  var d = document.createElement("div");
+  d.id = "sh-mdrop"; d.setAttribute("role", "menu");
+  items.forEach(function (it) {
+    if (!it) { d.appendChild(document.createElement("hr")); return; }
+    var b = document.createElement("button");
+    b.type = "button"; b.setAttribute("role", "menuitem"); b.textContent = it[0];
+    b.onclick = function () { shellCloseMenubar(); it[1](); };
+    d.appendChild(b);
+  });
+  shellRootEl().appendChild(d);
+  var r = btn.getBoundingClientRect();
+  d.style.top = Math.round(r.bottom + 4) + "px";
+  d.style.left = Math.max(8, Math.min(Math.round(r.left), window.innerWidth - d.offsetWidth - 8)) + "px";
+  btn.setAttribute("aria-expanded", "true");
+  document.addEventListener("keydown", shellMenubarKeys, true);
+  document.addEventListener("pointerdown", shellMenubarAway, true);
+  var first = d.querySelector("button"); if (first) first.focus();
+}
+function shellWireMenubar() {
+  Array.prototype.forEach.call(document.querySelectorAll("#sh-mbar .sh-mtop"), function (b) {
+    b.onclick = function () { shellOpenMenubar(b); };
+  });
+}
 function shellShowCanvas(file) {
   window.CrumbsShell.state.destination = "build";
   window.CrumbsShell.state.mode = "simple";
@@ -20962,6 +21091,13 @@ function shellShowCanvas(file) {
     '<div class="sh-screen sh-canvas-screen">' +
       '<div class="sh-canvas-topbar">' +
         '<span class="sh-world-chip" id="sh-canvas-chip"></span>' +
+        '<nav class="sh-mbar" id="sh-mbar" aria-label="Menu bar">' +
+          '<button type="button" class="sh-mtop" data-m="file" aria-haspopup="menu" aria-expanded="false">File</button>' +
+          '<button type="button" class="sh-mtop" data-m="edit" aria-haspopup="menu" aria-expanded="false">Edit</button>' +
+          '<button type="button" class="sh-mtop" data-m="view" aria-haspopup="menu" aria-expanded="false">View</button>' +
+          '<button type="button" class="sh-mtop" data-m="play" aria-haspopup="menu" aria-expanded="false">Play</button>' +
+          '<button type="button" class="sh-mtop" data-m="profile" aria-haspopup="menu" aria-expanded="false">Profile</button>' +
+        '</nav>' +
         '<button type="button" class="sh-command-open" id="sh-command-open" aria-label="Search actions" title="Search actions (Ctrl+K)">&#8981; <span>Search</span></button>' +
         '<button type="button" class="sh-menu-btn" id="sh-canvas-menu" aria-label="Menu" aria-haspopup="dialog">\u2630</button>' +
       "</div>" +
@@ -20976,6 +21112,7 @@ function shellShowCanvas(file) {
   $("sh-canvas-chip").textContent = friendlyName(file);
   $("sh-canvas-menu").onclick = function () { shellOpenMenu($("sh-canvas-menu")); };
   $("sh-command-open").onclick = shellOpenCommandPalette;
+  shellWireMenubar();
   shellWireNav(root);
   // Stage 9: honest loading state while the framed map boots (first open can
   // take a few seconds). Hides on iframe load; if it takes too long, say so.

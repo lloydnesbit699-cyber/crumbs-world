@@ -833,7 +833,20 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   #compass .cp-n { position: absolute; top: -1px; left: 50%; transform: translateX(-50%); font-size: 8px; color: #f66; }
   #compass .cp-needle { position: absolute; left: 50%; top: 4px; width: 0; height: 22px; transform-origin: 50% 11px; }
   #compass .cp-needle::after { content: ""; position: absolute; left: -3px; top: 0; border: 3px solid transparent; border-bottom: 10px solid #ffd75f; border-top: 0; }
-  #sky-toggle.on { background: #2a5a8a; color: #fff; }
+  #sky-toggle.on, #flight-toggle.on { background: #2a5a8a; color: #fff; }
+  #flight-panel { position: fixed; right: 62px; bottom: calc(60px + env(safe-area-inset-bottom)); z-index: 101; width: 230px;
+                  background: rgba(20,20,28,.92); border: 1px solid #3a3a48; border-radius: 12px; padding: 8px; color: #ddd;
+                  font: 12px/1.4 ui-monospace, Consolas, monospace; display: flex; flex-direction: column; gap: 6px; }
+  #flight-panel[hidden] { display: none; }
+  body.clean #flight-panel, body.clean #flight-toggle { display: none !important; }
+  #flight-panel .fl-row { display: flex; gap: 4px; flex-wrap: wrap; }
+  #flight-panel button { min-height: 0; height: 30px; padding: 0 8px; border-radius: 8px; font-size: 12px; background: rgba(42,42,42,.9);
+                         border: 1px solid transparent; color: #ddd; cursor: pointer; }
+  #flight-panel button.on { border-color: #8cf; color: #8cf; }
+  #fl-bar { height: 6px; background: #333; border-radius: 3px; overflow: hidden; }
+  #fl-bar i { display: block; height: 100%; width: 0; background: #ffd75f; }
+  #fl-log { max-height: 120px; overflow-y: auto; white-space: pre-wrap; color: #9c9; }
+  #fl-log .bad { color: #f77; }
   #lens-badge { font-size: 11px; color: #8cf; padding: 0 8px 0 4px; white-space: nowrap; }
   #lens-full-toggle.on { background: #2a5a8a; color: #fff; }
   #play-mode-badge { font-size: 11px; color: #8f8; padding: 0 8px 0 4px; white-space: nowrap; }
@@ -4609,6 +4622,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
 <div id="zoom-cluster">
   <button id="btn-grid" title="Toggle grid lines">&#x25A6;</button>
   <button id="lens-full-toggle" title="Full-screen lens (L)" aria-label="Toggle full-screen lens">⛶</button>
+  <button id="flight-toggle" title="Flight test panel (F)" aria-label="Flight test panel">&#9992;&#65039;</button>
   <button id="sky-toggle" title="Weather &amp; sounds" aria-label="Weather and sounds">&#127782;&#65039;</button>
   <button id="world-lens-toggle" title="Toggle world lens" aria-label="Toggle world lens">🔎</button>
   <button id="zoom-out" title="Zoom out">&minus;</button>
@@ -4618,6 +4632,20 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
 </div>
 
 <div id="compass" hidden aria-label="Compass"><div class="cp-dial"><span class="cp-n">N</span><div class="cp-needle"></div></div><span class="cp-txt"></span></div>
+<div id="flight-panel" hidden aria-label="Flight test">
+  <div id="fl-stat">Enter Play to test flights.</div>
+  <div id="fl-bar"><i></i></div>
+  <div class="fl-row">
+    <button data-fl="first">👁 First</button><button data-fl="ground">🧍 Close</button>
+    <button data-fl="survey">🗺 Survey</button><button data-fl="world">🌍 World</button>
+  </div>
+  <div class="fl-row">
+    <button id="fl-run" title="Fly World, Survey, Ground, First, World and check each landing">▶ Run test</button>
+    <button id="fl-slow" title="Slow motion (x4 longer flights)">🐢 Slow</button>
+    <button id="fl-clear">Clear</button>
+  </div>
+  <div id="fl-log"></div>
+</div>
 <div id="sky-panel" hidden>
   <div class="sky-row" id="sky-wx">
     <button data-w="clear" title="Clear">&#9728;&#65039;</button>
@@ -5126,7 +5154,7 @@ const PLAY_PIXEL_BUDGETS = { low: 2073600, auto: 8294400, max: 16588800 };   // 
 let playQuality = "auto";   // backing-store ceiling (~4K) before the adaptive scaler backs off
 const PLAY_OVERVIEW_TILES = 220;     // wider than this draws from the baked overview bitmap
 let playN = PLAY_DEFAULT_N, playTargetN = PLAY_DEFAULT_N;
-let playFlight = null, playLoopOn = false, playLoopT = 0;
+let playFlight = null, playLoopOn = false, playLoopT = 0, playFlightScale = 1;
 let playCam = null, playCamT = 0, playCamBusy = false;
 let playFacing = { dx: 0, dy: 1 }, playLastHero = null, playFirst = false;
 let playQ = { scale: 0, ema: 8, adjusted: 0 };
@@ -5157,7 +5185,8 @@ function playFlightDur(fromN, toN, worldN) {
 }
 function playFlightStart(fromN, toN, now, worldN) {
   if (Math.abs(Math.log(toN / fromN)) < 0.002) return null;
-  return { from: fromN, to: toN, start: now, dur: playFlightDur(fromN, toN, worldN), dive: toN < fromN };
+  const ts = typeof playFlightScale === "number" ? playFlightScale : 1;
+  return { from: fromN, to: toN, start: now, dur: playFlightDur(fromN, toN, worldN) * ts, dive: toN < fromN };
 }
 // dive eases in ("falling to earth"), rise eases out (settles)
 function playFlightAt(fl, now) {
@@ -5401,8 +5430,65 @@ function playLoop() {
   } else playN = playTargetN;
   render();
   playModeBadge();
+  if (typeof flightHud === "function") flightHud();
   if (moving) playKick(); else playLoopT = 0;
 }
+// ---- flight test panel: live telemetry + scripted pass over every altitude ----
+let flightRunning = false;
+function flightHud() {
+  const p = document.getElementById("flight-panel");
+  if (!p || p.hidden) return;
+  const st = document.getElementById("fl-stat"), bar = document.querySelector("#fl-bar i");
+  if (!playRegionOn()) { st.textContent = "Enter Play to test flights."; bar.style.width = "0"; return; }
+  const t = playModeTargets(W, H, playHeroTiles(), stage.clientWidth / Math.max(1, stage.clientHeight));
+  const pr = playFlight ? Math.min(1, (performance.now() - playFlight.start) / playFlight.dur) : 0;
+  st.textContent = "mode  " + playModeName() + "\nN     " + playN.toFixed(1) + " (world " + t.world + ")\ntile  " +
+    playTilePx(playN, stage.clientHeight, playHeroTiles()).toFixed(1) + "px  scale " + (rgScale || 0).toFixed(2) +
+    "\nfly   " + (playFlight ? (playFlight.dive ? "DIVE " : "RISE ") + Math.round(pr * 100) + "% of " + (playFlight.dur / 1000).toFixed(1) + "s" : "idle");
+  st.style.whiteSpace = "pre";
+  bar.style.width = Math.round(pr * 100) + "%";
+}
+function flightLog(msg, bad) {
+  const l = document.getElementById("fl-log");
+  const d = document.createElement("div");
+  if (bad) d.className = "bad";
+  d.textContent = msg; l.appendChild(d); l.scrollTop = l.scrollHeight;
+}
+function flightWait(ms) { return new Promise(r => setTimeout(r, ms)); }
+async function flightRunTest() {
+  if (flightRunning) return;
+  if (!playRegionOn()) { flightLog("Enter Play first.", true); return; }
+  flightRunning = true; document.getElementById("fl-run").classList.add("on");
+  let pass = 0, fail = 0;
+  for (const name of ["world", "survey", "ground", "first", "world"]) {
+    if (!playRegionOn()) { flightLog("aborted: left Play", true); break; }
+    const t0 = performance.now();
+    playGoMode(name);
+    const to = playTargetN;
+    let guard = 0;
+    while (playFlight && guard++ < 600) await flightWait(50);
+    await flightWait(120);
+    const dt = ((performance.now() - t0) / 1000).toFixed(1), err = Math.abs(Math.log(playN / to));
+    const nm = playModeName(), ok = err < 0.02 && (name === "first" ? playFirst : nm.toLowerCase() === name);
+    ok ? pass++ : fail++;
+    flightLog((ok ? "ok  " : "BAD ") + name + "  " + dt + "s  N=" + playN.toFixed(1) + " target=" + to.toFixed(1) + " reads " + nm, !ok);
+  }
+  flightLog("done: " + pass + " ok, " + fail + " bad", fail > 0);
+  flightRunning = false; document.getElementById("fl-run").classList.remove("on");
+}
+function flightWire() {
+  const tg = document.getElementById("flight-toggle"), p = document.getElementById("flight-panel");
+  if (!tg || !p) return;
+  const flip = () => { p.hidden = !p.hidden; tg.classList.toggle("on", !p.hidden); flightHud(); };
+  tg.onclick = flip;
+  p.querySelectorAll("[data-fl]").forEach(b => b.onclick = () => playGoMode(b.dataset.fl));
+  document.getElementById("fl-run").onclick = flightRunTest;
+  document.getElementById("fl-clear").onclick = () => { document.getElementById("fl-log").textContent = ""; };
+  const sl = document.getElementById("fl-slow");
+  sl.onclick = () => { playFlightScale = playFlightScale === 1 ? 4 : 1; sl.classList.toggle("on", playFlightScale !== 1); };
+  window.flightToggle = flip;
+}
+if (typeof document !== "undefined" && document.getElementById) flightWire();
 // any input hands control back at whatever altitude the view holds right now
 function playCancelFlight() {
   if (playFlight) playN = playFlightAt(playFlight, performance.now()).n;
@@ -10037,6 +10123,7 @@ function onKbMove(e) {
     case "3": if (activePlay) playGoMode("survey"); else handled = false; break;
     case "4": if (activePlay) playGoMode("world"); else handled = false; break;
     case "p": case "P": if (activePlay) { uiClean = !uiClean; applyUiClean(); toast(uiClean ? "photo mode — P to bring the HUD back" : "HUD back"); } else handled = false; break;
+    case "f": case "F": if (activePlay && window.flightToggle) window.flightToggle(); else handled = false; break;
     case "q": case "Q": if (activePlay) playCycleQuality(); else handled = false; break;
     case "l": case "L": if (!activePlay) lensToggle(); else handled = false; break;
     case "Escape": if (lensFull) lensToggle(false); else handled = false; break;
@@ -21012,6 +21099,7 @@ function shellMenubarItems(name) {
   ];
   if (name === "play") return [
     ["\u25B6 Play", function () { shellNavGo("play"); }],
+    ["\u2708 Flight test panel", function () { F(function (fw) { fw.flightToggle(); }); }],
     ["Build", function () { shellNavGo("build"); }],
     ["World", function () { shellNavGo("world"); }]
   ];

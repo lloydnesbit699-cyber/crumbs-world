@@ -4764,7 +4764,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
      undo state. Tap = undo. Never blocks: tiny, translucent, ignorable. -->
 <button id="budget-strip" title="budget — tap to undo">🧱 — · 🚶 — · ✨ — · ↩ —</button>
 <!-- v5.45: the brush scope — magnified footprint preview above the finger -->
-<div id="brush-scope"><canvas id="brush-scope-cv" width="150" height="150"></canvas></div>
+
 <div id="ctx-menu" aria-label="Touch actions"></div>
 
 <!-- v5.29 (item 19): always-reachable panel visibility control -->
@@ -9000,34 +9000,9 @@ function drawGhostStroke() {
     ctx.strokeRect(c.x * tilePx + 1, c.y * tilePx + 1, tilePx - 2, tilePx - 2);
   }
 }
-// -- the brush scope: magnified footprint above the fingertip ------------------
-function hideScope() { const b = $("brush-scope"); if (b) b.style.display = "none"; }
-function updateScope(cell) {
-  const box = $("brush-scope");
-  if (!box || !scopeCtx || !stroke || !stroke.cells.size || !cell || !baseCv || !baseCv.width) {
-    hideScope(); return;
-  }
-  box.style.display = "block";
-  const S = 150, R = 2, cs = S / (2 * R + 1);
-  box.style.left = Math.max(4, Math.min(window.innerWidth - S - 4, lastTouchX - S / 2)) + "px";
-  box.style.top = Math.max(4, lastTouchY - S - 48) + "px";
-  const c = scopeCtx;
-  c.imageSmoothingEnabled = false;
-  c.clearRect(0, 0, S, S);
-  try {
-    c.drawImage(baseCv, (cell.x - R) * tilePx, (cell.y - R) * tilePx,
-                tilePx * (2 * R + 1), tilePx * (2 * R + 1), 0, 0, S, S);
-  } catch (e) { /* base not ready yet */ }
-  c.globalAlpha = 0.7;
-  for (const gc of stroke.cells.values()) {
-    const dx = gc.x - (cell.x - R), dy = gc.y - (cell.y - R);
-    if (dx < 0 || dy < 0 || dx > 2 * R || dy > 2 * R) continue;
-    drawGhostCell(c, gc.pv, dx * cs, dy * cs, cs);
-  }
-  c.globalAlpha = 1;
-  c.strokeStyle = "#ffd75f"; c.lineWidth = 3;
-  c.strokeRect(R * cs + 2, R * cs + 2, cs - 4, cs - 4);
-}
+// the hold-to-magnify brush scope was removed; these stay as no-ops for the stroke code
+function hideScope() {}
+function updateScope(cell) {}
 
 // -- brush behaviors --------------------------------------------------------------
 function stampStrokeAdd(cell) {
@@ -9521,7 +9496,7 @@ function toggleMoreSheet() { const sh = $("more-sheet"); if (sh) sh.classList.to
   scatterDensity = clampDensity(lsGet("cw_scatterDensity", 60));
   rectFill = lsGet("cw_rectFill", "0") === "1";
   buildStampRow(); buildScatterRow(); buildMoreSheet();
-  scopeCtx = $("brush-scope-cv").getContext("2d");
+  scopeCtx = null;
   $("bb-stamp").onclick = () => { closeMoreSheet(); setBrushTool("stamp"); buzz(10); };
   $("bb-paint").onclick = () => { closeMoreSheet(); setBrushTool("paint"); buzz(10); };
   $("bb-erase").onclick = () => { closeMoreSheet(); setBrushTool("erase"); buzz(10); };

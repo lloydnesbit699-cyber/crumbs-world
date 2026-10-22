@@ -52,7 +52,7 @@ check("layout() keeps the map transform scoped to a translate",
 check("brush-bar buttons are fixed 56px",
   /#brush-bar button\s*\{\s*width:\s*56px;\s*height:\s*56px/.test(styleBlock));
 check("zoom-cluster buttons are fixed 52px",
-  /#zoom-cluster button\s*\{\s*width:\s*52px;\s*height:\s*52px/.test(styleBlock));
+  /#zoom-cluster button\s*\{\s*width:\s*42px;\s*height:\s*42px/.test(styleBlock));
 check("dpad cells are fixed 46px",
   /#dpad\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*46px\)/.test(styleBlock));
 check("topbar is a fixed 48px strip",
@@ -67,7 +67,7 @@ const MAX_CANVAS_DIM=4096;
 const stage={clientWidth:1366,clientHeight:700,getBoundingClientRect:function(){return {left:0,top:48};}};
 const canvas={style:{}};
 function render(){}
-${extract("maxTilePx")}
+function playRegionOn(){return false}\nfunction playZoomBy(){}\nconst rgActive=false;\n${extract("maxTilePx")}
 ${extract("clampPan")}
 ${extract("layout")}
 ${extract("zoomAt")}
@@ -174,7 +174,7 @@ const MAX_CANVAS_DIM=4096;
 const stage={clientWidth:1366,clientHeight:700,getBoundingClientRect:function(){return {left:0,top:48};}};
 const canvas={style:{},_wl:null,addEventListener:function(t,f,o){this._wl={t:t,f:f,o:o};}};
 function render(){}
-${extract("maxTilePx")}
+function playRegionOn(){return false}\nfunction playZoomBy(){}\nconst rgActive=false;\n${extract("maxTilePx")}
 ${extract("clampPan")}
 ${extract("layout")}
 ${extract("zoomAt")}

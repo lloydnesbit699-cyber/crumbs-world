@@ -795,24 +795,33 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
 
   #zoom-cluster { position: fixed; right: 10px;
                   bottom: calc(10px + env(safe-area-inset-bottom));
-                  z-index: 100; display: flex; flex-direction: column; gap: 8px; }
+                  z-index: 100; display: flex; flex-direction: column; gap: 6px; }
   /* v5.61.0: shift zoom cluster left when right panel is open — Lloyd's bug:
      the minus button was hidden behind the panel */
   body.panel-open #zoom-cluster { right: 244px; }
-  #zoom-cluster button { width: 52px; height: 52px; border-radius: 50%; padding: 0;
-                        font-size: 20px; background: rgba(42,42,42,.92); }
+  #zoom-cluster button { width: 42px; height: 42px; border-radius: 50%; padding: 0;
+                        font-size: 17px; background: rgba(42,42,42,.85); }
   #zoom-cluster #btn-pan { font-size: 12px; border-radius: 14px; height: auto;
                           padding: 9px 0; }
   /* v5.51.1: dim the grid toggle when the grid is off, so the state reads
      at a glance. */
   #zoom-cluster #btn-grid.off { opacity: .45; }
+  /* v6.2: Play altitude modes — compact, top-centre, hidden outside Play */
+  #play-modes { display: none; position: fixed; top: calc(56px + env(safe-area-inset-top)); left: 50%;
+                transform: translateX(-50%); z-index: 60; gap: 4px; align-items: center;
+                background: rgba(20,20,28,.72); border: 1px solid #3a3a48; border-radius: 999px; padding: 3px; }
+  body.play-follow #play-modes { display: flex; }
+  #play-modes button { min-height: 0; height: 30px; padding: 0 10px; border-radius: 999px; font-size: 12px;
+                       background: transparent; border: 1px solid transparent; color: #ddd; cursor: pointer; }
+  #play-modes button.on { border-color: #ffd75f; color: #ffd75f; font-weight: 700; }
+  #play-mode-badge { font-size: 11px; color: #8f8; padding: 0 8px 0 4px; white-space: nowrap; }
   /* v5.61.0: minimap — bottom-left, zoom cluster owns bottom-right */
   #minimap { position: fixed; left: 10px;
              bottom: calc(10px + env(safe-area-inset-bottom));
-             z-index: 30; width: 120px; height: 120px;
+             z-index: 30; width: 96px; height: 96px;
              border: 2px solid #555; border-radius: 12px; overflow: hidden;
              background: #111; box-shadow: 0 2px 12px rgba(0,0,0,.5); }
-  #minimap-cv { display: block; width: 120px; height: 120px; touch-action: none;
+  #minimap-cv { display: block; width: 96px; height: 96px; touch-action: none;
                 cursor: crosshair; }
   #minimap-toggle { position: absolute; top: 4px; right: 4px;
                     width: 44px; height: 44px; min-width: 44px; min-height: 44px;
@@ -1089,10 +1098,10 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   #budget-strip .over { color: #ff9a9a; font-weight: 700; }
   /* v5.47: the always-visible Play — one button, always on screen */
   #btn-play-fab { position: fixed; left: 14px; bottom: calc(84px + env(safe-area-inset-bottom));
-    z-index: 240; width: 64px; height: 64px; border-radius: 50%;
+    z-index: 240; width: 52px; height: 52px; border-radius: 50%;
     background: #2f6b3a; border: 2px solid #4caf5d; color: #fff;
-    font-size: 26px; display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 4px 16px rgba(0,0,0,.55); touch-action: none; }
+    font-size: 21px; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 3px 12px rgba(0,0,0,.55); touch-action: none; }
   #btn-play-fab:active { transform: scale(.93); }
   #btn-play-fab.playing { background: #6b2f2f; border-color: #af5d5d; }
   #btn-play-fab.ab { background: #4a3f6e; border-color: #8a6dd7; }
@@ -4544,6 +4553,14 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
 
 <div id="scrim" role="button" aria-label="Dismiss open panels" tabindex="-1"></div>
 
+<div id="play-modes" aria-label="Camera altitude">
+  <button data-mode="first" title="First person (1)">👁 First</button>
+  <button data-mode="ground" title="Close-up third person (2)">🧍 Close</button>
+  <button data-mode="survey" title="Survey (3)">🗺 Survey</button>
+  <button data-mode="world" title="World (4)">🌍 World</button>
+  <span id="play-mode-badge" hidden></span>
+</div>
+
 <div id="zoom-cluster">
   <button id="btn-grid" title="Toggle grid lines">&#x25A6;</button>
   <button id="world-lens-toggle" title="Toggle world lens" aria-label="Toggle world lens">🔎</button>
@@ -4844,6 +4861,7 @@ function clampPan() {
   panY = Math.max(-my, Math.min(my, panY));
 }
 function layout() {
+  if (typeof rgActive !== "undefined" && rgActive) { canvas.style.transform = "translate(0px,0px)"; return; }
   const baseX = (stage.clientWidth - W * tilePx) / 2;
   const baseY = (stage.clientHeight - H * tilePx) / 2;
   canvas.style.transform = "translate(" + (baseX + panX) + "px," + (baseY + panY) + "px)";
@@ -4851,7 +4869,15 @@ function layout() {
 // v5.41: visible tile range — the canvas is full-map sized and CSS-panned,
 // so per-frame overlay loops (animated tiles, collision, height, traits)
 // only walk the on-screen cells instead of all 250k.
-function visibleTiles() {
+function visibleTiles(full) {
+  if (typeof rgActive !== "undefined" && rgActive) {   // v6.2: Play region window
+    if (rgOverview && !full) return { x0: 0, y0: 0, x1: -1, y1: -1 };   // world view: no per-tile overlays
+    return {
+      x0: Math.max(0, Math.floor(rgOx) - 1), y0: Math.max(0, Math.floor(rgOy) - 1),
+      x1: Math.min(W - 1, Math.ceil(rgOx + scrW / tilePx) + 1),
+      y1: Math.min(H - 1, Math.ceil(rgOy + scrH / tilePx) + 1)
+    };
+  }
   const ox = (stage.clientWidth - W * tilePx) / 2 + panX;
   const oy = (stage.clientHeight - H * tilePx) / 2 + panY;
   return {
@@ -4908,7 +4934,7 @@ function renderMinimap(force) {
   ctx.clearRect(0, 0, MINIMAP_SIZE, MINIMAP_SIZE);
   ctx.drawImage(minimapOff, 0, 0);
   try {
-    const vt = visibleTiles();
+    const vt = visibleTiles(true);
     const x0 = vt.x0 * MINIMAP_SIZE / W, y0 = vt.y0 * MINIMAP_SIZE / H;
     const x1 = (vt.x1 + 1) * MINIMAP_SIZE / W, y1 = (vt.y1 + 1) * MINIMAP_SIZE / H;
     ctx.strokeStyle = "#ffd75f"; ctx.lineWidth = 2;
@@ -5003,6 +5029,242 @@ let buildBreak = false;   // v5.29: paint-during-play — the sim is paused and 
                           // brush is unlocked; the play session itself never stops
 let playHeroTid = null, playHeroSize = 1.0;   // v5.29: the flagged PC's sprite + size for this run
 let heroInDeep = false;   // v3.6 SWIM HOOK: true on deep-water steps (only once SWIM_UNLOCKED flips server-side)
+// ---- v6.2: region-rendered Play view + altitude modes (handoff stages 1–2) ----
+// Play's canvas is stage-sized and redraws the visible window from map data, so
+// the 4096px full-map cap only governs Build. Scale is character-relative:
+// playN = how many hero-heights fit the stage height. GROUND / SURVEY / WORLD
+// are named bands of that one continuum, reached by timed flights that animate
+// playN and nothing else.
+const PLAY_GROUND_N = 6, PLAY_FLOOR_N = 4, PLAY_DEFAULT_N = 14;
+const PLAY_DIVE_MS = 6000, PLAY_RISE_MS = 7000, PLAY_FLIGHT_MIN_MS = 1100;
+const PLAY_DEADZONE_W = 3, PLAY_DEADZONE_H = 2, PLAY_LOOKAHEAD = 2;   // character units
+const PLAY_PIXEL_BUDGET = 8294400;   // backing-store ceiling (~4K) before the adaptive scaler backs off
+const PLAY_OVERVIEW_TILES = 220;     // wider than this draws from the baked overview bitmap
+let playN = PLAY_DEFAULT_N, playTargetN = PLAY_DEFAULT_N;
+let playFlight = null, playLoopOn = false, playLoopT = 0;
+let playCam = null, playCamT = 0, playCamBusy = false;
+let playFacing = { dx: 0, dy: 1 }, playLastHero = null, playFirst = false;
+let playQ = { scale: 0, ema: 8, adjusted: 0 };
+let playBadgeKey = "";
+let rgActive = false, rgOverview = false, playLastMs = 8, playOv = null, playOvAt = 0;
+let rgOx = 0, rgOy = 0, rgScale = 1, scrW = 0, scrH = 0;   // region origin (map px), backing scale, logical canvas size
+function playTilePx(n, stageH, heroTiles) {
+  return Math.max(0.5, stageH / (Math.max(0.1, n) * Math.max(1, heroTiles || 1)));
+}
+function playSurveyN(mapW) { return mapW > 100 ? 64 : 32; }
+function playWorldN(mapW, mapH, heroTiles, aspect) {
+  const span = aspect > 0 ? Math.max(mapH, mapW / aspect) : mapH;
+  return Math.max(PLAY_FLOOR_N, Math.ceil(span / Math.max(1, heroTiles || 1)));
+}
+function playModeTargets(mapW, mapH, heroTiles, aspect) {
+  const world = playWorldN(mapW, mapH, heroTiles, aspect);
+  return { ground: Math.min(PLAY_GROUND_N, world), survey: Math.min(playSurveyN(mapW), world),
+           first: Math.min(PLAY_FLOOR_N, world), world };
+}
+function playClampN(n, worldN) {
+  return Math.max(PLAY_FLOOR_N, Math.min(Math.max(PLAY_FLOOR_N, worldN), n));
+}
+function playFlightDur(fromN, toN, worldN) {
+  const full = Math.max(0.5, Math.log(Math.max(2, worldN) / PLAY_GROUND_N));
+  const frac = Math.min(1, Math.abs(Math.log(toN / fromN)) / full);
+  return Math.max(PLAY_FLIGHT_MIN_MS, (toN < fromN ? PLAY_DIVE_MS : PLAY_RISE_MS) * frac);
+}
+function playFlightStart(fromN, toN, now, worldN) {
+  if (Math.abs(Math.log(toN / fromN)) < 0.002) return null;
+  return { from: fromN, to: toN, start: now, dur: playFlightDur(fromN, toN, worldN), dive: toN < fromN };
+}
+// dive eases in ("falling to earth"), rise eases out (settles)
+function playFlightAt(fl, now) {
+  const p = Math.min(1, Math.max(0, (now - fl.start) / fl.dur));
+  const e = fl.dive ? Math.pow(p, 1.6) : 1 - Math.pow(1 - p, 1.6);
+  if (p >= 1) return { n: fl.to, done: true };
+  return { n: Math.exp(Math.log(fl.from) + (Math.log(fl.to) - Math.log(fl.from)) * e), done: false };
+}
+// cu = hero height in tiles. The camera holds still while the focus point
+// (hero + lookahead in the facing direction) stays inside a 3x2 CU deadzone.
+function playCameraStep(cam, hero, facing, cu, dtMs, opts) {
+  const o = opts || {};
+  const dzW = o.dzW != null ? o.dzW : PLAY_DEADZONE_W, dzH = o.dzH != null ? o.dzH : PLAY_DEADZONE_H;
+  const look = o.look != null ? o.look : PLAY_LOOKAHEAD;
+  if (!cam) return { x: hero.x, y: hero.y, settled: true };
+  const fx = hero.x + (facing ? facing.dx : 0) * look * cu;
+  const fy = hero.y + (facing ? facing.dy : 0) * look * cu;
+  const hw = dzW * cu / 2, hh = dzH * cu / 2;
+  let tx = cam.x, ty = cam.y;
+  if (fx < cam.x - hw) tx = fx + hw; else if (fx > cam.x + hw) tx = fx - hw;
+  if (fy < cam.y - hh) ty = fy + hh; else if (fy > cam.y + hh) ty = fy - hh;
+  const k = 1 - Math.exp(-Math.min(100, Math.max(0, dtMs)) / 110);
+  const x = cam.x + (tx - cam.x) * k, y = cam.y + (ty - cam.y) * k;
+  return { x, y, settled: Math.abs(tx - x) < 0.02 * cu && Math.abs(ty - y) < 0.02 * cu };
+}
+function playScaleCap(sw, sh, dpr, budget) {
+  const area = Math.max(1, sw * sh);
+  return Math.max(0.6, Math.min(Math.max(1, Math.min(dpr || 1, 3)), Math.sqrt(budget / area)));
+}
+// Adaptive pixel count: render at the highest backing scale that keeps the
+// per-frame cost under ~14ms; back off fast, recover slowly.
+function playQualityStep(q, frameMs, now, cap) {
+  q.ema = q.ema * 0.9 + frameMs * 0.1;
+  if (!q.scale || q.scale > cap) q.scale = cap;
+  if (q.ema > 14 && now - q.adjusted > 1000) { q.scale = Math.max(0.6, q.scale * 0.85); q.adjusted = now; q.ema = 8; }
+  else if (q.ema < 6 && q.scale < cap && now - q.adjusted > 2500) { q.scale = Math.min(cap, q.scale * 1.1); q.adjusted = now; }
+  return q.scale;
+}
+function playRegionOn() { return playMode && !buildBreak && !!hero && W > 0 && H > 0; }
+function playHeroTiles() { return Math.max(1, playHeroSize || 1); }
+function playWorldNow() {
+  const sw = stage.clientWidth || 1, sh = stage.clientHeight || 1;
+  return playWorldN(W, H, playHeroTiles(), sw / sh);
+}
+function playKick() {
+  if (playLoopOn) return;
+  playLoopOn = true;
+  requestAnimationFrame(playLoop);
+}
+function playLoop() {
+  playLoopOn = false;
+  if (!playRegionOn()) { playFlight = null; return; }
+  const now = performance.now(), dt = Math.min(100, now - (playLoopT || now));
+  playLoopT = now;
+  let moving = false;
+  if (playFlight) {
+    const r = playFlightAt(playFlight, now);
+    playN = r.n;
+    if (r.done) playFlight = null; else moving = true;
+  } else if (Math.abs(Math.log(playTargetN / playN)) > 0.0015) {
+    playN = Math.exp(Math.log(playN) + (Math.log(playTargetN) - Math.log(playN)) * (1 - Math.exp(-dt / 290)));
+    moving = true;
+  } else playN = playTargetN;
+  render();
+  playModeBadge();
+  if (moving) playKick(); else playLoopT = 0;
+}
+// any input hands control back at whatever altitude the view holds right now
+function playCancelFlight() {
+  if (playFlight) playN = playFlightAt(playFlight, performance.now()).n;
+  playFlight = null;
+  playTargetN = playN;
+}
+function playGoMode(name) {
+  if (!playRegionOn()) return;
+  playCancelFlight();
+  const t = playModeTargets(W, H, playHeroTiles(), stage.clientWidth / Math.max(1, stage.clientHeight));
+  playFirst = name === "first";
+  const to = t[name] || t.survey;
+  playTargetN = to;
+  playFlight = playFlightStart(playN, to, performance.now(), t.world);
+  if (!playFlight) playN = to;
+  playLoopT = 0; playKick();
+  playModeBadge();
+}
+function playZoomBy(factor) {
+  if (!playRegionOn()) return;
+  playCancelFlight();
+  playFirst = false;
+  playTargetN = playClampN(playN * factor, playWorldNow());
+  playLoopT = 0; playKick();
+  playModeBadge();
+}
+function playSetN(n) {
+  playCancelFlight();
+  playFirst = false;
+  playN = playTargetN = playClampN(n, playWorldNow());
+}
+function playModeName() {
+  if (!playRegionOn()) return "";
+  const t = playModeTargets(W, H, playHeroTiles(), stage.clientWidth / Math.max(1, stage.clientHeight));
+  if (playFirst) return "FIRST PERSON";
+  if (playN >= t.world * 0.92) return "WORLD";
+  if (playN <= t.ground * 1.7) return "GROUND";
+  if (playN <= t.survey * 1.45) return "SURVEY";
+  return "ALTITUDE";
+}
+function playModeBadge() {
+  const el = document.getElementById("play-mode-badge");
+  if (!el) return;
+  const nm = playModeName(), key = nm + (playFlight ? (playFlight.dive ? "d" : "u") : "");
+  if (key === playBadgeKey) return;
+  playBadgeKey = key;
+  el.hidden = !nm;
+  el.textContent = (playFlight ? (playFlight.dive ? "⬇ " : "⬆ ") : "") + nm;
+  document.querySelectorAll("#play-modes button").forEach(b => {
+    const m = b.dataset.mode;
+    b.classList.toggle("on", !playFlight && ((m === "first" && playFirst) || (!playFirst && m === nm.toLowerCase())));
+  });
+}
+function playResetView() {
+  playN = playTargetN = PLAY_DEFAULT_N; playFlight = null; playCam = null;
+  playLastHero = null; playFirst = false; playFacing = { dx: 0, dy: 1 }; playCamBusy = false;
+}
+// WORLD base layer: the whole map baked once into a small bitmap (hero, NPCs and
+// markers still draw live on top).
+function playBakeOverview() {
+  const now = performance.now();
+  if (playOv && playOv.tiles === tiles && now - playOvAt < 3000) return playOv;
+  const s = Math.max(1, Math.floor(1024 / Math.max(W, H)));
+  const cv = (playOv && playOv.cv) || document.createElement("canvas");
+  cv.width = W * s; cv.height = H * s;
+  const c = cv.getContext("2d");
+  for (let y = 0; y < H; y++) {
+    const row = tiles[y]; if (!row) continue;
+    for (let x = 0; x < W; x++) {
+      let v = row[x]; if (v && typeof v === "object") v = v.tid;
+      const k = minimapTileColor(v);
+      c.fillStyle = "rgb(" + k[0] + "," + k[1] + "," + k[2] + ")";
+      c.fillRect(x * s, y * s, s, s);
+    }
+  }
+  playOv = { cv, s, tiles }; playOvAt = now;
+  return playOv;
+}
+// Sets up the region transform for this frame and draws the base layer.
+// Everything render() draws afterwards stays in map-pixel coordinates.
+function playRegionBegin() {
+  const sw = stage.clientWidth, sh = stage.clientHeight;
+  if (sw < 2 || sh < 2 || tiles.length < H) return false;
+  const now = performance.now(), cu = playHeroTiles();
+  playN = playClampN(playN, playWorldNow());
+  tilePx = playTilePx(playN, sh, cu);
+  scrW = sw; scrH = sh;
+  const cap = playScaleCap(sw, sh, window.devicePixelRatio || 1, PLAY_PIXEL_BUDGET);
+  rgScale = Math.round(playQualityStep(playQ, playLastMs, now, cap) * 20) / 20;
+  const bw = Math.round(sw * rgScale), bh = Math.round(sh * rgScale);
+  if (canvas.width !== bw || canvas.height !== bh) { canvas.width = bw; canvas.height = bh; }
+  canvas.style.width = sw + "px"; canvas.style.height = sh + "px";
+  rgActive = true;
+  const viewW = sw / tilePx, viewH = sh / tilePx;
+  const dt = playCamT ? now - playCamT : 16; playCamT = now;
+  let cam = playCam;
+  if (playFlight || !cam || Math.abs(hero.x - cam.x) > viewW || Math.abs(hero.y - cam.y) > viewH) cam = { x: hero.x, y: hero.y };
+  const st = playCameraStep(cam, hero, playFacing, cu, dt, playFirst ? { dzW: 0.4, dzH: 0.4, look: 1.5 } : null);
+  playCam = { x: st.x, y: st.y };
+  let ox = playCam.x + 0.5 - viewW / 2, oy = playCam.y + 0.5 - viewH / 2;
+  ox = viewW >= W ? (W - viewW) / 2 : Math.max(-2, Math.min(W - viewW + 2, ox));
+  oy = viewH >= H ? (H - viewH) / 2 : Math.max(-2, Math.min(H - viewH + 2, oy));
+  rgOx = ox; rgOy = oy;
+  rgOverview = viewW > PLAY_OVERVIEW_TILES;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = "#0a0a0a"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.setTransform(rgScale, 0, 0, rgScale, -ox * tilePx * rgScale, -oy * tilePx * rgScale);
+  ctx.imageSmoothingEnabled = false;
+  if (rgOverview) {
+    const ov = playBakeOverview();
+    ctx.drawImage(ov.cv, 0, 0, W * ov.s, H * ov.s, 0, 0, W * tilePx, H * tilePx);
+  } else {
+    drawBaseRect(ctx, visibleTiles(), tilePx % 1 ? 0.6 : 0);
+  }
+  if (!st.settled) playKick();
+  return true;
+}
+function playRegionEnd() {
+  if (!rgActive) return;
+  rgActive = false; rgOverview = false;
+  canvas.style.width = ""; canvas.style.height = "";
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (playMode && tilePx > maxTilePx()) tilePx = maxTilePx();   // build-break uses the full-map canvas
+  if (playMode && hero) { panX = (W / 2 - hero.x - 0.5) * tilePx; panY = (H / 2 - hero.y - 0.5) * tilePx; }
+  markBaseDirty();
+}
 // v3.4: patrol NPCs — routes from the server, live walkers in play mode
 let patrolTool = false, draftPoints = [], patrols = [], npcs = [], npcTimer = null;
 let patrolAnchor = null;   // v5.0: {x, y} — the placed character this route is assigned to
@@ -6658,10 +6920,14 @@ function renderBase() {
     baseDirty = { full: true };
   }
   if (!baseDirty) return;
-  const b = baseCv.getContext("2d");
-  b.imageSmoothingEnabled = false;
   // v5.41: draw only the dirty rect; a full pass uses the whole map
-  const r = baseDirty.full ? { x0: 0, y0: 0, x1: W - 1, y1: H - 1 } : baseDirty;
+  drawBaseRect(baseCv.getContext("2d"), baseDirty.full ? { x0: 0, y0: 0, x1: W - 1, y1: H - 1 } : baseDirty, 0);
+  baseDirty = null;
+}
+// v6.2: shared by the cached full-map base and the Play region renderer
+// (pad > 0 closes hairline seams at fractional tile sizes).
+function drawBaseRect(b, r, pad) {
+  b.imageSmoothingEnabled = false;
   for (let y = r.y0; y <= r.y1; y++) for (let x = r.x0; x <= r.x1; x++) {
     const id = tiles[y][x];
     const im = tileFrameImage(id);   // v3.0: animated custom tiles draw current frame
@@ -6674,7 +6940,7 @@ function renderBase() {
         b.ellipse(px + tilePx / 2, py + tilePx * 0.88, tilePx * 0.34, tilePx * 0.13, 0, 0, Math.PI * 2);
         b.fill();
       }
-      b.drawImage(im, px, py, tilePx, tilePx);
+      b.drawImage(im, px, py, tilePx + pad, tilePx + pad);
       const th = tileHt(id);
       // v5.10: the face shows when this tile stands at or above its
       // southern neighbor — never buried under a taller tile below
@@ -6682,7 +6948,7 @@ function renderBase() {
       if (th >= 1 && th >= below) drawTallFace(b, im, px, py, th);
     } else {
       b.fillStyle = customById[id] ? "#1c1c1c" : (colorOf[id] || "#000");
-      b.fillRect(px, py, tilePx, tilePx);
+      b.fillRect(px, py, tilePx + pad, tilePx + pad);
     }
   }
   // v5.10: height shadows — light falls from the northwest, so a taller
@@ -6722,7 +6988,6 @@ function renderBase() {
     for (let y = r.y0; y <= r.y1 + 1; y++) { b.moveTo(r.x0 * tilePx, y * tilePx + .5); b.lineTo((r.x1 + 1) * tilePx, y * tilePx + .5); }
     b.stroke();
   }
-  baseDirty = null;
 }
 
 // v5.3: render diet — high-frequency paths (paint strokes, NPC movement,
@@ -7276,11 +7541,17 @@ function render() {
   if (!tiles.length || tiles.length < H) return;
   // v5.3: resetting canvas.width wipes the whole canvas — only pay for it
   // when the size actually changed.
-  const cw = W * tilePx, ch = H * tilePx;
-  if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
-  ctx.imageSmoothingEnabled = false;
-  renderBase();                 // the cached static layer (tiles, grid)
-  ctx.drawImage(baseCv, 0, 0);
+  const _t0 = performance.now();
+  if (playRegionOn()) {
+    if (!playRegionBegin()) return;
+  } else {
+    playRegionEnd();
+    const cw = W * tilePx, ch = H * tilePx;
+    if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
+    ctx.imageSmoothingEnabled = false;
+    renderBase();                 // the cached static layer (tiles, grid)
+    ctx.drawImage(baseCv, 0, 0);
+  }
   // v5.3: animated tiles stay live — overdrawn with the current frame.
   // v5.37: FX tiles overdraw here too, with their animator effects.
   if (animOnMap.size || fxOnMap.size) {
@@ -7576,9 +7847,11 @@ function render() {
   // destination-out used to erase the hero and the map along with it,
   // leaving a black hole where the hero stood.
   const darkFor = { clear: 0.12, rain: 0.35, snow: 0.25, storm: 0.45, fog: 0.20 };
-  if (playMode && lightingOn && hero) {
-    const hx = hero.x * tilePx + tilePx / 2, hy = hero.y * tilePx + tilePx / 2;
-    const lr = tilePx * 4;
+  if (playMode && lightingOn && hero && !rgOverview) {
+    const _k = rgActive ? rgScale : 1;
+    const hx = rgActive ? (hero.x + 0.5 - rgOx) * tilePx * _k : hero.x * tilePx + tilePx / 2;
+    const hy = rgActive ? (hero.y + 0.5 - rgOy) * tilePx * _k : hero.y * tilePx + tilePx / 2;
+    const lr = tilePx * 4 * _k;
     if (!lightCv || lightCv.width !== canvas.width || lightCv.height !== canvas.height) {
       lightCv = document.createElement("canvas");
       lightCv.width = canvas.width; lightCv.height = canvas.height;
@@ -7588,13 +7861,16 @@ function render() {
     d.fillStyle = "rgba(3,3,14," + (darkFor[worldWeather] ?? 0.62) + ")";
     d.fillRect(0, 0, lightCv.width, lightCv.height);
     d.globalCompositeOperation = "destination-out";
-    const g = d.createRadialGradient(hx, hy, tilePx * 0.6, hx, hy, lr);
+    const g = d.createRadialGradient(hx, hy, tilePx * 0.6 * _k, hx, hy, lr);
     g.addColorStop(0, "rgba(0,0,0,1)");
     g.addColorStop(1, "rgba(0,0,0,0)");
     d.fillStyle = g;
     d.beginPath(); d.arc(hx, hy, lr, 0, Math.PI * 2); d.fill();
     d.globalCompositeOperation = "source-over";
+    ctx.save();
+    if (rgActive) ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(lightCv, 0, 0);
+    ctx.restore();
   }
   // v5.10: sight — line-of-sight fog of war. Cells the hero can't see
   // (a taller cell blocks the sight line) go dark. Refreshes when he stops.
@@ -7615,8 +7891,10 @@ function render() {
     else { ctx.fillStyle = "rgba(255,215,95,.55)"; ctx.fillRect(gx, gy, tilePx, tilePx); }
     ctx.restore();
   }
+  if (rgActive) ctx.setTransform(rgScale, 0, 0, rgScale, 0, 0);   // screen space for the sky + captions
   if (playMode && worldWeather !== "clear") drawWeather();  // v4.1: the sky performs
   if (clipCaption) drawClipCaption();   // v5.53: auto-clip subtitles — her words on the film
+  if (rgActive) { ctx.setTransform(1, 0, 0, 1, 0, 0); playLastMs = performance.now() - _t0; }
   followPlayHero();                    // center the active character, only during play
   layout();   // v2.2: re-center + apply pan offset after every draw
   if (typeof renderMinimap === "function") renderMinimap();  // v5.61.0: throttled live minimap
@@ -7626,7 +7904,7 @@ function render() {
 // The camera is expressed in stage-local pixels, so centering the controlled
 // character here is independent of the browser window's origin or HUD height.
 function followPlayHero() {
-  if (!playMode || buildBreak || !hero || !W || !H) return;
+  if (!playMode || buildBreak || !hero || !W || !H || rgActive) return;
   panX = (W / 2 - hero.x - 0.5) * tilePx;
   panY = (H / 2 - hero.y - 0.5) * tilePx;
   clampPan();
@@ -7635,8 +7913,8 @@ function followPlayHero() {
 // ---- painting -------------------------------------------------------------
 function evCell(e) {
   const r = canvas.getBoundingClientRect();
-  const x = Math.floor((e.clientX - r.left) / tilePx);
-  const y = Math.floor((e.clientY - r.top) / tilePx);
+  const x = Math.floor((rgActive ? rgOx : 0) + (e.clientX - r.left) / tilePx);
+  const y = Math.floor((rgActive ? rgOy : 0) + (e.clientY - r.top) / tilePx);
   if (x < 0 || y < 0 || x >= W || y >= H) return null;
   return { x, y };
 }
@@ -9148,6 +9426,11 @@ function onGestureMove() {
   if (p.length < 2) return;
   const dist = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
   const mid = { x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2 };
+  if (playRegionOn()) {   // v6.2: pinch changes N, anchored on the hero
+    if (!gesture) { gesture = { startDist: dist, startN: playN, lastMid: mid }; return; }
+    playSetN(gesture.startN * gesture.startDist / dist); render(); playModeBadge();
+    return;
+  }
   if (!gesture) { gesture = { startDist: dist, startPx: tilePx, lastMid: mid }; return; }
   // v2.4: quantize zoom to whole px — at 64x64 a redraw paints 4096 tiles, so
   // only re-render when the integer size actually changes. Finger tremor no
@@ -9316,6 +9599,12 @@ let _pinchAccum = 0;   // v5.51.3: accumulated ctrl+wheel delta between zoom ste
 function onCanvasWheel(e) {
   if (e.__crumbsLensWheelHandled) return;
   e.__crumbsLensWheelHandled = true;
+  if (playRegionOn()) {                // v6.2: Play wheel / trackpad pinch ride the N continuum
+    e.preventDefault();
+    const pdy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+    playZoomBy(Math.exp(Math.max(-120, Math.min(120, pdy)) * (e.ctrlKey ? 0.01 : 0.0015)));
+    return;
+  }
   if (!e.ctrlKey) return;              // plain wheel: no binding today — untouched
   e.preventDefault();                  // block the browser's page zoom
   const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;  // wheel lines -> px
@@ -9359,6 +9648,7 @@ function panMapByTiles(dx, dy) {
 let kbStepCool = 0;   // v5.67.0: WASD step cooldown, mirrors the gamepad's padCool
 function kbCharStep(dx, dy) {
   const now = performance.now();
+  playCancelFlight();   // v6.2: movement keys end a flight at the current altitude
   if (now < kbStepCool) return;
   kbStepCool = now + Math.max((typeof RULES !== "undefined" && RULES.walk_ms) || 140, 150);
   doStep(dx, dy, false);
@@ -9404,6 +9694,10 @@ function onKbMove(e) {
     case "a": case "A": if (activePlay) kbCharStep(-1, 0); else handled = false; break;
     case "d": case "D": if (activePlay) kbCharStep(1, 0); else handled = false; break;
     case " ": if (activePlay) { e.preventDefault(); playInteract(); } else handled = false; break;
+    case "1": if (activePlay) playGoMode("first"); else handled = false; break;
+    case "2": if (activePlay) playGoMode("ground"); else handled = false; break;
+    case "3": if (activePlay) playGoMode("survey"); else handled = false; break;
+    case "4": if (activePlay) playGoMode("world"); else handled = false; break;
     default: handled = false;
   }
   if (!activePlay && !handled) {
@@ -9470,6 +9764,7 @@ $("end-again").onclick = async () => {
 };
 async function playTap(cell) {
   if (heroTimer || playOver) return;  // let the current walk finish first
+  playCancelFlight();   // v6.2
   // v5.40: tapping a paused walker while standing next to him = hello, no walk
   if (hero) {
     // v5.50: tapping Melody herself while standing close = talk, no walk
@@ -9504,6 +9799,10 @@ async function playTap(cell) {
   const evts = r.events || []; // v3.9: per-step game-rule events
   let i = 0;
   const step = async () => {
+    if (hero) {   // v6.2: facing follows the walk
+      const fx = Math.sign(path[i][0] - hero.x), fy = Math.sign(path[i][1] - hero.y);
+      if (fx || fy) playFacing = { dx: fx, dy: fy };
+    }
     hero = { x: path[i][0], y: path[i][1] };
     heroSwimming = !!swim[i];   // ripple + slow wading through water
     heroInDeep = !!deep[i];     // v3.6: lights the swim-animation hook below
@@ -9543,6 +9842,7 @@ async function togglePlay() {
     buildBreakUIOff();   // v5.29: a fresh run never starts mid-break
     const r = await api("/api/play/start", {});
     if (!r.ok) { toast("play failed"); return; }
+    playResetView();   // v6.2: fresh run, fresh altitude
     playMode = true; document.body.classList.add("play-follow"); hero = { x: r.x, y: r.y };
     walkerShown = new Set();   // v5.40: fresh hellos for a fresh run
     // v5.29: the flagged PC leads this run — his sprite and his size.
@@ -9584,7 +9884,7 @@ async function togglePlay() {
   } else {
     await api("/api/play/stop", {});
     if (buildBreak) buildBreakUIOff();   // v5.29: leaving play ends the break too (timers already cleared below)
-    playMode = false; document.body.classList.remove("play-follow"); hero = null; heroSwimming = false; heroInDeep = false;
+    playMode = false; playFlight = null; document.body.classList.remove("play-follow"); hero = null; heroSwimming = false; heroInDeep = false;
     playHeroTid = null; playHeroSize = 1.0;   // v5.29: run's hero pick rests
     if (heroTimer) { clearInterval(heroTimer); heroTimer = null; }
     if (npcTimer) { clearInterval(npcTimer); npcTimer = null; }   // v3.4: walkers rest
@@ -9966,12 +10266,13 @@ function clipSetCaption(text) {
 function drawClipCaption() {
   if (!clipCaption) return;
   if (performance.now() > clipCaption.until) { clipCaption = null; return; }
-  const pad = 10, fs = Math.max(13, Math.round(canvas.width / 48));
+  const cvW = rgActive ? scrW : canvas.width, cvH = rgActive ? scrH : canvas.height;
+  const pad = 10, fs = Math.max(13, Math.round(cvW / 48));
   ctx.save();
   ctx.font = "600 " + fs + "px system-ui, sans-serif";
   ctx.textBaseline = "alphabetic";
   const words = ("Melody: " + clipCaption.text).split(" "), lines = [];
-  const maxW = canvas.width - pad * 2;
+  const maxW = cvW - pad * 2;
   let line = "";
   for (const w of words) {
     const t = line ? line + " " + w : w;
@@ -9981,9 +10282,9 @@ function drawClipCaption() {
   if (line) lines.push(line);
   const lh = Math.round(fs * 1.35), bh = lines.length * lh + pad;
   ctx.fillStyle = "rgba(0,0,0,0.62)";
-  ctx.fillRect(0, canvas.height - bh, canvas.width, bh);
+  ctx.fillRect(0, cvH - bh, cvW, bh);
   ctx.fillStyle = "#fff";
-  lines.forEach((ln, i) => ctx.fillText(ln, pad, canvas.height - bh + pad * 0.6 + (i + 1) * lh - 4));
+  lines.forEach((ln, i) => ctx.fillText(ln, pad, cvH - bh + pad * 0.6 + (i + 1) * lh - 4));
   ctx.restore();
 }
 // -- gallery: IndexedDB, reviewed on his schedule -----------------------------
@@ -10366,7 +10667,7 @@ function wxRand(i, s) {
   return (h % 1000) / 1000;
 }
 function drawWeather() {
-  const wpx = canvas.width, hpx = canvas.height;
+  const wpx = rgActive ? scrW : canvas.width, hpx = rgActive ? scrH : canvas.height;
   if (worldWeather === "fog") {
     ctx.fillStyle = "rgba(150,160,175,0.30)";
     ctx.fillRect(0, 0, wpx, hpx);
@@ -11668,6 +11969,7 @@ dpad.querySelectorAll("button").forEach(b => {
 });
 async function doStep(dx, dy, repeat) {
   if (!playMode || playOver || buildBreak) return;   // v3.9: a win/lose freezes movement; v5.29: so does a build-break
+  playCancelFlight(); playFacing = { dx: Math.sign(dx), dy: Math.sign(dy) };   // v6.2: any input hands the view back
   let r;
   try { r = await api("/api/play/step", { dx, dy }); }
   catch (e) { return; }
@@ -14677,6 +14979,7 @@ $("btn-clear").onclick = async () => {
   await api("/api/clear_layer", { layer }); await refresh(); toast("layer cleared");
 };
 function zoomCenter(d) {
+  if (playRegionOn()) { playZoomBy(d > 0 ? 0.8 : 1.25); return; }   // v6.2: Play zoom changes N
   manualZoom = true;
   // v5.41: say why zoom-in stops on huge maps instead of silently ignoring it
   if (d > 0 && tilePx >= maxTilePx() && maxTilePx() < 64)
@@ -14687,9 +14990,10 @@ function zoomCenter(d) {
   const step = tilePx <= 8 ? 1 : 8;
   zoomAt(r.left + r.width / 2, r.top + r.height / 2, tilePx + Math.sign(d) * step);
 }
+document.querySelectorAll("#play-modes button").forEach(b => { b.onclick = () => playGoMode(b.dataset.mode); });
 $("zoom-in").onclick  = () => zoomCenter(8);
 $("zoom-out").onclick = () => zoomCenter(-8);
-$("zoom-fit").onclick = () => { manualZoom = false; panX = 0; panY = 0; fitTiles(); render(); toast("fit to screen"); };
+$("zoom-fit").onclick = () => { if (playRegionOn()) { playGoMode("survey"); return; } manualZoom = false; panX = 0; panY = 0; fitTiles(); render(); toast("fit to screen"); };
 // v5.51.1: grid lines toggle — per-device, default on (the historical look).
 let showGrid = true;
 try { showGrid = localStorage.getItem("crumbs.showGrid") !== "0"; } catch (e) {}

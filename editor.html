@@ -5308,6 +5308,30 @@ const DAY_SPLIT = { day: 0.5, night: 0.5 };
 const AREA_TILES = 100, WORLD_AREAS_EACH_WAY = 5;
 const WORLD_AREAS = 2 * WORLD_AREAS_EACH_WAY + 1, WORLD_TILES = WORLD_AREAS * AREA_TILES;
 function shrineMinSpacing(tilesPerSec, dayMs) { return tilesPerSec * (dayMs / 1000); }
+// §14 areas: 100x100 tiles, Origin's area is the centre (0,0); only the player's
+// area plus the 8 around it are live, the rest sleep and render from the overview.
+function areaOf(x, y, w, h) {
+  const lim = WORLD_AREAS_EACH_WAY, c = (v) => Math.max(-lim, Math.min(lim, v));
+  return { ax: c(Math.round((x - w / 2) / AREA_TILES)), ay: c(Math.round((y - h / 2) / AREA_TILES)) };
+}
+function areaAwake(x, y, hx, hy, w, h) {
+  const a = areaOf(x, y, w, h), b = areaOf(hx, hy, w, h);
+  return Math.abs(a.ax - b.ax) <= 1 && Math.abs(a.ay - b.ay) <= 1;
+}
+function areaLive(hx, hy, w, h) {
+  const b = areaOf(hx, hy, w, h), lim = WORLD_AREAS_EACH_WAY, out = [];
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    const ax = b.ax + dx, ay = b.ay + dy;
+    if (Math.abs(ax) <= lim && Math.abs(ay) <= lim) out.push({ ax, ay });
+  }
+  return out;
+}
+function areaLabel(a) { return a.ax === 0 && a.ay === 0 ? "Origin" : "Area " + a.ax + "," + a.ay; }
+// biome borders feather: weight of the far biome, 0..1, across `feather` tiles either side of the border
+function areaFeather(distToBorder, feather) {
+  const k = Math.max(0, Math.min(1, (distToBorder + feather) / (2 * Math.max(1, feather))));
+  return k * k * (3 - 2 * k);
+}
 const dayCfg = { on: true, t: 0.4, at: 0 };
 try { Object.assign(dayCfg, JSON.parse(localStorage.getItem("crumbs_day") || "{}")); } catch (e) {}
 dayCfg.at = performance.now();
@@ -5432,6 +5456,7 @@ function updateCompass() {
   shrineTick();
   const h = compassHeading(playFacing);
   let txt = h.name;
+  if (W > AREA_TILES * 1.5) txt += " · " + areaLabel(areaOf(hero.x, hero.y, W, H));
   if (playWaypoint) txt += " · 📍" + waypointInfo(hero, playWaypoint).dist;
   const key = h.deg + txt;
   if (el._k === key) return;
@@ -12751,6 +12776,7 @@ function npcTick(dt) {
   const melodyLive = npcs.some(n => n.melody);
   npcs.forEach(n => {
     if (!n.loop.length) return;
+    if (!n.melody && hero && !areaAwake(n.x, n.y, hero.x, hero.y, W, H)) return;   // sleeping area
     const SPEED = n.speed || SPEED0;
     // she stops for company: near the hero or in conversation, then resumes the circuit
     if (n.melody && hero && (MELODY.open || Math.max(Math.abs(n.x - hero.x), Math.abs(n.y - hero.y)) <= 2)) { n.swimming = false; return; }

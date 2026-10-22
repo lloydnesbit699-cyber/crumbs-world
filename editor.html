@@ -843,6 +843,17 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   #flight-panel button { min-height: 0; height: 30px; padding: 0 8px; border-radius: 8px; font-size: 12px; background: rgba(42,42,42,.9);
                          border: 1px solid transparent; color: #ddd; cursor: pointer; }
   #flight-panel button.on { border-color: #8cf; color: #8cf; }
+  #shrine-toggle.on { background: #2a5a8a; color: #fff; }
+  #shrine-panel { position: fixed; right: 62px; bottom: calc(60px + env(safe-area-inset-bottom)); z-index: 101; width: 250px;
+                  background: rgba(20,20,28,.92); border: 1px solid #3a3a48; border-radius: 12px; padding: 8px; color: #ddd;
+                  font: 12px/1.4 system-ui, sans-serif; display: flex; flex-direction: column; gap: 4px; }
+  #shrine-panel[hidden] { display: none; }
+  body.clean #shrine-panel, body.clean #shrine-toggle { display: none !important; }
+  #shrine-panel .sh-row { display: flex; gap: 4px; align-items: center; }
+  #shrine-panel .sh-row span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #shrine-panel .sh-row.dim { opacity: .45; }
+  #shrine-panel button { min-height: 0; height: 28px; padding: 0 8px; border-radius: 8px; font-size: 12px; background: rgba(42,42,42,.9);
+                         border: 1px solid transparent; color: #ddd; cursor: pointer; }
   #fl-bar { height: 6px; background: #333; border-radius: 3px; overflow: hidden; }
   #fl-bar i { display: block; height: 100%; width: 0; background: #ffd75f; }
   #fl-log { max-height: 120px; overflow-y: auto; white-space: pre-wrap; color: #9c9; }
@@ -4623,6 +4634,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   <button id="btn-grid" title="Toggle grid lines">&#x25A6;</button>
   <button id="lens-full-toggle" title="Full-screen lens (L)" aria-label="Toggle full-screen lens">⛶</button>
   <button id="flight-toggle" title="Flight test panel (F)" aria-label="Flight test panel">&#9992;&#65039;</button>
+  <button id="shrine-toggle" title="Teleport shrines (T)" aria-label="Teleport shrines">&#128511;</button>
   <button id="sky-toggle" title="Weather &amp; sounds" aria-label="Weather and sounds">&#127782;&#65039;</button>
   <button id="world-lens-toggle" title="Toggle world lens" aria-label="Toggle world lens">🔎</button>
   <button id="zoom-out" title="Zoom out">&minus;</button>
@@ -4632,6 +4644,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
 </div>
 
 <div id="compass" hidden aria-label="Compass"><div class="cp-dial"><span class="cp-n">N</span><div class="cp-needle"></div></div><span class="cp-txt"></span></div>
+<div id="shrine-panel" hidden aria-label="Teleport shrines"></div>
 <div id="flight-panel" hidden aria-label="Flight test">
   <div id="fl-stat">Enter Play to test flights.</div>
   <div id="fl-bar"><i></i></div>
@@ -5312,12 +5325,111 @@ function waypointInfo(h, wp) {
   const dx = wp.x - h.x, dy = wp.y - h.y;
   return { dist: Math.round(Math.hypot(dx, dy)), ang: Math.atan2(dy, dx) };
 }
+// §13.1 teleport shrines: server places them (Star Beacon = Origin); unlocks are per character.
+const SHRINE_UNLOCK_RANGE = 3, SHRINE_SEE_RANGE = 30;
+let shrineList = [], shrineUn = new Set(["star_beacon"]), shrineDisc = new Set(["star_beacon"]), shrineBusy = false;
+function shrineState(s, un, disc) { return un.has(s.id) ? "full" : disc.has(s.id) ? "dim" : "hidden"; }
+// Origin only becomes a destination once another shrine is unlocked
+function shrineTargets(list, un) {
+  const others = list.filter(s => !s.origin && un.has(s.id)).length;
+  return list.filter(s => un.has(s.id) && (!s.origin || others > 0));
+}
+function shrineScan(list, h, un, disc) {
+  let changed = false, fresh = null;
+  for (const s of list) {
+    const d = Math.max(Math.abs(s.x - h.x), Math.abs(s.y - h.y));
+    if (d <= SHRINE_SEE_RANGE && !disc.has(s.id)) { disc.add(s.id); changed = true; }
+    if (d <= SHRINE_UNLOCK_RANGE && !un.has(s.id)) { un.add(s.id); disc.add(s.id); changed = true; fresh = s; }
+  }
+  return { changed, fresh };
+}
+function shrineKey() { return "crumbs_shrines_" + (typeof playHeroTid !== "undefined" && playHeroTid != null ? playHeroTid : 0); }
+function shrineSave() { try { localStorage.setItem(shrineKey(), JSON.stringify({ u: [...shrineUn], d: [...shrineDisc] })); } catch (e) {} }
+async function shrineLoad() {
+  shrineUn = new Set(["star_beacon"]); shrineDisc = new Set(["star_beacon"]);
+  try { const o = JSON.parse(localStorage.getItem(shrineKey()) || "{}"); (o.u || []).forEach(i => { shrineUn.add(i); shrineDisc.add(i); }); (o.d || []).forEach(i => shrineDisc.add(i)); } catch (e) {}
+  const r = await api("/api/play/shrines", {}).catch(() => null);
+  shrineList = r && r.ok ? r.shrines : [];
+  shrinePanelPaint();
+}
+function shrineTick() {
+  if (!shrineList.length || !hero || !playMode) return;
+  const r = shrineScan(shrineList, hero, shrineUn, shrineDisc);
+  if (!r.changed) return;
+  shrineSave(); shrinePanelPaint();
+  if (r.fresh) toast(r.fresh.icon + " " + r.fresh.name + " unlocked — T to travel");
+}
+function shrinePanelPaint() {
+  const p = document.getElementById("shrine-panel");
+  if (!p) return;
+  const tg = shrineTargets(shrineList, shrineUn), vis = shrineList.filter(s => shrineState(s, shrineUn, shrineDisc) !== "hidden");
+  p.textContent = "";
+  const head = document.createElement("b"); head.textContent = "Shrines " + shrineUn.size + "/" + shrineList.length; p.appendChild(head);
+  vis.forEach(s => {
+    const un = shrineUn.has(s.id), row = document.createElement("div");
+    row.className = "sh-row" + (un ? "" : " dim");
+    const nm = document.createElement("span"); nm.textContent = s.icon + " " + s.name + (un ? "" : " (undiscovered path)"); row.appendChild(nm);
+    if (un) {
+      const wp = document.createElement("button"); wp.textContent = "📍"; wp.title = "Set as waypoint";
+      wp.onclick = () => { playWaypoint = { x: s.x, y: s.y, shrine: s.id }; skyPaint(); queueRender(); toast("waypoint: " + s.name); };
+      row.appendChild(wp);
+      if (tg.includes(s)) { const go = document.createElement("button"); go.textContent = "✈ Go"; go.onclick = () => shrineTravel(s.id); row.appendChild(go); }
+    }
+    p.appendChild(row);
+  });
+  if (tg.length === 0) { const n = document.createElement("div"); n.textContent = "Unlock a shrine by walking up to it."; p.appendChild(n); }
+}
+// rise → cross → fall; never a hard cut
+async function shrineTravel(id) {
+  const s = shrineList.find(q => q.id === id);
+  if (!s || shrineBusy || !playRegionOn()) return;
+  if (heroTimer || playOver) { toast("wait until you stop moving"); return; }
+  shrineBusy = true;
+  const wait = async () => { let g = 0; while (playFlight && g++ < 600) await flightWait(50); };
+  try {
+    playGoMode("world"); await wait();
+    const r = await api("/api/play/teleport", { id }).catch(() => null);
+    if (r && r.ok) {
+      hero = { x: r.x, y: r.y }; playCam = null; playLastHero = null;
+      render();
+      await flightWait(450);
+    } else toast("the shrine did not answer");
+    playGoMode("ground"); await wait();
+  } finally { shrineBusy = false; }
+}
+function drawShrines() {
+  if (!shrineList.length || !rgActive) return;
+  const k = rgScale;
+  ctx.save();
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  for (const s of shrineList) {
+    const st = shrineState(s, shrineUn, shrineDisc);
+    if (st === "hidden") continue;
+    const px = (s.x + 0.5 - rgOx) * tilePx * k, py = (s.y + 0.5 - rgOy) * tilePx * k;
+    if (px < -40 || py < -40 || px > canvas.width + 40 || py > canvas.height + 40) continue;
+    ctx.globalAlpha = st === "full" ? 1 : 0.4;
+    const size = Math.max(tilePx * 2, 20) * k;
+    ctx.fillStyle = "rgba(10,10,20,.55)"; ctx.beginPath(); ctx.arc(px, py, size * 0.62, 0, Math.PI * 2); ctx.fill();
+    ctx.font = Math.round(size) + "px sans-serif"; ctx.fillStyle = "#fff";
+    ctx.fillText(s.icon, px, py);
+  }
+  ctx.restore();
+}
+function shrineWire() {
+  const tg = document.getElementById("shrine-toggle"), p = document.getElementById("shrine-panel");
+  if (!tg || !p) return;
+  const flip = () => { p.hidden = !p.hidden; tg.classList.toggle("on", !p.hidden); if (!p.hidden) shrinePanelPaint(); };
+  tg.onclick = flip;
+  window.shrineToggle = flip;
+}
+if (typeof document !== "undefined" && document.getElementById) shrineWire();
 function updateCompass() {
   const el = document.getElementById("compass");
   if (!el) return;
   const on = playMode && !!hero;
   el.hidden = !on;
   if (!on) return;
+  shrineTick();
   const h = compassHeading(playFacing);
   let txt = h.name;
   if (playWaypoint) txt += " · 📍" + waypointInfo(hero, playWaypoint).dist;
@@ -8301,6 +8413,7 @@ function render() {
   if (rgActive) ctx.setTransform(rgScale, 0, 0, rgScale, 0, 0);   // screen space for the sky + captions
   if (playMode && worldWeather !== "clear") drawWeather();  // v4.1: the sky performs
   if (rgActive && playFlight) drawFlightLines();
+  if (rgActive) drawShrines();
   if (rgActive) drawWaypointRing();
   updateCompass();
   if (clipCaption) drawClipCaption();   // v5.53: auto-clip subtitles — her words on the film
@@ -10107,6 +10220,7 @@ function onKbMove(e) {
     case "p": case "P": if (activePlay) { uiClean = !uiClean; applyUiClean(); toast(uiClean ? "photo mode — P to bring the HUD back" : "HUD back"); } else handled = false; break;
     case "f": case "F": if (activePlay && window.flightToggle) window.flightToggle(); else handled = false; break;
     case "q": case "Q": if (activePlay) playCycleQuality(); else handled = false; break;
+    case "t": case "T": if (activePlay && window.shrineToggle) window.shrineToggle(); else handled = false; break;
     case "l": case "L": if (!activePlay) lensToggle(); else handled = false; break;
     case "Escape": if (lensFull) lensToggle(false); else handled = false; break;
     default: handled = false;
@@ -10256,6 +10370,7 @@ async function togglePlay() {
     const r = await api("/api/play/start", {});
     if (!r.ok) { toast("play failed"); return; }
     playResetView();   // v6.2: fresh run, fresh altitude
+    shrineLoad();
     heroAnimKick();
     playMode = true; document.body.classList.add("play-follow"); hero = { x: r.x, y: r.y };
     walkerShown = new Set();   // v5.40: fresh hellos for a fresh run
@@ -21148,6 +21263,7 @@ function shellMenubarItems(name) {
   if (name === "play") return [
     ["\u25B6 Play", function () { shellNavGo("play"); }],
     ["\u2708 Flight test panel", function () { F(function (fw) { fw.flightToggle(); }); }],
+    ["\uD83D\uDDFF Teleport shrines", function () { F(function (fw) { fw.shrineToggle(); }); }],
     ["Build", function () { shellNavGo("build"); }],
     ["World", function () { shellNavGo("world"); }]
   ];

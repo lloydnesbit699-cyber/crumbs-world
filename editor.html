@@ -5288,6 +5288,13 @@ function dayLabel(t) {
   return s > 0.5 ? "day" : s > 0.1 ? (t < 0.5 ? "morning" : "afternoon") : s > -0.3 ? (t < 0.5 ? "dawn" : "dusk") : "night";
 }
 const DAY_LEN_MS = 60 * 60 * 1000;
+// Lloyd's decisions (2026-10-22): even day/night split with dawn + dusk between;
+// world = 5 areas of 100x100 out in every direction from Origin (11x11 areas);
+// shrines at least one in-game day of walking apart.
+const DAY_SPLIT = { day: 0.5, night: 0.5 };
+const AREA_TILES = 100, WORLD_AREAS_EACH_WAY = 5;
+const WORLD_AREAS = 2 * WORLD_AREAS_EACH_WAY + 1, WORLD_TILES = WORLD_AREAS * AREA_TILES;
+function shrineMinSpacing(tilesPerSec, dayMs) { return tilesPerSec * (dayMs / 1000); }
 const dayCfg = { on: true, t: 0.4, at: 0 };
 try { Object.assign(dayCfg, JSON.parse(localStorage.getItem("crumbs_day") || "{}")); } catch (e) {}
 dayCfg.at = performance.now();

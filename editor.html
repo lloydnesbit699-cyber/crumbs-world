@@ -811,6 +811,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
                 transform: translateX(-50%); z-index: 60; gap: 4px; align-items: center;
                 background: rgba(20,20,28,.72); border: 1px solid #3a3a48; border-radius: 999px; padding: 3px; }
   body.play-follow #play-modes { display: flex; }
+  body.clean #play-modes { display: none !important; }
   #play-modes button { min-height: 0; height: 30px; padding: 0 10px; border-radius: 999px; font-size: 12px;
                        background: transparent; border: 1px solid transparent; color: #ddd; cursor: pointer; }
   #play-modes button.on { border-color: #ffd75f; color: #ffd75f; font-weight: 700; }
@@ -5038,7 +5039,8 @@ let heroInDeep = false;   // v3.6 SWIM HOOK: true on deep-water steps (only once
 const PLAY_GROUND_N = 6, PLAY_FLOOR_N = 4, PLAY_DEFAULT_N = 14;
 const PLAY_DIVE_MS = 6000, PLAY_RISE_MS = 7000, PLAY_FLIGHT_MIN_MS = 1100;
 const PLAY_DEADZONE_W = 3, PLAY_DEADZONE_H = 2, PLAY_LOOKAHEAD = 2;   // character units
-const PLAY_PIXEL_BUDGET = 8294400;   // backing-store ceiling (~4K) before the adaptive scaler backs off
+const PLAY_PIXEL_BUDGETS = { low: 2073600, auto: 8294400, max: 16588800 };   // 1080p / ~4K / ~8K ceilings
+let playQuality = "auto";   // backing-store ceiling (~4K) before the adaptive scaler backs off
 const PLAY_OVERVIEW_TILES = 220;     // wider than this draws from the baked overview bitmap
 let playN = PLAY_DEFAULT_N, playTargetN = PLAY_DEFAULT_N;
 let playFlight = null, playLoopOn = false, playLoopT = 0;
@@ -5046,6 +5048,7 @@ let playCam = null, playCamT = 0, playCamBusy = false;
 let playFacing = { dx: 0, dy: 1 }, playLastHero = null, playFirst = false;
 let playQ = { scale: 0, ema: 8, adjusted: 0 };
 let playBadgeKey = "";
+let heroStepT = 0, heroAnimTimer = null;   // v6.3: last step time + idle-animation ticker
 let rgActive = false, rgOverview = false, playLastMs = 8, playOv = null, playOvAt = 0;
 let rgOx = 0, rgOy = 0, rgScale = 1, scrW = 0, scrH = 0;   // region origin (map px), backing scale, logical canvas size
 function playTilePx(n, stageH, heroTiles) {
@@ -5109,6 +5112,55 @@ function playQualityStep(q, frameMs, now, cap) {
   if (q.ema > 14 && now - q.adjusted > 1000) { q.scale = Math.max(0.6, q.scale * 0.85); q.adjusted = now; q.ema = 8; }
   else if (q.ema < 6 && q.scale < cap && now - q.adjusted > 2500) { q.scale = Math.min(cap, q.scale * 1.1); q.adjusted = now; }
   return q.scale;
+}
+// v6.3: keep the hero's rig clip playing (idle breathing, walk cycle ending) —
+// repaints only while his current clip has more than one frame.
+function heroAnimKick() {
+  if (heroAnimTimer) return;
+  const tick = () => {
+    heroAnimTimer = null;
+    if (!playMode || !hero) return;
+    const pc = playHeroTid != null ? playHeroTid : primaryHeroTile();
+    const ct = pc != null ? customById[pc] : null;
+    let ms = 250;
+    if (ct && ct.rig && ct.rig.actions && !playFlight) {
+      const a = heroActionFor(heroSwimming, heroInDeep, runMode, heroStepT ? performance.now() - heroStepT : -1);
+      const clip = rigClip(ct, a, rigDirFromFacing(playFacing));
+      if (clip && clip.frames && clip.frames.length > 1) { ms = Math.max(60, clip.frame_ms || 250); if (!playLoopOn) render(); }
+    }
+    heroAnimTimer = setTimeout(tick, ms);
+  };
+  heroAnimTimer = setTimeout(tick, 250);
+}
+function playCycleQuality() {
+  const order = ["auto", "max", "low"];
+  playQuality = order[(order.indexOf(playQuality) + 1) % order.length];
+  playQ.scale = 0;
+  toast("pixel quality: " + playQuality + (playQuality === "max" ? " (sharpest, may drop frames)" : playQuality === "low" ? " (fastest)" : " (adaptive)"));
+  render();
+}
+// v6.3: streaks rush past the edges while the camera falls or climbs
+function drawFlightLines() {
+  const fl = playFlight; if (!fl) return;
+  const now = performance.now(), p = Math.min(1, (now - fl.start) / fl.dur);
+  const power = Math.sin(Math.PI * p);   // strongest mid-flight, gone at the ends
+  if (power < 0.05) return;
+  const cx = scrW / 2, cy = scrH / 2, R = Math.hypot(cx, cy);
+  ctx.save();
+  ctx.lineCap = "round";
+  for (let i = 0; i < 28; i++) {
+    const a = (i * 2.399963) % (Math.PI * 2);   // golden-angle spread, stable per frame
+    const ph = ((now / 700) + i * 0.37) % 1;
+    const r0 = R * (fl.dive ? 1 - ph * 0.55 : 0.45 + ph * 0.55), len = R * 0.16 * power;
+    const r1 = fl.dive ? r0 - len : r0 + len;
+    ctx.strokeStyle = "rgba(255,255,255," + (0.35 * power).toFixed(2) + ")";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0 * 0.75);
+    ctx.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1 * 0.75);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 function playRegionOn() { return playMode && !buildBreak && !!hero && W > 0 && H > 0; }
 function playHeroTiles() { return Math.max(1, playHeroSize || 1); }
@@ -5226,7 +5278,7 @@ function playRegionBegin() {
   playN = playClampN(playN, playWorldNow());
   tilePx = playTilePx(playN, sh, cu);
   scrW = sw; scrH = sh;
-  const cap = playScaleCap(sw, sh, window.devicePixelRatio || 1, PLAY_PIXEL_BUDGET);
+  const cap = playScaleCap(sw, sh, window.devicePixelRatio || 1, PLAY_PIXEL_BUDGETS[playQuality] || PLAY_PIXEL_BUDGETS.auto);
   rgScale = Math.round(playQualityStep(playQ, playLastMs, now, cap) * 20) / 20;
   const bw = Math.round(sw * rgScale), bh = Math.round(sh * rgScale);
   if (canvas.width !== bw || canvas.height !== bh) { canvas.width = bw; canvas.height = bh; }
@@ -7673,13 +7725,21 @@ function render() {
     // Unreachable for now — deep water blocks the hero until SWIM_UNLOCKED
     // flips server-side, at which point heroInDeep goes true on deep steps
     // and this branch draws the swim animation instead of the wade ripple.
-    if (heroInDeep) {
-      // TODO(swim): draw the swim animation (strokes, splash, submerged bob).
+    if (heroInDeep) {   // v6.3: submerged bob + expanding splash rings
+      const ph = (performance.now() % 900) / 900;
+      for (let k = 0; k < 2; k++) {
+        const q = (ph + k / 2) % 1;
+        ctx.strokeStyle = "rgba(190,230,255," + (0.7 * (1 - q)).toFixed(2) + ")"; ctx.lineWidth = Math.max(1, tilePx * 0.04);
+        ctx.beginPath();
+        ctx.ellipse(hx + tilePx / 2, hy + tilePx * 0.78, tilePx * (0.25 + 0.3 * q), tilePx * (0.1 + 0.12 * q), 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
     }
     // v5.29: PC sprite — flagged instance first (mirrors server _find_spawn),
     // then the tile-level hero designation, then the gold circle fallback.
     const pcTid = playHeroTid != null ? playHeroTid : primaryHeroTile();
-    const him = pcTid != null ? tileFrameImage(pcTid) : null;
+    const _hAct = heroActionFor(heroSwimming, heroInDeep, runMode, heroStepT ? performance.now() - heroStepT : -1);
+    const him = pcTid != null ? rigTileImage(pcTid, _hAct, rigDirFromFacing(playFacing), performance.now()) : null;
     if (him) {
       // v5.29: the PC keeps his build size — a mouse hero stays mouse-sized
       const _hw = tilePx * playHeroSize, _hh = tilePx * playHeroSize;
@@ -7893,6 +7953,7 @@ function render() {
   }
   if (rgActive) ctx.setTransform(rgScale, 0, 0, rgScale, 0, 0);   // screen space for the sky + captions
   if (playMode && worldWeather !== "clear") drawWeather();  // v4.1: the sky performs
+  if (rgActive && playFlight) drawFlightLines();
   if (clipCaption) drawClipCaption();   // v5.53: auto-clip subtitles — her words on the film
   if (rgActive) { ctx.setTransform(1, 0, 0, 1, 0, 0); playLastMs = performance.now() - _t0; }
   followPlayHero();                    // center the active character, only during play
@@ -9698,6 +9759,8 @@ function onKbMove(e) {
     case "2": if (activePlay) playGoMode("ground"); else handled = false; break;
     case "3": if (activePlay) playGoMode("survey"); else handled = false; break;
     case "4": if (activePlay) playGoMode("world"); else handled = false; break;
+    case "p": case "P": if (activePlay) { uiClean = !uiClean; applyUiClean(); toast(uiClean ? "photo mode — P to bring the HUD back" : "HUD back"); } else handled = false; break;
+    case "q": case "Q": if (activePlay) playCycleQuality(); else handled = false; break;
     default: handled = false;
   }
   if (!activePlay && !handled) {
@@ -9806,6 +9869,7 @@ async function playTap(cell) {
     hero = { x: path[i][0], y: path[i][1] };
     heroSwimming = !!swim[i];   // ripple + slow wading through water
     heroInDeep = !!deep[i];     // v3.6: lights the swim-animation hook below
+    heroStepT = performance.now();
     const evs = evts[i] || [];
     i++; render();
     // v5.40: walked up to a resting walker — he notices you
@@ -9843,6 +9907,7 @@ async function togglePlay() {
     const r = await api("/api/play/start", {});
     if (!r.ok) { toast("play failed"); return; }
     playResetView();   // v6.2: fresh run, fresh altitude
+    heroAnimKick();
     playMode = true; document.body.classList.add("play-follow"); hero = { x: r.x, y: r.y };
     walkerShown = new Set();   // v5.40: fresh hellos for a fresh run
     // v5.29: the flagged PC leads this run — his sprite and his size.
@@ -9884,7 +9949,7 @@ async function togglePlay() {
   } else {
     await api("/api/play/stop", {});
     if (buildBreak) buildBreakUIOff();   // v5.29: leaving play ends the break too (timers already cleared below)
-    playMode = false; playFlight = null; document.body.classList.remove("play-follow"); hero = null; heroSwimming = false; heroInDeep = false;
+    playMode = false; playFlight = null; clearTimeout(heroAnimTimer); heroAnimTimer = null; document.body.classList.remove("play-follow"); hero = null; heroSwimming = false; heroInDeep = false;
     playHeroTid = null; playHeroSize = 1.0;   // v5.29: run's hero pick rests
     if (heroTimer) { clearInterval(heroTimer); heroTimer = null; }
     if (npcTimer) { clearInterval(npcTimer); npcTimer = null; }   // v3.4: walkers rest
@@ -11978,7 +12043,7 @@ async function doStep(dx, dy, repeat) {
   if (r.warp) { await warpRefresh(r); return; }   // v5.29: stepped through a portal
   if (r.notice) toast(r.notice);   // v5.42: broken link / broken edge
   hero = { x: r.x, y: r.y };
-  heroSwimming = !!r.swim; heroInDeep = !!r.deep;
+  heroSwimming = !!r.swim; heroInDeep = !!r.deep; heroStepT = performance.now();
   syncNature(r);   // v4.0: meters move on every step
   render();
   syncMissionHud();   // v5.12: objectives update per step
@@ -13665,6 +13730,37 @@ function ensureAnim(t) {
 // four directions sharing the full strip — existing tiles keep working.
 const RIG_DIRS = ["down", "up", "left", "right"];
 const RIG_DIR_LABEL = { down: "⬇ down", up: "⬆ up", left: "⬅ left", right: "➡ right" };
+// v6.3: the core character set — what Play asks the rig for. Missing actions
+// fall back along these chains so a sheet with only idle+walk still works.
+const RIG_CORE_ACTIONS = ["idle", "walk", "run", "swim"];
+const RIG_FALLBACK = { run: ["walk", "idle"], swim: ["walk", "idle"], walk: ["idle"], talk: ["idle"], hurt: ["idle"] };
+// Row order of the common RPG sprite sheet: down, left, right, up.
+const RIG_SHEET_ROWS = ["down", "left", "right", "up"];
+function rigDirFromFacing(f) {
+  if (!f) return "down";
+  if (f.dy < 0) return "up";
+  if (f.dy > 0) return "down";
+  if (f.dx < 0) return "left";
+  if (f.dx > 0) return "right";
+  return "down";
+}
+// What the hero is doing right now. msSinceStep < 0 means "never stepped".
+function heroActionFor(swimming, deep, running, msSinceStep) {
+  if (swimming || deep) return "swim";
+  if (msSinceStep >= 0 && msSinceStep < 380) return running ? "run" : "walk";
+  return "idle";
+}
+// Split a strip of n frames into 4 rows (down,left,right,up), `per` frames each.
+function rigAutoRows(n, per) {
+  per = Math.max(1, per | 0);
+  const out = {};
+  RIG_SHEET_ROWS.forEach((d, r) => {
+    const arr = [];
+    for (let i = 0; i < per; i++) { const k = r * per + i; if (k < n) arr.push(k); }
+    out[d] = arr.length ? arr : [0];
+  });
+  return out;
+}
 function ensureRig(t) {
   if (!t.rig || typeof t.rig !== "object" || !t.rig.actions || typeof t.rig.actions !== "object") {
     const n = Math.max(1, t.frames | 0 || 1);
@@ -13695,11 +13791,25 @@ function ensureRig(t) {
   });
   return t.rig;
 }
+// add any missing core action, cloned from the first existing one
+function rigAddCore(t) {
+  const rig = ensureRig(t);
+  const src = rig.actions[rig.default_action] || rig.actions[Object.keys(rig.actions)[0]];
+  RIG_CORE_ACTIONS.forEach(a => {
+    if (rig.actions[a]) return;
+    const d = {};
+    RIG_DIRS.forEach(k => { d[k] = { frames: src[k].frames.slice(), frame_ms: Math.max(60, Math.round(src[k].frame_ms * (a === "run" ? 0.6 : 1))) }; });
+    rig.actions[a] = d;
+  });
+  return rig;
+}
 function rigClip(t, action, direction) {
   if (!t) return null;
   const rig = ensureRig(t);
   const acts = rig.actions || {};
-  const act = acts[action] || acts[rig.default_action] || acts["idle"] || acts[Object.keys(acts)[0]];
+  let act = acts[action];
+  if (!act) { const ch = RIG_FALLBACK[action] || []; for (const a of ch) if (acts[a]) { act = acts[a]; break; } }
+  act = act || acts[rig.default_action] || acts["idle"] || acts[Object.keys(acts)[0]];
   if (!act) return null;
   return act[direction] || act[rig.default_direction] || act["down"] || act[RIG_DIRS.find(d => act[d])] || null;
 }
@@ -13815,6 +13925,21 @@ function renderRigEditor() {
     animPush(); renderRigEditor();
   };
   actsBox.appendChild(add);
+  const core = document.createElement("button");
+  core.type = "button"; core.textContent = "+ idle/walk/run/swim";
+  core.title = "Add any missing core action (copies the current one) so Play has all four";
+  core.onclick = () => { rigAddCore(t); animPush(); renderRigEditor(); toast("core actions ready"); };
+  actsBox.appendChild(core);
+  const rows = document.createElement("button");
+  rows.type = "button"; rows.textContent = "▦ split rows";
+  rows.title = "Treat this action as a sheet of 4 rows: down, left, right, up";
+  rows.onclick = () => {
+    const per = Math.max(1, Math.floor((t.frames | 0) / 4));
+    const m = rigAutoRows(t.frames | 0, per);
+    RIG_DIRS.forEach(d => { rig.actions[rigEditAction][d].frames = m[d].slice(); });
+    animPush(); renderRigEditor(); toast("split into 4 direction rows of " + per);
+  };
+  actsBox.appendChild(rows);
   // direction rows for the selected action
   const act = rig.actions[rigEditAction];
   if (!act) return;

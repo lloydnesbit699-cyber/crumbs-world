@@ -67,7 +67,7 @@ const MAX_CANVAS_DIM=4096;
 const stage={clientWidth:1366,clientHeight:700,getBoundingClientRect:function(){return {left:0,top:48};}};
 const canvas={style:{}};
 function render(){}
-function playRegionOn(){return false}\nfunction playZoomBy(){}\nconst rgActive=false;\n${extract("maxTilePx")}
+function playRegionOn(){return false}\nfunction playZoomBy(){}\nfunction lensRegionOn(){return false}\nfunction lensSetPx(){}\nconst rgActive=false;\n${extract("maxTilePx")}
 ${extract("clampPan")}
 ${extract("layout")}
 ${extract("zoomAt")}
@@ -174,7 +174,7 @@ const MAX_CANVAS_DIM=4096;
 const stage={clientWidth:1366,clientHeight:700,getBoundingClientRect:function(){return {left:0,top:48};}};
 const canvas={style:{},_wl:null,addEventListener:function(t,f,o){this._wl={t:t,f:f,o:o};}};
 function render(){}
-function playRegionOn(){return false}\nfunction playZoomBy(){}\nconst rgActive=false;\n${extract("maxTilePx")}
+function playRegionOn(){return false}\nfunction playZoomBy(){}\nfunction lensRegionOn(){return false}\nfunction lensSetPx(){}\nconst rgActive=false;\n${extract("maxTilePx")}
 ${extract("clampPan")}
 ${extract("layout")}
 ${extract("zoomAt")}

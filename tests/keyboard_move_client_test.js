@@ -62,8 +62,10 @@ const src2 = src
   .replace(/\bbuildBreak\b/g, "state.buildBreak");
 const api = new Function("W", "tilePx", "state", "RULES", "clampPan", "layout", "doStep", "document", "performance",
   "selectedInstance", "objects", "moveTap", "zoomCenter", "playInteract", "playCancelFlight", "playFacing", "playGoMode",
+  "lensRegionOn", "lensToggle", "lensPanBy", "flightToggle", "shrineToggle", "applyUiClean", "playCycleQuality", "toast",
   src2 + "\nreturn { onKbMove, kbTypingTarget };")(W, tilePx, state, RULES, clampPan, layout, doStep, documentStub, testPerformance,
-  selectedInstance, objects, moveTap, zoomCenter, playInteract, playCancelFlight, playFacing, () => {});
+  selectedInstance, objects, moveTap, zoomCenter, playInteract, playCancelFlight, playFacing, () => {},
+  () => false, () => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {});
 check("keydown listener registered", typeof kbHandler === "function" || typeof api.onKbMove === "function");
 const onKbMove = api.onKbMove;
 

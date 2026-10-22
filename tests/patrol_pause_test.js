@@ -26,6 +26,13 @@ global.performance = { now: () => fakeNow };
 let renders = 0;
 global.queueRender = () => { renders++; };
 let npcs = [];   // npcTick reads the global `npcs`
+// The branch's npcTick (areas layer + Melody circuit) also reads these
+// globals. This suite's world: no hero placed, every area awake,
+// Melody's panel closed — the pre-areas behaviour the checks describe.
+let hero = null;
+let MELODY = { open: false };
+function areaAwake() { return true; }
+function melodyLapRoll() {}
 
 // v5.43: npcTick now calls setNpcState + npcAnimStateFor — extract them too
 eval(extract("npcAnimStateFor"));

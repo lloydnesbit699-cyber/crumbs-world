@@ -16125,7 +16125,7 @@ $("sky-wp").onclick = () => {
   else toast("waypoints work in Play");
   skyPaint(); queueRender();
 };
-$("sky-hud").onclick = () => { uiClean = true; applyUiClean(); toast("HUD hidden — press P or ☰ to bring it back"); };
+$("sky-hud").onclick = () => { uiClean = !uiClean; applyUiClean(); toast(uiClean ? "HUD hidden — press P or ☰ to bring it back" : "HUD back"); };
 setInterval(() => { if (playMode && dayCfg.on) { queueRender(); if (!$("sky-panel").hidden) skyPaint(); } }, 2000);
 $("sky-toggle").onclick = () => { $("sky-panel").hidden = !$("sky-panel").hidden; skyPaint(); };
 $("sky-mute").onclick = () => { Sfx.toggleMute(); skyPaint(); };
@@ -21067,7 +21067,7 @@ function shellMenubarItems(name) {
     ["\u25A6 Grid lines", function () { C("btn-grid"); }],
     ["Fit map to screen", function () { C("zoom-fit"); }],
     ["\uD83C\uDF26 Weather and sounds", function () { C("sky-toggle"); }],
-    ["\uD83D\uDE48 Hide HUD", function () { F(function (fw) { fw.uiClean = true; fw.applyUiClean(); }); }],
+    ["\uD83D\uDE48 Show / hide HUD", function () { C("menu-clean"); }],
     null,
     ["World settings", function () { shellNavGo("world"); }],
     ["Display settings", function () { shellOpenSettings(null); }]

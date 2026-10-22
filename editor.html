@@ -815,6 +815,8 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   #play-modes button { min-height: 0; height: 30px; padding: 0 10px; border-radius: 999px; font-size: 12px;
                        background: transparent; border: 1px solid transparent; color: #ddd; cursor: pointer; }
   #play-modes button.on { border-color: #ffd75f; color: #ffd75f; font-weight: 700; }
+  #lens-badge { font-size: 11px; color: #8cf; padding: 0 8px 0 4px; white-space: nowrap; }
+  #lens-full-toggle.on { background: #2a5a8a; color: #fff; }
   #play-mode-badge { font-size: 11px; color: #8f8; padding: 0 8px 0 4px; white-space: nowrap; }
   /* v5.61.0: minimap — bottom-left, zoom cluster owns bottom-right */
   #minimap { position: fixed; left: 10px;
@@ -4560,10 +4562,12 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   <button data-mode="survey" title="Survey (3)">🗺 Survey</button>
   <button data-mode="world" title="World (4)">🌍 World</button>
   <span id="play-mode-badge" hidden></span>
+  <span id="lens-badge" hidden></span>
 </div>
 
 <div id="zoom-cluster">
   <button id="btn-grid" title="Toggle grid lines">&#x25A6;</button>
+  <button id="lens-full-toggle" title="Full-screen lens (L)" aria-label="Toggle full-screen lens">⛶</button>
   <button id="world-lens-toggle" title="Toggle world lens" aria-label="Toggle world lens">🔎</button>
   <button id="zoom-out" title="Zoom out">&minus;</button>
   <button id="zoom-in" title="Zoom in">+</button>
@@ -5176,6 +5180,66 @@ function drawFlightLines() {
   ctx.restore();
 }
 function playRegionOn() { return playMode && !buildBreak && !!hero && W > 0 && H > 0; }
+// Full-screen world lens: the region renderer in Build mode with its own zoom/camera.
+const LENS_PX_MIN = 6, LENS_PX_MAX = 160, LENS_PX_DEFAULT = 28;
+let lensFull = false, lensPx = LENS_PX_DEFAULT, lensCam = { x: 0, y: 0 }, lensSavedPx = 0;
+try { const sp = +localStorage.getItem("crumbs_lens_px"); if (sp >= LENS_PX_MIN && sp <= LENS_PX_MAX) lensPx = sp; } catch (e) {}
+function lensClampPx(p) { return Math.max(LENS_PX_MIN, Math.min(LENS_PX_MAX, Math.round(Number(p) || LENS_PX_DEFAULT))); }
+function lensRegionOn() { return lensFull && !playMode && W > 0 && H > 0 && tiles.length >= H; }
+// Zoom to newPx keeping the world point under screen (sx, sy) fixed.
+function lensZoomAt(cam, px, newPx, sx, sy, sw, sh) {
+  const np = lensClampPx(newPx);
+  const wx = cam.x - sw / 2 / px + sx / px, wy = cam.y - sh / 2 / px + sy / px;
+  return { px: np, cam: { x: wx - sx / np + sw / 2 / np, y: wy - sy / np + sh / 2 / np } };
+}
+function lensClampCam(cam, W_, H_) {
+  return { x: Math.max(0, Math.min(W_, cam.x)), y: Math.max(0, Math.min(H_, cam.y)) };
+}
+function lensBadge() {
+  const el = document.getElementById("lens-badge"), b = document.getElementById("lens-full-toggle");
+  if (b) b.classList.toggle("on", lensFull);
+  if (!el) return;
+  el.hidden = !lensFull;
+  if (lensFull) el.textContent = "LENS " + lensPx + "px · " + Math.round(lensPx / LENS_PX_DEFAULT * 100) + "%";
+}
+function lensSetPx(np, sx, sy) {
+  const sw = stage.clientWidth, sh = stage.clientHeight;
+  if (sx === undefined) { sx = sw / 2; sy = sh / 2; }
+  const r = lensZoomAt(lensCam, lensPx, np, sx, sy, sw, sh);
+  lensPx = r.px; lensCam = lensClampCam(r.cam, W, H);
+  try { localStorage.setItem("crumbs_lens_px", String(lensPx)); } catch (e) {}
+  render(); lensBadge();
+}
+function lensZoomBy(f, sx, sy) { lensSetPx(lensPx * f, sx, sy); }
+function lensPanBy(dxPx, dyPx) {
+  lensCam = lensClampCam({ x: lensCam.x - dxPx / lensPx, y: lensCam.y - dyPx / lensPx }, W, H);
+  render();
+}
+function lensLeave() {
+  if (!lensFull) return;
+  lensFull = false;
+  if (lensSavedPx) tilePx = lensSavedPx;
+  panX = (W / 2 - lensCam.x) * tilePx; panY = (H / 2 - lensCam.y) * tilePx;
+  if (typeof clampPan === "function") clampPan();
+  lensBadge();
+}
+function lensToggle(on) {
+  if (on === undefined) on = !lensFull;
+  if (on === lensFull) return;
+  if (on) {
+    if (playMode || !W || !tiles.length) { toast("lens is for building — stop Play first"); return; }
+    lensSavedPx = tilePx;
+    lensCam = lensClampCam({ x: W / 2 - panX / tilePx, y: H / 2 - panY / tilePx }, W, H);
+    if (typeof selectedInstance !== "undefined" && selectedInstance && Number.isFinite(selectedInstance.x))
+      lensCam = { x: selectedInstance.x + 0.5, y: selectedInstance.y + 0.5 };
+    lensFull = true;
+    const pl = document.getElementById("world-lens"); if (pl) pl.hidden = true;
+    toast("full-screen lens — wheel/pinch/+− zoom, drag to pan, L to exit");
+  } else {
+    lensLeave();
+  }
+  lensBadge(); render();
+}
 function playHeroTiles() { return Math.max(1, playHeroSize || 1); }
 function playWorldNow() {
   const sw = stage.clientWidth || 1, sh = stage.clientHeight || 1;
@@ -5287,9 +5351,10 @@ function playBakeOverview() {
 function playRegionBegin() {
   const sw = stage.clientWidth, sh = stage.clientHeight;
   if (sw < 2 || sh < 2 || tiles.length < H) return false;
+  const lens = lensRegionOn();
   const now = performance.now(), cu = playHeroTiles();
-  playN = playClampN(playN, playWorldNow());
-  tilePx = playTilePx(playN, sh, cu);
+  if (lens) { lensPx = lensClampPx(lensPx); tilePx = lensPx; }
+  else { playN = playClampN(playN, playWorldNow()); tilePx = playTilePx(playN, sh, cu); }
   scrW = sw; scrH = sh;
   const cap = playScaleCap(sw, sh, window.devicePixelRatio || 1, PLAY_PIXEL_BUDGETS[playQuality] || PLAY_PIXEL_BUDGETS.auto);
   rgScale = Math.round(playQualityStep(playQ, playLastMs, now, cap) * 20) / 20;
@@ -5298,12 +5363,15 @@ function playRegionBegin() {
   canvas.style.width = sw + "px"; canvas.style.height = sh + "px";
   rgActive = true;
   const viewW = sw / tilePx, viewH = sh / tilePx;
-  const dt = playCamT ? now - playCamT : 16; playCamT = now;
-  let cam = playCam;
-  if (playFlight || !cam || Math.abs(hero.x - cam.x) > viewW || Math.abs(hero.y - cam.y) > viewH) cam = { x: hero.x, y: hero.y };
-  const st = playCameraStep(cam, hero, playFacing, cu, dt, playFirst ? { dzW: 0.4, dzH: 0.4, look: 1.5 } : null);
-  playCam = { x: st.x, y: st.y };
-  let ox = playCam.x + 0.5 - viewW / 2, oy = playCam.y + 0.5 - viewH / 2;
+  let st = { settled: true };
+  if (!lens) {
+    const dt = playCamT ? now - playCamT : 16; playCamT = now;
+    let cam = playCam;
+    if (playFlight || !cam || Math.abs(hero.x - cam.x) > viewW || Math.abs(hero.y - cam.y) > viewH) cam = { x: hero.x, y: hero.y };
+    st = playCameraStep(cam, hero, playFacing, cu, dt, playFirst ? { dzW: 0.4, dzH: 0.4, look: 1.5 } : null);
+    playCam = { x: st.x, y: st.y };
+  }
+  let ox = (lens ? lensCam.x : playCam.x + 0.5) - viewW / 2, oy = (lens ? lensCam.y : playCam.y + 0.5) - viewH / 2;
   ox = viewW >= W ? (W - viewW) / 2 : Math.max(-2, Math.min(W - viewW + 2, ox));
   oy = viewH >= H ? (H - viewH) / 2 : Math.max(-2, Math.min(H - viewH + 2, oy));
   rgOx = ox; rgOy = oy;
@@ -7135,7 +7203,7 @@ function updateWorldLensFocus() {
 }
 function paintLens() {
   const panel = $("world-lens"), cv = $("world-lens-cv");
-  if (!LENS_ENABLED || !worldLens.on || !panel || !cv || !tiles.length || !W || !H ||
+  if (lensFull || !LENS_ENABLED || !worldLens.on || !panel || !cv || !tiles.length || !W || !H ||
       document.body.classList.contains("clean") || document.body.classList.contains("panels-hidden")) return;
   try {
     if (!worldLens.ready) lensFocus(W / 2, H / 2);
@@ -7607,7 +7675,8 @@ function render() {
   // v5.3: resetting canvas.width wipes the whole canvas — only pay for it
   // when the size actually changed.
   const _t0 = performance.now();
-  if (playRegionOn()) {
+  if (lensFull && playMode) lensLeave();
+  if (playRegionOn() || lensRegionOn()) {
     if (!playRegionBegin()) return;
   } else {
     playRegionEnd();
@@ -9401,7 +9470,7 @@ canvas.addEventListener("pointerdown", async e => {
   }
   if (ptrs.size > 2) return;
   if (panMode) {  // v2.2: single-finger drag pans via transform offset
-    panStart = { x: e.clientX, y: e.clientY, px: panX, py: panY };
+    panStart = { x: e.clientX, y: e.clientY, px: panX, py: panY, cx: lensCam.x, cy: lensCam.y };
     return;
   }
   const cell = evCell(e); if (!cell) return;
@@ -9500,6 +9569,14 @@ function onGestureMove() {
   if (p.length < 2) return;
   const dist = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
   const mid = { x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2 };
+  if (lensRegionOn()) {   // full-screen lens: own pinch zoom + two-finger pan
+    const r = stage.getBoundingClientRect();
+    if (!gesture) { gesture = { startDist: dist, startPx: lensPx, lastMid: mid }; return; }
+    lensPanBy(mid.x - gesture.lastMid.x, mid.y - gesture.lastMid.y);
+    gesture.lastMid = mid;
+    lensSetPx(gesture.startPx * dist / gesture.startDist, mid.x - r.left, mid.y - r.top);
+    return;
+  }
   if (playRegionOn()) {   // v6.2: pinch changes N, anchored on the hero
     if (!gesture) { gesture = { startDist: dist, startN: playN, lastMid: mid }; return; }
     playSetN(gesture.startN * gesture.startDist / dist); render(); playModeBadge();
@@ -9525,6 +9602,10 @@ canvas.addEventListener("pointermove", e => {
   if (panMode) {
     if (!panStart) return;
     e.preventDefault();
+    if (lensRegionOn()) {
+      lensCam = lensClampCam({ x: panStart.cx - (e.clientX - panStart.x) / lensPx, y: panStart.cy - (e.clientY - panStart.y) / lensPx }, W, H);
+      render(); return;
+    }
     panX = panStart.px + (e.clientX - panStart.x);
     panY = panStart.py + (e.clientY - panStart.y);
     clampPan(); layout();
@@ -9673,6 +9754,14 @@ let _pinchAccum = 0;   // v5.51.3: accumulated ctrl+wheel delta between zoom ste
 function onCanvasWheel(e) {
   if (e.__crumbsLensWheelHandled) return;
   e.__crumbsLensWheelHandled = true;
+  if (lensRegionOn()) {                // full-screen lens: wheel zooms at the cursor
+    e.preventDefault();
+    const ldy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY, lr = stage.getBoundingClientRect();
+    const f = Math.exp(-Math.max(-120, Math.min(120, ldy)) * (e.ctrlKey ? 0.01 : 0.0018));
+    const np = lensPx * f;
+    lensSetPx(Math.abs(np - lensPx) < 1 ? lensPx + Math.sign(np - lensPx) : np, e.clientX - lr.left, e.clientY - lr.top);
+    return;
+  }
   if (playRegionOn()) {                // v6.2: Play wheel / trackpad pinch ride the N continuum
     e.preventDefault();
     const pdy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
@@ -9715,6 +9804,7 @@ function kbTypingTarget(t) {
 }
 function panMapByTiles(dx, dy) {
   if (!W) return;
+  if (lensRegionOn()) { lensPanBy(-dx * lensPx, -dy * lensPx); return; }
   panX -= dx * tilePx;
   panY -= dy * tilePx;
   clampPan(); layout();
@@ -9774,6 +9864,8 @@ function onKbMove(e) {
     case "4": if (activePlay) playGoMode("world"); else handled = false; break;
     case "p": case "P": if (activePlay) { uiClean = !uiClean; applyUiClean(); toast(uiClean ? "photo mode — P to bring the HUD back" : "HUD back"); } else handled = false; break;
     case "q": case "Q": if (activePlay) playCycleQuality(); else handled = false; break;
+    case "l": case "L": if (!activePlay) lensToggle(); else handled = false; break;
+    case "Escape": if (lensFull) lensToggle(false); else handled = false; break;
     default: handled = false;
   }
   if (!activePlay && !handled) {
@@ -15117,6 +15209,7 @@ $("btn-clear").onclick = async () => {
   await api("/api/clear_layer", { layer }); await refresh(); toast("layer cleared");
 };
 function zoomCenter(d) {
+  if (lensRegionOn()) { lensZoomBy(d > 0 ? 1.25 : 0.8); return; }
   if (playRegionOn()) { playZoomBy(d > 0 ? 0.8 : 1.25); return; }   // v6.2: Play zoom changes N
   manualZoom = true;
   // v5.41: say why zoom-in stops on huge maps instead of silently ignoring it
@@ -15130,8 +15223,9 @@ function zoomCenter(d) {
 }
 document.querySelectorAll("#play-modes button").forEach(b => { b.onclick = () => playGoMode(b.dataset.mode); });
 $("zoom-in").onclick  = () => zoomCenter(8);
+{ const lb = $("lens-full-toggle"); if (lb) lb.onclick = () => lensToggle(); }
 $("zoom-out").onclick = () => zoomCenter(-8);
-$("zoom-fit").onclick = () => { if (playRegionOn()) { playGoMode("survey"); return; } manualZoom = false; panX = 0; panY = 0; fitTiles(); render(); toast("fit to screen"); };
+$("zoom-fit").onclick = () => { if (lensRegionOn()) { lensSetPx(LENS_PX_DEFAULT); return; } if (playRegionOn()) { playGoMode("survey"); return; } manualZoom = false; panX = 0; panY = 0; fitTiles(); render(); toast("fit to screen"); };
 // v5.51.1: grid lines toggle — per-device, default on (the historical look).
 let showGrid = true;
 try { showGrid = localStorage.getItem("crumbs.showGrid") !== "0"; } catch (e) {}

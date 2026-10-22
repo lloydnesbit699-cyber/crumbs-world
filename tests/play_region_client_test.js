@@ -82,7 +82,7 @@ for (let i = 1; i < 80; i++) s = P.playQualityStep(q, 2, 50000 + i * 3000, 2);
 check("fast frames recover to the cap", Math.abs(s - 2) < 1e-9, "s " + s);
 
 console.log("== wiring ==");
-check("render() has a region path", /if \(playRegionOn\(\)\) \{\s*if \(!playRegionBegin\(\)\) return;/.test(html));
+check("render() has a region path", /if \(playRegionOn\(\) \|\| lensRegionOn\(\)\) \{\s*if \(!playRegionBegin\(\)\) return;/.test(html));
 check("build mode keeps the full-map path", /function playRegionOn\(\) \{ return playMode && !buildBreak/.test(html));
 check("mode buttons present", ["first", "ground", "survey", "world"].every(m => html.includes('data-mode="' + m + '"')));
 

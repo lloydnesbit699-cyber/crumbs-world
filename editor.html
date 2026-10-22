@@ -4852,7 +4852,7 @@ function fitTiles() {
 const MAX_CANVAS_DIM = 4096;
 function maxTilePx() { return Math.max(1, Math.min(64, Math.floor(MAX_CANVAS_DIM / Math.max(W, H, 1)))); }
 const onViewportChange = () => { fitTiles(); clampPan(); clampDpad(); playQ.scale = 0; render(); maybeHintPageZoomSoon(); };
-window.addEventListener("resize", onViewportChange);
+window.addEventListener("resize", () => { fitTiles(); clampPan(); clampDpad(); playQ.scale = 0; render(); maybeHintPageZoomSoon(); });
 window.addEventListener("orientationchange", () => setTimeout(onViewportChange, 250));
 // v6.3: the stage itself can change size without a window resize (rotation,
 // mobile URL bar, fullscreen, panel docking) — rescale to whatever device we're on.

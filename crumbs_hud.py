@@ -6859,6 +6859,22 @@ def _visibility_grid(wrld, vx, vy):
              for x in range(wrld.width)] for y in range(wrld.height)]
 
 
+def _near_water(x, y, r=14):
+    """Nearest swimmable water cell to (x, y) within r, or None."""
+    best = None
+    for dy in range(-r, r + 1):
+        for dx in range(-r, r + 1):
+            tx, ty = x + dx, y + dy
+            if not (0 <= tx < world.width and 0 <= ty < world.height):
+                continue
+            if not _swim_at(tx, ty) or _deep_at(tx, ty) or not _walkable(tx, ty):
+                continue
+            d = dx * dx + dy * dy
+            if best is None or d < best[0]:
+                best = (d, [tx, ty])
+    return best[1] if best else None
+
+
 def _find_path(sx, sy, tx, ty, ghost=False):
     """v3.2: Dijkstra over walkable tiles — water costs 4x (swim), so the hero
     walks around it when a dry route exists and swims only when it must.
@@ -11751,6 +11767,7 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(legs, list) or len(legs) > 64:
                 return self._send_json({"ok": False, "error": "bad legs"}, 400)
             paths = []
+            swims = []
             for leg in legs:
                 try:
                     (x1, y1), (x2, y2) = leg[0], leg[1]
@@ -11759,9 +11776,10 @@ class Handler(BaseHTTPRequestHandler):
                                                     int(x2), int(y2),
                                                     ghost=ghost)
                 except (TypeError, ValueError, IndexError):
-                    cells = []
+                    cells, _swim = [], []
                 paths.append([list(c) for c in cells])
-            return self._send_json({"ok": True, "paths": paths})
+                swims.append([1 if s else 0 for s in _swim])
+            return self._send_json({"ok": True, "paths": paths, "swims": swims})
 
         if path == "/api/custom/update":
             # v3.3: rename / re-designate an imported tile — {id, name?, preset?}
@@ -13009,6 +13027,8 @@ class Handler(BaseHTTPRequestHandler):
             # tile to the given cell. Read-only: never touches run state.
             x, y = body.get("x"), body.get("y")
             spot = _near_walkable(x, y) if isinstance(x, int) and isinstance(y, int) else None
+            if spot and body.get("water") and isinstance(x, int) and isinstance(y, int):
+                spot = _near_water(x, y)
             return self._send_json({"ok": True, "spot": spot})
 
         if path == "/api/play/move":

@@ -6843,7 +6843,7 @@ function rebuildFxOnMap() {
 // anim record is {v, default, states: {idle, walk, sleep, talk, hurt,
 // magic}, transitions}. Fallback chain: states[state] -> states[default]
 // -> the legacy per-tile fx (so pre-state tiles keep their look).
-const ANIM_STATES = ["idle", "walk", "sleep", "talk", "hurt", "magic"];
+const ANIM_STATES = ["idle", "walk", "sleep", "talk", "hurt", "magic", "swim"];
 const ANIM_STATE_DEFAULTS = { act: "none", amp: 100, hue: 0, sat: 100,
                               bri: 100, magic: null, frame_ms: 400,
                               frames: null,
@@ -10178,7 +10178,7 @@ async function playTap(cell) {
         Math.max(Math.abs(melodyNpc.x - hero.x), Math.abs(melodyNpc.y - hero.y)) <= 2) {
       openMelDock(); return;
     }
-    const w = npcs.find(n => n.pauseUntil &&
+    const w = npcs.find(n => n.pauseUntil && !n.melody &&
       Math.round(n.x) === cell.x && Math.round(n.y) === cell.y &&
       Math.max(Math.abs(n.x - hero.x), Math.abs(n.y - hero.y)) <= 1);
     if (w) { fireWalkerInteract(w); return; }
@@ -12620,7 +12620,7 @@ async function buildNpcs() {
   });
 }
 function npcTick(dt) {
-  const SPEED = 2.4;   // tiles per second
+  const SPEED0 = 2.4;   // tiles per second
   const now = (typeof performance !== "undefined" && performance.now)
     ? performance.now() : Date.now();
   let moved = false, resting = false;
@@ -12629,12 +12629,16 @@ function npcTick(dt) {
   const melodyLive = npcs.some(n => n.melody);
   npcs.forEach(n => {
     if (!n.loop.length) return;
+    const SPEED = n.speed || SPEED0;
+    // she stops for company: near the hero or in conversation, then resumes the circuit
+    if (n.melody && hero && (MELODY.open || Math.max(Math.abs(n.x - hero.x), Math.abs(n.y - hero.y)) <= 2)) { n.swimming = false; return; }
     // v5.40: stop pauses — the timer runs on the wall clock, so a pause
     // survives a slept tab and he walks on when it ends. Tapping him
     // mid-pause never touches the timer.
     if (n.pauseUntil) {
       if (now < n.pauseUntil) { if (n.pauseMode === "sleep") resting = true; return; }
       n.pauseUntil = 0; n.pauseMode = null;   // timer done — walk on
+      if (n.melody) melodyLapRoll(n);
       setNpcState(n, "walk", now);            // v5.43: back to the Walk state
     }
     let rem = dt * SPEED, guard = 0;
@@ -12667,6 +12671,7 @@ function npcTick(dt) {
       }
     }
   });
+  npcs.forEach(n => { if (n.melody && n.swimMap) n.swimming = !!n.swimMap[(n.seg + n.loop.length - 1) % n.loop.length] || n.animState === "swim"; });
   if (moved) queueRender();   // v5.3: batched with the frame
   else if (resting) queueRender();   // v5.40: the 💤 bob needs frames too
   else if (melodyLive && typeof melodySpriteReady === "function" && melodySpriteReady()) queueRender();   // v5.61: her glow + hover
@@ -12680,6 +12685,18 @@ function drawNpc(n) {
   const px = n.x * tilePx, py = n.y * tilePx;   // v5.50: up early — her marker needs it too
   // v5.50: Melody's marker — purple glow ring, 💜 overhead, her name on a
   // pill. Drawn even when her body tile is missing: she's herself regardless.
+  if (n.melody && n.swimming) {
+    const ph = (performance.now() % 1100) / 1100;
+    ctx.save();
+    for (let k = 0; k < 2; k++) {
+      const q = (ph + k / 2) % 1;
+      ctx.strokeStyle = "rgba(190,230,255," + (0.7 * (1 - q)).toFixed(2) + ")"; ctx.lineWidth = Math.max(1, tilePx * 0.04);
+      ctx.beginPath();
+      ctx.ellipse(px + tilePx / 2, py + tilePx * 0.85, tilePx * (0.28 + 0.3 * q), tilePx * (0.1 + 0.12 * q), 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
   if (n.melody) {
     const cx = px + tilePx / 2;
     ctx.save();
@@ -12830,7 +12847,7 @@ function pauseListFor(p) {
 }
 let walkerShown = new Set();
 function walkerNear(x, y) {
-  return npcs.filter(n => n.pauseUntil &&
+  return npcs.filter(n => n.pauseUntil && !n.melody &&
     !(n.ax != null && Math.round(n.x) === n.ax && Math.round(n.y) === n.ay) &&
     Math.max(Math.abs(n.x - x), Math.abs(n.y - y)) <= 1);
 }
@@ -12927,6 +12944,54 @@ function melodyBodyTile() {
   return playHeroTid;
 }
 
+// §14 Melody's daily circuit: a ring of stops around Origin (her spawn), one lap
+// per in-game day, a lingering pause at each stop, and a swim detour when water is near.
+function melodyCircuitStops(ox, oy, w, h, n) {
+  const r = Math.max(4, Math.min(w, h) * 0.32), out = [];
+  for (let i = 0; i < (n || 6); i++) {
+    const a = (i / (n || 6)) * Math.PI * 2 + 0.5;
+    out.push([Math.max(1, Math.min(w - 2, Math.round(ox + Math.cos(a) * r))),
+              Math.max(1, Math.min(h - 2, Math.round(oy + Math.sin(a) * r)))]);
+  }
+  return out;
+}
+// speed (tiles/s) and per-stop linger (s) so walking + lingering fills one day
+function melodyCircuitPlan(totalTiles, stops, daySecs) {
+  const speed = Math.min(2.4, Math.max(1, totalTiles / (daySecs * 0.8)));
+  const walk = totalTiles / speed;
+  return { speed, linger: Math.max(4, (daySecs - walk) / Math.max(1, stops)) };
+}
+async function melodyStartCircuit(m) {
+  const ox = Math.round(m.x), oy = Math.round(m.y);
+  const spots = [];
+  for (const s of melodyCircuitStops(ox, oy, W, H, 6)) {
+    const r = await api("/api/play/melody_spot", { x: s[0], y: s[1] }).catch(() => null);
+    if (r && r.ok && r.spot) spots.push({ c: r.spot, swim: false });
+  }
+  const wr = await api("/api/play/melody_spot", { x: ox, y: oy, water: true }).catch(() => null);
+  if (wr && wr.ok && wr.spot && spots.length > 1) spots.splice(Math.min(2, spots.length), 0, { c: wr.spot, swim: true });
+  if (spots.length < 2) return;
+  spots.push({ c: [ox, oy], swim: false });
+  const legs = []; let from = [ox, oy];
+  spots.forEach(s => { legs.push([from, s.c]); from = s.c; });
+  const r = await api("/api/patrol-paths", { legs }).catch(() => null);
+  if (!r || !r.ok || !melodyNpc || melodyNpc !== m) return;
+  const loop = [], swimMap = [], stopAt = [], pz = [];
+  r.paths.forEach((p, i) => {
+    if (!p.length) return;
+    p.forEach((c, k) => { loop.push(c); swimMap.push(r.swims && r.swims[i] ? r.swims[i][k] : 0); });
+    stopAt[loop.length - 1] = pz.length;
+    pz.push({ secs: 0, mode: "stand", swim: spots[i].swim });
+  });
+  if (!loop.length) return;
+  const plan = melodyCircuitPlan(loop.length, pz.length, DAY_LEN_MS / 1000);
+  pz.forEach(p => { p.secs = p.swim ? 0 : plan.linger; p.state = p.swim ? "swim" : "idle"; p.base = plan.linger; });
+  Object.assign(m, { loop, swimMap, stopAt, pauses: pz, speed: plan.speed, seg: 0, pauseUntil: 0, pauseMode: null, animState: "walk" });
+}
+// each lap she swims at the water stop only now and then
+function melodyLapRoll(n) {
+  (n.pauses || []).forEach(p => { if (p.swim) p.secs = Math.random() < 0.4 ? 20 : 0; });
+}
 async function spawnMelodyNpc() {
   melodyNpc = null;
   $("mel-talk").hidden = true;
@@ -12939,6 +13004,7 @@ async function spawnMelodyNpc() {
     x: spot[0], y: spot[1], loop: [], seg: 0, size: 1.0,
     nm: "Melody", interactive: true };
   npcs.push(melodyNpc);
+  melodyStartCircuit(melodyNpc).catch(() => {});
   queueRender();
   melodyProximity();   // she may have spawned within earshot
 }

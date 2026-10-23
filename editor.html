@@ -5553,8 +5553,22 @@ async function playUnstuck() {
     toast("🆘 safe ground — you're out");
   } else toast("no safe ground could be found on this map");
 }
+// Stage 2 (§15, Ball Room item 11): the shrine badge's screen size in CSS
+// px, fixed at every altitude — it no longer scales with tilePx. 20px is
+// the floor the old tile-scaled size already bottomed out at in WORLD
+// view on a full-size map, so WORLD keeps the look it had; the badge just
+// stops growing (and stops appearing) everywhere else.
+const SHRINE_MARKER_PX = 20;
 function drawShrines() {
   if (!shrineList.length || !rgActive) return;
+  // Stage 2 (§15, item 11): shrine badges render in WORLD view ONLY. At
+  // GROUND/FIRST/SURVEY the tile-scaled badge loomed as a giant floating
+  // bubble; discovery/teleport logic is untouched — this gate is purely
+  // about where the badge is drawn. (The mode test is playModeName, the
+  // same one the altitude badge uses. Exception, Lloyd's ruling: the
+  // Build (dev) World lens KEEPS the badges — it's the owner's workbench
+  // view of the whole map, shrine no-build buffers included.)
+  if (playModeName() !== "WORLD" && !lensRegionOn()) return;
   const k = rgScale;
   ctx.save();
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
@@ -5564,7 +5578,7 @@ function drawShrines() {
     const px = (s.x + 0.5 - rgOx) * tilePx * k, py = (s.y + 0.5 - rgOy) * tilePx * k;
     if (px < -40 || py < -40 || px > canvas.width + 40 || py > canvas.height + 40) continue;
     ctx.globalAlpha = st === "full" ? 1 : 0.4;
-    const size = Math.max(tilePx * 2, 20) * k;
+    const size = SHRINE_MARKER_PX * k;
     ctx.fillStyle = "rgba(10,10,20,.55)"; ctx.beginPath(); ctx.arc(px, py, size * 0.62, 0, Math.PI * 2); ctx.fill();
     ctx.font = Math.round(size) + "px sans-serif"; ctx.fillStyle = "#fff";
     ctx.fillText(s.icon, px, py);

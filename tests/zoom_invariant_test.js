@@ -116,8 +116,10 @@ check("NPC sprite size scales with tilePx",
   /const dw = tilePx \* sz, dh = tilePx \* sz/.test(html));
 check("Melody's marker ring scales with tilePx",
   /ctx\.arc\(cx, py \+ tilePx \/ 2, tilePx \* 0\.46/.test(html));
-check("hero anchors at hero.x * tilePx",
-  /const hx = hero\.x \* tilePx, hy = hero\.y \* tilePx/.test(html));
+check("hero anchors at the drawn (gliding) position * tilePx",
+  /const hx = _hd\.x \* tilePx, hy = _hd\.y \* tilePx/.test(html));
+check("hero draw position comes from heroDrawPos (the glide)",
+  /const _hd = heroDrawPos\(performance\.now\(\)\)/.test(html));
 check("hero sprite keeps build size relative to tilePx",
   /const _hw = tilePx \* playHeroSize, _hh = tilePx \* playHeroSize/.test(html));
 

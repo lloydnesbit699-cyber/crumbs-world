@@ -4680,8 +4680,8 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
 <div id="scrim" role="button" aria-label="Dismiss open panels" tabindex="-1"></div>
 
 <div id="play-modes" aria-label="Camera altitude">
-  <button data-mode="first" title="First person (1)">👁 First</button>
-  <button data-mode="ground" title="Close-up third person (2)">🧍 Close</button>
+  <button data-mode="first" title="First — over-the-shoulder (1)">👁 First</button>
+  <button data-mode="ground" title="Ground — top-down (2)">🧍 Ground</button>
   <button data-mode="survey" title="Survey (3)">🗺 Survey</button>
   <button data-mode="world" title="World (4)">🌍 World</button>
   <span id="play-mode-badge" hidden></span>
@@ -4707,7 +4707,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   <div id="fl-stat">Enter Play to test flights.</div>
   <div id="fl-bar"><i></i></div>
   <div class="fl-row">
-    <button data-fl="first">👁 First</button><button data-fl="ground">🧍 Close</button>
+    <button data-fl="first">👁 First</button><button data-fl="ground">🧍 Ground</button>
     <button data-fl="survey">🗺 Survey</button><button data-fl="world">🌍 World</button>
   </div>
   <div class="fl-row">
@@ -5229,6 +5229,21 @@ let playFlight = null, playLoopOn = false, playLoopT = 0, playFlightScale = 1;
 let playCam = null, playCamT = 0, playCamBusy = false;
 let playFacing = { dx: 0, dy: 1 }, playLastHero = null, playFirst = false;
 let playQ = { scale: 0, ema: 8, adjusted: 0 };
+const PLAY_CLOSE_MAX_N = 10;   // v6.4: the GROUND/FIRST band — scaler pinned + origin snapped at or below this N
+let playHeroDraw = null, playHeroDrawT = 0, playHeroDrawSettled = true;   // v6.4: the gliding drawn hero (render-only)
+// The hero's drawn position for this frame: eases toward the logical tile
+// via playHeroGlideStep. Idempotent within a frame (dt<=0 returns as-is),
+// so the camera, the sprite and the light pool all read the same point.
+function heroDrawPos(now) {
+  if (!hero) { playHeroDraw = null; playHeroDrawSettled = true; return null; }
+  if (!playHeroDraw) { playHeroDraw = { x: hero.x, y: hero.y }; playHeroDrawT = now; playHeroDrawSettled = true; return playHeroDraw; }
+  const dt = now - playHeroDrawT;
+  if (dt <= 0) return playHeroDraw;
+  playHeroDrawT = now;
+  const s = playHeroGlideStep(playHeroDraw, hero, dt);
+  playHeroDraw = { x: s.x, y: s.y }; playHeroDrawSettled = s.settled;
+  return playHeroDraw;
+}
 let playBadgeKey = "";
 let heroStepT = 0, heroAnimTimer = null;   // v6.3: last step time + idle-animation ticker
 let rgActive = false, rgOverview = false, playLastMs = 8, playOv = null, playOvAt = 0;
@@ -5273,8 +5288,8 @@ function playCameraStep(cam, hero, facing, cu, dtMs, opts) {
   const dzW = o.dzW != null ? o.dzW : PLAY_DEADZONE_W, dzH = o.dzH != null ? o.dzH : PLAY_DEADZONE_H;
   const look = o.look != null ? o.look : PLAY_LOOKAHEAD;
   if (!cam) return { x: hero.x, y: hero.y, settled: true };
-  const fx = hero.x + (facing ? facing.dx : 0) * look * cu;
-  const fy = hero.y + (facing ? facing.dy : 0) * look * cu;
+  const fx = o.focus ? o.focus.x : hero.x + (facing ? facing.dx : 0) * look * cu;
+  const fy = o.focus ? o.focus.y : hero.y + (facing ? facing.dy : 0) * look * cu;
   const hw = dzW * cu / 2, hh = dzH * cu / 2;
   let tx = cam.x, ty = cam.y;
   if (fx < cam.x - hw) tx = fx + hw; else if (fx > cam.x + hw) tx = fx - hw;
@@ -5283,15 +5298,56 @@ function playCameraStep(cam, hero, facing, cu, dtMs, opts) {
   const x = cam.x + (tx - cam.x) * k, y = cam.y + (ty - cam.y) * k;
   return { x, y, settled: Math.abs(tx - x) < 0.02 * cu && Math.abs(ty - y) < 0.02 * cu };
 }
+// v6.4 (Stage 1): the hero is server-stepped in whole tiles, so drawing him
+// AT the logical tile teleports him a tile per step while the camera eases
+// after him — the low-altitude sawtooth. The drawn position glides toward
+// the logical tile over the step interval instead, and the camera follows
+// the drawn position. Render only: the logical hero, collision and server
+// state never see the glide. A jump past the snap distance (warp, unstuck,
+// spawn) lands instantly — no swoop across the map.
+const PLAY_GLIDE_TAU_MS = 90, PLAY_GLIDE_SNAP_TILES = 3;
+function playHeroGlideStep(drawn, target, dtMs) {
+  if (!drawn) return { x: target.x, y: target.y, settled: true };
+  const dx = target.x - drawn.x, dy = target.y - drawn.y;
+  if (Math.hypot(dx, dy) > PLAY_GLIDE_SNAP_TILES) return { x: target.x, y: target.y, settled: true };
+  const k = 1 - Math.exp(-Math.min(100, Math.max(0, dtMs)) / PLAY_GLIDE_TAU_MS);
+  const x = drawn.x + dx * k, y = drawn.y + dy * k;
+  return { x, y, settled: Math.abs(target.x - x) < 0.01 && Math.abs(target.y - y) < 0.01 };
+}
+// v6.4 (Stage 1, §15): FIRST is over-the-shoulder. The camera focus rides
+// AHEAD of the drawn hero along his facing, so he anchors toward the edge
+// behind him (back + a shoulder at the frame's edge) and the view opens
+// forward. No deadzone — playCameraStep chases the focus with the same
+// exponential step as every other mode, so a turn swings the view around
+// him; it never snaps.
+const PLAY_FIRST_AHEAD = 0.3;   // fraction of the view span the focus leads the hero by
+function playFirstFocus(draw, facing, viewW, viewH) {
+  let fx = facing ? facing.dx : 0, fy = facing ? facing.dy : 0;
+  const len = Math.hypot(fx, fy);
+  if (len > 1) { fx /= len; fy /= len; }
+  if (!len) fy = 1;
+  return { x: draw.x + fx * viewW * PLAY_FIRST_AHEAD, y: draw.y + fy * viewH * PLAY_FIRST_AHEAD };
+}
+// v6.4 (Stage 1): at close range a fractional camera origin makes tile
+// edges land between screen pixels and shimmer as the view drifts. Snap
+// the origin (in tiles) so the region lands on whole backing pixels.
+function playSnapOrigin(o, tilePx, scale) {
+  const g = tilePx * scale;
+  return g > 0 ? Math.round(o * g) / g : o;
+}
 function playScaleCap(sw, sh, dpr, budget) {
   const area = Math.max(1, sw * sh);
   return Math.max(0.6, Math.min(Math.max(1, Math.min(dpr || 1, 3)), Math.sqrt(budget / area)));
 }
 // Adaptive pixel count: render at the highest backing scale that keeps the
 // per-frame cost under ~14ms; back off fast, recover slowly.
-function playQualityStep(q, frameMs, now, cap) {
+function playQualityStep(q, frameMs, now, cap, pin) {
   q.ema = q.ema * 0.9 + frameMs * 0.1;
   if (!q.scale || q.scale > cap) q.scale = cap;
+  // v6.4 (Stage 1): pinned at close range — resizing the backing store there
+  // reads as shimmer/hunting exactly where frames cost most. The ema keeps
+  // tracking so unpinning resumes from fresh numbers.
+  if (pin) return q.scale;
   if (q.ema > 14 && now - q.adjusted > 1000) { q.scale = Math.max(0.6, q.scale * 0.85); q.adjusted = now; q.ema = 8; }
   else if (q.ema < 6 && q.scale < cap && now - q.adjusted > 2500) { q.scale = Math.min(cap, q.scale * 1.1); q.adjusted = now; }
   return q.scale;
@@ -5743,7 +5799,7 @@ function playSetN(n) {
 function playModeName() {
   if (!playRegionOn()) return "";
   const t = playModeTargets(W, H, playHeroTiles(), stage.clientWidth / Math.max(1, stage.clientHeight));
-  if (playFirst) return "FIRST PERSON";
+  if (playFirst) return "FIRST";   // v6.4 §15: over-the-shoulder — the ladder's name is FIRST
   if (playN >= t.world * 0.92) return "WORLD";
   if (playN <= t.ground * 1.7) return "GROUND";
   if (playN <= t.survey * 1.45) return "SURVEY";
@@ -5765,6 +5821,7 @@ function playModeBadge() {
 function playResetView() {
   playN = playTargetN = PLAY_DEFAULT_N; playFlight = null; playCam = null;
   playLastHero = null; playFirst = false; playFacing = { dx: 0, dy: 1 }; playCamBusy = false;
+  playHeroDraw = null; playHeroDrawSettled = true;   // v6.4: the glide restarts on the spawn tile
 }
 // WORLD base layer: the whole map baked once into a small bitmap (hero, NPCs and
 // markers still draw live on top).
@@ -5798,7 +5855,7 @@ function playRegionBegin() {
   else { playN = playClampN(playN, playWorldNow()); tilePx = playTilePx(playN, sh, cu); }
   scrW = sw; scrH = sh;
   const cap = playScaleCap(sw, sh, window.devicePixelRatio || 1, PLAY_PIXEL_BUDGETS[playQuality] || PLAY_PIXEL_BUDGETS.auto);
-  rgScale = Math.round(playQualityStep(playQ, playLastMs, now, cap) * 20) / 20;
+  rgScale = Math.round(playQualityStep(playQ, playLastMs, now, cap, !lens && playN <= PLAY_CLOSE_MAX_N) * 20) / 20;
   const bw = Math.round(sw * rgScale), bh = Math.round(sh * rgScale);
   if (canvas.width !== bw || canvas.height !== bh) { canvas.width = bw; canvas.height = bh; }
   canvas.style.width = sw + "px"; canvas.style.height = sh + "px";
@@ -5807,14 +5864,20 @@ function playRegionBegin() {
   let st = { settled: true };
   if (!lens) {
     const dt = playCamT ? now - playCamT : 16; playCamT = now;
+    const hd = heroDrawPos(now);   // v6.4: the camera follows the GLIDING hero, never the snapped tile
     let cam = playCam;
-    if (playFlight || !cam || Math.abs(hero.x - cam.x) > viewW || Math.abs(hero.y - cam.y) > viewH) cam = { x: hero.x, y: hero.y };
-    st = playCameraStep(cam, hero, playFacing, cu, dt, playFirst ? { dzW: 0.4, dzH: 0.4, look: 1.5 } : null);
+    if (playFlight || !cam || Math.abs(hd.x - cam.x) > viewW || Math.abs(hd.y - cam.y) > viewH) cam = { x: hd.x, y: hd.y };
+    st = playCameraStep(cam, hd, playFacing, cu, dt, playFirst
+      ? { focus: playFirstFocus(hd, playFacing, viewW, viewH), dzW: 0, dzH: 0 }   // v6.4 §15: over-the-shoulder
+      : null);
     playCam = { x: st.x, y: st.y };
   }
   let ox = (lens ? lensCam.x : playCam.x + 0.5) - viewW / 2, oy = (lens ? lensCam.y : playCam.y + 0.5) - viewH / 2;
   ox = viewW >= W ? (W - viewW) / 2 : Math.max(-2, Math.min(W - viewW + 2, ox));
   oy = viewH >= H ? (H - viewH) / 2 : Math.max(-2, Math.min(H - viewH + 2, oy));
+  if (!lens && playN <= PLAY_CLOSE_MAX_N) {   // v6.4: close range lands on whole pixels (playSnapOrigin)
+    ox = playSnapOrigin(ox, tilePx, rgScale); oy = playSnapOrigin(oy, tilePx, rgScale);
+  }
   rgOx = ox; rgOy = oy;
   rgOverview = viewW > PLAY_OVERVIEW_TILES;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -5827,7 +5890,7 @@ function playRegionBegin() {
   } else {
     drawBaseRect(ctx, visibleTiles(), tilePx % 1 ? 0.6 : 0);
   }
-  if (!st.settled) playKick();
+  if (!st.settled || !playHeroDrawSettled) playKick();   // v6.4: keep frames flowing while the glide is mid-step
   return true;
 }
 function playRegionEnd() {
@@ -8272,7 +8335,8 @@ function render() {
   drawHeightGhost();   // v5.45.2: sculpt preview — buffered levels, grid untouched
   // hero marker in play mode — v3.0: hero sprite when available
   if (playMode && hero) {
-    const hx = hero.x * tilePx, hy = hero.y * tilePx;
+    const _hd = heroDrawPos(performance.now());   // v6.4: drawn at the gliding position, not the snapped tile
+    const hx = _hd.x * tilePx, hy = _hd.y * tilePx;
     if (heroSwimming) {   // v3.2: ripple ring while swimming
       ctx.strokeStyle = "rgba(150,210,255,0.85)"; ctx.lineWidth = 2;
       ctx.beginPath();
@@ -8304,7 +8368,7 @@ function render() {
       const _hw = tilePx * playHeroSize, _hh = tilePx * playHeroSize;
       drawFxTile(ctx, pcTid, him, hx + (tilePx - _hw) / 2, hy + tilePx - _hh, _hw, _hh);
     } else {
-      const cx = hero.x * tilePx + tilePx / 2, cy = hero.y * tilePx + tilePx / 2, r = tilePx * 0.32;
+      const cx = _hd.x * tilePx + tilePx / 2, cy = _hd.y * tilePx + tilePx / 2, r = tilePx * 0.32;
       ctx.fillStyle = "#ffd75f"; ctx.strokeStyle = "#000"; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     }
@@ -8472,8 +8536,9 @@ function render() {
   const darkFor = { clear: 0.12, rain: 0.35, snow: 0.25, storm: 0.45, fog: 0.20 };
   if (playMode && lightingOn && hero && !rgOverview) {
     const _k = rgActive ? rgScale : 1;
-    const hx = rgActive ? (hero.x + 0.5 - rgOx) * tilePx * _k : hero.x * tilePx + tilePx / 2;
-    const hy = rgActive ? (hero.y + 0.5 - rgOy) * tilePx * _k : hero.y * tilePx + tilePx / 2;
+    const _hdp = heroDrawPos(performance.now());   // v6.4: the light pool rides the gliding hero too
+    const hx = rgActive ? (_hdp.x + 0.5 - rgOx) * tilePx * _k : _hdp.x * tilePx + tilePx / 2;
+    const hy = rgActive ? (_hdp.y + 0.5 - rgOy) * tilePx * _k : _hdp.y * tilePx + tilePx / 2;
     const lr = tilePx * 4 * _k;
     if (!lightCv || lightCv.width !== canvas.width || lightCv.height !== canvas.height) {
       lightCv = document.createElement("canvas");
@@ -10473,6 +10538,14 @@ function playInteract() {
 // hands both back exactly (restoreCameraSel).
 async function togglePlay() {
   if (!playMode) {
+    // v6.4 (item 20): leave the full-screen lens BEFORE the snapshot. The
+    // lens renderer rewrites the shared tilePx global with lensPx every
+    // frame, so a snapshot taken under the lens restores the lens zoom as
+    // the Build zoom (with the pre-lens pan) — the Play→Build view glitch.
+    // lensLeave() restores the real Build camera first; the snapshot then
+    // holds exactly what exit hands back. (render() keeps its own leave as
+    // a backstop for any other entry path.)
+    if (lensFull) lensLeave();
     // v5.47: snapshot before the run — the camera and selection below are
     // the creator's, and the run returns them untouched.
     snapCameraSel();

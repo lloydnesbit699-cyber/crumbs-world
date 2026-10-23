@@ -7977,9 +7977,9 @@ if (hazGrid.length === H && hazGrid[0] && hazGrid[0].length === W) {
 const SEM_LAYER_DEFS = {
   ground: { brushes: [["floor", "🟫", "Floor", "walkable ground"],
                       ["water", "🌊", "Water", "blocked + hazard"],
-                      ["erase", "🧽", "Clear", "remove meaning"]] },
+                      ["erase", "🧽", "Erase", "remove meaning"]] },
   walls:  { brushes: [["wall", "🧱", "Wall", "blocked"],
-                      ["erase", "🧽", "Clear", "remove meaning"]] },
+                      ["erase", "🧽", "Erase", "remove meaning"]] },
   objects:{ brushes: [] },
   routes: { brushes: [] },
   fx:     { brushes: [["walk", "🟢", "Walkable", "heroes can walk"],
@@ -8019,7 +8019,7 @@ function armMeaning(t) {
   if (brushTool === "erase" || brushTool === "select" || brushTool === "eyedropper")
     setBrushTool("stamp");   // meaning needs a shape brush, not the eraser
   renderSemDock(); queueRender();
-  const lbl = t === "erase" ? "clear meaning" : t;
+  const lbl = t === "erase" ? "erase meaning" : t;
   toast("painting " + lbl + " — drag on the map");
 }
 function armColl(m) {
@@ -8830,6 +8830,11 @@ function setBrushTool(t, skipModal) {
   if (t !== "erase" && t !== "select" && t !== "eyedropper") lastBrush = t;
   brushTool = t;
   erasing = (t === "erase");
+  // The eraser is a concrete tool: an armed meaning/collision brush must
+  // yield, or addStrokeCell tags the stroke as meaning paint and the sponge
+  // silently repaints instead of erasing. Same rule as selectTile (v5.46:
+  // a concrete tile wins over a meaning brush).
+  if (t === "erase") { disarmMeaning(true); renderSemDock(); }
   selectTool = (t === "select");
   const be = $("btn-eraser"), bs = $("btn-select");
   if (be) be.classList.toggle("on", erasing);

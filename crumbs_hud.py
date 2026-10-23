@@ -4525,7 +4525,7 @@ def _melody_player_save(state):
 # Never raises, never logs the token. The game works fine without a brain.
 # Operator setup: MELODY_BRAIN=proxy, MELODY_PROXY_URL=<https://.../chat>,
 # MELODY_PROXY_TOKEN=<64-hex bearer token> in the server environment.
-_MELODY_PROXY_TIMEOUT = 5  # seconds; the game must never hang on the brain
+_MELODY_PROXY_TIMEOUT = 8  # seconds; the game must never hang on the brain
 
 def melody_brain_chat(messages, system=None):
     """Query Melody Prime through the proxy. Returns reply text or None."""
@@ -9281,7 +9281,14 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/health":
             # v5.27: no auth — the page checks this before deciding whether
             # to show the login overlay.
+            try:
+                import melody_agent as _ma
+                _mel = ("brain" if _ma.brain_status().get("last_call", {})
+                        .get("outcome") == "success" else "guide")
+            except Exception:
+                _mel = "guide"
             self._send_json({"ok": True, "version": APP_VERSION,
+                             "mel_mode": _mel,
                              "public_mode": PUBLIC_MODE,
                              "tester_shell": TESTER_SHELL,
                              "persistence_warning": _persistence_warning(),

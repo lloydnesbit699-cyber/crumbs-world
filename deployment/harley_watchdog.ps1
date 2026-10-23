@@ -50,9 +50,31 @@ while ($true) {
     $started = Get-Date
     # --funnel enables account authentication but binds only to 127.0.0.1;
     # Tailscale Funnel already forwards to this exact local endpoint.
+    # Single-instance guard: never launch a second HUD over a live one.
+    $owner = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($owner) {
+        Write-Output ("Port $port already owned by pid $($owner.OwningProcess); waiting.")
+        Start-Sleep -Seconds 15
+        continue
+    }
     $proc = Start-Process -FilePath $python -ArgumentList ('"' + $server + '" --funnel') `
         -WorkingDirectory $repoDir -WindowStyle Hidden -RedirectStandardOutput $stdout `
-        -RedirectStandardError $stderr -Wait -PassThru
+        -RedirectStandardError $stderr -PassThru
+    # Hang detector: restart the HUD if it is alive but /api/health stops answering.
+    Start-Sleep -Seconds 30
+    $fails = 0
+    while (-not $proc.HasExited) {
+        try {
+            $h = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/health" -TimeoutSec 10
+            if ($h.ok) { $fails = 0 } else { $fails++ }
+        } catch { $fails++ }
+        if ($fails -ge 4) {
+            Write-Output 'HUD health failed 4x - restarting'
+            & taskkill.exe /PID $proc.Id /T /F | Out-Null
+            break
+        }
+        Start-Sleep -Seconds 30
+    }
     if (((Get-Date) - $started).TotalMinutes -ge 10) { $delay = 5 }
     Start-Sleep -Seconds $delay
     $delay = [Math]::Min(60, $delay * 2)

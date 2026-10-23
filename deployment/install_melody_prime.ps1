@@ -8,7 +8,7 @@ param([switch]$Status)
 $ErrorActionPreference = 'Stop'
 $taskName = 'Crumbs World Melody Prime'
 $repoDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$runner = Join-Path $PSScriptRoot 'start_melody_prime.ps1'
+$runner = Join-Path $PSScriptRoot 'prime_watchdog.ps1'   # supervises start_melody_prime.ps1
 $python = Join-Path $repoDir '.venv\Scripts\python.exe'
 $proxy = Join-Path $repoDir 'tools\melody_prime_proxy.py'
 $secretFile = Join-Path $env:LOCALAPPDATA 'CrumbsWorld\secrets\groq-api-key.dpapi'

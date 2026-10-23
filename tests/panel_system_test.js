@@ -1,9 +1,12 @@
 #!/usr/bin/env node
-// panel_system_test.js — v5.49.4 client tests.
-// Static checks over editor.html: the panel content is now modular —
-// tiles, paint, inspector, animation, NPC/patrol, melody-suggest and tools
-// are content modules that don't know their container, and the bottom sheet
-// vs side trays are interchangeable renderers behind the PanelSys facade.
+// panel_system_test.js — client tests, rewritten 2026-10-23 for the
+// Docked editor (PR #3 + Harley local fixes). The bottom sheet layout is
+// retired: the layout switcher offers "docked" (trays pinned open, palette
+// bar + hotbar in the centre column) and "trays" (the sliding Sides), and
+// setPanelLayout coerces any other saved value — including "sheet" — to
+// docked. These static checks over editor.html pin the modular panel
+// system behind the PanelSys facade and the Docked behaviors that
+// replaced the sheet-era ones (sheet detents, sheet [x], Bottom option).
 // Run: node panel_system_test.js
 const fs = require("fs");
 const path = require("path");
@@ -46,22 +49,38 @@ check("every module names its preferred tray (left/right)",
 check("panelRoot resolves tools to its wrapper, others to sheet views",
   /function panelRoot\(id\) \{[\s\S]*?id === "tools" \? \$\("tray-view-tools"\) : \$\("sheet-view-" \+ id\)/.test(html));
 
-console.log("== renderer interface: both implement the same seam ==");
-const sheet = objBody("SheetRenderer"), trays = objBody("TrayRenderer");
+console.log("== renderer interface: the seam the facade drives ==");
+const trays = objBody("TrayRenderer");
 ["mount", "render", "openView", "close", "reopen", "fabAvoid"].forEach(fn => {
-  check("SheetRenderer." + fn + " exists", !!sheet && new RegExp(fn + "\\(").test(sheet));
   check("TrayRenderer." + fn + " exists", !!trays && new RegExp(fn + "\\(").test(trays));
 });
+const facade0 = objBody("PanelSys");
+check("PanelSys.renderer() serves the tray renderer for trays AND docked",
+  !!facade0 && /renderer\(\) \{ return this\.layout === "sheet" \? SheetRenderer : TrayRenderer; \}/.test(facade0),
+  "SheetRenderer is behind the seam for the retired layout only");
 
-console.log("== the sheet keeps its v5.47–v5.49 behavior ==");
-check("sheet openView reopens a dismissed sheet to half",
-  !!sheet && /sheetHeight === "closed"\) sheetHeight = "half"/.test(sheet));
-check("sheet close() adds the closed class (play mode hides it)",
-  !!sheet && /close\(\) \{[\s\S]*?classList\.add\("closed"\)/.test(sheet));
-check("sheet mount docks the brush bar + more-sheet above the sheet",
-  !!sheet && /prepend\(bb\)/.test(sheet) && /prepend\(ms\)/.test(sheet));
-check("sheet fabAvoid still aims at the detent target top",
-  !!sheet && /fabAvoid\(\) \{[\s\S]*?melSheetTargetTop\(\)/.test(sheet));
+console.log("== the docked layout: pinned trays, the sheet retired ==");
+const spl = fnBody("setPanelLayout");
+check("setPanelLayout coerces every non-trays layout to docked (sheet retired)",
+  !!spl && /which = which === "trays" \? "trays" : "docked";/.test(spl));
+check("tray mount hides the retired sheet element",
+  !!trays && /\$\("hud-sheet"\)\.style\.display = "none";/.test(trays));
+check("tray mount floats the brush bar + more-sheet back to their homes",
+  !!trays && /brushBarHome\.appendChild\(bb\)/.test(trays) && /moreSheetHome\.appendChild\(ms\)/.test(trays));
+const dt = fnBody("dockTrays");
+check("dockTrays pins both trays open, docked only",
+  !!dt && /if \(!document\.body\.classList\.contains\("docked"\)\) return;/.test(dt) &&
+          /\["tray-left", "tray-right"\]\.forEach\(id => \$\(id\)\.classList\.add\("open"\)\);/.test(dt));
+check("closeOverlays re-pins the trays (docked panels never stay closed)",
+  /function closeOverlays\(\) \{[\s\S]*?dockTrays\(\);/.test(html));
+check("toggleOverlay refuses to toggle a tray while docked",
+  /function toggleOverlay\(id\) \{[\s\S]*?document\.body\.classList\.contains\("docked"\) && id\.startsWith\("tray-"\)\) return;/.test(html));
+check("tray openView renders in place when docked instead of toggling",
+  !!trays && /if \(tray\.classList\.contains\("open"\) \|\| document\.body\.classList\.contains\("docked"\)\) this\.render\(\);/.test(trays) &&
+          /else toggleOverlay\(tray\.id\);/.test(trays));
+check("docked CSS pins the trays and centres the map column",
+  /body\.docked \.tray \{ top: 0; width: 300px; transform: none; z-index: 46; \}/.test(html) &&
+  /body\.docked #stage \{ left: 300px; right: 300px; \}/.test(html));
 
 console.log("== the tray renderer resurrects the sides ==");
 check("tray mount moves module roots into tray-left / tray-right",
@@ -101,29 +120,39 @@ check("dodgeMelFab asks the active renderer what to avoid",
   !!dodge && /sys = PanelSys;/.test(dodge) && /sys\.fabAvoid\(\)/.test(dodge));
 check("dodgeMelFab never throws before the facade exists (TDZ-safe)",
   !!dodge && /try \{ sys = PanelSys; \} catch/.test(dodge));
-check("sheet mount un-hides the tools root (tray tabs may have hidden it)",
-  !!sheet && /tw\.hidden = false/.test(sheet));
+check("tray reopen leaves trays shut — the edge tabs summon them",
+  !!trays && /reopen\(\) \{\s*\/\* trays stay shut/.test(trays));
 check("the tray renderer reports an avoid-rect when the right tray is open",
   !!trays && /fabAvoid\(\) \{[\s\S]*?return \{ left: r\.left \}/.test(trays));
 
 console.log("== layout is a saved preference, not a rewrite ==");
-check("the panel sheet carries a layout segmented control",
-  /id="layout-seg"/.test(html) && /data-layout="trays"/.test(html) && /data-layout="sheet"/.test(html));
+check("the layout segmented control offers Docked + Sides, no Bottom/sheet",
+  /id="layout-seg"/.test(html) && /data-layout="docked"/.test(html) &&
+  /data-layout="trays"/.test(html) && !/data-layout="sheet"/.test(html));
 check("saveUiPrefs persists the layout", /panelLayout: PanelSys\.layout/.test(html));
-check("boot restores the saved layout before first mount",
-  /const p = readUiPrefs\(\);[\s\S]*?p\.panelLayout === "sheet"[\s\S]*?PanelSys\.layout = p\.panelLayout/.test(html));
+const ips = fnBody("initPanelSystem");
+check("boot restores the saved layout; a saved 'sheet' migrates to docked",
+  !!ips && /const p = readUiPrefs\(\);/.test(ips) &&
+          /if \(p\.panelLayout === "trays"\) PanelSys\.layout = "trays";/.test(ips) &&
+          /else PanelSys\.layout = "docked";\s*\/\/ saved "sheet" prefs migrate to docked/.test(ips));
+check("layout-seg buttons are wired to setPanelLayout",
+  !!ips && /b\.onclick = \(\) => setPanelLayout\(b\.dataset\.layout\);/.test(ips) &&
+          /setPanelLayout\(PanelSys\.layout, \{ first: true \}\);/.test(ips));
+check("docked needs a wide screen; narrow falls back to sliding trays",
+  /const DOCK_MIN_WIDTH = 900;/.test(html) &&
+  !!spl && /const dockedNow = which === "docked" && window\.innerWidth >= DOCK_MIN_WIDTH;/.test(spl));
 check("tray tab bar styling exists", /\.tray-tabs \{/.test(html) && /\.tray-tabs button\.on/.test(html));
 
-console.log("== v5.49.5: the little [x] on every panel ==");
-check("the sheet's grabber row carries a close button",
-  /id="sheet-close"/.test(html) && />×<\/button>/.test(html));
-check("the sheet [x] dismisses the sheet without tripping the grabber drag",
-  /sheet-close[\s\S]*?pointerdown[\s\S]*?stopPropagation/.test(html) &&
-  /setSheetHeight\("closed"\)/.test(html));
+console.log("== the little [x] on every panel ==");
+check("the palette bar's head carries a close button naming its gesture",
+  /id="nwc-palette-hide" title="hide \(Esc\)">×<\/button>/.test(html));
+check("the palette [x] is wired straight to hidePalette",
+  /document\.getElementById\("nwc-palette-hide"\)\.onclick=hidePalette;/.test(html));
 check("every tray tab bar ends with an [x] that closes the overlays",
   /button\.tx[\s\S]*?x\.onclick = \(\) => closeOverlays\(\)/.test(html));
 check("the tray [x] has its own styling", /\.tray-tabs button\.tx \{/.test(html));
-check("the sheet [x] has its own styling", /#sheet-close \{/.test(html));
+check("docked hides the tray [x] — pinned panels have nothing to close",
+  /body\.docked \.tray-tabs button\.tx \{ display: none !important; \}/.test(html));
 check("tap-the-map-to-close still works through the scrim",
   /\$\("scrim"\)\.onclick = closeOverlays/.test(html));
 

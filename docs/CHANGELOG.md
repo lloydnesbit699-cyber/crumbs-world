@@ -3,6 +3,10 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v6.4.4 — 2026-10-23
+
+**Fit means fit in the lens (Lloyd's ruling).** The zoom cluster's Fit button used to reset the Build lens to its 28px default; in the lens it now fits the whole map — the exact WORLD stop that key 4 jumps to (`lensGoBand("world")`). Fit outside the lens is unchanged (Play: Survey; Build canvas: fit to screen). The lens suite's guard was updated deliberately to pin the new meaning.
+
 ## v6.4.3 — 2026-10-23
 
 **Stage 3: the Build lens gets the altitude range.** Dev mode's full-screen lens zoomed 6–160px per tile, which made Play's WORLD fit unreachable (a 500-tile map fits at ~1.8px) and GROUND's detailing scale unreachable on tall stages. The range is now 1–256px, and the lens speaks Play's ladder: keys **2/3/4** jump to 🧍 Ground (Play's exact detailing scale), 🗺 Survey, and 🌍 World (a true whole-map fit), computed the way Play computes its own mode targets; the lens badge names the current band ("LENS 28px · 100% · SURVEY"). The existing +/− cluster and arrow-key panning span the new range unchanged; no pointer-driven camera was added (§17 stands — wheel/drag behavior in the lens is pre-existing and Stage 5's remit). Verified: lens_range_client_test 31/31 (mutation-checked), full JS suite 956 checks green.

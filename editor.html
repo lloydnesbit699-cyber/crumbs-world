@@ -15901,7 +15901,7 @@ document.querySelectorAll("#play-modes button").forEach(b => { b.onclick = () =>
 $("zoom-in").onclick  = () => zoomCenter(8);
 { const lb = $("lens-full-toggle"); if (lb) lb.onclick = () => lensToggle(); }
 $("zoom-out").onclick = () => zoomCenter(-8);
-$("zoom-fit").onclick = () => { if (lensRegionOn()) { lensSetPx(LENS_PX_DEFAULT); return; } if (playRegionOn()) { playGoMode("survey"); return; } manualZoom = false; panX = 0; panY = 0; fitTiles(); render(); toast("fit to screen"); };
+$("zoom-fit").onclick = () => { if (lensRegionOn()) { lensGoBand("world"); return; } if (playRegionOn()) { playGoMode("survey"); return; } manualZoom = false; panX = 0; panY = 0; fitTiles(); render(); toast("fit to screen"); };
 // v5.51.1: grid lines toggle — per-device, default on (the historical look).
 let showGrid = true;
 try { showGrid = localStorage.getItem("crumbs.showGrid") !== "0"; } catch (e) {}

@@ -84,8 +84,8 @@ check("keys 2/3/4 jump the lens bands (Play's digits, Play's words)",
 check("key 1 stays Play-only (FIRST has no lens analogue)", !/lensGoBand\("first"\)/.test(html));
 check("lensGoBand goes through lensSetPx + band px", /function lensGoBand\(band\) \{\s*if \(!lensRegionOn\(\)\) return;\s*lensSetPx\(lensBandPx\(/.test(html));
 check("badge names the band", /lensBandName\(lensPx, stage\.clientWidth, stage\.clientHeight, W, H\)/.test(html));
-check("Fit still resets lens zoom to default (guarded behavior, lens_full suite)",
-  /zoom-fit"\)\.onclick = \(\) => \{ if \(lensRegionOn\(\)\) \{ lensSetPx\(LENS_PX_DEFAULT\)/.test(html));
+check("Fit in the lens fits the whole map (Lloyd's ruling 2026-10-23, supersedes the old reset-to-default guard)",
+  /zoom-fit"\)\.onclick = \(\) => \{ if \(lensRegionOn\(\)\) \{ lensGoBand\("world"\)/.test(html));
 check("zoom +/- still routes to the lens", /if \(lensRegionOn\(\)\) \{ lensZoomBy\(/.test(html));
 
 console.log(PASS + " passed, " + FAIL + " failed");

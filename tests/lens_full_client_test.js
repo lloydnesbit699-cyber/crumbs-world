@@ -38,7 +38,7 @@ check("region renderer serves the lens", /playRegionOn\(\) \|\| lensRegionOn\(\)
 check("lens needs Build mode", /function lensRegionOn\(\) \{ return lensFull && !playMode/.test(html));
 check("zoom +/- routes to lens", /if \(lensRegionOn\(\)\) \{ lensZoomBy\(/.test(html));
 check("wheel routes to lens", /if \(lensRegionOn\(\)\) \{\s*\/\/ ?full-screen lens|lensRegionOn\(\)\) \{\s+\/\/ full-screen lens: wheel/.test(html));
-check("Fit resets lens zoom", /zoom-fit"\)\.onclick = \(\) => \{ if \(lensRegionOn\(\)\) \{ lensSetPx\(LENS_PX_DEFAULT\)/.test(html));
+check("Fit in the lens fits the whole map (Lloyd's ruling 2026-10-23: Fit means fit, same as key 4)", /zoom-fit"\)\.onclick = \(\) => \{ if \(lensRegionOn\(\)\) \{ lensGoBand\("world"\)/.test(html));
 check("drag pans lens camera", /lensCam = lensClampCam\(\{ x: panStart\.cx/.test(html));
 check("toggle button + L/Esc keys", /id="lens-full-toggle"/.test(html) && /case "l": case "L"/.test(html) && /case "Escape": if \(lensFull\)/.test(html));
 check("small magnifier yields to full lens", /if \(lensFull \|\| !LENS_ENABLED/.test(html));

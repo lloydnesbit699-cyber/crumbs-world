@@ -5635,10 +5635,21 @@ function drawWaypointRing() {
 }
 function playRegionOn() { return playMode && !buildBreak && !!hero && W > 0 && H > 0; }
 // Full-screen world lens: the region renderer in Build mode with its own zoom/camera.
-const LENS_PX_MIN = 6, LENS_PX_MAX = 160, LENS_PX_DEFAULT = 28;
+// Stage 3 (§16.1, item 12): the range now spans Play's whole ladder — down to
+// 1px so a 500-tile map can truly fit (WORLD, "high for layout"), up to 256px
+// so Play's GROUND detailing scale (stageH / PLAY_GROUND_N) stays reachable on
+// tall stages ("ground level for detailing"). Below 6px the clamp keeps one
+// decimal instead of rounding to a whole pixel, so a WORLD fit lands exact
+// rather than rounding past the map's edge; the region renderer's overview
+// bitmap (capped at 1024px across) already handles views that wide.
+const LENS_PX_MIN = 1, LENS_PX_MAX = 256, LENS_PX_DEFAULT = 28;
 let lensFull = false, lensPx = LENS_PX_DEFAULT, lensCam = { x: 0, y: 0 }, lensSavedPx = 0;
 try { const sp = +localStorage.getItem("crumbs_lens_px"); if (sp >= LENS_PX_MIN && sp <= LENS_PX_MAX) lensPx = sp; } catch (e) {}
-function lensClampPx(p) { return Math.max(LENS_PX_MIN, Math.min(LENS_PX_MAX, Math.round(Number(p) || LENS_PX_DEFAULT))); }
+function lensClampPx(p) {
+  const n = Number(p) || LENS_PX_DEFAULT;
+  const r = n >= 6 ? Math.round(n) : Math.round(n * 10) / 10;
+  return Math.max(LENS_PX_MIN, Math.min(LENS_PX_MAX, r));
+}
 function lensRegionOn() { return lensFull && !playMode && W > 0 && H > 0 && tiles.length >= H; }
 // Zoom to newPx keeping the world point under screen (sx, sy) fixed.
 function lensZoomAt(cam, px, newPx, sx, sy, sw, sh) {
@@ -5654,7 +5665,10 @@ function lensBadge() {
   if (b) b.classList.toggle("on", lensFull);
   if (!el) return;
   el.hidden = !lensFull;
-  if (lensFull) el.textContent = "LENS " + lensPx + "px · " + Math.round(lensPx / LENS_PX_DEFAULT * 100) + "%";
+  if (lensFull) {
+    const band = lensBandName(lensPx, stage.clientWidth, stage.clientHeight, W, H);
+    el.textContent = "LENS " + lensPx + "px · " + Math.round(lensPx / LENS_PX_DEFAULT * 100) + "%" + (band ? " · " + band : "");
+  }
 }
 function lensSetPx(np, sx, sy) {
   const sw = stage.clientWidth, sh = stage.clientHeight;
@@ -5665,6 +5679,34 @@ function lensSetPx(np, sx, sy) {
   render(); lensBadge();
 }
 function lensZoomBy(f, sx, sy) { lensSetPx(lensPx * f, sx, sy); }
+// Stage 3 (§16.1): Play's altitude ladder as named lens stops, computed the
+// way Play computes its own mode targets — GROUND shows PLAY_GROUND_N tiles
+// down the stage (Play's detailing scale), SURVEY shows playSurveyN tiles,
+// WORLD is a true fit of the whole map. Same words as the Play ladder, so
+// dev mode and Play speak one language; keys 2/3/4 match Play's digits.
+const LENS_BAND_LABELS = { ground: "🧍 Ground", survey: "🗺 Survey", world: "🌍 World" };
+function lensBandPx(band, sw, sh, w, h) {
+  if (!sw || !sh || !w || !h) return LENS_PX_DEFAULT;
+  if (band === "ground") return lensClampPx(sh / PLAY_GROUND_N);
+  if (band === "survey") return lensClampPx(sh / playSurveyN(w));
+  return lensClampPx(Math.min(sw / w, sh / h));   // world: fit the whole map
+}
+// Which ladder band a lens zoom sits in — playModeName's tolerances, read in
+// lens terms (tiles down the stage ≈ Play's N with a 1-tile hero).
+function lensBandName(px, sw, sh, w, h) {
+  if (!px || !sw || !sh || !w || !h) return "";
+  const t = playModeTargets(w, h, 1, sw / Math.max(1, sh));
+  const n = sh / px;
+  if (n >= t.world * 0.92) return "WORLD";
+  if (n <= t.ground * 1.7) return "GROUND";
+  if (n <= t.survey * 1.45) return "SURVEY";
+  return "";
+}
+function lensGoBand(band) {
+  if (!lensRegionOn()) return;
+  lensSetPx(lensBandPx(band, stage.clientWidth, stage.clientHeight, W, H));
+  toast("lens — " + (LENS_BAND_LABELS[band] || band));
+}
 function lensPanBy(dxPx, dyPx) {
   lensCam = lensClampCam({ x: lensCam.x - dxPx / lensPx, y: lensCam.y - dyPx / lensPx }, W, H);
   render();
@@ -5688,7 +5730,7 @@ function lensToggle(on) {
       lensCam = { x: selectedInstance.x + 0.5, y: selectedInstance.y + 0.5 };
     lensFull = true;
     const pl = document.getElementById("world-lens"); if (pl) pl.hidden = true;
-    toast("full-screen lens — wheel/pinch/+− zoom, drag to pan, L to exit");
+    toast("full-screen lens — wheel/pinch/+− zoom, 2/3/4 = Ground/Survey/World, drag to pan, L to exit");
   } else {
     lensLeave();
   }
@@ -10403,9 +10445,9 @@ function onKbMove(e) {
     case "d": case "D": if (activePlay) kbCharStep(1, 0); else handled = false; break;
     case " ": if (activePlay) { e.preventDefault(); playInteract(); } else handled = false; break;
     case "1": if (activePlay) playGoMode("first"); else handled = false; break;
-    case "2": if (activePlay) playGoMode("ground"); else handled = false; break;
-    case "3": if (activePlay) playGoMode("survey"); else handled = false; break;
-    case "4": if (activePlay) playGoMode("world"); else handled = false; break;
+    case "2": if (activePlay) playGoMode("ground"); else if (lensRegionOn()) lensGoBand("ground"); else handled = false; break;
+    case "3": if (activePlay) playGoMode("survey"); else if (lensRegionOn()) lensGoBand("survey"); else handled = false; break;
+    case "4": if (activePlay) playGoMode("world"); else if (lensRegionOn()) lensGoBand("world"); else handled = false; break;
     case "p": case "P": if (activePlay) { uiClean = !uiClean; applyUiClean(); toast(uiClean ? "photo mode — P to bring the HUD back" : "HUD back"); } else handled = false; break;
     case "f": case "F": if (activePlay && window.flightToggle) window.flightToggle(); else handled = false; break;
     case "q": case "Q": if (activePlay) playCycleQuality(); else handled = false; break;

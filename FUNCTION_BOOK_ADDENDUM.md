@@ -14,5 +14,6 @@ Rules unchanged: no hold-to-magnify scope, no auto-hide HUD (P / button / View m
 | FIRST = over-the-shoulder — camera focus rides ahead of the hero along his facing (no deadzone; turns swing, never snap) | `playFirstFocus`, `playCameraStep` (`opts.focus`), `playRegionBegin` | `stage1_camera_client_test.js` |
 | Close-range pixel snap + scaler pin (GROUND/FIRST band: origin lands on whole backing pixels, quality scale frozen) | `playSnapOrigin`, `playQualityStep` (`pin`), `PLAY_CLOSE_MAX_N` | `stage1_camera_client_test.js` |
 | Play entry leaves the full-screen lens before the camera snapshot, so exit restores the true Build camera (item 20) | `togglePlay`, `lensLeave`, `snapCameraSel` | `stage1_camera_client_test.js` |
+| Build lens altitude range (Stage 3, §16.1) — lens spans 1–256px: down to a true WORLD fit of a 500-tile map (sub-6px keeps a decimal so the fit stays exact), up to Play's GROUND detailing scale on tall stages; named stops mirror Play's ladder, on Play's digits (2/3/4) | `lensBandPx`, `lensBandName`, `lensGoBand`, `lensClampPx`, `LENS_BAND_LABELS`, `lensBadge` | `lens_range_client_test.js`, `lens_full_client_test.js` |
 
 Assumptions: shrine spacing is clamped to a third of the map diagonal (a full in-game day of walking exceeds any map); the engine `MAP_MAX` is still 500, so the 1100x1100 world needs that cap raised and performance-tested.

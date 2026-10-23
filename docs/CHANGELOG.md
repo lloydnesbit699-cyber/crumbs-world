@@ -3,6 +3,10 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v6.4.3 — 2026-10-23
+
+**Stage 3: the Build lens gets the altitude range.** Dev mode's full-screen lens zoomed 6–160px per tile, which made Play's WORLD fit unreachable (a 500-tile map fits at ~1.8px) and GROUND's detailing scale unreachable on tall stages. The range is now 1–256px, and the lens speaks Play's ladder: keys **2/3/4** jump to 🧍 Ground (Play's exact detailing scale), 🗺 Survey, and 🌍 World (a true whole-map fit), computed the way Play computes its own mode targets; the lens badge names the current band ("LENS 28px · 100% · SURVEY"). The existing +/− cluster and arrow-key panning span the new range unchanged; no pointer-driven camera was added (§17 stands — wheel/drag behavior in the lens is pre-existing and Stage 5's remit). Verified: lens_range_client_test 31/31 (mutation-checked), full JS suite 956 checks green.
+
 ## v6.4.2 — 2026-10-23
 
 **Stage 2: shrine markers live in WORLD view only.** The shrine badges no longer render at GROUND, FIRST, or SURVEY — at close range the tile-scaled badge loomed as a giant floating bubble over the playfield. In WORLD they draw at a fixed 20px, the size they already bottomed out at on a full-size map. The Build (dev) World lens keeps its badges — the owner's workbench view of the whole map, no-build buffers included. Discovery visibility (found full, dimmed, unfound hidden), the compass/waypoint ring, and teleport are unchanged. Verified: stage2_shrines_client_test (mutation-checked), full JS suite green.

@@ -21,10 +21,10 @@ const hideBlock = html.match(/#paint-strip,#strip-search-row[^{]*\{display:none!
 check("stage-3 hide list still exists", !!hideBlock);
 check("btn-pan NOT hidden by stage-3 list", !!hideBlock && !hideBlock[0].includes("#btn-pan"),
   hideBlock ? hideBlock[0].slice(0, 120) : "no block");
-check("zoom-cluster Move button present",
+check("Move button present (camera pill since Stage 4)",
   html.includes('<button id="btn-pan"') && html.includes(">Move</button>"));
-check("btn-pan handler still toggles panMode",
-  html.includes('$("btn-pan").onclick') && html.includes("panMode = !panMode"));
+check("btn-pan toggles the D-pad mode, and drag-pan stays dead (§17 + Lloyd's Move ruling 2026-10-23)",
+  html.includes('$("btn-pan").onclick = flipDpadMode') && !html.includes("panMode = !panMode") && !html.includes("let panMode") && !html.includes("let panStart"));
 
 // ---- behaviour: extract the v5.67.0 keyboard block -----------------------
 console.log("== keyboard movement ==");

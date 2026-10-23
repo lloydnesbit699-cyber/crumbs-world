@@ -39,8 +39,8 @@ check("lens needs Build mode", /function lensRegionOn\(\) \{ return lensFull && 
 check("zoom +/- routes to lens", /if \(lensRegionOn\(\)\) \{ lensZoomBy\(/.test(html));
 check("wheel routes to lens", /if \(lensRegionOn\(\)\) \{\s*\/\/ ?full-screen lens|lensRegionOn\(\)\) \{\s+\/\/ full-screen lens: wheel/.test(html));
 check("Fit in the lens fits the whole map (Lloyd's ruling 2026-10-23: Fit means fit, same as key 4)", /zoom-fit"\)\.onclick = \(\) => \{ if \(lensRegionOn\(\)\) \{ lensGoBand\("world"\)/.test(html));
-check("drag pans lens camera", /lensCam = lensClampCam\(\{ x: panStart\.cx/.test(html));
-check("toggle button + L/Esc keys", /id="lens-full-toggle"/.test(html) && /case "l": case "L"/.test(html) && /case "Escape": if \(lensFull\)/.test(html));
+check("drag does NOT pan the lens camera (§17 item 16: keys pan the lens)", !/lensCam = lensClampCam\(\{ x: panStart\.cx/.test(html) && /lensPanBy\(/.test(html));
+check("toggle button + L/Esc keys (Esc cancels a grab first, §17 Stage 5)", /id="lens-full-toggle"/.test(html) && /case "l": case "L"/.test(html) && /case "Escape": if \(moveArmed\) cancelGrab\(\); else if \(lensFull\)/.test(html));
 check("small magnifier yields to full lens", /if \(lensFull \|\| !LENS_ENABLED/.test(html));
 check("Play start leaves the lens", /if \(lensFull && playMode\) lensLeave\(\);/.test(html));
 

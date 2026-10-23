@@ -956,6 +956,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
               border-radius: 8px; font-size: 14px; background: rgba(42,42,42,.9);
               border: 1px solid transparent; color: #ddd; cursor: pointer; }
   .pill-panel button.on { border-color: #8cf; color: #8cf; background: #2a5a8a; }
+  .pill-panel button:disabled { opacity: .45; cursor: default; }
   .pill-sys-row { display: flex; gap: 8px; align-items: center; }
   .pill-sys-row span { flex: 1; font-size: 13px; white-space: nowrap; }
   /* Stage 4 (§18d): the left-side EDIT pill — undo/redo live here now,
@@ -1033,6 +1034,11 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
                       border: 2px solid #555; }
   #brush-bar button.on { border-color: #ffd75f; color: #ffd75f;
                          box-shadow: 0 0 10px rgba(255,215,95,.35); }
+  /* Stage 5 (§17, item 17): the held slot — a grabbed object rides here
+     until it's placed. Hidden unless a move is armed (moveArmed). */
+  #brush-bar button[hidden] { display: none; }
+  #bb-held { border-color: #ffd75f; }
+  #bb-held canvas { display: block; margin: 1px auto 0; }
   #brush-bar button .blbl { display: block; font-size: 9px; margin-top: 1px;
                             color: #bbb; }
   #brush-bar button.on .blbl { color: #ffd75f; }
@@ -4783,7 +4789,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     <button id="zoom-out" title="Zoom out">&minus;</button>
     <button id="zoom-in" title="Zoom in">+</button>
     <button id="zoom-fit" title="Fit map to screen">Fit</button>
-    <button id="btn-pan" title="Move: pan the map instead of painting (arrow keys pan too)">Move</button>
+    <button id="btn-pan" title="D-pad mode: Pan — the pad pans the map (the arrow-key path). Tap to switch the pad to Nudge">Move</button>
   </div>
   <div class="pill-cam-row">
     <button id="lens-full-toggle" title="Full-screen lens (L)" aria-label="Toggle full-screen lens">⛶</button>
@@ -4851,8 +4857,9 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
 </div>
 
 <!-- v5.61.0: dynamic minimap with static toggle — Lloyd's call. Bottom-left
-     (zoom cluster owns bottom-right). Tap to jump, toggle for live/static. -->
-<div id="minimap" aria-label="Minimap — tap to jump">
+     (zoom cluster owns bottom-right). Display only since Stage 5 (§17,
+     item 16): tap-to-jump moved the camera by pointer — keys pan now. -->
+<div id="minimap" aria-label="Minimap">
   <canvas id="minimap-cv" width="120" height="120"></canvas>
   <button id="minimap-toggle" title="Toggle live/static minimap" aria-label="Toggle live or static minimap">⏸</button>
 </div>
@@ -4867,12 +4874,15 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   <div id="world-lens-resize" role="separator" aria-label="Resize world lens" tabindex="0"></div>
 </aside>
 
-<!-- v5.45: the brush bar — exactly 4 tools visible. Stamp is the hero
-     (default); ••• opens the more-tools sheet (tap or long-press). -->
+<!-- v5.45: the brush bar — exactly 4 tools visible at rest. Stamp is the
+     hero (default); ••• opens the more-tools sheet (tap or long-press).
+     Stage 5: #bb-held is the palette slot for a grabbed object — hidden
+     unless a move is armed; tapping it puts the object back. -->
 <div id="brush-bar" aria-label="Brush tools">
   <button id="bb-stamp" title="Stamp brush — multi-tile footprints"><span>🏷</span><span class="blbl">stamp</span></button>
   <button id="bb-paint" title="Paint — single tile brush"><span>🖌</span><span class="blbl">paint</span></button>
   <button id="bb-erase" title="Eraser — restore the seed's ground"><span>🧽</span><span class="blbl">erase</span></button>
+  <button id="bb-held" hidden title="Holding a grabbed object — tap to put it back"><canvas id="bb-held-cv" width="30" height="30"></canvas><span class="blbl">held</span></button>
   <button id="bb-more" title="More tools — long-press or tap"><span>•••</span><span class="blbl">more</span></button>
 </div>
 <!-- v5.46: the semantic layer dock — paint MEANING, not tiles. The ribbon
@@ -5048,8 +5058,9 @@ if (WRITE_KEY && window.history && window.history.replaceState) {
 const $ = id => document.getElementById(id);
 const canvas = $("grid"), ctx = canvas.getContext("2d");
 const stage = $("stage");
-let objectDrag = null;              // build-only drag of an existing placed object
-let objectDragFrame = 0;
+let grabTap = null;   // Stage 5 (§17, item 17): a press on a placed object,
+// waiting out its own release — a tap grabs the object into the palette
+// slot, a drag does nothing at all (the old objectDrag move is gone).
 
 let W = 25, H = 15;                 // map dims from server
 let tiles = [], objects = [], coll = [];
@@ -5233,19 +5244,6 @@ function renderMinimap(force) {
     ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
   } catch (e) {}
 }
-function minimapJump(clientX, clientY) {
-  const cv = $("minimap-cv");
-  if (!cv || !W || !H) return;
-  const r = cv.getBoundingClientRect();
-  const px = (clientX - r.left) * (MINIMAP_SIZE / r.width);
-  const py = (clientY - r.top) * (MINIMAP_SIZE / r.height);
-  const tx = Math.max(0, Math.min(W - 1, Math.floor(px * W / MINIMAP_SIZE)));
-  const ty = Math.max(0, Math.min(H - 1, Math.floor(py * H / MINIMAP_SIZE)));
-  panX = (W / 2 - tx) * tilePx;
-  panY = (H / 2 - ty) * tilePx;
-  clampPan(); queueRender();
-  renderMinimap(true);
-}
 function initMinimap() {
   const cv = $("minimap-cv");
   if (!cv) return;
@@ -5259,10 +5257,8 @@ function initMinimap() {
     if (minimapMode === "dynamic") renderMinimap(true);
     toast("minimap: " + minimapMode);
   };
-  cv.addEventListener("pointerdown", (e) => {
-    e.preventDefault();
-    minimapJump(e.clientX, e.clientY);
-  });
+  // Stage 5 (§17, item 16): no tap-to-jump — the minimap is a display.
+  // It used to set panX/panY straight from the tap (mouse-driven camera).
 }
 function zoomAt(clientX, clientY, newPx) {
   newPx = Math.max(1, Math.min(maxTilePx(), newPx));
@@ -5310,7 +5306,8 @@ function maybeHintPageZoomSoon() {
   clearTimeout(_pzHintT);
   _pzHintT = setTimeout(maybeHintPageZoom, 600);
 }
-let panMode = false, panStart = null;   // v1.7 camera: pan instead of paint
+// Stage 5 (§17, item 16): the v1.7 drag-pan mode (panMode/panStart) is
+// gone — no pointer path moves the camera; keys are the sole authority.
 let touchDrag = false;                  // v5.36.1: finger down on canvas — the
                                         // 150ms timers skip redraws until it lifts
 let panX = 0, panY = 0;                 // v2.2: canvas offset in px, relative to centered
@@ -7834,7 +7831,7 @@ function drawBaseRect(b, r, pad) {
 const LENS_ENABLED = true; // v6.1: one-line kill switch; lens is read-only in v1.
 const LENS_MAX_COLS = 26, LENS_MAX_ROWS = 19; // caps redraw work after user resizing.
 const WORLD_LENS_PREF_KEY = "crumbs_world_lens";
-const worldLens = { on: LENS_ENABLED, px: 20, fx: 0, fy: 0, ready: false, lastKey: "", pointer: null };
+const worldLens = { on: LENS_ENABLED, px: 20, fx: 0, fy: 0, ready: false, lastKey: "" };
 let lensWorldStamp = 0;
 function lensFocus(fx, fy) {
   if (!Number.isFinite(fx) || !Number.isFinite(fy)) return false;
@@ -7891,19 +7888,14 @@ function restoreWorldLensLayout() {
 }
 function updateWorldLensFocus() {
   if (playMode && hero) return lensFocus(hero.x, hero.y);
-  if (objectDrag && objectDrag.to) return lensFocus(objectDrag.to.x, objectDrag.to.y);
   if (moveArmed) return lensFocus(moveArmed.x, moveArmed.y);
   if (selectedInstance && objects[selectedInstance.y] && objects[selectedInstance.y][selectedInstance.x] != null) {
     return lensFocus(selectedInstance.x, selectedInstance.y);
   }
   if (selectTool && inspectPos) return lensFocus(inspectPos.x, inspectPos.y);
-  if (worldLens.pointer) {
-    const r = stage.getBoundingClientRect();
-    const ox = (stage.clientWidth - W * tilePx) / 2 + panX;
-    const oy = (stage.clientHeight - H * tilePx) / 2 + panY;
-    return lensFocus(Math.floor((worldLens.pointer.x - r.left - ox) / tilePx),
-      Math.floor((worldLens.pointer.y - r.top - oy) / tilePx));
-  }
+  // Stage 5 (§17, item 15): no pointer-follow fallback — plain pointer
+  // movement must not drag the lens focus. The lens follows the hero, a
+  // carried object, or the selection; nothing else.
   return false;
 }
 function paintLens() {
@@ -7988,20 +7980,8 @@ function paintLens() {
       const p = lensCellXY(cell.x, cell.y, win, ox, oy);
       drawGhostCell(c, cell.pv, p.x, p.y, S);
     });
-    if (!playMode && objectDrag && objectDrag.moved && objectDrag.to) {
-      const cell = objectDrag.to;
-      if (cell.x >= win.x0 && cell.y >= win.y0 && cell.x <= win.x1 && cell.y <= win.y1) {
-        const src = objects[objectDrag.from.y] && objects[objectDrag.from.y][objectDrag.from.x];
-        const id = src == null ? null : objTid(src), im = id == null ? null : tileFrameImage(id);
-        const p = lensCellXY(cell.x, cell.y, win, ox, oy), size = src == null ? 1 : objSize(src);
-        c.save(); c.globalAlpha = .72;
-        if (im) drawFxTile(c, id, im, p.x+(S-S*size)/2, p.y+S-S*size, S*size, S*size);
-        else { c.fillStyle = "rgba(255,215,95,.55)"; c.fillRect(p.x,p.y,S,S); }
-        c.restore();
-      }
-    }
     if (!playMode) {
-      const sel = (objectDrag && objectDrag.to) || moveArmed || (selectTool && inspectPos);
+      const sel = moveArmed || (selectTool && inspectPos);
       if (sel && sel.x >= win.x0 && sel.y >= win.y0 && sel.x <= win.x1 && sel.y <= win.y1) {
         const p = lensCellXY(sel.x, sel.y, win, ox, oy);
         c.save(); c.strokeStyle = "#ffd75f"; c.lineWidth = Math.max(1, S * .08);
@@ -8059,16 +8039,9 @@ function initWorldLens() {
     const sizeDone = () => { if (sizing) saveWorldLensLayout(); sizing = null; };
     resize.addEventListener("pointerup", sizeDone); resize.addEventListener("pointercancel", sizeDone);
   }
-  stage.addEventListener("pointermove", e => {
-    if (panel.contains(e.target)) return;
-    worldLens.pointer = { x:e.clientX, y:e.clientY };
-    if (!playMode && updateWorldLensFocus() && worldLens.on) queueRender(false);
-  });
-  stage.addEventListener("pointerdown", e => {
-    if (panel.contains(e.target)) return;
-    worldLens.pointer = { x:e.clientX, y:e.clientY };
-    if (!playMode && updateWorldLensFocus() && worldLens.on) queueRender(false);
-  });
+  // Stage 5 (§17, item 15): the stage pointermove/pointerdown trackers that
+  // fed the small lens a pointer position are gone — it no longer follows
+  // the pointer. updateWorldLensFocus() runs off render()'s paintLens().
   restoreWorldLensLayout();
   const initial = panel.getBoundingClientRect(); clampLensPanel(initial.left, initial.top);
   window.addEventListener("resize", () => {
@@ -8621,7 +8594,7 @@ function render() {
     // for wall cells, a glowing dashed route for patrol joins.
     drawSuggestGhost();
     // v4.8: the working selection wears a gold dashed outline on the map
-    const _sel = (objectDrag && objectDrag.to) || moveArmed || (selectTool && inspectPos);
+    const _sel = moveArmed || (selectTool && inspectPos);
     if (_sel) {
       ctx.save();
       ctx.strokeStyle = "#ffd75f"; ctx.lineWidth = Math.max(2, tilePx * 0.08);
@@ -8735,16 +8708,6 @@ function render() {
       if (!visGrid[y][x]) ctx.fillRect(x * tilePx, y * tilePx, tilePx, tilePx);
     }
   }
-  if (objectDrag && objectDrag.moved && objectDrag.to) {
-    const source = objects[objectDrag.from.y] && objects[objectDrag.from.y][objectDrag.from.x];
-    const im = source == null ? null : tileFrameImage(objTid(source));
-    const size = source == null ? 1 : objSize(source);
-    const gx = objectDrag.to.x * tilePx, gy = objectDrag.to.y * tilePx;
-    ctx.save(); ctx.globalAlpha = 0.72;
-    if (im) ctx.drawImage(im, gx, gy + tilePx - tilePx * size, tilePx * size, tilePx * size);
-    else { ctx.fillStyle = "rgba(255,215,95,.55)"; ctx.fillRect(gx, gy, tilePx, tilePx); }
-    ctx.restore();
-  }
   if (rgActive) ctx.setTransform(rgScale, 0, 0, rgScale, 0, 0);   // screen space for the sky + captions
   if (playMode && worldWeather !== "clear") drawWeather();  // v4.1: the sky performs
   if (rgActive && playFlight) drawFlightLines();
@@ -8757,6 +8720,7 @@ function render() {
   layout();   // v2.2: re-center + apply pan offset after every draw
   if (typeof renderMinimap === "function") renderMinimap();  // v5.61.0: throttled live minimap
   paintLens();                         // v6.1: same queued render, local tile window only
+  syncHeldSlot();                      // Stage 5: the palette held slot mirrors moveArmed
 }
 
 // The camera is expressed in stage-local pixels, so centering the controlled
@@ -8776,51 +8740,65 @@ function evCell(e) {
   if (x < 0 || y < 0 || x >= W || y >= H) return null;
   return { x, y };
 }
-function updateObjectDrag(x, y) {
-  if (!objectDrag) return;
-  objectDrag.x = x; objectDrag.y = y;
-  if (!objectDrag.moved && Math.hypot(x - objectDrag.startX, y - objectDrag.startY) >= 6) {
-    objectDrag.moved = true;
-    objectDrag.to = evCell({ clientX: x, clientY: y });
+// ---- Stage 5 (§17, item 17): grab-to-palette --------------------------------
+// A tap on a placed object GRABS it: the object is represented in the
+// palette bar's held slot (#bb-held) and the existing moveArmed machinery
+// carries it — nothing is dragged under the pointer, and the object never
+// leaves the grid until the place lands, so cancelling is just disarming
+// (he's already home; there is nothing to restore). Placement is the same
+// one-call moveTap the inspector's Move button has always used: one
+// /api/move, one undo step, patrol rides along. The old objectDrag path
+// (drag the instance, edge auto-pan chasing the pointer) is gone.
+function finishGrabTap(e, cancelled) {
+  const g = grabTap; grabTap = null;
+  if (!g || g.pointerId !== e.pointerId || cancelled) return;
+  // a drag is not a grab — the press only counts as a tap if the pointer
+  // stayed put. (A dragged press falls through to nothing: dragging an
+  // object no longer moves it, the map, or the camera.)
+  if (Math.hypot(e.clientX - g.startX, e.clientY - g.startY) > 10) return;
+  grabObjectAt(g.from);
+}
+function grabObjectAt(cell) {
+  if (!objects[cell.y] || objects[cell.y][cell.x] == null) return;
+  moveArmed = { x: cell.x, y: cell.y, tile: objTid(objects[cell.y][cell.x]) };
+  selectedInstance = { x: cell.x, y: cell.y };
+  inspectPos = { x: cell.x, y: cell.y };
+  renderSelCard();
+  syncHeldSlot();
+  render();
+  toast("grabbed — tap where he goes (Esc puts him back)");
+}
+function cancelGrab() {
+  if (!moveArmed) return;
+  moveArmed = null;
+  syncHeldSlot();
+  render();
+  toast("put back — he never left");
+}
+// The held slot mirrors moveArmed, whoever armed it (tap-grab, the
+// inspector's Move button, the selection card) — one carried state, one
+// representation. Tapping the slot puts the object back (cancelGrab).
+let heldSlotKey = "";
+function syncHeldSlot() {
+  const btn = $("bb-held"); if (!btn) return;
+  const m = moveArmed;
+  const cell = (m && objects[m.y]) ? objects[m.y][m.x] : null;
+  const key = (m && cell != null) ? m.x + "," + m.y + ":" + objTid(cell) : "";
+  if (key === heldSlotKey) return;
+  heldSlotKey = key;
+  btn.hidden = !key;
+  if (!key) return;
+  btn.title = "Holding " + (instanceName(m.x, m.y) || tileLabel(objTid(cell))) + " — tap to put it back";
+  const cv = $("bb-held-cv");
+  if (cv) {
+    const c = cv.getContext("2d");
+    c.imageSmoothingEnabled = false;
+    c.clearRect(0, 0, 30, 30);
+    const im = tileFrameImage(objTid(cell));
+    if (im) c.drawImage(im, 0, 0, 30, 30);
   }
-  if (objectDrag.moved) {
-    objectDrag.to = evCell({ clientX: x, clientY: y });
-    queueRender();
-    if (!objectDragFrame) objectDragFrame = requestAnimationFrame(objectDragAutoPan);
-  }
 }
-function objectDragAutoPan() {
-  objectDragFrame = 0;
-  const drag = objectDrag;
-  if (!drag || !drag.moved) return;
-  const r = stage.getBoundingClientRect(), edge = 48;
-  const speed = d => Math.ceil(3 * Math.min(1, Math.max(0, d / edge)));
-  let dx = drag.x < r.left + edge ? speed(r.left + edge - drag.x)
-    : drag.x > r.right - edge ? -speed(drag.x - (r.right - edge)) : 0;
-  let dy = drag.y < r.top + edge ? speed(r.top + edge - drag.y)
-    : drag.y > r.bottom - edge ? -speed(drag.y - (r.bottom - edge)) : 0;
-  if (!dx && !dy) return;
-  const px = panX, py = panY;
-  panX += dx; panY += dy;
-  clampPan();
-  if (panX === px && panY === py) return;
-  layout();                         // canvas bounds now include the new pan offset
-  drag.to = evCell({ clientX: drag.x, clientY: drag.y });
-  queueRender();
-  objectDragFrame = requestAnimationFrame(objectDragAutoPan);
-}
-async function finishObjectDrag(e, cancelled) {
-  const drag = objectDrag;
-  if (!drag || drag.pointerId !== e.pointerId) return;
-  if (objectDragFrame) cancelAnimationFrame(objectDragFrame);
-  objectDragFrame = 0; objectDrag = null;
-  if (cancelled) { queueRender(); return; }
-  if (!drag.moved) { await inspectTap(drag.from); return; }
-  const to = evCell(e);
-  if (!to || (to.x === drag.from.x && to.y === drag.from.y)) { queueRender(); return; }
-  moveArmed = drag.from;
-  await moveTap(to);
-}
+$("bb-held").onclick = () => cancelGrab();
 function brushValue() {
   if (paintLayer() === "collision") return erasing ? false : selCollide;
   if (paintLayer() === "objects")   return erasing ? null  : selTile;
@@ -10155,30 +10133,32 @@ canvas.addEventListener("pointerdown", async e => {
   try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
   if (ptrs.size === 2) {
     // v2.1: second finger down — drop any in-progress paint, gesture takes over
-    if (objectDragFrame) cancelAnimationFrame(objectDragFrame);
-    objectDragFrame = 0; objectDrag = null;
+    grabTap = null;
     gesture = null;
     if (stroke) { stroke = null; hideScope(); queueRender(); }  // v5.45: ghost-only — nothing was written
     if (hstroke) { hstroke = null; queueRender(); }  // v5.45.2: ghost-only — grid untouched, no refresh needed
-    panStart = null;
     return;
   }
   if (ptrs.size > 2) return;
-  if (panMode) {  // v2.2: single-finger drag pans via transform offset
-    panStart = { x: e.clientX, y: e.clientY, px: panX, py: panY, cx: lensCam.x, cy: lensCam.y };
-    return;
-  }
   const cell = evCell(e); if (!cell) return;
-  // Existing objects can be grabbed directly while building. A tap still
-  // opens the normal inspector; a drag moves the same server-owned instance.
+  // Stage 5 (§17, item 17): carrying a grabbed object — this tap PLACES it,
+  // whatever tool is armed. moveTap refuses an occupied cell and treats the
+  // origin cell as "set back down", so placement needs no tool of its own.
+  // (The Select tool's own place check below is now a backstop.)
+  if (moveArmed && (!playMode || buildBreak)) { moveTap(cell); return; }
+  // Stage 5: a press on a placed object (objects layer) is a grab
+  // candidate — the tap (release, barely moved) grabs it into the palette
+  // slot; a drag does nothing at all. The Select tool keeps its charter:
+  // its taps fall through to inspect, and its Move button arms the same
+  // moveArmed this places with. (Was: a drag moved the instance itself.)
   if ((!playMode || buildBreak) && !erasing &&
-      (selectTool || paintLayer() === "objects") &&
+      paintLayer() === "objects" &&
       !(buildBreak && hero && cell.x === hero.x && cell.y === hero.y) &&
       objects[cell.y] && objects[cell.y][cell.x] != null) {
     selectedInstance = { x: cell.x, y: cell.y };
     inspectPos = { x: cell.x, y: cell.y };
-    objectDrag = { pointerId: e.pointerId, from: cell, to: cell,
-      startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY, moved: false };
+    grabTap = { pointerId: e.pointerId, from: { x: cell.x, y: cell.y },
+      startX: e.clientX, startY: e.clientY };
     return;
   }
   // v5.61 Stage 5: shell drawer outside-tap. A confirmed map tap with no tool
@@ -10258,18 +10238,20 @@ canvas.addEventListener("pointerdown", async e => {
   // (placed characters "poofed" the moment the finger lifted).
   strokeAdd(cell);
 });
-// v2.2: two fingers on the map — drag pans, pinch zooms around the fingers
+// Two fingers on the map — pinch zooms; nothing pans. Stage 5 (§17,
+// item 16): the two-finger drag-pan is gone in every mode, and the pinch
+// anchor is the view CENTER, not the fingers — a zoom must not drag the
+// camera focus around by pointer. (Play's pinch only changes N; its
+// camera is hero-anchored already, so it stands as-is.)
 function onGestureMove() {
   const p = [...ptrs.values()];
   if (p.length < 2) return;
   const dist = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
   const mid = { x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2 };
-  if (lensRegionOn()) {   // full-screen lens: own pinch zoom + two-finger pan
-    const r = stage.getBoundingClientRect();
+  if (lensRegionOn()) {   // full-screen lens: pinch zoom, centered (lensSetPx defaults to center)
     if (!gesture) { gesture = { startDist: dist, startPx: lensPx, lastMid: mid }; return; }
-    lensPanBy(mid.x - gesture.lastMid.x, mid.y - gesture.lastMid.y);
     gesture.lastMid = mid;
-    lensSetPx(gesture.startPx * dist / gesture.startDist, mid.x - r.left, mid.y - r.top);
+    lensSetPx(gesture.startPx * dist / gesture.startDist);
     return;
   }
   if (playRegionOn()) {   // v6.2: pinch changes N, anchored on the hero
@@ -10279,33 +10261,21 @@ function onGestureMove() {
   }
   if (!gesture) { gesture = { startDist: dist, startPx: tilePx, lastMid: mid }; return; }
   // v2.4: quantize zoom to whole px — at 64x64 a redraw paints 4096 tiles, so
-  // only re-render when the integer size actually changes. Finger tremor no
-  // longer spams redraws; panning stays cheap (layout only, no redraw).
+  // only re-render when the integer size actually changes.
   const newPx = Math.max(1, Math.min(maxTilePx(), Math.round(gesture.startPx * dist / gesture.startDist)));
-  if (newPx !== tilePx) { manualZoom = true; zoomAt(mid.x, mid.y, newPx); }
-  panX += mid.x - gesture.lastMid.x;
-  panY += mid.y - gesture.lastMid.y;
-  clampPan(); layout();
+  if (newPx !== tilePx) {
+    manualZoom = true;
+    const r = stage.getBoundingClientRect();
+    zoomAt(r.left + r.width / 2, r.top + r.height / 2, newPx);   // center anchor, never the fingers
+  }
   gesture.lastMid = mid;
 }
 canvas.addEventListener("pointermove", e => {
   if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (ptrs.size >= 2) { e.preventDefault(); onGestureMove(); return; }
-  if (objectDrag && objectDrag.pointerId === e.pointerId) {
-    e.preventDefault(); updateObjectDrag(e.clientX, e.clientY); return;
-  }
-  if (panMode) {
-    if (!panStart) return;
-    e.preventDefault();
-    if (lensRegionOn()) {
-      lensCam = lensClampCam({ x: panStart.cx - (e.clientX - panStart.x) / lensPx, y: panStart.cy - (e.clientY - panStart.y) / lensPx }, W, H);
-      render(); return;
-    }
-    panX = panStart.px + (e.clientX - panStart.x);
-    panY = panStart.py + (e.clientY - panStart.y);
-    clampPan(); layout();
-    return;
-  }
+  // Stage 5 (§17): no single-pointer camera path remains here — a press
+  // that travels is a paint stroke (below) or nothing at all. The old
+  // object-drag and Move-tool drag-pan branches are gone.
   if (hstroke) {  // v5.29: sculpting drag
     e.preventDefault();
     const cell = evCell(e); if (cell) heightStrokeAdd(cell);
@@ -10394,7 +10364,6 @@ function applyStrokeEcho(cells) {
   queueRender();
 }
 function endStroke() {
-  if (panMode) { panStart = null; return; }
   if (!stroke) return;
   const s = stroke; stroke = null;
   hideScope();   // v5.45
@@ -10421,21 +10390,29 @@ function endStroke() {
 }
 canvas.addEventListener("pointerup", e => {
   const mine = e.pointerId === lpId;   // v5.45.1: the long-press-tracked finger
-  if (objectDrag && objectDrag.pointerId === e.pointerId) finishObjectDrag(e, false);
+  if (grabTap && grabTap.pointerId === e.pointerId) finishGrabTap(e, false);
   ptrs.delete(e.pointerId);
   if (ptrs.size < 2) gesture = null;
   if (mine) { firePendingTap(e); disarmLongPress(); }   // v5.45.1: one-shot tools commit on the quick lift
   if (ptrs.size === 0) { touchDrag = false; endStroke(); endHeightStroke(); queueRender(); }  // v5.29; v5.36.1: one catch-up redraw
 });
 canvas.addEventListener("pointercancel", e => {
-  if (objectDrag && objectDrag.pointerId === e.pointerId) finishObjectDrag(e, true);
+  if (grabTap && grabTap.pointerId === e.pointerId) finishGrabTap(e, true);
   ptrs.delete(e.pointerId);
   touchDrag = false;   // v5.36.1
-  gesture = null; panStart = null;
+  gesture = null;
   disarmLongPress();   // v5.45.1
   hideScope();   // v5.45
   if (stroke) { stroke = null; queueRender(); }   // v5.45: ghost only — nothing to revert
   if (hstroke) { hstroke = null; queueRender(); }   // v5.45.2: ghost only — nothing was written
+});
+// Stage 5 (§17, item 17): right-click while carrying puts the object back
+// — the mouse twin of the Esc cancel. With nothing carried, the browser
+// menu is left exactly as it was.
+canvas.addEventListener("contextmenu", e => {
+  if (!moveArmed) return;
+  e.preventDefault();
+  cancelGrab();
 });
 // v5.51.3: trackpad pinch zooms the MAP — desktop browsers report a two-finger
 // trackpad pinch as wheel events with ctrlKey === true, which the browser would
@@ -10449,12 +10426,12 @@ let _pinchAccum = 0;   // v5.51.3: accumulated ctrl+wheel delta between zoom ste
 function onCanvasWheel(e) {
   if (e.__crumbsLensWheelHandled) return;
   e.__crumbsLensWheelHandled = true;
-  if (lensRegionOn()) {                // full-screen lens: wheel zooms at the cursor
+  if (lensRegionOn()) {                // full-screen lens: wheel zooms (Stage 5: anchored at the view CENTER — lensSetPx's default — never at the cursor, so the wheel can't drag lens focus by pointer; the zoom itself is untouched, §17 item 16)
     e.preventDefault();
-    const ldy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY, lr = stage.getBoundingClientRect();
+    const ldy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
     const f = Math.exp(-Math.max(-120, Math.min(120, ldy)) * (e.ctrlKey ? 0.01 : 0.0018));
     const np = lensPx * f;
-    lensSetPx(Math.abs(np - lensPx) < 1 ? lensPx + Math.sign(np - lensPx) : np, e.clientX - lr.left, e.clientY - lr.top);
+    lensSetPx(Math.abs(np - lensPx) < 1 ? lensPx + Math.sign(np - lensPx) : np);
     return;
   }
   if (playRegionOn()) {                // v6.2: Play wheel / trackpad pinch ride the N continuum
@@ -10481,12 +10458,12 @@ function onCanvasWheel(e) {
 canvas.addEventListener("wheel", onCanvasWheel, { passive: false });
 stage.addEventListener("wheel", onCanvasWheel, { passive: false }); // wheel over empty stage/lens still reaches the main camera
 
-// v1.7 camera: Move toggles pan mode, -/+ zoom, Fit re-fits the screen
-$("btn-pan").onclick = () => {
-  panMode = !panMode;
-  $("btn-pan").classList.toggle("on", panMode);
-  toast(panMode ? "move mode — drag the map to pan" : "paint mode");
-};
+// Stage 5 (§17, item 16): the v1.7 Move tool's drag-pan is retired — no
+// pointer path moves the camera; keys (arrows / the universal D-pad) are
+// the sole camera authority. The -/+ zoom cluster and Fit are untouched.
+// Lloyd's follow-up ruling (2026-10-23): the #btn-pan button itself is
+// back in the camera panel — NOT as a drag tool, but as the D-pad mode
+// toggle (Pan <-> Nudge); its state + wiring live in the D-pad section.
 
 // ---- v5.67.0: keyboard movement — Lloyd's split ---------------------------
 // In build mode, arrows pan the MAP and WASD moves the selected placed object.
@@ -10562,7 +10539,7 @@ function onKbMove(e) {
     case "q": case "Q": if (activePlay) playCycleQuality(); else handled = false; break;
     case "t": case "T": if (activePlay && window.shrineToggle) window.shrineToggle(); else handled = false; break;
     case "l": case "L": if (!activePlay) lensToggle(); else handled = false; break;
-    case "Escape": if (lensFull) lensToggle(false); else handled = false; break;
+    case "Escape": if (moveArmed) cancelGrab(); else if (lensFull) lensToggle(false); else handled = false; break;   // Stage 5: Esc puts a carried object back first
     default: handled = false;
   }
   if (!activePlay && !handled) {
@@ -12678,7 +12655,12 @@ function clampDpad() {
   dpad.style.right = "auto"; dpad.style.bottom = "auto";
 }
 function updateDpad() {
-  dpad.classList.toggle("show", playMode && RULES.touch && !buildBreak);  // v5.29: pad hides while painting
+  // Stage 5 (§17, item 18): the pad is universal — Play AND Build, desktop
+  // included (its buttons take pointer input, mouse clicks included). It
+  // still rides the Controls rule (RULES.touch, the owner's own switch)
+  // and still rests during a build-break paint (v5.29).
+  dpad.classList.toggle("show", RULES.touch && !buildBreak);
+  syncDpadModeBtn();   // the Move toggle's face follows the mode + run state
   placeDpad();
 }
 // v4.3: grab the ⠿ handle and drag the pad anywhere — no mode to enter first
@@ -12830,17 +12812,79 @@ function dodgePlayFab() {
 // v4.5: touch = go, release = halt, double-tap-hold the same arrow = run.
 let runMode = false, lastTap = { t: 0, btn: null }, runHintShown = false;
 let dpadHeld = null;   // v5.50.9: which dpad button is currently held (null = none)
+// Stage 5 (§17, item 18): in Build the pad drives the keyboard paths with
+// the same press/hold/double-tap-run language as Play, so one control
+// scheme reads the same on every device. Which path the pad drives is
+// the Move toggle's business (below): Pan = the arrow path, Nudge = the
+// WASD path.
+function dpadPanStep(dx, dy) {   // first press: one tile now, then the hold chain (doStep's cadence)
+  panMapByTiles(dx, dy);
+  clearTimeout(stepTimer);
+  stepTimer = setTimeout(() => { if (dpadHeld) dpadPanTick(dx, dy); }, 280);
+}
+function dpadPanTick(dx, dy) {
+  panMapByTiles(dx, dy);
+  clearTimeout(stepTimer);
+  stepTimer = setTimeout(() => { if (dpadHeld) dpadPanTick(dx, dy); }, runMode ? 60 : 110);
+}
+// ---- the Move toggle: what the D-pad's directions MEAN in Build --------
+// Lloyd's ruling (2026-10-23): #btn-pan returns to the camera panel as a
+// D-pad MODE toggle — Pan (the default) drives the arrow path above;
+// Nudge drives kbMoveSelectedObject, the exact function Build's WASD
+// keys call (one /api/move per step, the selection follows — there is
+// no parallel save path). The mode persists per device, beside the
+// pad's own saved position (crumbs_dpad / crumbs_dpad_mode). While an
+// object is carried (moveArmed — grab-to-palette or the inspector's
+// Move), the pad always pans, whatever the mode: you navigate the view
+// with it, then tap a cell to place — the pad never shoves the carried
+// object. In a live Play run the toggle disables: the pad walks the
+// hero there, and the mode is a Build concept.
+let dpadMode = "pan";
+try { if (localStorage.getItem("crumbs_dpad_mode") === "nudge") dpadMode = "nudge"; } catch (e) {}
+function syncDpadModeBtn() {
+  const b = $("btn-pan"); if (!b) return;
+  const nudge = dpadMode === "nudge";
+  b.textContent = nudge ? "Move: Nudge" : "Move: Pan";
+  b.classList.toggle("on", nudge);
+  b.disabled = playMode && !buildBreak;   // a live run: the pad walks the hero
+  b.title = b.disabled
+    ? "D-pad mode — a Build tool; in Play the pad walks the hero"
+    : nudge
+      ? "D-pad mode: Nudge — the pad moves the selected object (the WASD path). Tap to switch back to Pan"
+      : "D-pad mode: Pan — the pad pans the map (the arrow-key path). Tap to switch to Nudge";
+}
+function flipDpadMode() {
+  dpadMode = dpadMode === "nudge" ? "pan" : "nudge";
+  try { localStorage.setItem("crumbs_dpad_mode", dpadMode); } catch (e) {}
+  syncDpadModeBtn();
+  toast(dpadMode === "nudge" ? "D-pad: Nudge — the pad moves the selected object"
+                             : "D-pad: Pan — the pad pans the map");
+}
+$("btn-pan").onclick = flipDpadMode;
+function dpadNudgeStep(dx, dy) {   // first press: one nudge now, then the hold chain (dpadPanStep's cadence)
+  if (!kbMoveSelectedObject(dx, dy))   // false only when nothing (valid) is selected
+    toast("D-pad nudge: nothing selected — tap a placed object first, or flip Move back to Pan");
+  clearTimeout(stepTimer);
+  stepTimer = setTimeout(() => { if (dpadHeld) dpadNudgeTick(dx, dy); }, 280);
+}
+function dpadNudgeTick(dx, dy) {
+  kbMoveSelectedObject(dx, dy);   // its own 150ms step cooldown paces the chain, exactly like held WASD
+  clearTimeout(stepTimer);
+  stepTimer = setTimeout(() => { if (dpadHeld) dpadNudgeTick(dx, dy); }, runMode ? 60 : 110);
+}
 dpad.querySelectorAll("button").forEach(b => {
   const dx = +b.dataset.dx, dy = +b.dataset.dy;
   b.addEventListener("pointerdown", e => {
-    if (!playMode || buildBreak) return;   // v5.29: the pad rests during a build-break
+    if (buildBreak) return;   // v5.29: the pad rests during a build-break
     e.preventDefault();
     const now = performance.now();
     runMode = (lastTap.btn === b && now - lastTap.t < 320);
     lastTap = { t: 0, btn: null };   // the tap is spent
     if (runMode && !runHintShown) { runHintShown = true; toast("running — release to stop"); }
     dpadHeld = b;   // v5.50.9: the repeat chain below only continues while held
-    doStep(dx, dy, true);   // tap steps once; hold walks; double-tap-hold runs
+    if (playMode) { doStep(dx, dy, true); return; }   // Play: tap steps once; hold walks; double-tap-hold runs
+    if (!moveArmed && dpadMode === "nudge") { dpadNudgeStep(dx, dy); return; }   // Build, hands free: the WASD path
+    dpadPanStep(dx, dy);   // Build: the arrow path (pan) — also while carrying: navigate, then tap to place
   });
   ["pointerup", "pointercancel", "pointerleave"].forEach(ev =>
     b.addEventListener(ev, () => {
@@ -24231,7 +24275,6 @@ var TOOLS=[
   {id:"height",label:"Height",ico:"⛰",btn:"btn-height",opts:[["raise","Raise"],["lower","Lower"],["flatten","Flatten"]],optTitle:"Sculpt mode"},
   {id:"portal",label:"Portal",ico:"🌀",btn:"btn-portal",hint:"Tap a door/cave tile, then tap its destination."},
   {id:"patrol",label:"Patrol",ico:"🚶",btn:"btn-patrol",hint:"Tap one of your placed characters, then his stops, then Done ✓."},
-  {id:"pan",label:"Pan",ico:"✋",btn:"btn-pan",hint:"Drag the map to move around."},
   {id:"traits",label:"Traits",ico:"✨",btn:"btn-traits",hint:"Stamp nature traits: hot, cold, sharp, wood, food."},
   {id:"link",label:"Collision stamp",ico:"🔗",btn:"btn-link",dynHint:nwcLinkHint},
   {id:"clear",label:"Clear layer",ico:"🗑",btn:"btn-clear",hint:"Clears the current layer (asks first, undoable)."},

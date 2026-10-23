@@ -63,9 +63,9 @@ console.log("== phone contract (static) ==");
   const barStart = html.indexOf('<div id="brush-bar"');
   const bar = html.slice(barStart, html.indexOf("</div>", barStart));
   const ids = ["bb-stamp", "bb-paint", "bb-erase", "bb-more"];
-  check("exactly the four brush buttons exist",
+  check("exactly the four brush buttons exist (+ the held slot, §17 Stage 5)",
     ids.every(id => bar.includes('id="' + id + '"')) &&
-    (bar.match(/<button/g) || []).length === 4,
+    (bar.match(/<button/g) || []).length === 5 && bar.includes('id="bb-held"'),
     "buttons=" + ((bar.match(/<button/g) || []).length));
   check("stamp is first in the bar", bar.indexOf("bb-stamp") < bar.indexOf("bb-paint"));
 }

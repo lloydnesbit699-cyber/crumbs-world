@@ -53,7 +53,7 @@ check("lens failure is isolated from the main renderer", /catch \(err\)[\s\S]*wo
 check("lens detail is fixed at 20px in v1", /worldLens\.px = 20; \/\/ fixed readable detail in v1/.test(html));
 check("hero renders at its selected size in the lens", /drawPerson\(hero\.x, hero\.y,[\s\S]*playHeroSize/.test(paint));
 check("lens position and size persist per device", /crumbs_world_lens/.test(html) && /localStorage\.setItem\(WORLD_LENS_PREF_KEY/.test(html));
-check("build focus follows pointer unless an object is selected", /stage\.addEventListener\("pointermove"[\s\S]*updateWorldLensFocus/.test(html) && /objectDrag && objectDrag\.to[\s\S]*selectedInstance/.test(html));
+check("build focus follows hero/selection, never the pointer (§17 item 15)", !/worldLens\.pointer/.test(html) && /function updateWorldLensFocus/.test(html));
 check("lens passes Ctrl-wheel through to the main zoom handler", /panel\.addEventListener\("wheel", onCanvasWheel/.test(html));
 check("lens frame drag and resize clamp within the stage", /function clampLensPanel[\s\S]*stage\.getBoundingClientRect\(\)/.test(html) && /world-lens-resize/.test(html));
 check("lens previews remain read-only and paint from data", /drawGhostCell\(c, cell\.pv/.test(paint) && /pointer-events:\s*none/.test(html.slice(html.indexOf("#world-lens {"), html.indexOf("#world-lens\[hidden\]"))));

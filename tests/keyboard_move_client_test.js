@@ -48,6 +48,8 @@ function moveTap() {}
 function zoomCenter() {}
 function playInteract() {}
 let testNow = 1000;
+function playCancelFlight() {}
+const playFacing = null;
 const testPerformance = { now: () => testNow };
 let kbHandler = null;
 const documentStub = { addEventListener: (ev, fn) => { if (ev === "keydown") kbHandler = fn; } };
@@ -59,9 +61,11 @@ const src2 = src
   .replace(/\bplayMode\b/g, "state.playMode")
   .replace(/\bbuildBreak\b/g, "state.buildBreak");
 const api = new Function("W", "tilePx", "state", "RULES", "clampPan", "layout", "doStep", "document", "performance",
-  "selectedInstance", "objects", "moveTap", "zoomCenter", "playInteract",
+  "selectedInstance", "objects", "moveTap", "zoomCenter", "playInteract", "playCancelFlight", "playFacing", "playGoMode",
+  "lensRegionOn", "lensToggle", "lensPanBy", "flightToggle", "shrineToggle", "applyUiClean", "playCycleQuality", "toast",
   src2 + "\nreturn { onKbMove, kbTypingTarget };")(W, tilePx, state, RULES, clampPan, layout, doStep, documentStub, testPerformance,
-  selectedInstance, objects, moveTap, zoomCenter, playInteract);
+  selectedInstance, objects, moveTap, zoomCenter, playInteract, playCancelFlight, playFacing, () => {},
+  () => false, () => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {});
 check("keydown listener registered", typeof kbHandler === "function" || typeof api.onKbMove === "function");
 const onKbMove = api.onKbMove;
 

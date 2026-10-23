@@ -795,24 +795,79 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
 
   #zoom-cluster { position: fixed; right: 10px;
                   bottom: calc(10px + env(safe-area-inset-bottom));
-                  z-index: 100; display: flex; flex-direction: column; gap: 8px; }
+                  z-index: 100; display: flex; flex-direction: column; gap: 6px; }
   /* v5.61.0: shift zoom cluster left when right panel is open — Lloyd's bug:
      the minus button was hidden behind the panel */
   body.panel-open #zoom-cluster { right: 244px; }
-  #zoom-cluster button { width: 52px; height: 52px; border-radius: 50%; padding: 0;
-                        font-size: 20px; background: rgba(42,42,42,.92); }
+  #zoom-cluster button { width: 42px; height: 42px; border-radius: 50%; padding: 0;
+                        font-size: 17px; background: rgba(42,42,42,.85); }
   #zoom-cluster #btn-pan { font-size: 12px; border-radius: 14px; height: auto;
                           padding: 9px 0; }
   /* v5.51.1: dim the grid toggle when the grid is off, so the state reads
      at a glance. */
   #zoom-cluster #btn-grid.off { opacity: .45; }
+  /* v6.2: Play altitude modes — compact, top-centre, hidden outside Play */
+  #play-modes { display: none; position: fixed; top: calc(56px + env(safe-area-inset-top)); left: 50%;
+                transform: translateX(-50%); z-index: 60; gap: 4px; align-items: center;
+                background: rgba(20,20,28,.72); border: 1px solid #3a3a48; border-radius: 999px; padding: 3px; }
+  body.play-follow #play-modes { display: flex; }
+  body.clean #play-modes { display: none !important; }
+  #play-modes button { min-height: 0; height: 30px; padding: 0 10px; border-radius: 999px; font-size: 12px;
+                       background: transparent; border: 1px solid transparent; color: #ddd; cursor: pointer; }
+  #play-modes button.on { border-color: #ffd75f; color: #ffd75f; font-weight: 700; }
+  #sky-panel { position: fixed; right: 62px; bottom: calc(10px + env(safe-area-inset-bottom)); z-index: 101;
+               background: rgba(20,20,28,.9); border: 1px solid #3a3a48; border-radius: 12px; padding: 6px;
+               display: flex; flex-direction: column; gap: 6px; }
+  #sky-panel[hidden] { display: none; }
+  body.clean #sky-panel, body.clean #sky-toggle { display: none !important; }
+  #sky-panel .sky-row { display: flex; gap: 4px; }
+  #sky-panel button { min-height: 0; height: 32px; min-width: 32px; padding: 0 8px; border-radius: 8px; font-size: 14px;
+                      background: rgba(42,42,42,.9); border: 1px solid transparent; color: #ddd; cursor: pointer; }
+  #sky-panel button.on { border-color: #8cf; color: #8cf; }
+  #sky-panel input[type=range] { width: 100%; }
+  #compass { position: fixed; top: calc(56px + env(safe-area-inset-top)); right: 10px; z-index: 60; display: none; align-items: center; gap: 6px;
+             background: rgba(20,20,28,.72); border: 1px solid #3a3a48; border-radius: 999px; padding: 3px 10px 3px 3px; color: #ddd; font-size: 12px; }
+  body.play-follow #compass:not([hidden]) { display: flex; }
+  body.clean #compass { display: none !important; }
+  #compass .cp-dial { position: relative; width: 30px; height: 30px; border-radius: 50%; border: 1px solid #555; }
+  #compass .cp-n { position: absolute; top: -1px; left: 50%; transform: translateX(-50%); font-size: 8px; color: #f66; }
+  #compass .cp-needle { position: absolute; left: 50%; top: 4px; width: 0; height: 22px; transform-origin: 50% 11px; }
+  #compass .cp-needle::after { content: ""; position: absolute; left: -3px; top: 0; border: 3px solid transparent; border-bottom: 10px solid #ffd75f; border-top: 0; }
+  #sky-toggle.on, #flight-toggle.on { background: #2a5a8a; color: #fff; }
+  #flight-panel { position: fixed; right: 62px; bottom: calc(60px + env(safe-area-inset-bottom)); z-index: 101; width: 230px;
+                  background: rgba(20,20,28,.92); border: 1px solid #3a3a48; border-radius: 12px; padding: 8px; color: #ddd;
+                  font: 12px/1.4 ui-monospace, Consolas, monospace; display: flex; flex-direction: column; gap: 6px; }
+  #flight-panel[hidden] { display: none; }
+  body.clean #flight-panel, body.clean #flight-toggle { display: none !important; }
+  #flight-panel .fl-row { display: flex; gap: 4px; flex-wrap: wrap; }
+  #flight-panel button { min-height: 0; height: 30px; padding: 0 8px; border-radius: 8px; font-size: 12px; background: rgba(42,42,42,.9);
+                         border: 1px solid transparent; color: #ddd; cursor: pointer; }
+  #flight-panel button.on { border-color: #8cf; color: #8cf; }
+  #shrine-toggle.on { background: #2a5a8a; color: #fff; }
+  #shrine-panel { position: fixed; right: 62px; bottom: calc(60px + env(safe-area-inset-bottom)); z-index: 101; width: 250px;
+                  background: rgba(20,20,28,.92); border: 1px solid #3a3a48; border-radius: 12px; padding: 8px; color: #ddd;
+                  font: 12px/1.4 system-ui, sans-serif; display: flex; flex-direction: column; gap: 4px; }
+  #shrine-panel[hidden] { display: none; }
+  body.clean #shrine-panel, body.clean #shrine-toggle { display: none !important; }
+  #shrine-panel .sh-row { display: flex; gap: 4px; align-items: center; }
+  #shrine-panel .sh-row span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #shrine-panel .sh-row.dim { opacity: .45; }
+  #shrine-panel button { min-height: 0; height: 28px; padding: 0 8px; border-radius: 8px; font-size: 12px; background: rgba(42,42,42,.9);
+                         border: 1px solid transparent; color: #ddd; cursor: pointer; }
+  #fl-bar { height: 6px; background: #333; border-radius: 3px; overflow: hidden; }
+  #fl-bar i { display: block; height: 100%; width: 0; background: #ffd75f; }
+  #fl-log { max-height: 120px; overflow-y: auto; white-space: pre-wrap; color: #9c9; }
+  #fl-log .bad { color: #f77; }
+  #lens-badge { font-size: 11px; color: #8cf; padding: 0 8px 0 4px; white-space: nowrap; }
+  #lens-full-toggle.on { background: #2a5a8a; color: #fff; }
+  #play-mode-badge { font-size: 11px; color: #8f8; padding: 0 8px 0 4px; white-space: nowrap; }
   /* v5.61.0: minimap — bottom-left, zoom cluster owns bottom-right */
   #minimap { position: fixed; left: 10px;
              bottom: calc(10px + env(safe-area-inset-bottom));
-             z-index: 30; width: 120px; height: 120px;
+             z-index: 30; width: 96px; height: 96px;
              border: 2px solid #555; border-radius: 12px; overflow: hidden;
              background: #111; box-shadow: 0 2px 12px rgba(0,0,0,.5); }
-  #minimap-cv { display: block; width: 120px; height: 120px; touch-action: none;
+  #minimap-cv { display: block; width: 96px; height: 96px; touch-action: none;
                 cursor: crosshair; }
   #minimap-toggle { position: absolute; top: 4px; right: 4px;
                     width: 44px; height: 44px; min-width: 44px; min-height: 44px;
@@ -1089,10 +1144,10 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   #budget-strip .over { color: #ff9a9a; font-weight: 700; }
   /* v5.47: the always-visible Play — one button, always on screen */
   #btn-play-fab { position: fixed; left: 14px; bottom: calc(84px + env(safe-area-inset-bottom));
-    z-index: 240; width: 64px; height: 64px; border-radius: 50%;
+    z-index: 240; width: 52px; height: 52px; border-radius: 50%;
     background: #2f6b3a; border: 2px solid #4caf5d; color: #fff;
-    font-size: 26px; display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 4px 16px rgba(0,0,0,.55); touch-action: none; }
+    font-size: 21px; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 3px 12px rgba(0,0,0,.55); touch-action: none; }
   #btn-play-fab:active { transform: scale(.93); }
   #btn-play-fab.playing { background: #6b2f2f; border-color: #af5d5d; }
   #btn-play-fab.ab { background: #4a3f6e; border-color: #8a6dd7; }
@@ -2049,6 +2104,28 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     padding: max(6px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 6px max(16px, env(safe-area-inset-left));
     background: rgba(20, 19, 17, 0.94); border-bottom: 1px solid #3a352b;
   }
+  /* Simple View menu bar: File / Edit / View / Play / Profile */
+  #shell-root .sh-mbar { display: flex; gap: 2px; flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  #shell-root .sh-mbar::-webkit-scrollbar { display: none; }
+  #shell-root .sh-mtop {
+    flex: 0 0 auto; min-height: 44px; padding: 6px 12px; background: transparent; border: 2px solid transparent;
+    border-radius: 10px; color: #d8cdb4; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  #shell-root .sh-mtop[aria-expanded="true"] { background: #2b2822; border-color: #c9973f; color: #f3ead6; }
+  #sh-mdrop {
+    position: fixed; z-index: 60; min-width: 220px; max-width: calc(100vw - 16px); max-height: calc(100vh - 80px); overflow-y: auto;
+    background: #1e1c18; border: 1px solid #3a352b; border-radius: 12px; padding: 6px; box-shadow: 0 8px 28px rgba(0,0,0,.5);
+  }
+  #sh-mdrop button {
+    display: flex; width: 100%; align-items: center; gap: 10px; min-height: 44px; padding: 8px 12px; background: transparent;
+    border: 0; border-radius: 8px; color: #f3ead6; font: inherit; font-size: 15px; text-align: left; cursor: pointer;
+  }
+  #sh-mdrop button:hover, #sh-mdrop button:focus-visible { background: #2b2822; outline: none; }
+  #sh-mdrop hr { border: 0; border-top: 1px solid #3a352b; margin: 4px 0; }
+  html.sh-light #sh-mdrop { background: #fffdf8; border-color: #cfc6b0; }
+  html.sh-light #sh-mdrop button { color: #2b2517; }
+  html.sh-light #sh-mdrop button:hover { background: #efe7d2; }
+  html.sh-light #shell-root .sh-mtop { color: #4a4332; }
   #shell-root .sh-command-open {
     min-width: 48px; min-height: 48px; padding: 8px 12px; background: #24272d;
     border: 2px solid #454950; border-radius: 12px; color: #f4f4f4;
@@ -4544,13 +4621,65 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
 
 <div id="scrim" role="button" aria-label="Dismiss open panels" tabindex="-1"></div>
 
+<div id="play-modes" aria-label="Camera altitude">
+  <button data-mode="first" title="First person (1)">👁 First</button>
+  <button data-mode="ground" title="Close-up third person (2)">🧍 Close</button>
+  <button data-mode="survey" title="Survey (3)">🗺 Survey</button>
+  <button data-mode="world" title="World (4)">🌍 World</button>
+  <span id="play-mode-badge" hidden></span>
+  <span id="lens-badge" hidden></span>
+</div>
+
 <div id="zoom-cluster">
   <button id="btn-grid" title="Toggle grid lines">&#x25A6;</button>
+  <button id="lens-full-toggle" title="Full-screen lens (L)" aria-label="Toggle full-screen lens">⛶</button>
+  <button id="flight-toggle" title="Flight test panel (F)" aria-label="Flight test panel">&#9992;&#65039;</button>
+  <button id="shrine-toggle" title="Teleport shrines (T)" aria-label="Teleport shrines">&#128511;</button>
+  <button id="sky-toggle" title="Weather &amp; sounds" aria-label="Weather and sounds">&#127782;&#65039;</button>
   <button id="world-lens-toggle" title="Toggle world lens" aria-label="Toggle world lens">🔎</button>
   <button id="zoom-out" title="Zoom out">&minus;</button>
   <button id="zoom-in" title="Zoom in">+</button>
   <button id="zoom-fit" title="Fit map to screen">Fit</button>
   <button id="btn-pan" title="Move: pan the map instead of painting (arrow keys pan too)">Move</button>
+</div>
+
+<div id="compass" hidden aria-label="Compass"><div class="cp-dial"><span class="cp-n">N</span><div class="cp-needle"></div></div><span class="cp-txt"></span></div>
+<div id="shrine-panel" hidden aria-label="Teleport shrines"></div>
+<div id="flight-panel" hidden aria-label="Flight test">
+  <div id="fl-stat">Enter Play to test flights.</div>
+  <div id="fl-bar"><i></i></div>
+  <div class="fl-row">
+    <button data-fl="first">👁 First</button><button data-fl="ground">🧍 Close</button>
+    <button data-fl="survey">🗺 Survey</button><button data-fl="world">🌍 World</button>
+  </div>
+  <div class="fl-row">
+    <button id="fl-run" title="Fly World, Survey, Ground, First, World and check each landing">▶ Run test</button>
+    <button id="fl-slow" title="Slow motion (x4 longer flights)">🐢 Slow</button>
+    <button id="fl-clear">Clear</button>
+  </div>
+  <div id="fl-log"></div>
+</div>
+<div id="sky-panel" hidden>
+  <div class="sky-row" id="sky-wx">
+    <button data-w="clear" title="Clear">&#9728;&#65039;</button>
+    <button data-w="rain" title="Rain">&#127783;&#65039;</button>
+    <button data-w="fog" title="Fog">&#127787;&#65039;</button>
+    <button data-w="snow" title="Snow">&#10052;&#65039;</button>
+    <button data-w="storm" title="Storm">&#9968;&#65039;</button>
+  </div>
+  <div class="sky-row">
+    <button id="sky-mute" title="Mute everything"></button>
+    <button id="sky-wind" title="Wind"></button>
+    <button id="sky-nat" title="Nature: birds and crickets"></button>
+    <button id="sky-wxs" title="Weather sounds"></button>
+  </div>
+  <input id="sky-vol" type="range" min="0" max="100" title="Volume">
+  <div class="sky-row">
+    <button id="sky-day" title="Day/night cycle (60 min per day)"></button>
+    <button id="sky-wp" title="Drop a waypoint: tap the map in Play. Tap again to clear."></button>
+    <button id="sky-hud" title="Hide the whole HUD (P)">🙈 HUD</button>
+  </div>
+  <input id="sky-time" type="range" min="0" max="100" title="Time of day">
 </div>
 
 <!-- v5.61.0: dynamic minimap with static toggle — Lloyd's call. Bottom-left
@@ -4648,7 +4777,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
      undo state. Tap = undo. Never blocks: tiny, translucent, ignorable. -->
 <button id="budget-strip" title="budget — tap to undo">🧱 — · 🚶 — · ✨ — · ↩ —</button>
 <!-- v5.45: the brush scope — magnified footprint preview above the finger -->
-<div id="brush-scope"><canvas id="brush-scope-cv" width="150" height="150"></canvas></div>
+
 <div id="ctx-menu" aria-label="Touch actions"></div>
 
 <!-- v5.29 (item 19): always-reachable panel visibility control -->
@@ -4833,7 +4962,20 @@ function fitTiles() {
 // still bounds the canvas; smaller maps can zoom in up to 64px per tile.
 const MAX_CANVAS_DIM = 4096;
 function maxTilePx() { return Math.max(1, Math.min(64, Math.floor(MAX_CANVAS_DIM / Math.max(W, H, 1)))); }
-window.addEventListener("resize", () => { fitTiles(); clampPan(); clampDpad(); render(); maybeHintPageZoomSoon(); });
+const onViewportChange = () => { fitTiles(); clampPan(); clampDpad(); playQ.scale = 0; render(); maybeHintPageZoomSoon(); };
+window.addEventListener("resize", () => { fitTiles(); clampPan(); clampDpad(); playQ.scale = 0; render(); maybeHintPageZoomSoon(); });
+window.addEventListener("orientationchange", () => setTimeout(onViewportChange, 250));
+// v6.3: the stage itself can change size without a window resize (rotation,
+// mobile URL bar, fullscreen, panel docking) — rescale to whatever device we're on.
+if (window.visualViewport) window.visualViewport.addEventListener("resize", onViewportChange);
+if (window.ResizeObserver) {
+  let _roW = 0, _roH = 0;
+  new ResizeObserver(() => {
+    const w = stage.clientWidth, h = stage.clientHeight;
+    if (w === _roW && h === _roH) return;
+    _roW = w; _roH = h; onViewportChange();
+  }).observe(stage);
+}
 // v2.2 camera: the canvas is absolutely positioned; layout() centers it in
 // the stage and applies the pan offset. No scroll container is involved, so
 // dragging behaves the same at every zoom level.
@@ -4844,6 +4986,7 @@ function clampPan() {
   panY = Math.max(-my, Math.min(my, panY));
 }
 function layout() {
+  if (typeof rgActive !== "undefined" && rgActive) { canvas.style.transform = "translate(0px,0px)"; return; }
   const baseX = (stage.clientWidth - W * tilePx) / 2;
   const baseY = (stage.clientHeight - H * tilePx) / 2;
   canvas.style.transform = "translate(" + (baseX + panX) + "px," + (baseY + panY) + "px)";
@@ -4851,7 +4994,15 @@ function layout() {
 // v5.41: visible tile range — the canvas is full-map sized and CSS-panned,
 // so per-frame overlay loops (animated tiles, collision, height, traits)
 // only walk the on-screen cells instead of all 250k.
-function visibleTiles() {
+function visibleTiles(full) {
+  if (typeof rgActive !== "undefined" && rgActive) {   // v6.2: Play region window
+    if (rgOverview && !full) return { x0: 0, y0: 0, x1: -1, y1: -1 };   // world view: no per-tile overlays
+    return {
+      x0: Math.max(0, Math.floor(rgOx) - 1), y0: Math.max(0, Math.floor(rgOy) - 1),
+      x1: Math.min(W - 1, Math.ceil(rgOx + scrW / tilePx) + 1),
+      y1: Math.min(H - 1, Math.ceil(rgOy + scrH / tilePx) + 1)
+    };
+  }
   const ox = (stage.clientWidth - W * tilePx) / 2 + panX;
   const oy = (stage.clientHeight - H * tilePx) / 2 + panY;
   return {
@@ -4908,7 +5059,7 @@ function renderMinimap(force) {
   ctx.clearRect(0, 0, MINIMAP_SIZE, MINIMAP_SIZE);
   ctx.drawImage(minimapOff, 0, 0);
   try {
-    const vt = visibleTiles();
+    const vt = visibleTiles(true);
     const x0 = vt.x0 * MINIMAP_SIZE / W, y0 = vt.y0 * MINIMAP_SIZE / H;
     const x1 = (vt.x1 + 1) * MINIMAP_SIZE / W, y1 = (vt.y1 + 1) * MINIMAP_SIZE / H;
     ctx.strokeStyle = "#ffd75f"; ctx.lineWidth = 2;
@@ -5003,6 +5154,615 @@ let buildBreak = false;   // v5.29: paint-during-play — the sim is paused and 
                           // brush is unlocked; the play session itself never stops
 let playHeroTid = null, playHeroSize = 1.0;   // v5.29: the flagged PC's sprite + size for this run
 let heroInDeep = false;   // v3.6 SWIM HOOK: true on deep-water steps (only once SWIM_UNLOCKED flips server-side)
+// ---- v6.2: region-rendered Play view + altitude modes (handoff stages 1–2) ----
+// Play's canvas is stage-sized and redraws the visible window from map data, so
+// the 4096px full-map cap only governs Build. Scale is character-relative:
+// playN = how many hero-heights fit the stage height. GROUND / SURVEY / WORLD
+// are named bands of that one continuum, reached by timed flights that animate
+// playN and nothing else.
+const PLAY_GROUND_N = 6, PLAY_FLOOR_N = 4, PLAY_DEFAULT_N = 14;
+const PLAY_DIVE_MS = 6000, PLAY_RISE_MS = 7000, PLAY_FLIGHT_MIN_MS = 1100;
+const PLAY_DEADZONE_W = 3, PLAY_DEADZONE_H = 2, PLAY_LOOKAHEAD = 2;   // character units
+const PLAY_PIXEL_BUDGETS = { low: 2073600, auto: 8294400, max: 16588800 };   // 1080p / ~4K / ~8K ceilings
+let playQuality = "auto";   // backing-store ceiling (~4K) before the adaptive scaler backs off
+const PLAY_OVERVIEW_TILES = 220;     // wider than this draws from the baked overview bitmap
+let playN = PLAY_DEFAULT_N, playTargetN = PLAY_DEFAULT_N;
+let playFlight = null, playLoopOn = false, playLoopT = 0, playFlightScale = 1;
+let playCam = null, playCamT = 0, playCamBusy = false;
+let playFacing = { dx: 0, dy: 1 }, playLastHero = null, playFirst = false;
+let playQ = { scale: 0, ema: 8, adjusted: 0 };
+let playBadgeKey = "";
+let heroStepT = 0, heroAnimTimer = null;   // v6.3: last step time + idle-animation ticker
+let rgActive = false, rgOverview = false, playLastMs = 8, playOv = null, playOvAt = 0;
+let rgOx = 0, rgOy = 0, rgScale = 1, scrW = 0, scrH = 0;   // region origin (map px), backing scale, logical canvas size
+function playTilePx(n, stageH, heroTiles) {
+  return Math.max(0.5, stageH / (Math.max(0.1, n) * Math.max(1, heroTiles || 1)));
+}
+function playSurveyN(mapW) { return mapW > 100 ? 64 : 32; }
+function playWorldN(mapW, mapH, heroTiles, aspect) {
+  const span = aspect > 0 ? Math.max(mapH, mapW / aspect) : mapH;
+  return Math.max(PLAY_FLOOR_N, Math.ceil(span / Math.max(1, heroTiles || 1)));
+}
+function playModeTargets(mapW, mapH, heroTiles, aspect) {
+  const world = playWorldN(mapW, mapH, heroTiles, aspect);
+  return { ground: Math.min(PLAY_GROUND_N, world), survey: Math.min(playSurveyN(mapW), world),
+           first: Math.min(PLAY_FLOOR_N, world), world };
+}
+function playClampN(n, worldN) {
+  return Math.max(PLAY_FLOOR_N, Math.min(Math.max(PLAY_FLOOR_N, worldN), n));
+}
+function playFlightDur(fromN, toN, worldN) {
+  const full = Math.max(0.5, Math.log(Math.max(2, worldN) / PLAY_GROUND_N));
+  const frac = Math.min(1, Math.abs(Math.log(toN / fromN)) / full);
+  return Math.max(PLAY_FLIGHT_MIN_MS, (toN < fromN ? PLAY_DIVE_MS : PLAY_RISE_MS) * frac);
+}
+function playFlightStart(fromN, toN, now, worldN) {
+  if (Math.abs(Math.log(toN / fromN)) < 0.002) return null;
+  const ts = typeof playFlightScale === "number" ? playFlightScale : 1;
+  return { from: fromN, to: toN, start: now, dur: playFlightDur(fromN, toN, worldN) * ts, dive: toN < fromN };
+}
+// dive eases in ("falling to earth"), rise eases out (settles)
+function playFlightAt(fl, now) {
+  const p = Math.min(1, Math.max(0, (now - fl.start) / fl.dur));
+  const e = fl.dive ? Math.pow(p, 1.6) : 1 - Math.pow(1 - p, 1.6);
+  if (p >= 1) return { n: fl.to, done: true };
+  return { n: Math.exp(Math.log(fl.from) + (Math.log(fl.to) - Math.log(fl.from)) * e), done: false };
+}
+// cu = hero height in tiles. The camera holds still while the focus point
+// (hero + lookahead in the facing direction) stays inside a 3x2 CU deadzone.
+function playCameraStep(cam, hero, facing, cu, dtMs, opts) {
+  const o = opts || {};
+  const dzW = o.dzW != null ? o.dzW : PLAY_DEADZONE_W, dzH = o.dzH != null ? o.dzH : PLAY_DEADZONE_H;
+  const look = o.look != null ? o.look : PLAY_LOOKAHEAD;
+  if (!cam) return { x: hero.x, y: hero.y, settled: true };
+  const fx = hero.x + (facing ? facing.dx : 0) * look * cu;
+  const fy = hero.y + (facing ? facing.dy : 0) * look * cu;
+  const hw = dzW * cu / 2, hh = dzH * cu / 2;
+  let tx = cam.x, ty = cam.y;
+  if (fx < cam.x - hw) tx = fx + hw; else if (fx > cam.x + hw) tx = fx - hw;
+  if (fy < cam.y - hh) ty = fy + hh; else if (fy > cam.y + hh) ty = fy - hh;
+  const k = 1 - Math.exp(-Math.min(100, Math.max(0, dtMs)) / 110);
+  const x = cam.x + (tx - cam.x) * k, y = cam.y + (ty - cam.y) * k;
+  return { x, y, settled: Math.abs(tx - x) < 0.02 * cu && Math.abs(ty - y) < 0.02 * cu };
+}
+function playScaleCap(sw, sh, dpr, budget) {
+  const area = Math.max(1, sw * sh);
+  return Math.max(0.6, Math.min(Math.max(1, Math.min(dpr || 1, 3)), Math.sqrt(budget / area)));
+}
+// Adaptive pixel count: render at the highest backing scale that keeps the
+// per-frame cost under ~14ms; back off fast, recover slowly.
+function playQualityStep(q, frameMs, now, cap) {
+  q.ema = q.ema * 0.9 + frameMs * 0.1;
+  if (!q.scale || q.scale > cap) q.scale = cap;
+  if (q.ema > 14 && now - q.adjusted > 1000) { q.scale = Math.max(0.6, q.scale * 0.85); q.adjusted = now; q.ema = 8; }
+  else if (q.ema < 6 && q.scale < cap && now - q.adjusted > 2500) { q.scale = Math.min(cap, q.scale * 1.1); q.adjusted = now; }
+  return q.scale;
+}
+// v6.3: keep the hero's rig clip playing (idle breathing, walk cycle ending) —
+// repaints only while his current clip has more than one frame.
+function heroAnimKick() {
+  if (heroAnimTimer) return;
+  const tick = () => {
+    heroAnimTimer = null;
+    if (!playMode || !hero) return;
+    const pc = playHeroTid != null ? playHeroTid : primaryHeroTile();
+    const ct = pc != null ? customById[pc] : null;
+    let ms = 250;
+    if (ct && ct.rig && ct.rig.actions && !playFlight) {
+      const a = heroActionFor(heroSwimming, heroInDeep, runMode, heroStepT ? performance.now() - heroStepT : -1);
+      const clip = rigClip(ct, a, rigDirFromFacing(playFacing));
+      if (clip && clip.frames && clip.frames.length > 1) { ms = Math.max(60, clip.frame_ms || 250); if (!playLoopOn) render(); }
+    }
+    heroAnimTimer = setTimeout(tick, ms);
+  };
+  heroAnimTimer = setTimeout(tick, 250);
+}
+function playCycleQuality() {
+  const order = ["auto", "max", "low"];
+  playQuality = order[(order.indexOf(playQuality) + 1) % order.length];
+  playQ.scale = 0;
+  toast("pixel quality: " + playQuality + (playQuality === "max" ? " (sharpest, may drop frames)" : playQuality === "low" ? " (fastest)" : " (adaptive)"));
+  render();
+}
+// v6.3: streaks rush past the edges while the camera falls or climbs
+function drawFlightLines() {
+  const fl = playFlight; if (!fl) return;
+  const now = performance.now(), p = Math.min(1, (now - fl.start) / fl.dur);
+  const power = Math.sin(Math.PI * p);   // strongest mid-flight, gone at the ends
+  if (power < 0.05) return;
+  const cx = scrW / 2, cy = scrH / 2, R = Math.hypot(cx, cy);
+  ctx.save();
+  ctx.lineCap = "round";
+  for (let i = 0; i < 28; i++) {
+    const a = (i * 2.399963) % (Math.PI * 2);   // golden-angle spread, stable per frame
+    const ph = ((now / 700) + i * 0.37) % 1;
+    const r0 = R * (fl.dive ? 1 - ph * 0.55 : 0.45 + ph * 0.55), len = R * 0.16 * power;
+    const r1 = fl.dive ? r0 - len : r0 + len;
+    ctx.strokeStyle = "rgba(255,255,255," + (0.35 * power).toFixed(2) + ")";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0 * 0.75);
+    ctx.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1 * 0.75);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+// §13 day/night: t is the fraction of a day (0 = midnight, 0.5 = noon).
+function dayPhase(t) {
+  const s = -Math.cos(2 * Math.PI * t);
+  const n = Math.max(0, Math.min(1, (0.1 - s) / 0.55));
+  const night = n * n * (3 - 2 * n);
+  const dusk = Math.max(0, 1 - Math.abs(s) / 0.35) * (1 - night * 0.5);
+  const mix = (a, b, k) => Math.round(a + (b - a) * k);
+  return { dark: night * 0.6 + dusk * 0.14, rgb: [mix(3, 60, dusk), mix(3, 22, dusk), mix(14, 10, dusk)], night, dusk };
+}
+function dayLabel(t) {
+  const s = -Math.cos(2 * Math.PI * t);
+  return s > 0.5 ? "day" : s > 0.1 ? (t < 0.5 ? "morning" : "afternoon") : s > -0.3 ? (t < 0.5 ? "dawn" : "dusk") : "night";
+}
+const DAY_LEN_MS = 60 * 60 * 1000;
+// Lloyd's decisions (2026-10-22): even day/night split with dawn + dusk between;
+// world = 5 areas of 100x100 out in every direction from Origin (11x11 areas);
+// shrines at least one in-game day of walking apart.
+const DAY_SPLIT = { day: 0.5, night: 0.5 };
+const AREA_TILES = 100, WORLD_AREAS_EACH_WAY = 5;
+const WORLD_AREAS = 2 * WORLD_AREAS_EACH_WAY + 1, WORLD_TILES = WORLD_AREAS * AREA_TILES;
+function shrineMinSpacing(tilesPerSec, dayMs) { return tilesPerSec * (dayMs / 1000); }
+// §14 areas: 100x100 tiles, Origin's area is the centre (0,0); only the player's
+// area plus the 8 around it are live, the rest sleep and render from the overview.
+function areaOf(x, y, w, h) {
+  const lim = WORLD_AREAS_EACH_WAY, c = (v) => Math.max(-lim, Math.min(lim, v));
+  return { ax: c(Math.round((x - w / 2) / AREA_TILES)), ay: c(Math.round((y - h / 2) / AREA_TILES)) };
+}
+function areaAwake(x, y, hx, hy, w, h) {
+  const a = areaOf(x, y, w, h), b = areaOf(hx, hy, w, h);
+  return Math.abs(a.ax - b.ax) <= 1 && Math.abs(a.ay - b.ay) <= 1;
+}
+function areaLive(hx, hy, w, h) {
+  const b = areaOf(hx, hy, w, h), lim = WORLD_AREAS_EACH_WAY, out = [];
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    const ax = b.ax + dx, ay = b.ay + dy;
+    if (Math.abs(ax) <= lim && Math.abs(ay) <= lim) out.push({ ax, ay });
+  }
+  return out;
+}
+function areaLabel(a) { return a.ax === 0 && a.ay === 0 ? "Origin" : "Area " + a.ax + "," + a.ay; }
+// biome borders feather: weight of the far biome, 0..1, across `feather` tiles either side of the border
+function areaFeather(distToBorder, feather) {
+  const k = Math.max(0, Math.min(1, (distToBorder + feather) / (2 * Math.max(1, feather))));
+  return k * k * (3 - 2 * k);
+}
+const dayCfg = { on: true, t: 0.4, at: 0 };
+try { Object.assign(dayCfg, JSON.parse(localStorage.getItem("crumbs_day") || "{}")); } catch (e) {}
+dayCfg.at = performance.now();
+function dayNow() {
+  return dayCfg.on ? (dayCfg.t + (performance.now() - dayCfg.at) / DAY_LEN_MS) % 1 : dayCfg.t;
+}
+function daySave() { try { localStorage.setItem("crumbs_day", JSON.stringify({ on: dayCfg.on, t: dayNow() })); } catch (e) {} }
+// §13.2 compass + waypoint ring
+let playWaypoint = null, wpArmed = false;
+function compassHeading(f) {
+  const a = Math.round((Math.atan2(f.dx, -f.dy) * 180 / Math.PI + 360) % 360);
+  return { deg: a, name: ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(a / 45) % 8] };
+}
+function waypointInfo(h, wp) {
+  const dx = wp.x - h.x, dy = wp.y - h.y;
+  return { dist: Math.round(Math.hypot(dx, dy)), ang: Math.atan2(dy, dx) };
+}
+// §13.1 teleport shrines: server places them (Star Beacon = Origin); unlocks are per character.
+const SHRINE_UNLOCK_RANGE = 3, SHRINE_SEE_RANGE = 30;
+let shrineList = [], shrineUn = new Set(["star_beacon"]), shrineDisc = new Set(["star_beacon"]), shrineBusy = false;
+function shrineState(s, un, disc) { return un.has(s.id) ? "full" : disc.has(s.id) ? "dim" : "hidden"; }
+// Origin only becomes a destination once another shrine is unlocked
+function shrineTargets(list, un) {
+  const others = list.filter(s => !s.origin && un.has(s.id)).length;
+  return list.filter(s => un.has(s.id) && (!s.origin || others > 0));
+}
+function shrineScan(list, h, un, disc) {
+  let changed = false, fresh = null;
+  for (const s of list) {
+    const d = Math.max(Math.abs(s.x - h.x), Math.abs(s.y - h.y));
+    if (d <= SHRINE_SEE_RANGE && !disc.has(s.id)) { disc.add(s.id); changed = true; }
+    if (d <= SHRINE_UNLOCK_RANGE && !un.has(s.id)) { un.add(s.id); disc.add(s.id); changed = true; fresh = s; }
+  }
+  return { changed, fresh };
+}
+function shrineKey() { return "crumbs_shrines_" + (typeof playHeroTid !== "undefined" && playHeroTid != null ? playHeroTid : 0); }
+function shrineSave() { try { localStorage.setItem(shrineKey(), JSON.stringify({ u: [...shrineUn], d: [...shrineDisc] })); } catch (e) {} }
+async function shrineLoad() {
+  shrineUn = new Set(["star_beacon"]); shrineDisc = new Set(["star_beacon"]);
+  try { const o = JSON.parse(localStorage.getItem(shrineKey()) || "{}"); (o.u || []).forEach(i => { shrineUn.add(i); shrineDisc.add(i); }); (o.d || []).forEach(i => shrineDisc.add(i)); } catch (e) {}
+  const r = await api("/api/play/shrines", {}).catch(() => null);
+  shrineList = r && r.ok ? r.shrines : [];
+  shrinePanelPaint();
+}
+function shrineTick() {
+  if (!shrineList.length || !hero || !playMode) return;
+  const r = shrineScan(shrineList, hero, shrineUn, shrineDisc);
+  if (!r.changed) return;
+  shrineSave(); shrinePanelPaint();
+  if (r.fresh) toast(r.fresh.icon + " " + r.fresh.name + " unlocked — T to travel");
+}
+function shrinePanelPaint() {
+  const p = document.getElementById("shrine-panel");
+  if (!p) return;
+  const tg = shrineTargets(shrineList, shrineUn), vis = shrineList.filter(s => shrineState(s, shrineUn, shrineDisc) !== "hidden");
+  p.textContent = "";
+  const head = document.createElement("b"); head.textContent = "Shrines " + shrineUn.size + "/" + shrineList.length; p.appendChild(head);
+  vis.forEach(s => {
+    const un = shrineUn.has(s.id), row = document.createElement("div");
+    row.className = "sh-row" + (un ? "" : " dim");
+    const nm = document.createElement("span"); nm.textContent = s.icon + " " + s.name + (un ? "" : " (undiscovered path)"); row.appendChild(nm);
+    if (un) {
+      const wp = document.createElement("button"); wp.textContent = "📍"; wp.title = "Set as waypoint";
+      wp.onclick = () => { playWaypoint = { x: s.x, y: s.y, shrine: s.id }; skyPaint(); queueRender(); toast("waypoint: " + s.name); };
+      row.appendChild(wp);
+      if (tg.includes(s)) { const go = document.createElement("button"); go.textContent = "✈ Go"; go.onclick = () => shrineTravel(s.id); row.appendChild(go); }
+    }
+    p.appendChild(row);
+  });
+  if (tg.length === 0) { const n = document.createElement("div"); n.textContent = "Unlock a shrine by walking up to it."; p.appendChild(n); }
+}
+// rise → cross → fall; never a hard cut
+async function shrineTravel(id) {
+  const s = shrineList.find(q => q.id === id);
+  if (!s || shrineBusy || !playRegionOn()) return;
+  if (heroTimer || playOver) { toast("wait until you stop moving"); return; }
+  shrineBusy = true;
+  const wait = async () => { let g = 0; while (playFlight && g++ < 600) await flightWait(50); };
+  try {
+    playGoMode("world"); await wait();
+    const r = await api("/api/play/teleport", { id }).catch(() => null);
+    if (r && r.ok) {
+      hero = { x: r.x, y: r.y }; playCam = null; playLastHero = null;
+      render();
+      await flightWait(450);
+    } else toast("the shrine did not answer");
+    playGoMode("ground"); await wait();
+  } finally { shrineBusy = false; }
+}
+function drawShrines() {
+  if (!shrineList.length || !rgActive) return;
+  const k = rgScale;
+  ctx.save();
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  for (const s of shrineList) {
+    const st = shrineState(s, shrineUn, shrineDisc);
+    if (st === "hidden") continue;
+    const px = (s.x + 0.5 - rgOx) * tilePx * k, py = (s.y + 0.5 - rgOy) * tilePx * k;
+    if (px < -40 || py < -40 || px > canvas.width + 40 || py > canvas.height + 40) continue;
+    ctx.globalAlpha = st === "full" ? 1 : 0.4;
+    const size = Math.max(tilePx * 2, 20) * k;
+    ctx.fillStyle = "rgba(10,10,20,.55)"; ctx.beginPath(); ctx.arc(px, py, size * 0.62, 0, Math.PI * 2); ctx.fill();
+    ctx.font = Math.round(size) + "px sans-serif"; ctx.fillStyle = "#fff";
+    ctx.fillText(s.icon, px, py);
+  }
+  ctx.restore();
+}
+function shrineWire() {
+  const tg = document.getElementById("shrine-toggle"), p = document.getElementById("shrine-panel");
+  if (!tg || !p) return;
+  const flip = () => { p.hidden = !p.hidden; tg.classList.toggle("on", !p.hidden); if (!p.hidden) shrinePanelPaint(); };
+  tg.onclick = flip;
+  window.shrineToggle = flip;
+}
+if (typeof document !== "undefined" && document.getElementById) shrineWire();
+function updateCompass() {
+  const el = document.getElementById("compass");
+  if (!el) return;
+  const on = playMode && !!hero;
+  el.hidden = !on;
+  if (!on) return;
+  shrineTick();
+  const h = compassHeading(playFacing);
+  let txt = h.name;
+  if (W > AREA_TILES * 1.5) txt += " · " + areaLabel(areaOf(hero.x, hero.y, W, H));
+  if (playWaypoint) txt += " · 📍" + waypointInfo(hero, playWaypoint).dist;
+  const key = h.deg + txt;
+  if (el._k === key) return;
+  el._k = key;
+  el.querySelector(".cp-needle").style.transform = "rotate(" + h.deg + "deg)";
+  el.querySelector(".cp-txt").textContent = txt;
+}
+function drawWaypointRing() {
+  if (!playWaypoint || !hero || !rgActive) return;
+  const k = rgScale, hx = (hero.x + 0.5 - rgOx) * tilePx * k, hy = (hero.y + 0.5 - rgOy) * tilePx * k;
+  const r = Math.max(tilePx * 1.4, 30) * k, wi = waypointInfo(hero, playWaypoint);
+  ctx.save();
+  ctx.strokeStyle = "rgba(255,215,95,.7)"; ctx.lineWidth = 2 * k; ctx.setLineDash([6 * k, 6 * k]);
+  ctx.beginPath(); ctx.arc(hx, hy, r, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+  if (wi.dist > 0) {
+    const ax = hx + Math.cos(wi.ang) * r, ay = hy + Math.sin(wi.ang) * r, s = 8 * k;
+    ctx.fillStyle = "#ffd75f"; ctx.beginPath();
+    ctx.moveTo(ax + Math.cos(wi.ang) * s, ay + Math.sin(wi.ang) * s);
+    ctx.lineTo(ax + Math.cos(wi.ang + 2.4) * s, ay + Math.sin(wi.ang + 2.4) * s);
+    ctx.lineTo(ax + Math.cos(wi.ang - 2.4) * s, ay + Math.sin(wi.ang - 2.4) * s);
+    ctx.closePath(); ctx.fill();
+  }
+  const px = (playWaypoint.x + 0.5 - rgOx) * tilePx * k, py = (playWaypoint.y + 0.5 - rgOy) * tilePx * k;
+  if (px > 0 && py > 0 && px < canvas.width && py < canvas.height) {
+    ctx.font = Math.round(16 * k) + "px sans-serif"; ctx.textAlign = "center"; ctx.fillText("📍", px, py);
+  }
+  ctx.fillStyle = "#fff"; ctx.font = "bold " + Math.round(11 * k) + "px sans-serif"; ctx.textAlign = "center";
+  ctx.fillText(wi.dist + " tiles", hx, hy + r + 14 * k);
+  ctx.restore();
+}
+function playRegionOn() { return playMode && !buildBreak && !!hero && W > 0 && H > 0; }
+// Full-screen world lens: the region renderer in Build mode with its own zoom/camera.
+const LENS_PX_MIN = 6, LENS_PX_MAX = 160, LENS_PX_DEFAULT = 28;
+let lensFull = false, lensPx = LENS_PX_DEFAULT, lensCam = { x: 0, y: 0 }, lensSavedPx = 0;
+try { const sp = +localStorage.getItem("crumbs_lens_px"); if (sp >= LENS_PX_MIN && sp <= LENS_PX_MAX) lensPx = sp; } catch (e) {}
+function lensClampPx(p) { return Math.max(LENS_PX_MIN, Math.min(LENS_PX_MAX, Math.round(Number(p) || LENS_PX_DEFAULT))); }
+function lensRegionOn() { return lensFull && !playMode && W > 0 && H > 0 && tiles.length >= H; }
+// Zoom to newPx keeping the world point under screen (sx, sy) fixed.
+function lensZoomAt(cam, px, newPx, sx, sy, sw, sh) {
+  const np = lensClampPx(newPx);
+  const wx = cam.x - sw / 2 / px + sx / px, wy = cam.y - sh / 2 / px + sy / px;
+  return { px: np, cam: { x: wx - sx / np + sw / 2 / np, y: wy - sy / np + sh / 2 / np } };
+}
+function lensClampCam(cam, W_, H_) {
+  return { x: Math.max(0, Math.min(W_, cam.x)), y: Math.max(0, Math.min(H_, cam.y)) };
+}
+function lensBadge() {
+  const el = document.getElementById("lens-badge"), b = document.getElementById("lens-full-toggle");
+  if (b) b.classList.toggle("on", lensFull);
+  if (!el) return;
+  el.hidden = !lensFull;
+  if (lensFull) el.textContent = "LENS " + lensPx + "px · " + Math.round(lensPx / LENS_PX_DEFAULT * 100) + "%";
+}
+function lensSetPx(np, sx, sy) {
+  const sw = stage.clientWidth, sh = stage.clientHeight;
+  if (sx === undefined) { sx = sw / 2; sy = sh / 2; }
+  const r = lensZoomAt(lensCam, lensPx, np, sx, sy, sw, sh);
+  lensPx = r.px; lensCam = lensClampCam(r.cam, W, H);
+  try { localStorage.setItem("crumbs_lens_px", String(lensPx)); } catch (e) {}
+  render(); lensBadge();
+}
+function lensZoomBy(f, sx, sy) { lensSetPx(lensPx * f, sx, sy); }
+function lensPanBy(dxPx, dyPx) {
+  lensCam = lensClampCam({ x: lensCam.x - dxPx / lensPx, y: lensCam.y - dyPx / lensPx }, W, H);
+  render();
+}
+function lensLeave() {
+  if (!lensFull) return;
+  lensFull = false;
+  if (lensSavedPx) tilePx = lensSavedPx;
+  panX = (W / 2 - lensCam.x) * tilePx; panY = (H / 2 - lensCam.y) * tilePx;
+  if (typeof clampPan === "function") clampPan();
+  lensBadge();
+}
+function lensToggle(on) {
+  if (on === undefined) on = !lensFull;
+  if (on === lensFull) return;
+  if (on) {
+    if (playMode || !W || !tiles.length) { toast("lens is for building — stop Play first"); return; }
+    lensSavedPx = tilePx;
+    lensCam = lensClampCam({ x: W / 2 - panX / tilePx, y: H / 2 - panY / tilePx }, W, H);
+    if (typeof selectedInstance !== "undefined" && selectedInstance && Number.isFinite(selectedInstance.x))
+      lensCam = { x: selectedInstance.x + 0.5, y: selectedInstance.y + 0.5 };
+    lensFull = true;
+    const pl = document.getElementById("world-lens"); if (pl) pl.hidden = true;
+    toast("full-screen lens — wheel/pinch/+− zoom, drag to pan, L to exit");
+  } else {
+    lensLeave();
+  }
+  lensBadge(); render();
+}
+function playHeroTiles() { return Math.max(1, playHeroSize || 1); }
+function playWorldNow() {
+  const sw = stage.clientWidth || 1, sh = stage.clientHeight || 1;
+  return playWorldN(W, H, playHeroTiles(), sw / sh);
+}
+function playKick() {
+  if (playLoopOn) return;
+  playLoopOn = true;
+  requestAnimationFrame(playLoop);
+}
+function playLoop() {
+  playLoopOn = false;
+  if (!playRegionOn()) { playFlight = null; return; }
+  const now = performance.now(), dt = Math.min(100, now - (playLoopT || now));
+  playLoopT = now;
+  let moving = false;
+  if (playFlight) {
+    const r = playFlightAt(playFlight, now);
+    playN = r.n;
+    if (r.done) playFlight = null; else moving = true;
+  } else if (Math.abs(Math.log(playTargetN / playN)) > 0.0015) {
+    playN = Math.exp(Math.log(playN) + (Math.log(playTargetN) - Math.log(playN)) * (1 - Math.exp(-dt / 290)));
+    moving = true;
+  } else playN = playTargetN;
+  render();
+  playModeBadge();
+  if (typeof flightHud === "function") flightHud();
+  if (moving) playKick(); else playLoopT = 0;
+}
+// ---- flight test panel: live telemetry + scripted pass over every altitude ----
+let flightRunning = false;
+function flightHud() {
+  const p = document.getElementById("flight-panel");
+  if (!p || p.hidden) return;
+  const st = document.getElementById("fl-stat"), bar = document.querySelector("#fl-bar i");
+  if (!playRegionOn()) { st.textContent = "Enter Play to test flights."; bar.style.width = "0"; return; }
+  const t = playModeTargets(W, H, playHeroTiles(), stage.clientWidth / Math.max(1, stage.clientHeight));
+  const pr = playFlight ? Math.min(1, (performance.now() - playFlight.start) / playFlight.dur) : 0;
+  st.textContent = "mode  " + playModeName() + "\nN     " + playN.toFixed(1) + " (world " + t.world + ")\ntile  " +
+    playTilePx(playN, stage.clientHeight, playHeroTiles()).toFixed(1) + "px  scale " + (rgScale || 0).toFixed(2) +
+    "\nfly   " + (playFlight ? (playFlight.dive ? "DIVE " : "RISE ") + Math.round(pr * 100) + "% of " + (playFlight.dur / 1000).toFixed(1) + "s" : "idle");
+  st.style.whiteSpace = "pre";
+  bar.style.width = Math.round(pr * 100) + "%";
+}
+function flightLog(msg, bad) {
+  const l = document.getElementById("fl-log");
+  const d = document.createElement("div");
+  if (bad) d.className = "bad";
+  d.textContent = msg; l.appendChild(d); l.scrollTop = l.scrollHeight;
+}
+function flightWait(ms) { return new Promise(r => setTimeout(r, ms)); }
+async function flightRunTest() {
+  if (flightRunning) return;
+  if (!playRegionOn()) { flightLog("Enter Play first.", true); return; }
+  flightRunning = true; document.getElementById("fl-run").classList.add("on");
+  let pass = 0, fail = 0;
+  for (const name of ["world", "survey", "ground", "first", "world"]) {
+    if (!playRegionOn()) { flightLog("aborted: left Play", true); break; }
+    const t0 = performance.now();
+    playGoMode(name);
+    const to = playTargetN;
+    let guard = 0;
+    while (playFlight && guard++ < 600) await flightWait(50);
+    await flightWait(120);
+    const dt = ((performance.now() - t0) / 1000).toFixed(1), err = Math.abs(Math.log(playN / to));
+    const nm = playModeName(), ok = err < 0.02 && (name === "first" ? playFirst : nm.toLowerCase() === name);
+    ok ? pass++ : fail++;
+    flightLog((ok ? "ok  " : "BAD ") + name + "  " + dt + "s  N=" + playN.toFixed(1) + " target=" + to.toFixed(1) + " reads " + nm, !ok);
+  }
+  flightLog("done: " + pass + " ok, " + fail + " bad", fail > 0);
+  flightRunning = false; document.getElementById("fl-run").classList.remove("on");
+}
+function flightWire() {
+  const tg = document.getElementById("flight-toggle"), p = document.getElementById("flight-panel");
+  if (!tg || !p) return;
+  const flip = () => { p.hidden = !p.hidden; tg.classList.toggle("on", !p.hidden); flightHud(); };
+  tg.onclick = flip;
+  p.querySelectorAll("[data-fl]").forEach(b => b.onclick = () => playGoMode(b.dataset.fl));
+  document.getElementById("fl-run").onclick = flightRunTest;
+  document.getElementById("fl-clear").onclick = () => { document.getElementById("fl-log").textContent = ""; };
+  const sl = document.getElementById("fl-slow");
+  sl.onclick = () => { playFlightScale = playFlightScale === 1 ? 4 : 1; sl.classList.toggle("on", playFlightScale !== 1); };
+  window.flightToggle = flip;
+}
+if (typeof document !== "undefined" && document.getElementById) flightWire();
+// any input hands control back at whatever altitude the view holds right now
+function playCancelFlight() {
+  if (playFlight) playN = playFlightAt(playFlight, performance.now()).n;
+  playFlight = null;
+  playTargetN = playN;
+}
+function playGoMode(name) {
+  if (!playRegionOn()) return;
+  playCancelFlight();
+  const t = playModeTargets(W, H, playHeroTiles(), stage.clientWidth / Math.max(1, stage.clientHeight));
+  playFirst = name === "first";
+  const to = t[name] || t.survey;
+  playTargetN = to;
+  playFlight = playFlightStart(playN, to, performance.now(), t.world);
+  if (!playFlight) playN = to;
+  playLoopT = 0; playKick();
+  playModeBadge();
+}
+function playZoomBy(factor) {
+  if (!playRegionOn()) return;
+  playCancelFlight();
+  playFirst = false;
+  playTargetN = playClampN(playN * factor, playWorldNow());
+  playLoopT = 0; playKick();
+  playModeBadge();
+}
+function playSetN(n) {
+  playCancelFlight();
+  playFirst = false;
+  playN = playTargetN = playClampN(n, playWorldNow());
+}
+function playModeName() {
+  if (!playRegionOn()) return "";
+  const t = playModeTargets(W, H, playHeroTiles(), stage.clientWidth / Math.max(1, stage.clientHeight));
+  if (playFirst) return "FIRST PERSON";
+  if (playN >= t.world * 0.92) return "WORLD";
+  if (playN <= t.ground * 1.7) return "GROUND";
+  if (playN <= t.survey * 1.45) return "SURVEY";
+  return "ALTITUDE";
+}
+function playModeBadge() {
+  const el = document.getElementById("play-mode-badge");
+  if (!el) return;
+  const nm = playModeName(), key = nm + (playFlight ? (playFlight.dive ? "d" : "u") : "");
+  if (key === playBadgeKey) return;
+  playBadgeKey = key;
+  el.hidden = !nm;
+  el.textContent = (playFlight ? (playFlight.dive ? "⬇ " : "⬆ ") : "") + nm;
+  document.querySelectorAll("#play-modes button").forEach(b => {
+    const m = b.dataset.mode;
+    b.classList.toggle("on", !playFlight && ((m === "first" && playFirst) || (!playFirst && m === nm.toLowerCase())));
+  });
+}
+function playResetView() {
+  playN = playTargetN = PLAY_DEFAULT_N; playFlight = null; playCam = null;
+  playLastHero = null; playFirst = false; playFacing = { dx: 0, dy: 1 }; playCamBusy = false;
+}
+// WORLD base layer: the whole map baked once into a small bitmap (hero, NPCs and
+// markers still draw live on top).
+function playBakeOverview() {
+  const now = performance.now();
+  if (playOv && playOv.tiles === tiles && now - playOvAt < 3000) return playOv;
+  const s = Math.max(1, Math.floor(1024 / Math.max(W, H)));
+  const cv = (playOv && playOv.cv) || document.createElement("canvas");
+  cv.width = W * s; cv.height = H * s;
+  const c = cv.getContext("2d");
+  for (let y = 0; y < H; y++) {
+    const row = tiles[y]; if (!row) continue;
+    for (let x = 0; x < W; x++) {
+      let v = row[x]; if (v && typeof v === "object") v = v.tid;
+      const k = minimapTileColor(v);
+      c.fillStyle = "rgb(" + k[0] + "," + k[1] + "," + k[2] + ")";
+      c.fillRect(x * s, y * s, s, s);
+    }
+  }
+  playOv = { cv, s, tiles }; playOvAt = now;
+  return playOv;
+}
+// Sets up the region transform for this frame and draws the base layer.
+// Everything render() draws afterwards stays in map-pixel coordinates.
+function playRegionBegin() {
+  const sw = stage.clientWidth, sh = stage.clientHeight;
+  if (sw < 2 || sh < 2 || tiles.length < H) return false;
+  const lens = lensRegionOn();
+  const now = performance.now(), cu = playHeroTiles();
+  if (lens) { lensPx = lensClampPx(lensPx); tilePx = lensPx; }
+  else { playN = playClampN(playN, playWorldNow()); tilePx = playTilePx(playN, sh, cu); }
+  scrW = sw; scrH = sh;
+  const cap = playScaleCap(sw, sh, window.devicePixelRatio || 1, PLAY_PIXEL_BUDGETS[playQuality] || PLAY_PIXEL_BUDGETS.auto);
+  rgScale = Math.round(playQualityStep(playQ, playLastMs, now, cap) * 20) / 20;
+  const bw = Math.round(sw * rgScale), bh = Math.round(sh * rgScale);
+  if (canvas.width !== bw || canvas.height !== bh) { canvas.width = bw; canvas.height = bh; }
+  canvas.style.width = sw + "px"; canvas.style.height = sh + "px";
+  rgActive = true;
+  const viewW = sw / tilePx, viewH = sh / tilePx;
+  let st = { settled: true };
+  if (!lens) {
+    const dt = playCamT ? now - playCamT : 16; playCamT = now;
+    let cam = playCam;
+    if (playFlight || !cam || Math.abs(hero.x - cam.x) > viewW || Math.abs(hero.y - cam.y) > viewH) cam = { x: hero.x, y: hero.y };
+    st = playCameraStep(cam, hero, playFacing, cu, dt, playFirst ? { dzW: 0.4, dzH: 0.4, look: 1.5 } : null);
+    playCam = { x: st.x, y: st.y };
+  }
+  let ox = (lens ? lensCam.x : playCam.x + 0.5) - viewW / 2, oy = (lens ? lensCam.y : playCam.y + 0.5) - viewH / 2;
+  ox = viewW >= W ? (W - viewW) / 2 : Math.max(-2, Math.min(W - viewW + 2, ox));
+  oy = viewH >= H ? (H - viewH) / 2 : Math.max(-2, Math.min(H - viewH + 2, oy));
+  rgOx = ox; rgOy = oy;
+  rgOverview = viewW > PLAY_OVERVIEW_TILES;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = "#0a0a0a"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.setTransform(rgScale, 0, 0, rgScale, -ox * tilePx * rgScale, -oy * tilePx * rgScale);
+  ctx.imageSmoothingEnabled = false;
+  if (rgOverview) {
+    const ov = playBakeOverview();
+    ctx.drawImage(ov.cv, 0, 0, W * ov.s, H * ov.s, 0, 0, W * tilePx, H * tilePx);
+  } else {
+    drawBaseRect(ctx, visibleTiles(), tilePx % 1 ? 0.6 : 0);
+  }
+  if (!st.settled) playKick();
+  return true;
+}
+function playRegionEnd() {
+  if (!rgActive) return;
+  rgActive = false; rgOverview = false;
+  canvas.style.width = ""; canvas.style.height = "";
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (playMode && tilePx > maxTilePx()) tilePx = maxTilePx();   // build-break uses the full-map canvas
+  if (playMode && hero) { panX = (W / 2 - hero.x - 0.5) * tilePx; panY = (H / 2 - hero.y - 0.5) * tilePx; }
+  markBaseDirty();
+}
 // v3.4: patrol NPCs — routes from the server, live walkers in play mode
 let patrolTool = false, draftPoints = [], patrols = [], npcs = [], npcTimer = null;
 let patrolAnchor = null;   // v5.0: {x, y} — the placed character this route is assigned to
@@ -5976,7 +6736,8 @@ $("nu-pass").addEventListener("keydown", e => { if (e.key === "Enter") createUse
 // water splash, and a looped wind ambience. No downloads, works offline.
 const Sfx = (() => {
   let ctx = null, master = null, noiseBuf = null, ambNodes = null, lastTick = 0, recDest = null;
-  const cfg = { muted: false, vol: 0.7, amb: false };
+  const cfg = { muted: false, vol: 0.7, amb: false, nat: false, wx: true };
+  let natTimer = null, wxNodes = null, wxKind = "clear";
   try { Object.assign(cfg, JSON.parse(localStorage.getItem("crumbs_sfx") || "{}")); } catch (e) {}
   const save = () => { try { localStorage.setItem("crumbs_sfx", JSON.stringify(cfg)); } catch (e) {} };
 
@@ -6046,14 +6807,42 @@ const Sfx = (() => {
     lfo.connect(lfoG); lfoG.connect(flt.frequency);
     src.connect(flt); flt.connect(g); g.connect(master);
     src.start(); lfo.start();
-    const timer = setInterval(() => { if (!cfg.muted && Math.random() < 0.5) api.chirp(); }, 9000);
-    ambNodes = { src, lfo, timer };
+    ambNodes = { src, lfo };
   }
   function ambStop() {
     if (!ambNodes) return;
     try { ambNodes.src.stop(); ambNodes.lfo.stop(); } catch (e) {}
-    clearInterval(ambNodes.timer);
     ambNodes = null;
+  }
+  // Nature bed: birdsong by day, with the odd cricket trill.
+  function natStart() {
+    if (natTimer) return;
+    ensure();
+    natTimer = setInterval(() => {
+      if (cfg.muted || !cfg.nat || wxKind === "storm") return;
+      const r = Math.random();
+      if (r < 0.55) api.chirp();
+      else if (r < 0.8) { api.chirp(); setTimeout(api.chirp, 140); setTimeout(api.chirp, 300); }
+      else for (let i = 0; i < 5; i++) api.tone({ f: 4200, d: 0.03, g: 0.025, at: i * 0.06 });
+    }, 3500);
+  }
+  function natStop() { if (natTimer) clearInterval(natTimer); natTimer = null; }
+  // Weather bed: a looping filtered noise per condition.
+  function wxStop() {
+    if (!wxNodes) return;
+    try { wxNodes.src.stop(); } catch (e) {}
+    wxNodes = null;
+  }
+  function wxStart() {
+    wxStop();
+    if (!cfg.wx || wxKind === "clear" || !ensure()) return;
+    const P = { rain: ["highpass", 1800, 0.09], storm: ["bandpass", 700, 0.16], snow: ["lowpass", 500, 0.025], fog: ["lowpass", 260, 0.035] }[wxKind];
+    if (!P) return;
+    const src = ctx.createBufferSource(); src.buffer = noiseBufGet(); src.loop = true;
+    const flt = ctx.createBiquadFilter(); flt.type = P[0]; flt.frequency.value = P[1]; flt.Q.value = 0.5;
+    const g = ctx.createGain(); g.gain.value = P[2];
+    src.connect(flt); flt.connect(g); g.connect(master); src.start();
+    wxNodes = { src };
   }
 
   const api = {
@@ -6081,7 +6870,14 @@ const Sfx = (() => {
         at += d + 0.03 + Math.random() * 0.05;
       }
     },
+    tone,
     isMuted()  { return cfg.muted; },
+    natOn()    { return cfg.nat; },
+    wxOn()     { return cfg.wx; },
+    toggleNat() { cfg.nat = !cfg.nat; if (cfg.nat) natStart(); else natStop(); save(); return cfg.nat; },
+    toggleWx() { cfg.wx = !cfg.wx; wxStart(); save(); return cfg.wx; },
+    setWeather(w) { if (w === wxKind) return; wxKind = w || "clear"; if (ctx) wxStart(); },
+    thunder()  { noise({ d: 1.6, g: 0.3, fc: 160, fc2: 60, q: 0.7, type: "lowpass" }); },
     // v5.53: auto clips — tap the master bus into a MediaStreamDestination so
     // the recorder captures game SFX/music. Melody's speechSynthesis voice is
     // NOT routable (browsers expose no tap for it), so her words burn in as
@@ -6098,7 +6894,7 @@ const Sfx = (() => {
     toggleMute() { cfg.muted = !cfg.muted; ensure(); applyCfg(); save(); return cfg.muted; },
     setVol(v)  { cfg.vol = Math.max(0, Math.min(1, v)); ensure(); applyCfg(); save(); },
     toggleAmb() { cfg.amb = !cfg.amb; ensure(); if (cfg.amb) ambStart(); else ambStop(); save(); return cfg.amb; },
-    syncAmb()  { if (cfg.amb) ambStart(); },
+    syncAmb()  { if (cfg.amb) ambStart(); if (cfg.nat) natStart(); wxStart(); },
   };
   return api;
 })();
@@ -6191,7 +6987,7 @@ function rebuildFxOnMap() {
 // anim record is {v, default, states: {idle, walk, sleep, talk, hurt,
 // magic}, transitions}. Fallback chain: states[state] -> states[default]
 // -> the legacy per-tile fx (so pre-state tiles keep their look).
-const ANIM_STATES = ["idle", "walk", "sleep", "talk", "hurt", "magic"];
+const ANIM_STATES = ["idle", "walk", "sleep", "talk", "hurt", "magic", "swim"];
 const ANIM_STATE_DEFAULTS = { act: "none", amp: 100, hue: 0, sat: 100,
                               bri: 100, magic: null, frame_ms: 400,
                               frames: null,
@@ -6658,10 +7454,14 @@ function renderBase() {
     baseDirty = { full: true };
   }
   if (!baseDirty) return;
-  const b = baseCv.getContext("2d");
-  b.imageSmoothingEnabled = false;
   // v5.41: draw only the dirty rect; a full pass uses the whole map
-  const r = baseDirty.full ? { x0: 0, y0: 0, x1: W - 1, y1: H - 1 } : baseDirty;
+  drawBaseRect(baseCv.getContext("2d"), baseDirty.full ? { x0: 0, y0: 0, x1: W - 1, y1: H - 1 } : baseDirty, 0);
+  baseDirty = null;
+}
+// v6.2: shared by the cached full-map base and the Play region renderer
+// (pad > 0 closes hairline seams at fractional tile sizes).
+function drawBaseRect(b, r, pad) {
+  b.imageSmoothingEnabled = false;
   for (let y = r.y0; y <= r.y1; y++) for (let x = r.x0; x <= r.x1; x++) {
     const id = tiles[y][x];
     const im = tileFrameImage(id);   // v3.0: animated custom tiles draw current frame
@@ -6674,7 +7474,7 @@ function renderBase() {
         b.ellipse(px + tilePx / 2, py + tilePx * 0.88, tilePx * 0.34, tilePx * 0.13, 0, 0, Math.PI * 2);
         b.fill();
       }
-      b.drawImage(im, px, py, tilePx, tilePx);
+      b.drawImage(im, px, py, tilePx + pad, tilePx + pad);
       const th = tileHt(id);
       // v5.10: the face shows when this tile stands at or above its
       // southern neighbor — never buried under a taller tile below
@@ -6682,7 +7482,7 @@ function renderBase() {
       if (th >= 1 && th >= below) drawTallFace(b, im, px, py, th);
     } else {
       b.fillStyle = customById[id] ? "#1c1c1c" : (colorOf[id] || "#000");
-      b.fillRect(px, py, tilePx, tilePx);
+      b.fillRect(px, py, tilePx + pad, tilePx + pad);
     }
   }
   // v5.10: height shadows — light falls from the northwest, so a taller
@@ -6722,7 +7522,6 @@ function renderBase() {
     for (let y = r.y0; y <= r.y1 + 1; y++) { b.moveTo(r.x0 * tilePx, y * tilePx + .5); b.lineTo((r.x1 + 1) * tilePx, y * tilePx + .5); }
     b.stroke();
   }
-  baseDirty = null;
 }
 
 // v5.3: render diet — high-frequency paths (paint strokes, NPC movement,
@@ -6805,7 +7604,7 @@ function updateWorldLensFocus() {
 }
 function paintLens() {
   const panel = $("world-lens"), cv = $("world-lens-cv");
-  if (!LENS_ENABLED || !worldLens.on || !panel || !cv || !tiles.length || !W || !H ||
+  if (lensFull || !LENS_ENABLED || !worldLens.on || !panel || !cv || !tiles.length || !W || !H ||
       document.body.classList.contains("clean") || document.body.classList.contains("panels-hidden")) return;
   try {
     if (!worldLens.ready) lensFocus(W / 2, H / 2);
@@ -7276,11 +8075,18 @@ function render() {
   if (!tiles.length || tiles.length < H) return;
   // v5.3: resetting canvas.width wipes the whole canvas — only pay for it
   // when the size actually changed.
-  const cw = W * tilePx, ch = H * tilePx;
-  if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
-  ctx.imageSmoothingEnabled = false;
-  renderBase();                 // the cached static layer (tiles, grid)
-  ctx.drawImage(baseCv, 0, 0);
+  const _t0 = performance.now();
+  if (lensFull && playMode) lensLeave();
+  if (playRegionOn() || lensRegionOn()) {
+    if (!playRegionBegin()) return;
+  } else {
+    playRegionEnd();
+    const cw = W * tilePx, ch = H * tilePx;
+    if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
+    ctx.imageSmoothingEnabled = false;
+    renderBase();                 // the cached static layer (tiles, grid)
+    ctx.drawImage(baseCv, 0, 0);
+  }
   // v5.3: animated tiles stay live — overdrawn with the current frame.
   // v5.37: FX tiles overdraw here too, with their animator effects.
   if (animOnMap.size || fxOnMap.size) {
@@ -7402,13 +8208,21 @@ function render() {
     // Unreachable for now — deep water blocks the hero until SWIM_UNLOCKED
     // flips server-side, at which point heroInDeep goes true on deep steps
     // and this branch draws the swim animation instead of the wade ripple.
-    if (heroInDeep) {
-      // TODO(swim): draw the swim animation (strokes, splash, submerged bob).
+    if (heroInDeep) {   // v6.3: submerged bob + expanding splash rings
+      const ph = (performance.now() % 900) / 900;
+      for (let k = 0; k < 2; k++) {
+        const q = (ph + k / 2) % 1;
+        ctx.strokeStyle = "rgba(190,230,255," + (0.7 * (1 - q)).toFixed(2) + ")"; ctx.lineWidth = Math.max(1, tilePx * 0.04);
+        ctx.beginPath();
+        ctx.ellipse(hx + tilePx / 2, hy + tilePx * 0.78, tilePx * (0.25 + 0.3 * q), tilePx * (0.1 + 0.12 * q), 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
     }
     // v5.29: PC sprite — flagged instance first (mirrors server _find_spawn),
     // then the tile-level hero designation, then the gold circle fallback.
     const pcTid = playHeroTid != null ? playHeroTid : primaryHeroTile();
-    const him = pcTid != null ? tileFrameImage(pcTid) : null;
+    const _hAct = heroActionFor(heroSwimming, heroInDeep, runMode, heroStepT ? performance.now() - heroStepT : -1);
+    const him = pcTid != null ? rigTileImage(pcTid, _hAct, rigDirFromFacing(playFacing), performance.now()) : null;
     if (him) {
       // v5.29: the PC keeps his build size — a mouse hero stays mouse-sized
       const _hw = tilePx * playHeroSize, _hh = tilePx * playHeroSize;
@@ -7576,25 +8390,31 @@ function render() {
   // destination-out used to erase the hero and the map along with it,
   // leaving a black hole where the hero stood.
   const darkFor = { clear: 0.12, rain: 0.35, snow: 0.25, storm: 0.45, fog: 0.20 };
-  if (playMode && lightingOn && hero) {
-    const hx = hero.x * tilePx + tilePx / 2, hy = hero.y * tilePx + tilePx / 2;
-    const lr = tilePx * 4;
+  if (playMode && lightingOn && hero && !rgOverview) {
+    const _k = rgActive ? rgScale : 1;
+    const hx = rgActive ? (hero.x + 0.5 - rgOx) * tilePx * _k : hero.x * tilePx + tilePx / 2;
+    const hy = rgActive ? (hero.y + 0.5 - rgOy) * tilePx * _k : hero.y * tilePx + tilePx / 2;
+    const lr = tilePx * 4 * _k;
     if (!lightCv || lightCv.width !== canvas.width || lightCv.height !== canvas.height) {
       lightCv = document.createElement("canvas");
       lightCv.width = canvas.width; lightCv.height = canvas.height;
     }
     const d = lightCv.getContext("2d");
     d.clearRect(0, 0, lightCv.width, lightCv.height);
-    d.fillStyle = "rgba(3,3,14," + (darkFor[worldWeather] ?? 0.62) + ")";
+    const _wd = darkFor[worldWeather] ?? 0.62, _dp = dayPhase(dayNow());
+    d.fillStyle = "rgba(" + _dp.rgb.join(",") + "," + (1 - (1 - _wd) * (1 - _dp.dark)).toFixed(3) + ")";
     d.fillRect(0, 0, lightCv.width, lightCv.height);
     d.globalCompositeOperation = "destination-out";
-    const g = d.createRadialGradient(hx, hy, tilePx * 0.6, hx, hy, lr);
+    const g = d.createRadialGradient(hx, hy, tilePx * 0.6 * _k, hx, hy, lr);
     g.addColorStop(0, "rgba(0,0,0,1)");
     g.addColorStop(1, "rgba(0,0,0,0)");
     d.fillStyle = g;
     d.beginPath(); d.arc(hx, hy, lr, 0, Math.PI * 2); d.fill();
     d.globalCompositeOperation = "source-over";
+    ctx.save();
+    if (rgActive) ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(lightCv, 0, 0);
+    ctx.restore();
   }
   // v5.10: sight — line-of-sight fog of war. Cells the hero can't see
   // (a taller cell blocks the sight line) go dark. Refreshes when he stops.
@@ -7615,8 +8435,14 @@ function render() {
     else { ctx.fillStyle = "rgba(255,215,95,.55)"; ctx.fillRect(gx, gy, tilePx, tilePx); }
     ctx.restore();
   }
+  if (rgActive) ctx.setTransform(rgScale, 0, 0, rgScale, 0, 0);   // screen space for the sky + captions
   if (playMode && worldWeather !== "clear") drawWeather();  // v4.1: the sky performs
+  if (rgActive && playFlight) drawFlightLines();
+  if (rgActive) drawShrines();
+  if (rgActive) drawWaypointRing();
+  updateCompass();
   if (clipCaption) drawClipCaption();   // v5.53: auto-clip subtitles — her words on the film
+  if (rgActive) { ctx.setTransform(1, 0, 0, 1, 0, 0); playLastMs = performance.now() - _t0; }
   followPlayHero();                    // center the active character, only during play
   layout();   // v2.2: re-center + apply pan offset after every draw
   if (typeof renderMinimap === "function") renderMinimap();  // v5.61.0: throttled live minimap
@@ -7626,7 +8452,7 @@ function render() {
 // The camera is expressed in stage-local pixels, so centering the controlled
 // character here is independent of the browser window's origin or HUD height.
 function followPlayHero() {
-  if (!playMode || buildBreak || !hero || !W || !H) return;
+  if (!playMode || buildBreak || !hero || !W || !H || rgActive) return;
   panX = (W / 2 - hero.x - 0.5) * tilePx;
   panY = (H / 2 - hero.y - 0.5) * tilePx;
   clampPan();
@@ -7635,8 +8461,8 @@ function followPlayHero() {
 // ---- painting -------------------------------------------------------------
 function evCell(e) {
   const r = canvas.getBoundingClientRect();
-  const x = Math.floor((e.clientX - r.left) / tilePx);
-  const y = Math.floor((e.clientY - r.top) / tilePx);
+  const x = Math.floor((rgActive ? rgOx : 0) + (e.clientX - r.left) / tilePx);
+  const y = Math.floor((rgActive ? rgOy : 0) + (e.clientY - r.top) / tilePx);
   if (x < 0 || y < 0 || x >= W || y >= H) return null;
   return { x, y };
 }
@@ -8319,34 +9145,9 @@ function drawGhostStroke() {
     ctx.strokeRect(c.x * tilePx + 1, c.y * tilePx + 1, tilePx - 2, tilePx - 2);
   }
 }
-// -- the brush scope: magnified footprint above the fingertip ------------------
-function hideScope() { const b = $("brush-scope"); if (b) b.style.display = "none"; }
-function updateScope(cell) {
-  const box = $("brush-scope");
-  if (!box || !scopeCtx || !stroke || !stroke.cells.size || !cell || !baseCv || !baseCv.width) {
-    hideScope(); return;
-  }
-  box.style.display = "block";
-  const S = 150, R = 2, cs = S / (2 * R + 1);
-  box.style.left = Math.max(4, Math.min(window.innerWidth - S - 4, lastTouchX - S / 2)) + "px";
-  box.style.top = Math.max(4, lastTouchY - S - 48) + "px";
-  const c = scopeCtx;
-  c.imageSmoothingEnabled = false;
-  c.clearRect(0, 0, S, S);
-  try {
-    c.drawImage(baseCv, (cell.x - R) * tilePx, (cell.y - R) * tilePx,
-                tilePx * (2 * R + 1), tilePx * (2 * R + 1), 0, 0, S, S);
-  } catch (e) { /* base not ready yet */ }
-  c.globalAlpha = 0.7;
-  for (const gc of stroke.cells.values()) {
-    const dx = gc.x - (cell.x - R), dy = gc.y - (cell.y - R);
-    if (dx < 0 || dy < 0 || dx > 2 * R || dy > 2 * R) continue;
-    drawGhostCell(c, gc.pv, dx * cs, dy * cs, cs);
-  }
-  c.globalAlpha = 1;
-  c.strokeStyle = "#ffd75f"; c.lineWidth = 3;
-  c.strokeRect(R * cs + 2, R * cs + 2, cs - 4, cs - 4);
-}
+// the hold-to-magnify brush scope was removed; these stay as no-ops for the stroke code
+function hideScope() {}
+function updateScope(cell) {}
 
 // -- brush behaviors --------------------------------------------------------------
 function stampStrokeAdd(cell) {
@@ -8840,7 +9641,7 @@ function toggleMoreSheet() { const sh = $("more-sheet"); if (sh) sh.classList.to
   scatterDensity = clampDensity(lsGet("cw_scatterDensity", 60));
   rectFill = lsGet("cw_rectFill", "0") === "1";
   buildStampRow(); buildScatterRow(); buildMoreSheet();
-  scopeCtx = $("brush-scope-cv").getContext("2d");
+  scopeCtx = null;
   $("bb-stamp").onclick = () => { closeMoreSheet(); setBrushTool("stamp"); buzz(10); };
   $("bb-paint").onclick = () => { closeMoreSheet(); setBrushTool("paint"); buzz(10); };
   $("bb-erase").onclick = () => { closeMoreSheet(); setBrushTool("erase"); buzz(10); };
@@ -9049,7 +9850,7 @@ canvas.addEventListener("pointerdown", async e => {
   }
   if (ptrs.size > 2) return;
   if (panMode) {  // v2.2: single-finger drag pans via transform offset
-    panStart = { x: e.clientX, y: e.clientY, px: panX, py: panY };
+    panStart = { x: e.clientX, y: e.clientY, px: panX, py: panY, cx: lensCam.x, cy: lensCam.y };
     return;
   }
   const cell = evCell(e); if (!cell) return;
@@ -9148,6 +9949,19 @@ function onGestureMove() {
   if (p.length < 2) return;
   const dist = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
   const mid = { x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2 };
+  if (lensRegionOn()) {   // full-screen lens: own pinch zoom + two-finger pan
+    const r = stage.getBoundingClientRect();
+    if (!gesture) { gesture = { startDist: dist, startPx: lensPx, lastMid: mid }; return; }
+    lensPanBy(mid.x - gesture.lastMid.x, mid.y - gesture.lastMid.y);
+    gesture.lastMid = mid;
+    lensSetPx(gesture.startPx * dist / gesture.startDist, mid.x - r.left, mid.y - r.top);
+    return;
+  }
+  if (playRegionOn()) {   // v6.2: pinch changes N, anchored on the hero
+    if (!gesture) { gesture = { startDist: dist, startN: playN, lastMid: mid }; return; }
+    playSetN(gesture.startN * gesture.startDist / dist); render(); playModeBadge();
+    return;
+  }
   if (!gesture) { gesture = { startDist: dist, startPx: tilePx, lastMid: mid }; return; }
   // v2.4: quantize zoom to whole px — at 64x64 a redraw paints 4096 tiles, so
   // only re-render when the integer size actually changes. Finger tremor no
@@ -9168,6 +9982,10 @@ canvas.addEventListener("pointermove", e => {
   if (panMode) {
     if (!panStart) return;
     e.preventDefault();
+    if (lensRegionOn()) {
+      lensCam = lensClampCam({ x: panStart.cx - (e.clientX - panStart.x) / lensPx, y: panStart.cy - (e.clientY - panStart.y) / lensPx }, W, H);
+      render(); return;
+    }
     panX = panStart.px + (e.clientX - panStart.x);
     panY = panStart.py + (e.clientY - panStart.y);
     clampPan(); layout();
@@ -9316,6 +10134,20 @@ let _pinchAccum = 0;   // v5.51.3: accumulated ctrl+wheel delta between zoom ste
 function onCanvasWheel(e) {
   if (e.__crumbsLensWheelHandled) return;
   e.__crumbsLensWheelHandled = true;
+  if (lensRegionOn()) {                // full-screen lens: wheel zooms at the cursor
+    e.preventDefault();
+    const ldy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY, lr = stage.getBoundingClientRect();
+    const f = Math.exp(-Math.max(-120, Math.min(120, ldy)) * (e.ctrlKey ? 0.01 : 0.0018));
+    const np = lensPx * f;
+    lensSetPx(Math.abs(np - lensPx) < 1 ? lensPx + Math.sign(np - lensPx) : np, e.clientX - lr.left, e.clientY - lr.top);
+    return;
+  }
+  if (playRegionOn()) {                // v6.2: Play wheel / trackpad pinch ride the N continuum
+    e.preventDefault();
+    const pdy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+    playZoomBy(Math.exp(Math.max(-120, Math.min(120, pdy)) * (e.ctrlKey ? 0.01 : 0.0015)));
+    return;
+  }
   if (!e.ctrlKey) return;              // plain wheel: no binding today — untouched
   e.preventDefault();                  // block the browser's page zoom
   const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;  // wheel lines -> px
@@ -9352,6 +10184,7 @@ function kbTypingTarget(t) {
 }
 function panMapByTiles(dx, dy) {
   if (!W) return;
+  if (lensRegionOn()) { lensPanBy(-dx * lensPx, -dy * lensPx); return; }
   panX -= dx * tilePx;
   panY -= dy * tilePx;
   clampPan(); layout();
@@ -9359,6 +10192,7 @@ function panMapByTiles(dx, dy) {
 let kbStepCool = 0;   // v5.67.0: WASD step cooldown, mirrors the gamepad's padCool
 function kbCharStep(dx, dy) {
   const now = performance.now();
+  playCancelFlight();   // v6.2: movement keys end a flight at the current altitude
   if (now < kbStepCool) return;
   kbStepCool = now + Math.max((typeof RULES !== "undefined" && RULES.walk_ms) || 140, 150);
   doStep(dx, dy, false);
@@ -9404,6 +10238,16 @@ function onKbMove(e) {
     case "a": case "A": if (activePlay) kbCharStep(-1, 0); else handled = false; break;
     case "d": case "D": if (activePlay) kbCharStep(1, 0); else handled = false; break;
     case " ": if (activePlay) { e.preventDefault(); playInteract(); } else handled = false; break;
+    case "1": if (activePlay) playGoMode("first"); else handled = false; break;
+    case "2": if (activePlay) playGoMode("ground"); else handled = false; break;
+    case "3": if (activePlay) playGoMode("survey"); else handled = false; break;
+    case "4": if (activePlay) playGoMode("world"); else handled = false; break;
+    case "p": case "P": if (activePlay) { uiClean = !uiClean; applyUiClean(); toast(uiClean ? "photo mode — P to bring the HUD back" : "HUD back"); } else handled = false; break;
+    case "f": case "F": if (activePlay && window.flightToggle) window.flightToggle(); else handled = false; break;
+    case "q": case "Q": if (activePlay) playCycleQuality(); else handled = false; break;
+    case "t": case "T": if (activePlay && window.shrineToggle) window.shrineToggle(); else handled = false; break;
+    case "l": case "L": if (!activePlay) lensToggle(); else handled = false; break;
+    case "Escape": if (lensFull) lensToggle(false); else handled = false; break;
     default: handled = false;
   }
   if (!activePlay && !handled) {
@@ -9469,7 +10313,9 @@ $("end-again").onclick = async () => {
   toast("back to the start — go again");
 };
 async function playTap(cell) {
+  if (wpArmed) { wpArmed = false; playWaypoint = { x: cell.x, y: cell.y }; skyPaint(); queueRender(); toast("waypoint set"); return; }
   if (heroTimer || playOver) return;  // let the current walk finish first
+  playCancelFlight();   // v6.2
   // v5.40: tapping a paused walker while standing next to him = hello, no walk
   if (hero) {
     // v5.50: tapping Melody herself while standing close = talk, no walk
@@ -9478,7 +10324,7 @@ async function playTap(cell) {
         Math.max(Math.abs(melodyNpc.x - hero.x), Math.abs(melodyNpc.y - hero.y)) <= 2) {
       openMelDock(); return;
     }
-    const w = npcs.find(n => n.pauseUntil &&
+    const w = npcs.find(n => n.pauseUntil && !n.melody &&
       Math.round(n.x) === cell.x && Math.round(n.y) === cell.y &&
       Math.max(Math.abs(n.x - hero.x), Math.abs(n.y - hero.y)) <= 1);
     if (w) { fireWalkerInteract(w); return; }
@@ -9504,9 +10350,14 @@ async function playTap(cell) {
   const evts = r.events || []; // v3.9: per-step game-rule events
   let i = 0;
   const step = async () => {
+    if (hero) {   // v6.2: facing follows the walk
+      const fx = Math.sign(path[i][0] - hero.x), fy = Math.sign(path[i][1] - hero.y);
+      if (fx || fy) playFacing = { dx: fx, dy: fy };
+    }
     hero = { x: path[i][0], y: path[i][1] };
     heroSwimming = !!swim[i];   // ripple + slow wading through water
     heroInDeep = !!deep[i];     // v3.6: lights the swim-animation hook below
+    heroStepT = performance.now();
     const evs = evts[i] || [];
     i++; render();
     // v5.40: walked up to a resting walker — he notices you
@@ -9543,6 +10394,9 @@ async function togglePlay() {
     buildBreakUIOff();   // v5.29: a fresh run never starts mid-break
     const r = await api("/api/play/start", {});
     if (!r.ok) { toast("play failed"); return; }
+    playResetView();   // v6.2: fresh run, fresh altitude
+    shrineLoad();
+    heroAnimKick();
     playMode = true; document.body.classList.add("play-follow"); hero = { x: r.x, y: r.y };
     walkerShown = new Set();   // v5.40: fresh hellos for a fresh run
     // v5.29: the flagged PC leads this run — his sprite and his size.
@@ -9584,7 +10438,7 @@ async function togglePlay() {
   } else {
     await api("/api/play/stop", {});
     if (buildBreak) buildBreakUIOff();   // v5.29: leaving play ends the break too (timers already cleared below)
-    playMode = false; document.body.classList.remove("play-follow"); hero = null; heroSwimming = false; heroInDeep = false;
+    playMode = false; playFlight = null; clearTimeout(heroAnimTimer); heroAnimTimer = null; document.body.classList.remove("play-follow"); hero = null; heroSwimming = false; heroInDeep = false;
     playHeroTid = null; playHeroSize = 1.0;   // v5.29: run's hero pick rests
     if (heroTimer) { clearInterval(heroTimer); heroTimer = null; }
     if (npcTimer) { clearInterval(npcTimer); npcTimer = null; }   // v3.4: walkers rest
@@ -9966,12 +10820,13 @@ function clipSetCaption(text) {
 function drawClipCaption() {
   if (!clipCaption) return;
   if (performance.now() > clipCaption.until) { clipCaption = null; return; }
-  const pad = 10, fs = Math.max(13, Math.round(canvas.width / 48));
+  const cvW = rgActive ? scrW : canvas.width, cvH = rgActive ? scrH : canvas.height;
+  const pad = 10, fs = Math.max(13, Math.round(cvW / 48));
   ctx.save();
   ctx.font = "600 " + fs + "px system-ui, sans-serif";
   ctx.textBaseline = "alphabetic";
   const words = ("Melody: " + clipCaption.text).split(" "), lines = [];
-  const maxW = canvas.width - pad * 2;
+  const maxW = cvW - pad * 2;
   let line = "";
   for (const w of words) {
     const t = line ? line + " " + w : w;
@@ -9981,9 +10836,9 @@ function drawClipCaption() {
   if (line) lines.push(line);
   const lh = Math.round(fs * 1.35), bh = lines.length * lh + pad;
   ctx.fillStyle = "rgba(0,0,0,0.62)";
-  ctx.fillRect(0, canvas.height - bh, canvas.width, bh);
+  ctx.fillRect(0, cvH - bh, cvW, bh);
   ctx.fillStyle = "#fff";
-  lines.forEach((ln, i) => ctx.fillText(ln, pad, canvas.height - bh + pad * 0.6 + (i + 1) * lh - 4));
+  lines.forEach((ln, i) => ctx.fillText(ln, pad, cvH - bh + pad * 0.6 + (i + 1) * lh - 4));
   ctx.restore();
 }
 // -- gallery: IndexedDB, reviewed on his schedule -----------------------------
@@ -10366,12 +11221,13 @@ function wxRand(i, s) {
   return (h % 1000) / 1000;
 }
 function drawWeather() {
-  const wpx = canvas.width, hpx = canvas.height;
+  const wpx = rgActive ? scrW : canvas.width, hpx = rgActive ? scrH : canvas.height;
   if (worldWeather === "fog") {
     ctx.fillStyle = "rgba(150,160,175,0.30)";
     ctx.fillRect(0, 0, wpx, hpx);
     return;
   }
+  if (worldWeather === "storm" && wxFrame % 45 === 0 && Math.random() < 0.3) Sfx.thunder();
   if (worldWeather === "storm" && wxFrame % 45 < 2) {
     ctx.fillStyle = "rgba(240,245,255,0.45)";   // lightning
     ctx.fillRect(0, 0, wpx, hpx);
@@ -11276,6 +12132,8 @@ async function loadWorld() {
   } catch (e) {}
 }
 function paintWorld() {
+  Sfx.setWeather(worldWeather);
+  document.querySelectorAll("#sky-panel [data-w]").forEach(b => b.classList.toggle("on", b.dataset.w === worldWeather));
   document.querySelectorAll("#world-meters button").forEach(b => {
     b.classList.toggle("on", !!meterProfile[b.dataset.m]);
   });
@@ -11305,7 +12163,7 @@ function syncNature(r) {
   meters = n.meters || meters;
   woodCount = (n.inv && n.inv.wood) || 0;
   if (n.profile && n.profile.meters) meterProfile = n.profile.meters;
-  if (n.profile && n.profile.weather) worldWeather = n.profile.weather;  // v4.1
+  if (n.profile && n.profile.weather) { worldWeather = n.profile.weather; Sfx.setWeather(worldWeather); }  // v4.1
   paintMeters();
 }
 function paintMeters() {
@@ -11668,6 +12526,7 @@ dpad.querySelectorAll("button").forEach(b => {
 });
 async function doStep(dx, dy, repeat) {
   if (!playMode || playOver || buildBreak) return;   // v3.9: a win/lose freezes movement; v5.29: so does a build-break
+  playCancelFlight(); playFacing = { dx: Math.sign(dx), dy: Math.sign(dy) };   // v6.2: any input hands the view back
   let r;
   try { r = await api("/api/play/step", { dx, dy }); }
   catch (e) { return; }
@@ -11676,7 +12535,7 @@ async function doStep(dx, dy, repeat) {
   if (r.warp) { await warpRefresh(r); return; }   // v5.29: stepped through a portal
   if (r.notice) toast(r.notice);   // v5.42: broken link / broken edge
   hero = { x: r.x, y: r.y };
-  heroSwimming = !!r.swim; heroInDeep = !!r.deep;
+  heroSwimming = !!r.swim; heroInDeep = !!r.deep; heroStepT = performance.now();
   syncNature(r);   // v4.0: meters move on every step
   render();
   syncMissionHud();   // v5.12: objectives update per step
@@ -11908,7 +12767,7 @@ async function buildNpcs() {
   });
 }
 function npcTick(dt) {
-  const SPEED = 2.4;   // tiles per second
+  const SPEED0 = 2.4;   // tiles per second
   const now = (typeof performance !== "undefined" && performance.now)
     ? performance.now() : Date.now();
   let moved = false, resting = false;
@@ -11917,12 +12776,17 @@ function npcTick(dt) {
   const melodyLive = npcs.some(n => n.melody);
   npcs.forEach(n => {
     if (!n.loop.length) return;
+    if (!n.melody && hero && !areaAwake(n.x, n.y, hero.x, hero.y, W, H)) return;   // sleeping area
+    const SPEED = n.speed || SPEED0;
+    // she stops for company: near the hero or in conversation, then resumes the circuit
+    if (n.melody && hero && (MELODY.open || Math.max(Math.abs(n.x - hero.x), Math.abs(n.y - hero.y)) <= 2)) { n.swimming = false; return; }
     // v5.40: stop pauses — the timer runs on the wall clock, so a pause
     // survives a slept tab and he walks on when it ends. Tapping him
     // mid-pause never touches the timer.
     if (n.pauseUntil) {
       if (now < n.pauseUntil) { if (n.pauseMode === "sleep") resting = true; return; }
       n.pauseUntil = 0; n.pauseMode = null;   // timer done — walk on
+      if (n.melody) melodyLapRoll(n);
       setNpcState(n, "walk", now);            // v5.43: back to the Walk state
     }
     let rem = dt * SPEED, guard = 0;
@@ -11955,6 +12819,7 @@ function npcTick(dt) {
       }
     }
   });
+  npcs.forEach(n => { if (n.melody && n.swimMap) n.swimming = !!n.swimMap[(n.seg + n.loop.length - 1) % n.loop.length] || n.animState === "swim"; });
   if (moved) queueRender();   // v5.3: batched with the frame
   else if (resting) queueRender();   // v5.40: the 💤 bob needs frames too
   else if (melodyLive && typeof melodySpriteReady === "function" && melodySpriteReady()) queueRender();   // v5.61: her glow + hover
@@ -11968,6 +12833,18 @@ function drawNpc(n) {
   const px = n.x * tilePx, py = n.y * tilePx;   // v5.50: up early — her marker needs it too
   // v5.50: Melody's marker — purple glow ring, 💜 overhead, her name on a
   // pill. Drawn even when her body tile is missing: she's herself regardless.
+  if (n.melody && n.swimming) {
+    const ph = (performance.now() % 1100) / 1100;
+    ctx.save();
+    for (let k = 0; k < 2; k++) {
+      const q = (ph + k / 2) % 1;
+      ctx.strokeStyle = "rgba(190,230,255," + (0.7 * (1 - q)).toFixed(2) + ")"; ctx.lineWidth = Math.max(1, tilePx * 0.04);
+      ctx.beginPath();
+      ctx.ellipse(px + tilePx / 2, py + tilePx * 0.85, tilePx * (0.28 + 0.3 * q), tilePx * (0.1 + 0.12 * q), 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
   if (n.melody) {
     const cx = px + tilePx / 2;
     ctx.save();
@@ -12118,7 +12995,7 @@ function pauseListFor(p) {
 }
 let walkerShown = new Set();
 function walkerNear(x, y) {
-  return npcs.filter(n => n.pauseUntil &&
+  return npcs.filter(n => n.pauseUntil && !n.melody &&
     !(n.ax != null && Math.round(n.x) === n.ax && Math.round(n.y) === n.ay) &&
     Math.max(Math.abs(n.x - x), Math.abs(n.y - y)) <= 1);
 }
@@ -12215,6 +13092,54 @@ function melodyBodyTile() {
   return playHeroTid;
 }
 
+// §14 Melody's daily circuit: a ring of stops around Origin (her spawn), one lap
+// per in-game day, a lingering pause at each stop, and a swim detour when water is near.
+function melodyCircuitStops(ox, oy, w, h, n) {
+  const r = Math.max(4, Math.min(w, h) * 0.32), out = [];
+  for (let i = 0; i < (n || 6); i++) {
+    const a = (i / (n || 6)) * Math.PI * 2 + 0.5;
+    out.push([Math.max(1, Math.min(w - 2, Math.round(ox + Math.cos(a) * r))),
+              Math.max(1, Math.min(h - 2, Math.round(oy + Math.sin(a) * r)))]);
+  }
+  return out;
+}
+// speed (tiles/s) and per-stop linger (s) so walking + lingering fills one day
+function melodyCircuitPlan(totalTiles, stops, daySecs) {
+  const speed = Math.min(2.4, Math.max(1, totalTiles / (daySecs * 0.8)));
+  const walk = totalTiles / speed;
+  return { speed, linger: Math.max(4, (daySecs - walk) / Math.max(1, stops)) };
+}
+async function melodyStartCircuit(m) {
+  const ox = Math.round(m.x), oy = Math.round(m.y);
+  const spots = [];
+  for (const s of melodyCircuitStops(ox, oy, W, H, 6)) {
+    const r = await api("/api/play/melody_spot", { x: s[0], y: s[1] }).catch(() => null);
+    if (r && r.ok && r.spot) spots.push({ c: r.spot, swim: false });
+  }
+  const wr = await api("/api/play/melody_spot", { x: ox, y: oy, water: true }).catch(() => null);
+  if (wr && wr.ok && wr.spot && spots.length > 1) spots.splice(Math.min(2, spots.length), 0, { c: wr.spot, swim: true });
+  if (spots.length < 2) return;
+  spots.push({ c: [ox, oy], swim: false });
+  const legs = []; let from = [ox, oy];
+  spots.forEach(s => { legs.push([from, s.c]); from = s.c; });
+  const r = await api("/api/patrol-paths", { legs }).catch(() => null);
+  if (!r || !r.ok || !melodyNpc || melodyNpc !== m) return;
+  const loop = [], swimMap = [], stopAt = [], pz = [];
+  r.paths.forEach((p, i) => {
+    if (!p.length) return;
+    p.forEach((c, k) => { loop.push(c); swimMap.push(r.swims && r.swims[i] ? r.swims[i][k] : 0); });
+    stopAt[loop.length - 1] = pz.length;
+    pz.push({ secs: 0, mode: "stand", swim: spots[i].swim });
+  });
+  if (!loop.length) return;
+  const plan = melodyCircuitPlan(loop.length, pz.length, DAY_LEN_MS / 1000);
+  pz.forEach(p => { p.secs = p.swim ? 0 : plan.linger; p.state = p.swim ? "swim" : "idle"; p.base = plan.linger; });
+  Object.assign(m, { loop, swimMap, stopAt, pauses: pz, speed: plan.speed, seg: 0, pauseUntil: 0, pauseMode: null, animState: "walk" });
+}
+// each lap she swims at the water stop only now and then
+function melodyLapRoll(n) {
+  (n.pauses || []).forEach(p => { if (p.swim) p.secs = Math.random() < 0.4 ? 20 : 0; });
+}
 async function spawnMelodyNpc() {
   melodyNpc = null;
   $("mel-talk").hidden = true;
@@ -12227,6 +13152,7 @@ async function spawnMelodyNpc() {
     x: spot[0], y: spot[1], loop: [], seg: 0, size: 1.0,
     nm: "Melody", interactive: true };
   npcs.push(melodyNpc);
+  melodyStartCircuit(melodyNpc).catch(() => {});
   queueRender();
   melodyProximity();   // she may have spawned within earshot
 }
@@ -13363,6 +14289,37 @@ function ensureAnim(t) {
 // four directions sharing the full strip — existing tiles keep working.
 const RIG_DIRS = ["down", "up", "left", "right"];
 const RIG_DIR_LABEL = { down: "⬇ down", up: "⬆ up", left: "⬅ left", right: "➡ right" };
+// v6.3: the core character set — what Play asks the rig for. Missing actions
+// fall back along these chains so a sheet with only idle+walk still works.
+const RIG_CORE_ACTIONS = ["idle", "walk", "run", "swim"];
+const RIG_FALLBACK = { run: ["walk", "idle"], swim: ["walk", "idle"], walk: ["idle"], talk: ["idle"], hurt: ["idle"] };
+// Row order of the common RPG sprite sheet: down, left, right, up.
+const RIG_SHEET_ROWS = ["down", "left", "right", "up"];
+function rigDirFromFacing(f) {
+  if (!f) return "down";
+  if (f.dy < 0) return "up";
+  if (f.dy > 0) return "down";
+  if (f.dx < 0) return "left";
+  if (f.dx > 0) return "right";
+  return "down";
+}
+// What the hero is doing right now. msSinceStep < 0 means "never stepped".
+function heroActionFor(swimming, deep, running, msSinceStep) {
+  if (swimming || deep) return "swim";
+  if (msSinceStep >= 0 && msSinceStep < 380) return running ? "run" : "walk";
+  return "idle";
+}
+// Split a strip of n frames into 4 rows (down,left,right,up), `per` frames each.
+function rigAutoRows(n, per) {
+  per = Math.max(1, per | 0);
+  const out = {};
+  RIG_SHEET_ROWS.forEach((d, r) => {
+    const arr = [];
+    for (let i = 0; i < per; i++) { const k = r * per + i; if (k < n) arr.push(k); }
+    out[d] = arr.length ? arr : [0];
+  });
+  return out;
+}
 function ensureRig(t) {
   if (!t.rig || typeof t.rig !== "object" || !t.rig.actions || typeof t.rig.actions !== "object") {
     const n = Math.max(1, t.frames | 0 || 1);
@@ -13393,11 +14350,25 @@ function ensureRig(t) {
   });
   return t.rig;
 }
+// add any missing core action, cloned from the first existing one
+function rigAddCore(t) {
+  const rig = ensureRig(t);
+  const src = rig.actions[rig.default_action] || rig.actions[Object.keys(rig.actions)[0]];
+  RIG_CORE_ACTIONS.forEach(a => {
+    if (rig.actions[a]) return;
+    const d = {};
+    RIG_DIRS.forEach(k => { d[k] = { frames: src[k].frames.slice(), frame_ms: Math.max(60, Math.round(src[k].frame_ms * (a === "run" ? 0.6 : 1))) }; });
+    rig.actions[a] = d;
+  });
+  return rig;
+}
 function rigClip(t, action, direction) {
   if (!t) return null;
   const rig = ensureRig(t);
   const acts = rig.actions || {};
-  const act = acts[action] || acts[rig.default_action] || acts["idle"] || acts[Object.keys(acts)[0]];
+  let act = acts[action];
+  if (!act) { const ch = RIG_FALLBACK[action] || []; for (const a of ch) if (acts[a]) { act = acts[a]; break; } }
+  act = act || acts[rig.default_action] || acts["idle"] || acts[Object.keys(acts)[0]];
   if (!act) return null;
   return act[direction] || act[rig.default_direction] || act["down"] || act[RIG_DIRS.find(d => act[d])] || null;
 }
@@ -13513,6 +14484,21 @@ function renderRigEditor() {
     animPush(); renderRigEditor();
   };
   actsBox.appendChild(add);
+  const core = document.createElement("button");
+  core.type = "button"; core.textContent = "+ idle/walk/run/swim";
+  core.title = "Add any missing core action (copies the current one) so Play has all four";
+  core.onclick = () => { rigAddCore(t); animPush(); renderRigEditor(); toast("core actions ready"); };
+  actsBox.appendChild(core);
+  const rows = document.createElement("button");
+  rows.type = "button"; rows.textContent = "▦ split rows";
+  rows.title = "Treat this action as a sheet of 4 rows: down, left, right, up";
+  rows.onclick = () => {
+    const per = Math.max(1, Math.floor((t.frames | 0) / 4));
+    const m = rigAutoRows(t.frames | 0, per);
+    RIG_DIRS.forEach(d => { rig.actions[rigEditAction][d].frames = m[d].slice(); });
+    animPush(); renderRigEditor(); toast("split into 4 direction rows of " + per);
+  };
+  actsBox.appendChild(rows);
   // direction rows for the selected action
   const act = rig.actions[rigEditAction];
   if (!act) return;
@@ -14677,6 +15663,8 @@ $("btn-clear").onclick = async () => {
   await api("/api/clear_layer", { layer }); await refresh(); toast("layer cleared");
 };
 function zoomCenter(d) {
+  if (lensRegionOn()) { lensZoomBy(d > 0 ? 1.25 : 0.8); return; }
+  if (playRegionOn()) { playZoomBy(d > 0 ? 0.8 : 1.25); return; }   // v6.2: Play zoom changes N
   manualZoom = true;
   // v5.41: say why zoom-in stops on huge maps instead of silently ignoring it
   if (d > 0 && tilePx >= maxTilePx() && maxTilePx() < 64)
@@ -14687,9 +15675,11 @@ function zoomCenter(d) {
   const step = tilePx <= 8 ? 1 : 8;
   zoomAt(r.left + r.width / 2, r.top + r.height / 2, tilePx + Math.sign(d) * step);
 }
+document.querySelectorAll("#play-modes button").forEach(b => { b.onclick = () => playGoMode(b.dataset.mode); });
 $("zoom-in").onclick  = () => zoomCenter(8);
+{ const lb = $("lens-full-toggle"); if (lb) lb.onclick = () => lensToggle(); }
 $("zoom-out").onclick = () => zoomCenter(-8);
-$("zoom-fit").onclick = () => { manualZoom = false; panX = 0; panY = 0; fitTiles(); render(); toast("fit to screen"); };
+$("zoom-fit").onclick = () => { if (lensRegionOn()) { lensSetPx(LENS_PX_DEFAULT); return; } if (playRegionOn()) { playGoMode("survey"); return; } manualZoom = false; panX = 0; panY = 0; fitTiles(); render(); toast("fit to screen"); };
 // v5.51.1: grid lines toggle — per-device, default on (the historical look).
 let showGrid = true;
 try { showGrid = localStorage.getItem("crumbs.showGrid") !== "0"; } catch (e) {}
@@ -15326,7 +16316,42 @@ $("sfx-mute").onclick = () => { Sfx.toggleMute(); sfxPaintUI(); };
 $("sfx-amb").onclick = () => { Sfx.toggleAmb(); sfxPaintUI(); };
 $("sfx-vol").oninput = (e) => Sfx.setVol(e.target.value / 100);
 $("sfx-test").onclick = () => { Sfx.mumble(); Sfx.chirp(); Sfx.splash(); };
-sfxPaintUI();
+function skyPaint() {
+  sfxPaintUI();
+  $("sky-mute").textContent = Sfx.isMuted() ? "🔇" : "🔊";
+  $("sky-mute").classList.toggle("on", !Sfx.isMuted());
+  $("sky-wind").textContent = "💨 " + (Sfx.ambOn() ? "on" : "off"); $("sky-wind").classList.toggle("on", Sfx.ambOn());
+  $("sky-nat").textContent = "🐦 " + (Sfx.natOn() ? "on" : "off"); $("sky-nat").classList.toggle("on", Sfx.natOn());
+  $("sky-wxs").textContent = "🌧 " + (Sfx.wxOn() ? "on" : "off"); $("sky-wxs").classList.toggle("on", Sfx.wxOn());
+  $("sky-vol").value = Math.round(Sfx.getVol() * 100);
+  $("sky-toggle").classList.toggle("on", !$("sky-panel").hidden);
+  $("sky-day").textContent = "🌗 " + (dayCfg.on ? dayLabel(dayNow()) : "held");
+  $("sky-day").classList.toggle("on", dayCfg.on);
+  $("sky-time").value = Math.round(dayNow() * 100);
+  $("sky-wp").textContent = wpArmed ? "📍 tap map…" : playWaypoint ? "📍 clear" : "📍 set";
+  $("sky-wp").classList.toggle("on", wpArmed || !!playWaypoint);
+}
+$("sky-day").onclick = () => { const t = dayNow(); dayCfg.on = !dayCfg.on; dayCfg.t = t; dayCfg.at = performance.now(); daySave(); skyPaint(); queueRender(); };
+$("sky-time").oninput = e => { dayCfg.t = e.target.value / 100; dayCfg.at = performance.now(); daySave(); queueRender(); };
+$("sky-wp").onclick = () => {
+  if (playWaypoint) { playWaypoint = null; wpArmed = false; }
+  else if (playMode) { wpArmed = !wpArmed; if (wpArmed) toast("tap the map to drop a waypoint"); }
+  else toast("waypoints work in Play");
+  skyPaint(); queueRender();
+};
+$("sky-hud").onclick = () => { uiClean = !uiClean; applyUiClean(); toast(uiClean ? "HUD hidden — press P or ☰ to bring it back" : "HUD back"); };
+setInterval(() => { if (playMode && dayCfg.on) { queueRender(); if (!$("sky-panel").hidden) skyPaint(); } }, 2000);
+$("sky-toggle").onclick = () => { $("sky-panel").hidden = !$("sky-panel").hidden; skyPaint(); };
+$("sky-mute").onclick = () => { Sfx.toggleMute(); skyPaint(); };
+$("sky-wind").onclick = () => { Sfx.toggleAmb(); skyPaint(); };
+$("sky-nat").onclick = () => { Sfx.toggleNat(); skyPaint(); };
+$("sky-wxs").onclick = () => { Sfx.toggleWx(); skyPaint(); };
+$("sky-vol").oninput = e => Sfx.setVol(e.target.value / 100);
+document.querySelectorAll("#sky-wx [data-w]").forEach(b => {
+  b.onclick = async () => { worldWeather = b.dataset.w; paintWorld(); try { await api("/api/world", { weather: worldWeather }); } catch (e) {} };
+});
+$("sfx-mute").addEventListener("click", skyPaint); $("sfx-amb").addEventListener("click", skyPaint);
+sfxPaintUI(); paintWorld(); skyPaint();
 Sfx.syncAmb();   // restore wind if it was on
 $("menu-save").onclick = () => { closeOverlays(); doSave(); };
 $("menu-saveas").onclick = () => { closeOverlays(); doSaveAs(); };
@@ -20212,6 +21237,115 @@ function shellDismissCoach(file) {
   var c = $("sh-coach");
   if (c) c.hidden = true;
 }
+// ---- Simple View menu bar -------------------------------------------------
+// Every item drives the real classic function/button inside the map frame.
+function shellFrameDo(fn) {
+  var fw = shellFrameWin();
+  if (!fw) { shellToast("The map is still loading \u2014 try again in a moment."); return; }
+  try { fn(fw); } catch (e) { shellToast("That action isn't available yet."); }
+}
+function shellFrameClick(id) {
+  shellFrameDo(function (fw) {
+    var el = fw.document.getElementById(id);
+    if (!el) throw new Error("missing " + id);
+    el.click();
+  });
+}
+function shellMenubarItems(name) {
+  var C = shellFrameClick, F = shellFrameDo;
+  var W = window.CrumbsShell;
+  if (name === "file") return [
+    ["\uD83D\uDCBE Save", function () { C("menu-save"); }],
+    ["Save As\u2026", function () { C("menu-saveas"); }],
+    ["\uD83D\uDCC2 Load\u2026", function () { C("menu-load"); }],
+    ["Save slots\u2026", function () { C("menu-slots"); }],
+    ["My worlds", function () { shellShowWorlds(); }],
+    ["New world\u2026", function () { shellShowCreateStep1(); }],
+    null,
+    ["Export PNG", function () { C("menu-export"); }],
+    ["\uD83C\uDFAC Birth certificate\u2026", function () { C("menu-birth"); }],
+    ["Recovery\u2026", function () { C("menu-recovery"); }]
+  ];
+  if (name === "edit") return [
+    ["\u21A9 Undo", function () { F(function (fw) { fw.doUndo(); }); }],
+    ["\u21AA Redo", function () { F(function (fw) { fw.doRedo(); }); }],
+    null,
+    ["Paint terrain", function () { shellNavGo("build"); shellOpenBuildDrawer("paint"); }],
+    ["Place objects", function () { shellNavGo("build"); shellOpenBuildDrawer("place"); }],
+    ["Population", function () { shellNavGo("population"); }],
+    ["Assets and imports", function () { shellNavGo("assets"); }],
+    ["Animation", function () { F(function (fw) { fw.openSheet("anim"); }); }]
+  ];
+  if (name === "view") return [
+    ["\u26F6 Full-screen lens", function () { F(function (fw) { fw.lensToggle(); }); }],
+    ["\u25A6 Grid lines", function () { C("btn-grid"); }],
+    ["Fit map to screen", function () { C("zoom-fit"); }],
+    ["\uD83C\uDF26 Weather and sounds", function () { C("sky-toggle"); }],
+    ["\uD83D\uDE48 Show / hide HUD", function () { C("menu-clean"); }],
+    null,
+    ["World settings", function () { shellNavGo("world"); }],
+    ["Display settings", function () { shellOpenSettings(null); }]
+  ];
+  if (name === "play") return [
+    ["\u25B6 Play", function () { shellNavGo("play"); }],
+    ["\u2708 Flight test panel", function () { F(function (fw) { fw.flightToggle(); }); }],
+    ["\uD83D\uDDFF Teleport shrines", function () { F(function (fw) { fw.shrineToggle(); }); }],
+    ["Build", function () { shellNavGo("build"); }],
+    ["World", function () { shellNavGo("world"); }]
+  ];
+  return [
+    ["\u2699 Settings", function () { shellOpenSettings(null); }],
+    ["\uD83C\uDF10 Switch world", function () { shellShowWorlds(); }],
+    ["\uD83D\uDD11 Change password", function () { C("btn-change-pass"); }],
+    ["\uD83D\uDD10 Two-factor auth", function () { C("btn-2fa"); }],
+    ["\uD83D\uDEE0 Creator Tools", function () { shellEnterCreator(); }],
+    null,
+    ["\u2139 Help", function () { shellMenuHelp(); }],
+    ["\u26A0 Report a problem", function () { shellMenuReport(); }],
+    ["About this build", function () { shellMenuAbout(); }],
+    null,
+    ["\u2192 Sign out", function () { shellSignOut(); }]
+  ];
+}
+function shellCloseMenubar() {
+  var d = document.getElementById("sh-mdrop");
+  if (d) d.remove();
+  document.removeEventListener("keydown", shellMenubarKeys, true);
+  document.removeEventListener("pointerdown", shellMenubarAway, true);
+  Array.prototype.forEach.call(document.querySelectorAll("#sh-mbar .sh-mtop"), function (b) { b.setAttribute("aria-expanded", "false"); });
+}
+function shellMenubarKeys(e) { if (e.key === "Escape") shellCloseMenubar(); }
+function shellMenubarAway(e) {
+  if (!e.target.closest || (!e.target.closest("#sh-mdrop") && !e.target.closest("#sh-mbar"))) shellCloseMenubar();
+}
+function shellOpenMenubar(btn) {
+  var was = btn.getAttribute("aria-expanded") === "true";
+  shellCloseMenubar();
+  if (was) return;
+  var items = shellMenubarItems(btn.getAttribute("data-m"));
+  var d = document.createElement("div");
+  d.id = "sh-mdrop"; d.setAttribute("role", "menu");
+  items.forEach(function (it) {
+    if (!it) { d.appendChild(document.createElement("hr")); return; }
+    var b = document.createElement("button");
+    b.type = "button"; b.setAttribute("role", "menuitem"); b.textContent = it[0];
+    b.onclick = function () { shellCloseMenubar(); it[1](); };
+    d.appendChild(b);
+  });
+  shellRootEl().appendChild(d);
+  var r = btn.getBoundingClientRect();
+  d.style.top = Math.round(r.bottom + 4) + "px";
+  d.style.left = Math.max(8, Math.min(Math.round(r.left), window.innerWidth - d.offsetWidth - 8)) + "px";
+  btn.setAttribute("aria-expanded", "true");
+  document.addEventListener("keydown", shellMenubarKeys, true);
+  document.addEventListener("pointerdown", shellMenubarAway, true);
+  var first = d.querySelector("button"); if (first) first.focus();
+}
+function shellWireMenubar() {
+  Array.prototype.forEach.call(document.querySelectorAll("#sh-mbar .sh-mtop"), function (b) {
+    b.onclick = function () { shellOpenMenubar(b); };
+  });
+}
 function shellShowCanvas(file) {
   window.CrumbsShell.state.destination = "build";
   window.CrumbsShell.state.mode = "simple";
@@ -20235,6 +21369,13 @@ function shellShowCanvas(file) {
     '<div class="sh-screen sh-canvas-screen">' +
       '<div class="sh-canvas-topbar">' +
         '<span class="sh-world-chip" id="sh-canvas-chip"></span>' +
+        '<nav class="sh-mbar" id="sh-mbar" aria-label="Menu bar">' +
+          '<button type="button" class="sh-mtop" data-m="file" aria-haspopup="menu" aria-expanded="false">File</button>' +
+          '<button type="button" class="sh-mtop" data-m="edit" aria-haspopup="menu" aria-expanded="false">Edit</button>' +
+          '<button type="button" class="sh-mtop" data-m="view" aria-haspopup="menu" aria-expanded="false">View</button>' +
+          '<button type="button" class="sh-mtop" data-m="play" aria-haspopup="menu" aria-expanded="false">Play</button>' +
+          '<button type="button" class="sh-mtop" data-m="profile" aria-haspopup="menu" aria-expanded="false">Profile</button>' +
+        '</nav>' +
         '<button type="button" class="sh-command-open" id="sh-command-open" aria-label="Search actions" title="Search actions (Ctrl+K)">&#8981; <span>Search</span></button>' +
         '<button type="button" class="sh-menu-btn" id="sh-canvas-menu" aria-label="Menu" aria-haspopup="dialog">\u2630</button>' +
       "</div>" +
@@ -20249,6 +21390,7 @@ function shellShowCanvas(file) {
   $("sh-canvas-chip").textContent = friendlyName(file);
   $("sh-canvas-menu").onclick = function () { shellOpenMenu($("sh-canvas-menu")); };
   $("sh-command-open").onclick = shellOpenCommandPalette;
+  shellWireMenubar();
   shellWireNav(root);
   // Stage 9: honest loading state while the framed map boots (first open can
   // take a few seconds). Hides on iframe load; if it takes too long, say so.

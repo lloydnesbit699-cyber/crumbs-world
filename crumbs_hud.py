@@ -6859,6 +6859,151 @@ def _visibility_grid(wrld, vx, vy):
              for x in range(wrld.width)] for y in range(wrld.height)]
 
 
+def _near_water(x, y, r=14):
+    """Nearest swimmable water cell to (x, y) within r, or None."""
+    best = None
+    for dy in range(-r, r + 1):
+        for dx in range(-r, r + 1):
+            tx, ty = x + dx, y + dy
+            if not (0 <= tx < world.width and 0 <= ty < world.height):
+                continue
+            if not _swim_at(tx, ty) or _deep_at(tx, ty) or not _walkable(tx, ty):
+                continue
+            d = dx * dx + dy * dy
+            if best is None or d < best[0]:
+                best = (d, [tx, ty])
+    return best[1] if best else None
+
+
+# -- §13.1 teleport shrines (stage 3). Star Beacon is the Origin (the spawn);
+# the seven travel shrines each sit in the biome they resemble, on a flat
+# walkable clearing reachable on foot from Origin, in seven different areas.
+SHRINE_AREA_TILES = 100
+SHRINE_DEFS = [
+    {"id": "star_beacon", "name": "Star Beacon", "icon": "\u2b50", "origin": True, "words": ()},
+    {"id": "frost_reaper", "name": "Frost Reaper", "icon": "\u2744\ufe0f",
+     "words": ("snow", "ice", "frost", "arctic", "frozen")},
+    {"id": "stone_warlord", "name": "Ram-Horned Stone Warlord", "icon": "\U0001f40f",
+     "words": ("mountain", "rock", "stone", "cliff", "boulder")},
+    {"id": "void_obelisk", "name": "Void Obelisk", "icon": "\U0001f573\ufe0f",
+     "words": ("dungeon", "cave", "void", "obsidian")},
+    {"id": "tide_mermaid", "name": "Tide Mermaid", "icon": "\U0001f9dc", "words": (), "shore": True},
+    {"id": "sun_falcon", "name": "Sun Falcon", "icon": "\U0001f985",
+     "words": ("desert", "sand", "dune")},
+    {"id": "forest_guardian", "name": "Forest Guardian", "icon": "\U0001f332",
+     "words": ("forest", "tree", "moss", "leaf")},
+    {"id": "wind_pillar", "name": "Wind Pillar", "icon": "\U0001f32c\ufe0f",
+     "words": ("grass", "hill", "plateau", "meadow")},
+]
+_shrine_cache = {"key": None, "plan": None}
+
+
+def _shrine_min_spacing():
+    """Lloyd: no closer than one in-game day of walking. A day of walking is
+    far larger than any map, so the rule is clamped to what the map can hold:
+    a third of the map diagonal (and never below 8 tiles)."""
+    diag = (world.width ** 2 + world.height ** 2) ** 0.5
+    return max(8.0, diag / 3.0)
+
+
+def _shrine_name_at(tx, ty):
+    tile = assets.tiles.get(world.data[ty][tx]) or {}
+    return str(tile.get("name", "")).lower()
+
+
+def _shrine_clear(tx, ty, r=None):
+    """Flat clearing: a (2r+1)^2 block of walkable dry ground."""
+    if r is None:
+        r = 2 if min(world.width, world.height) >= 60 else 1
+    for dy in range(-r, r + 1):
+        for dx in range(-r, r + 1):
+            x, y = tx + dx, ty + dy
+            if not (0 <= x < world.width and 0 <= y < world.height):
+                return False
+            if not _walkable(x, y) or _swim_at(x, y):
+                return False
+    return True
+
+
+def _shrine_reach(sx, sy):
+    """Flood fill over dry walkable ground from Origin."""
+    seen = {(sx, sy)}
+    stack = [(sx, sy)]
+    while stack:
+        x, y = stack.pop()
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = x + dx, y + dy
+            if (nx, ny) in seen or not (0 <= nx < world.width and 0 <= ny < world.height):
+                continue
+            if _walkable(nx, ny) and not _swim_at(nx, ny):
+                seen.add((nx, ny))
+                stack.append((nx, ny))
+    return seen
+
+
+def _shrine_fits(d, tx, ty):
+    if d.get("shore"):
+        for dx, dy in ((3, 0), (-3, 0), (0, 3), (0, -3)):
+            x, y = tx + dx, ty + dy
+            if 0 <= x < world.width and 0 <= y < world.height and _swim_at(x, y):
+                return True
+        return False
+    nm = _shrine_name_at(tx, ty)
+    return any(w in nm for w in d["words"])
+
+
+def _shrine_plan():
+    """Designer-fixed, deterministic placement for the current map."""
+    ox, oy = _find_spawn()
+    key = (world.width, world.height, ox, oy, hash(tuple(map(tuple, world.data))) if world.width * world.height <= 90000 else id(world.data))
+    if _shrine_cache["key"] == key:
+        return _shrine_cache["plan"]
+    reach = _shrine_reach(ox, oy)
+    step = 1 if world.width * world.height <= 40000 else 3
+    spacing = _shrine_min_spacing()
+    placed = [{"id": "star_beacon", "name": "Star Beacon", "icon": SHRINE_DEFS[0]["icon"],
+               "x": ox, "y": oy, "origin": True, "biome_ok": True}]
+    used_areas = {((ox - world.width // 2) // SHRINE_AREA_TILES, (oy - world.height // 2) // SHRINE_AREA_TILES)}
+    clear_cache = {}
+
+    def clear(x, y):
+        k = (x, y)
+        if k not in clear_cache:
+            clear_cache[k] = (x, y) in reach and _shrine_clear(x, y)
+        return clear_cache[k]
+
+    cells = [(x, y) for y in range(6, world.height - 6, step) for x in range(6, world.width - 6, step)]
+    for d in SHRINE_DEFS[1:]:
+        best = None
+        for relax in (0, 1, 2):
+            for (x, y) in cells:
+                if not clear(x, y):
+                    continue
+                if relax < 2 and not _shrine_fits(d, x, y):
+                    continue
+                area = ((x - world.width // 2) // SHRINE_AREA_TILES, (y - world.height // 2) // SHRINE_AREA_TILES)
+                if relax == 0 and area in used_areas:
+                    continue
+                dmin = min(((x - p["x"]) ** 2 + (y - p["y"]) ** 2) ** 0.5 for p in placed)
+                if relax < 2 and dmin < spacing and relax == 0:
+                    continue
+                # prefer the most distant candidate (spread), tie-break by position
+                score = (dmin, -y, -x)
+                if best is None or score > best[0]:
+                    best = (score, x, y, area, relax == 0)
+            if best:
+                break
+        if best:
+            _, x, y, area, ok = best
+            used_areas.add(area)
+            placed.append({"id": d["id"], "name": d["name"], "icon": d["icon"], "x": x, "y": y,
+                           "origin": False, "biome_ok": bool(ok)})
+    plan = {"shrines": placed, "spacing": round(spacing, 1), "buffer": 2,
+            "area_tiles": SHRINE_AREA_TILES}
+    _shrine_cache["key"], _shrine_cache["plan"] = key, plan
+    return plan
+
+
 def _find_path(sx, sy, tx, ty, ghost=False):
     """v3.2: Dijkstra over walkable tiles — water costs 4x (swim), so the hero
     walks around it when a dry route exists and swims only when it must.
@@ -11751,6 +11896,7 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(legs, list) or len(legs) > 64:
                 return self._send_json({"ok": False, "error": "bad legs"}, 400)
             paths = []
+            swims = []
             for leg in legs:
                 try:
                     (x1, y1), (x2, y2) = leg[0], leg[1]
@@ -11759,9 +11905,10 @@ class Handler(BaseHTTPRequestHandler):
                                                     int(x2), int(y2),
                                                     ghost=ghost)
                 except (TypeError, ValueError, IndexError):
-                    cells = []
+                    cells, _swim = [], []
                 paths.append([list(c) for c in cells])
-            return self._send_json({"ok": True, "paths": paths})
+                swims.append([1 if s else 0 for s in _swim])
+            return self._send_json({"ok": True, "paths": paths, "swims": swims})
 
         if path == "/api/custom/update":
             # v3.3: rename / re-designate an imported tile — {id, name?, preset?}
@@ -13009,7 +13156,23 @@ class Handler(BaseHTTPRequestHandler):
             # tile to the given cell. Read-only: never touches run state.
             x, y = body.get("x"), body.get("y")
             spot = _near_walkable(x, y) if isinstance(x, int) and isinstance(y, int) else None
+            if spot and body.get("water") and isinstance(x, int) and isinstance(y, int):
+                spot = _near_water(x, y)
             return self._send_json({"ok": True, "spot": spot})
+
+        if path == "/api/play/shrines":
+            return self._send_json({"ok": True, **_shrine_plan()})
+
+        if path == "/api/play/teleport":
+            # §13.1: only onto a shrine's clearing; the client flies there.
+            if not play["active"]:
+                return self._send_json({"ok": False, "error": "play mode not active"}, 400)
+            sid = body.get("id")
+            s = next((s for s in _shrine_plan()["shrines"] if s["id"] == sid), None)
+            if not s:
+                return self._send_json({"ok": False, "error": "unknown shrine"}, 400)
+            play["tx"], play["ty"] = s["x"], s["y"]
+            return self._send_json({"ok": True, "x": s["x"], "y": s["y"]})
 
         if path == "/api/play/move":
             if not play["active"]:

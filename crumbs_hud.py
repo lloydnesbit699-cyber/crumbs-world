@@ -6501,6 +6501,49 @@ def _near_walkable(sx, sy, radius=4):
     return None
 
 
+def _safe_at(tx, ty):
+    """Rescue landing rules — where an "I'm stuck" teleport may put the
+    hero: standable by the movement rules (_walkable), DRY (no water at
+    all, not even a wading tile — the shoreline, not the shallows), and
+    not dangerous: no painted hazard cell (the v5.46 hazard layer is
+    collision-blocked too, but a rescue never lands on one on purpose)
+    and no tile a hazard rule would kill on (see _check_rules)."""
+    if not _walkable(tx, ty):
+        return False
+    if _swim_at(tx, ty) or _deep_at(tx, ty):
+        return False
+    if world.hazard_layer[ty][tx]:
+        return False
+    for r in game_rules:
+        if (r.get("kind") == "hazard"
+                and _tile_at_any_layer(tx, ty) == r.get("tile")):
+            return False
+    return True
+
+
+def _near_safe(sx, sy):
+    """Nearest safe tile to (sx, sy), ring by ring (Chebyshev) — the
+    _near_walkable search aimed at _safe_at and widened to the whole
+    map, so a hero dropped in the middle of a big lake still reaches a
+    shore. The hero's own cell is never the answer (rings start at 1):
+    a hero stuck standing on safe ground is boxed in, and the rescue
+    has to take him somewhere else. None when no other safe tile
+    exists."""
+    if not isinstance(sx, int) or not isinstance(sy, int):
+        return None
+    if not (0 <= sx < world.width and 0 <= sy < world.height):
+        return None
+    far = max(sx, world.width - 1 - sx, sy, world.height - 1 - sy)
+    for r in range(1, far + 1):
+        for dy in range(-r, r + 1):
+            for dx in range(-r, r + 1):
+                if max(abs(dx), abs(dy)) != r:
+                    continue
+                if _safe_at(sx + dx, sy + dy):
+                    return [sx + dx, sy + dy]
+    return None
+
+
 # -- v5.47: patrol validation shared by create + merge (Melody's
 # "connect these patrol stops?" suggestion). Same rules, one place.
 def _validate_patrol_points(pts_in):
@@ -13180,6 +13223,22 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": False, "error": "unknown shrine"}, 400)
             play["tx"], play["ty"] = s["x"], s["y"]
             return self._send_json({"ok": True, "x": s["x"], "y": s["y"]})
+
+        if path == "/api/play/unstuck":
+            # "I'm stuck" rescue (Ball Room playtest feedback, 2026-10-22):
+            # deep water blocks every legal move until SWIM_UNLOCKED, so a
+            # hero dropped there (portal, pocket spawn, a map painted under
+            # him) is hard-stuck. Same authority as /api/play/teleport: the
+            # server picks the landing — nearest _safe_at tile — and the
+            # client only moves the hero sprite to the answer.
+            if not play["active"]:
+                return self._send_json({"ok": False, "error": "play mode not active"}, 400)
+            spot = _near_safe(play["tx"], play["ty"])
+            if not spot:
+                return self._send_json({"ok": False, "error": "no safe ground on this map"}, 400)
+            play["tx"], play["ty"] = spot
+            _log_event(f"unstuck rescue to {spot[0]},{spot[1]}")
+            return self._send_json({"ok": True, "x": spot[0], "y": spot[1]})
 
         if path == "/api/play/move":
             if not play["active"]:

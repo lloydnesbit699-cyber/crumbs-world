@@ -889,6 +889,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
                   background: rgba(20,20,28,.92); border: 1px solid #3a3a48; border-radius: 12px; padding: 8px; color: #ddd;
                   font: 12px/1.4 ui-monospace, Consolas, monospace; display: flex; flex-direction: column; gap: 6px; }
   #flight-panel[hidden] { display: none; }
+  #btn-unstuck[hidden] { display: none; }
   body.clean #flight-panel, body.clean #flight-toggle { display: none !important; }
   #flight-panel .fl-row { display: flex; gap: 4px; flex-wrap: wrap; }
   #flight-panel button { min-height: 0; height: 30px; padding: 0 8px; border-radius: 8px; font-size: 12px; background: rgba(42,42,42,.9);
@@ -3832,6 +3833,8 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
 </div>
 <div id="m-play" class="menu-drop">
   <button id="btn-play" title="Walk the map">&#9654; Play</button>
+  <hr>
+  <button id="btn-unstuck" hidden title="Teleport to the nearest safe ground">&#127384; I'm stuck — nearest safe ground</button>
 </div>
 <!-- v5.33: the old Setup menu is now Animation — one home for the animator.
      v5.37: beginner/advanced mode toggle; every animator control lives here. -->
@@ -5475,6 +5478,24 @@ async function shrineTravel(id) {
     } else toast("the shrine did not answer");
     playGoMode("ground"); await wait();
   } finally { shrineBusy = false; }
+}
+// "I'm stuck" rescue (Ball Room playtest feedback, 2026-10-22): a hero in
+// deep water has no legal move until SWIM_UNLOCKED, so walking out is not
+// an option. The server picks the nearest safe ground (/api/play/unstuck,
+// like the shrine teleport the server is the authority); the client just
+// lands the hero there — instantly, no flight. Lives in the Play menu on
+// purpose: the mobile HUD gets no new floating button.
+async function playUnstuck() {
+  if (!playMode || !hero || playOver) return;
+  if (heroTimer) { clearTimeout(heroTimer); heroTimer = null; }   // a walk in progress is cancelled — we are teleporting
+  const r = await api("/api/play/unstuck", {}).catch(() => null);
+  if (r && r.ok) {
+    hero = { x: r.x, y: r.y }; playCam = null; playLastHero = null;
+    heroSwimming = false; heroInDeep = false;
+    refreshSight();
+    render();
+    toast("🆘 safe ground — you're out");
+  } else toast("no safe ground could be found on this map");
 }
 function drawShrines() {
   if (!shrineList.length || !rgActive) return;
@@ -10485,6 +10506,7 @@ async function togglePlay() {
     await syncInv();   // v5.13: pack + gold onto the HUD
     // "can't reach" confusion was play mode intercepting taps — paint tools rest now
     $("btn-play").classList.add("on");
+    $("btn-unstuck").hidden = false;   // the rescue lives in the Play menu for the length of the run
     $("budget-strip").hidden = true;   // v5.50.14: meters owns this corner during a run
     // v5.47: full map for the run — the panel UI hides, the FAB becomes Stop
     // v5.50: the renderer hides its own panels (sheet: closed; trays: shut)
@@ -10509,6 +10531,7 @@ async function togglePlay() {
     $("mission-hud").hidden = true; missionDanger = new Set();  // v5.12
     updateDpad();   // v3.7: hide the touch controls (pad loop self-stops)
     $("btn-play").classList.remove("on");
+    $("btn-unstuck").hidden = true;
     // v5.47: the panel UI comes back, the FAB becomes Play again
     // v5.50: the renderer brings its own panels back (trays stay shut)
     PanelSys.renderer().reopen();
@@ -10526,6 +10549,7 @@ async function togglePlay() {
   render();
 }
 $("btn-play").onclick = togglePlay;
+$("btn-unstuck").onclick = () => { closeOverlays(); playUnstuck(); };
 // v5.29: build-break — paint while play is active (Lloyd's feedback #12).
 // Chosen approach: unlock the brush with the simulation PAUSED — not save-state
 // snapshot/restore. Why: a snapshot would have to serialize the whole server

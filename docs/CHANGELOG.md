@@ -3,6 +3,10 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v6.4.5 — 2026-10-23
+
+**Stage 4: the top pill system (§18).** The floating bubble buttons are retired for one row of pop-open pills across the top, grouped by what they affect: a **Camera pill** (the altitude stops, zoom +/−, Fit, Move, and the lens toggle), a **World pill** (weather, shrines/teleport, flight test — firing one now closes the other system panels instead of stacking them), and the **Survey pill** (the world-lens toggle itself, its panel keeping its own hide). The stats strip is now a slim display-only **health pill** in the row; **undo/redo moved to a left-side edit pill** wired to the same actions (two suite guards updated deliberately to pin the §18 design). The Palette button — cut off at the screen edge since the HUD redesign — has a home in the row at last. Melody's button is untouched: a lone perfect circle, not a pill, exactly as ruled. On narrow screens the group pills collapse to icons so the row never wraps. Verified: stage4_pills_client_test 46/46; full JS suite 1000+ checks green.
+
 ## v6.4.4 — 2026-10-23
 
 **Fit means fit in the lens (Lloyd's ruling).** The zoom cluster's Fit button used to reset the Build lens to its 28px default; in the lens it now fits the whole map — the exact WORLD stop that key 4 jumps to (`lensGoBand("world")`). Fit outside the lens is unchanged (Play: Survey; Build canvas: fit to screen). The lens suite's guard was updated deliberately to pin the new meaning.

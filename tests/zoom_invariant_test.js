@@ -166,8 +166,8 @@ check("hint is re-armed on resize (debounced)", /addEventListener\("resize", \(\
 console.log("== recent repairs intact ==");
 check("grid toggle ▦ still lives in the zoom cluster (v5.51.1)",
   html.includes('id="btn-grid"') && /#zoom-cluster #btn-grid\.off/.test(styleBlock));
-check("pills still sit below the topbar (v5.50.13)",
-  /#gear-hud\s*\{\s*position:\s*fixed;\s*top:\s*calc\(56px \+ env\(safe-area-inset-top\)\)/.test(styleBlock));
+check("pills clear the topbar AND the Stage-4 pill row (v5.50.13, row added §18)",
+  /#gear-hud\s*\{\s*position:\s*fixed;\s*top:\s*calc\(96px \+ env\(safe-area-inset-top\)\)/.test(styleBlock));
 
 console.log("== v5.51.3 trackpad pinch zooms the map, not the page (stub DOM) ==");
 const wDriver = `

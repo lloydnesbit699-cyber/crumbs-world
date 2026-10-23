@@ -857,9 +857,11 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   /* v5.51.1: dim the grid toggle when the grid is off, so the state reads
      at a glance. */
   #zoom-cluster #btn-grid.off { opacity: .45; }
-  /* v6.2: Play altitude modes — compact, top-centre, hidden outside Play */
-  #play-modes { display: none; position: fixed; top: calc(56px + env(safe-area-inset-top)); left: 50%;
-                transform: translateX(-50%); z-index: 60; gap: 4px; align-items: center;
+  /* v6.2: Play altitude modes — compact, hidden outside Play.
+     Stage 4 (§18): the bar itself now lives inside the camera pill's
+     pop-open panel (top pill row), so it is a plain flex row here —
+     its show/hide still rides body.play-follow exactly as before. */
+  #play-modes { display: none; gap: 4px; align-items: center;
                 background: rgba(20,20,28,.72); border: 1px solid #3a3a48; border-radius: 999px; padding: 3px; }
   body.play-follow #play-modes { display: flex; }
   body.clean #play-modes { display: none !important; }
@@ -876,7 +878,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
                       background: rgba(42,42,42,.9); border: 1px solid transparent; color: #ddd; cursor: pointer; }
   #sky-panel button.on { border-color: #8cf; color: #8cf; }
   #sky-panel input[type=range] { width: 100%; }
-  #compass { position: fixed; top: calc(56px + env(safe-area-inset-top)); right: 10px; z-index: 60; display: none; align-items: center; gap: 6px;
+  #compass { position: fixed; top: calc(96px + env(safe-area-inset-top)); right: 10px; z-index: 60; display: none; align-items: center; gap: 6px;
              background: rgba(20,20,28,.72); border: 1px solid #3a3a48; border-radius: 999px; padding: 3px 10px 3px 3px; color: #ddd; font-size: 12px; }
   body.play-follow #compass:not([hidden]) { display: flex; }
   body.clean #compass { display: none !important; }
@@ -913,6 +915,72 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   #lens-badge { font-size: 11px; color: #8cf; padding: 0 8px 0 4px; white-space: nowrap; }
   #lens-full-toggle.on { background: #2a5a8a; color: #fff; }
   #play-mode-badge { font-size: 11px; color: #8f8; padding: 0 8px 0 4px; white-space: nowrap; }
+  /* Stage 4 (§18, Ball Room item 19): the TOP PILL ROW — one row of
+     pop-open pills directly below the black HUD bar, in the top bar's
+     visual language, grouped by what they affect. The right-edge
+     bubble stack retired into these pills; their buttons keep their
+     ids and handlers, only their homes moved. Melody's bubble is
+     deliberately NOT here — she is not a tool (Lloyd's ruling); her
+     lone circle stays where it has always lived.
+     Phone contract (390px): the row is a single flex line with
+     overflow-x auto as the safety net; under 520px the group pills
+     collapse to icon-only (the v5.23 dot-only precedent), while the
+     persistent health pill keeps its numbers. No second row, ever. */
+  #pill-row { position: fixed; top: calc(48px + env(safe-area-inset-top)); left: 0; right: 0;
+              height: 40px; z-index: 44; display: flex; align-items: center; gap: 6px;
+              padding: 4px 8px; box-sizing: border-box;
+              background: rgba(16,17,24,.92); border-bottom: 1px solid #2c3145;
+              overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+  #pill-row::-webkit-scrollbar { display: none; }
+  .pill-btn { flex: 0 0 auto; height: 32px; padding: 0 12px; border-radius: 999px;
+              background: rgba(42,42,42,.9); border: 1px solid #3a3a48; color: #ddd;
+              font-size: 13px; cursor: pointer; white-space: nowrap; }
+  .pill-btn.on { background: #2a5a8a; color: #fff; border-color: #8cf; }
+  /* the Survey pill IS the world-lens toggle, wearing pill clothes */
+  #pill-row #world-lens-toggle { flex: 0 0 auto; height: 32px; width: auto; padding: 0 12px;
+              border-radius: 999px; background: rgba(42,42,42,.9); border: 1px solid #3a3a48;
+              color: #ddd; font-size: 13px; cursor: pointer; white-space: nowrap; }
+  /* pop-open panels under the row — same dark card language as the
+     legacy flight/shrine panels; only one open at a time (pillToggle) */
+  .pill-panel { position: fixed; top: calc(92px + env(safe-area-inset-top)); z-index: 101;
+              background: rgba(20,20,28,.94); border: 1px solid #3a3a48; border-radius: 12px;
+              padding: 8px; color: #ddd; display: flex; flex-direction: column; gap: 6px;
+              max-width: calc(100vw - 16px); }
+  .pill-panel[hidden] { display: none; }
+  #pill-panel-camera { left: 8px; }
+  #pill-panel-world { left: 8px; }
+  .pill-panel .pill-sec { font-size: 11px; color: #9aa0b5; letter-spacing: .06em;
+              text-transform: uppercase; }
+  .pill-cam-row { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+  .pill-panel button { min-height: 0; height: 32px; min-width: 32px; padding: 0 10px;
+              border-radius: 8px; font-size: 14px; background: rgba(42,42,42,.9);
+              border: 1px solid transparent; color: #ddd; cursor: pointer; }
+  .pill-panel button.on { border-color: #8cf; color: #8cf; background: #2a5a8a; }
+  .pill-sys-row { display: flex; gap: 8px; align-items: center; }
+  .pill-sys-row span { flex: 1; font-size: 13px; white-space: nowrap; }
+  /* Stage 4 (§18d): the left-side EDIT pill — undo/redo live here now,
+     out of the health pill, grouped with the left edge like the trays. */
+  #edit-pill { position: fixed; left: 8px; top: calc(140px + env(safe-area-inset-top));
+              z-index: 58; display: flex; flex-direction: column; gap: 4px;
+              background: rgba(18,18,22,.82); border: 1px solid #3a3a3a;
+              border-radius: 999px; padding: 4px; }
+  #edit-pill button { width: 36px; height: 36px; border-radius: 50%; padding: 0;
+              font-size: 17px; background: rgba(42,42,42,.9);
+              border: 1px solid transparent; color: #ddd; cursor: pointer; }
+  #edit-pill button:active { background: #2a5a8a; color: #fff; }
+  /* docked layout: like the topbar, the row runs between the trays,
+     and the edit pill hugs the left tray's outer edge */
+  body.docked #pill-row { left: 300px; right: 300px; }
+  body.docked #edit-pill { left: 308px; }
+  body.clean #pill-row, body.clean .pill-panel, body.clean #edit-pill { display: none !important; }
+  body.panels-hidden #pill-row, body.panels-hidden .pill-panel,
+  body.panels-hidden #edit-pill { display: none !important; }
+  @media (max-width: 520px) {
+    #pill-row { gap: 4px; padding: 4px 6px; }
+    .pill-btn .pill-lbl { display: none; }
+    #pill-row #world-lens-toggle .pill-lbl { display: none; }
+    .pill-btn, #pill-row #world-lens-toggle { padding: 0 9px; }
+  }
   /* v5.61.0: minimap — bottom-left, zoom cluster owns bottom-right */
   #minimap { position: fixed; left: 10px;
              bottom: calc(10px + env(safe-area-inset-bottom));
@@ -1188,11 +1256,16 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   #suggest-card .sg-btns button { flex: 1; min-height: 52px; font-size: 16px;
     border-radius: 12px; font-weight: 700; }
   #suggest-accept { background: #2f6b3a; border-color: #4caf5d; color: #fff; }
-  /* v5.47: the persistent budget strip — tiny, non-blocking, tappable */
-  #budget-strip { position: fixed; left: 8px; top: 52px; z-index: 58;
-    background: rgba(18,18,22,.82); border: 1px solid #3a3a3a; border-radius: 10px;
-    color: #bbb; font-size: 11px; padding: 6px 10px; min-height: 32px;
+  /* v5.47: the persistent budget strip — tiny, non-blocking.
+     Stage 4 (§18d): it is now the slim PERSISTENT HEALTH/STATUS PILL in
+     the top pill row, just below the black HUD bar — display only.
+     Undo LEFT this pill (Lloyd's ruling): it lives on the left-side
+     edit pill (#edit-pill) now, so the strip no longer taps to undo. */
+  #budget-strip { position: static; flex: 0 0 auto;
+    background: rgba(18,18,22,.82); border: 1px solid #3a3a3a; border-radius: 999px;
+    color: #bbb; font-size: 11px; padding: 6px 12px; min-height: 32px;
     white-space: nowrap; }
+  #budget-strip[hidden] { display: none; }
   #budget-strip b { color: #eee; font-weight: 700; }
   #budget-strip .over { color: #ff9a9a; font-weight: 700; }
   /* v5.47: the always-visible Play — one button, always on screen */
@@ -1371,7 +1444,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   .stockrow input { width: 52px; }
   /* v5.50.13: was top:8px — sat ON the topbar (z-60 over z-45) and buried
      the undo/redo cluster at the bar's right end. Now hangs below the bar. */
-  #gear-hud { position: fixed; top: calc(56px + env(safe-area-inset-top)); right: 8px; z-index: 60;
+  #gear-hud { position: fixed; top: calc(96px + env(safe-area-inset-top)); right: 8px; z-index: 60;
     background: rgba(20, 30, 22, 0.92); border: 1px solid #3f5a4a; border-radius: 10px;
     padding: 6px 10px; font-size: 13px; color: #e8f5e9; }
   /* v5.50.12: default parks above the zoom cluster (which owns the bottom
@@ -1466,7 +1539,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
                  z-index: 90; }
   #end-overlay[hidden] { display: none; }
   /* v4.0: nature HUD — hero meters + build-fire button, play mode only */
-  #meters { position: fixed; top: calc(56px + env(safe-area-inset-top)); left: 10px; z-index: 60; display: none;
+  #meters { position: fixed; top: calc(96px + env(safe-area-inset-top)); left: 10px; z-index: 60; display: none;
             background: rgba(10,14,20,.78); border: 1px solid #2a3340;
             border-radius: 10px; padding: 6px 10px; font-size: 15px; }
   #meters.show { display: block; }
@@ -1560,7 +1633,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   /* v5.29 (item 19): panel visibility — one always-reachable control for
      panel opacity + hide-all, persisted per player in localStorage */
   body { --panel-op: 1; }
-  #panel-ui-btn { position: fixed; top: 56px; right: 10px; z-index: 85;
+  #panel-ui-btn { position: fixed; top: calc(96px + env(safe-area-inset-top)); right: 10px; z-index: 85;
     width: 44px; height: 44px; border-radius: 50%; padding: 0; font-size: 19px;
     background: rgba(42,42,42,.92); border: 1px solid #555; color: #eee;
     cursor: pointer; min-height: 0; }
@@ -3726,9 +3799,12 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
 .nwc-cell .nwc-lbl{font-size:11px;line-height:1.15;}
 .nwc-cell:active{transform:scale(.96);}
 .nwc-sec-label{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#9aa0b5;margin:10px 4px 2px;}
-#nwc-palette-fab{position:fixed;right:12px;bottom:12px;z-index:80;background:#4da3ff;color:#06121f;
-  border:none;border-radius:999px;padding:12px 18px;font-size:14px;font-weight:700;cursor:pointer;
-  box-shadow:0 6px 20px rgba(77,163,255,.4);}
+/* Stage 4 (§18, absorbing Ball Room item 13): the Palette pill's home is
+   the top pill row — the old floating bottom-right fab was cut off
+   ("Pal…") and collided with Move. Same button, same id, same wiring. */
+#nwc-palette-fab{position:static;flex:0 0 auto;background:#4da3ff;color:#06121f;
+  border:none;border-radius:999px;padding:0 14px;height:32px;font-size:13px;font-weight:700;cursor:pointer;
+  box-shadow:0 2px 8px rgba(77,163,255,.35);}
 #nwc-palette-fab[hidden]{display:none;}
 /* Legacy layer/tool controls stay wired as the source of truth, but the trays
    show the compact grids; contextual controls move into the shared palette. */
@@ -4142,7 +4218,8 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     <div id="nwc-float-grip" title="drag to resize"></div>
   </div>
 </div>
-<button id="nwc-palette-fab" hidden>🎨 Palette</button>
+<!-- Stage 4 (§18 / item 13): #nwc-palette-fab moved into the top pill
+     row — see #pill-row below. -->
 <div id="nwc-hotbar" aria-label="Hotbar — selected tile slots"></div>
 <div id="sheet-inspect" class="sheet">
   <div class="grab"></div>
@@ -4679,26 +4756,59 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
 
 <div id="scrim" role="button" aria-label="Dismiss open panels" tabindex="-1"></div>
 
-<div id="play-modes" aria-label="Camera altitude">
-  <button data-mode="first" title="First — over-the-shoulder (1)">👁 First</button>
-  <button data-mode="ground" title="Ground — top-down (2)">🧍 Ground</button>
-  <button data-mode="survey" title="Survey (3)">🗺 Survey</button>
-  <button data-mode="world" title="World (4)">🌍 World</button>
-  <span id="play-mode-badge" hidden></span>
-  <span id="lens-badge" hidden></span>
+<!-- Stage 4 (§18, Ball Room item 19): the TOP PILL ROW — one row of
+     pop-open pills under the black HUD bar, grouped by what they
+     affect. The right-edge bubble stack retired into these homes;
+     every moved button keeps its id, its handler, and its behavior.
+     Melody's bubble is NOT in this row and never will be — she is
+     not a tool (Lloyd's ruling); her lone circle stays put. -->
+<div id="pill-row" aria-label="Control pills">
+  <button class="pill-btn" id="pill-camera" title="Camera — altitude, zoom, fit, move">📷<span class="pill-lbl"> Camera</span></button>
+  <button class="pill-btn" id="pill-world" title="World systems — weather, shrines, flight test">🌍<span class="pill-lbl"> World</span></button>
+  <button id="world-lens-toggle" title="Survey — toggle world lens" aria-label="Survey — toggle world lens">🔎<span class="pill-lbl"> Survey</span></button>
+  <button id="budget-strip" title="World budget">🧱 — · 🚶 — · ✨ —</button>
+  <button id="nwc-palette-fab" hidden>🎨 Palette</button>
 </div>
 
+<div class="pill-panel" id="pill-panel-camera" hidden aria-label="Camera controls">
+  <div id="play-modes" aria-label="Camera altitude">
+    <button data-mode="first" title="First — over-the-shoulder (1)">👁 First</button>
+    <button data-mode="ground" title="Ground — top-down (2)">🧍 Ground</button>
+    <button data-mode="survey" title="Survey (3)">🗺 Survey</button>
+    <button data-mode="world" title="World (4)">🌍 World</button>
+    <span id="play-mode-badge" hidden></span>
+    <span id="lens-badge" hidden></span>
+  </div>
+  <div class="pill-cam-row">
+    <button id="zoom-out" title="Zoom out">&minus;</button>
+    <button id="zoom-in" title="Zoom in">+</button>
+    <button id="zoom-fit" title="Fit map to screen">Fit</button>
+    <button id="btn-pan" title="Move: pan the map instead of painting (arrow keys pan too)">Move</button>
+  </div>
+  <div class="pill-cam-row">
+    <button id="lens-full-toggle" title="Full-screen lens (L)" aria-label="Toggle full-screen lens">⛶</button>
+    <span class="pill-sec">Full-screen lens (L)</span>
+  </div>
+</div>
+
+<div class="pill-panel" id="pill-panel-world" hidden aria-label="World systems">
+  <div class="pill-sys-row"><span>Weather &amp; sounds</span><button id="sky-toggle" title="Weather &amp; sounds" aria-label="Weather and sounds">&#127782;&#65039;</button></div>
+  <div class="pill-sys-row"><span>Teleport shrines</span><button id="shrine-toggle" title="Teleport shrines (T)" aria-label="Teleport shrines">&#128511;</button></div>
+  <div class="pill-sys-row"><span>Flight test</span><button id="flight-toggle" title="Flight test panel (F)" aria-label="Flight test panel">&#9992;&#65039;</button></div>
+</div>
+
+<!-- Stage 4 (§18d): the left-side EDIT pill — undo/redo moved here out
+     of the health pill; they call the same doUndo/doRedo as the
+     top-bar and menu copies. -->
+<div id="edit-pill" aria-label="Edit">
+  <button id="pill-undo" title="Undo">&#8617;</button>
+  <button id="pill-redo" title="Redo">&#8618;</button>
+</div>
+
+<!-- §18 leaves the grid toggle no pill home — the cluster shell stays
+     as its home, exactly where it was (Stage 4 inventory call). -->
 <div id="zoom-cluster">
   <button id="btn-grid" title="Toggle grid lines">&#x25A6;</button>
-  <button id="lens-full-toggle" title="Full-screen lens (L)" aria-label="Toggle full-screen lens">⛶</button>
-  <button id="flight-toggle" title="Flight test panel (F)" aria-label="Flight test panel">&#9992;&#65039;</button>
-  <button id="shrine-toggle" title="Teleport shrines (T)" aria-label="Teleport shrines">&#128511;</button>
-  <button id="sky-toggle" title="Weather &amp; sounds" aria-label="Weather and sounds">&#127782;&#65039;</button>
-  <button id="world-lens-toggle" title="Toggle world lens" aria-label="Toggle world lens">🔎</button>
-  <button id="zoom-out" title="Zoom out">&minus;</button>
-  <button id="zoom-in" title="Zoom in">+</button>
-  <button id="zoom-fit" title="Fit map to screen">Fit</button>
-  <button id="btn-pan" title="Move: pan the map instead of painting (arrow keys pan too)">Move</button>
 </div>
 
 <div id="compass" hidden aria-label="Compass"><div class="cp-dial"><span class="cp-n">N</span><div class="cp-needle"></div></div><span class="cp-txt"></span></div>
@@ -4831,9 +4941,8 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
      enter/exit preview (camera + selection preserved); hold for a quick
      before/after of the current animation. -->
 <button id="btn-play-fab" title="Play — tap to walk the map, hold to compare animation">▶</button>
-<!-- v5.47: persistent budget strip — tiles placed, NPC count, FX budget,
-     undo state. Tap = undo. Never blocks: tiny, translucent, ignorable. -->
-<button id="budget-strip" title="budget — tap to undo">🧱 — · 🚶 — · ✨ — · ↩ —</button>
+<!-- v5.47: persistent budget strip — Stage 4 (§18d) moved it into the
+     top pill row as the slim health/status pill; see #pill-row above. -->
 <!-- v5.45: the brush scope — magnified footprint preview above the finger -->
 
 <div id="ctx-menu" aria-label="Touch actions"></div>
@@ -19253,6 +19362,7 @@ function initPanelSystem() {
   initWorldLens();    // v6.1: bounded, read-only detail view
   initPlayFab();
   initBudgetStrip();
+  initPillRow();      // Stage 4 (§18): top pill row + left edit pill
   initReaderPagers();   // v5.58 (C-2): paged navigation on pilot reader sheets
   document.querySelectorAll("#layout-seg button").forEach(b => {
     b.onclick = () => setPanelLayout(b.dataset.layout);
@@ -19275,14 +19385,70 @@ function refreshBudget() {
   const npc = c.npcsOver ? '<span class="over">' + c.npcs + "</span>" : "<b>" + c.npcs + "</b>";
   const fx = c.fxOver ? '<span class="over">' + c.fx + "/" + FX_CELL_BUDGET + "</span>"
     : "<b>" + c.fx + "</b>";
-  b.innerHTML = "🧱 <b>" + c.painted + "</b> · 🚶 " + npc + " · ✨ " + fx +
-    " · ↩ " + c.undoDepth + (c.redoDepth ? " ↪ " + c.redoDepth : "");
-  b.title = "budget — tap to undo" +
+  // Stage 4 (§18d): the pill shows world stats only — the ↩ undo segment
+  // left with undo itself (now on the left-side edit pill).
+  b.innerHTML = "🧱 <b>" + c.painted + "</b> · 🚶 " + npc + " · ✨ " + fx;
+  b.title = "world budget — tiles placed, NPCs, FX" +
     (c.fxOver ? " · FX past the soft " + FX_CELL_BUDGET + " budget (old phones may chug)" : "") +
     (c.npcsOver ? " · past the soft " + NPC_SOFT_BUDGET + " patrol budget" : "");
 }
 function initBudgetStrip() {
-  $("budget-strip").onclick = () => doUndo();   // one tap = undo
+  // Stage 4 (§18d): the strip is display-only now — one tap no longer
+  // undoes. Undo/redo live on the left-side edit pill (initPillRow
+  // wires pill-undo/pill-redo to the same doUndo/doRedo).
+}
+
+// -- Stage 4 (§18): the top pill row ---------------------------------------
+// One row of pop-open pills under the black HUD bar. The pills own no
+// state of their own: the camera panel hosts the moved zoom-cluster
+// buttons + the Play altitude bar, the world panel hosts the legacy
+// system toggles (their own flips still open their panels), the Survey
+// pill IS the world-lens toggle, and the edit pill calls doUndo/doRedo.
+function pillCloseAll() {
+  ["camera", "world"].forEach(n => {
+    const p = $("pill-panel-" + n), b = $("pill-" + n);
+    if (p) p.hidden = true;
+    if (b) b.classList.remove("on");
+  });
+}
+function pillToggle(name) {
+  const p = $("pill-panel-" + name), b = $("pill-" + name);
+  const wasOpen = p && !p.hidden;
+  pillCloseAll();            // one pill panel at a time — the §18 rule
+  if (p && !wasOpen) { p.hidden = false; if (b) b.classList.add("on"); }
+}
+// The three legacy system panels (sky/shrine/flight) all pop at the same
+// bottom-right corner — Lloyd's screenshot had the flight panel sitting
+// ON the shrines panel. Opening one now closes the other two, using
+// each flip's own close path (hidden + toggle light off), never a
+// re-flip (which could open instead of close).
+function sysPanelSolo(openedId) {
+  [["sky-panel", "sky-toggle"], ["shrine-panel", "shrine-toggle"],
+   ["flight-panel", "flight-toggle"]].forEach(([pid, tid]) => {
+    if (pid === openedId) return;
+    const p = $(pid), t = $(tid);
+    if (p && !p.hidden) { p.hidden = true; if (t) t.classList.remove("on"); }
+  });
+}
+function initPillRow() {
+  const cam = $("pill-camera"), wrld = $("pill-world");
+  if (cam) cam.onclick = () => pillToggle("camera");
+  if (wrld) wrld.onclick = () => pillToggle("world");
+  // after a system toggle fires its legacy flip, close the siblings it
+  // now overlaps, and fold the world pill back up (it is a launcher).
+  [["sky-toggle", "sky-panel"], ["shrine-toggle", "shrine-panel"],
+   ["flight-toggle", "flight-panel"]].forEach(([tid, pid]) => {
+    const t = $(tid);
+    if (!t) return;
+    t.addEventListener("click", () => {
+      const p = $(pid);
+      if (p && !p.hidden) sysPanelSolo(pid);
+      pillCloseAll();
+    });
+  });
+  const u = $("pill-undo"), r = $("pill-redo");
+  if (u) u.onclick = doUndo;
+  if (r) r.onclick = doRedo;
 }
 
 // -- the always-visible Play --------------------------------------------------

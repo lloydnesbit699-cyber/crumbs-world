@@ -182,7 +182,8 @@ check("grab cycles heights", html.includes("sheetNextHeight(sheetHeight)"));
 check("Play FAB exists", html.includes('id="btn-play-fab"'));
 check("FAB hold gesture wired (550ms)", html.includes("550"));
 check("budget strip exists", html.includes('id="budget-strip"'));
-check("strip taps to undo", html.includes('$("budget-strip").onclick'));
+check("health pill is display-only — undo moved to the edit pill (§18, Stage 4)",
+  !html.includes('$("budget-strip").onclick') && html.includes("u.onclick = doUndo") && html.includes("r.onclick = doRedo"));
 check("semantic dock retired", html.includes("#sem-dock { display: none !important; }"));
 check("sheet built before sem wiring",
   html.indexOf("initHudSheet();         // v5.47") <

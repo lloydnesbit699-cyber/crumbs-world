@@ -337,6 +337,57 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   #tray-left { left: 0; border-right: 1px solid #333; transform: translateX(-103%); }
   #tray-right { right: 0; border-left: 1px solid #333; transform: translateX(103%); }
   #tray-left.open, #tray-right.open { transform: none; }   /* v2.5: ID+class beats the ID-only hidden transform */
+  /* Docked layout (wide screens): left palette | menu bar + map + hotbar | right
+     tools. Same trays and modules as "Sides", but permanently pinned instead
+     of sliding; the map and menu bar occupy the centre column. */
+  body.docked #tab-left, body.docked #tab-right, body.docked #scrim,
+  body.docked .tray-tabs button.tx { display: none !important; }
+  body.docked .tray { top: 0; width: 300px; transform: none; z-index: 46; }
+  body.docked #tray-left { left: 0; }
+  body.docked #tray-right { right: 0; }
+  body.docked #topbar { left: 300px; right: 300px; }
+  body.docked #stage { left: 300px; right: 300px; }
+  body.docked .menu-drop { left: 308px; }
+  body.docked #zoom-cluster, body.docked.panel-open #zoom-cluster { right: 310px; }
+  body.docked #brush-bar { padding: 8px 14px; border: 2px solid #444; border-radius: 14px;
+                           background: rgba(22,22,22,.92); bottom: calc(10px + env(safe-area-inset-bottom)); }
+  /* Docked: the palette bar lives inside the centre column, not under the side panels,
+     and carries a drag handle on its top edge to resize its height. */
+  body.docked #nwc-palette-dock { left: 300px; right: 300px; z-index: 47; min-height: 0;
+    height: var(--nwc-dock-h, 150px); max-height: 60vh; padding: 0; display: flex; flex-direction: column;
+    border: 2px solid #444; border-radius: 12px 12px 0 0; }
+  body.docked #nwc-palette-dock #nwc-palette { flex: 1; min-height: 0; }
+  body.docked #nwc-palette.nwc-docked #nwc-palette-body { flex: 1; min-height: 0; max-height: none; }
+  body.docked #nwc-palette.nwc-docked .nwc-ptile { flex: 0 0 var(--nwc-tile-w, 76px); }
+  /* Hotbar: 7 slots, bottom of the map frame, above the palette bar. */
+  #nwc-hotbar { display: none; }
+  body.docked #nwc-hotbar { display: flex; gap: 8px; position: fixed; z-index: 48; left: 50%;
+    transform: translateX(-50%); bottom: calc(var(--nwc-dock-h, 150px) + 8px); padding: 6px 8px;
+    background: rgba(22,22,22,.92); border: 2px solid #444; border-radius: 12px; }
+  body.docked.nwc-dock-off #nwc-hotbar { bottom: 10px; }
+  .nwc-hslot { position: relative; width: 56px; height: 56px; min-height: 0; padding: 0; overflow: hidden;
+    border: 2px solid #555; border-radius: 8px; background: #1f2330; display: flex;
+    align-items: center; justify-content: center; }
+  .nwc-hslot.on { border-color: #ffd75f; box-shadow: 0 0 10px rgba(255,215,95,.35); }
+  .nwc-hslot .sw { width: 100%; height: 100%; margin: 0; border: none; pointer-events: none; }
+  .nwc-hslot canvas, .nwc-hslot img { max-width: 100%; max-height: 100%; }
+  .nwc-hk { position: absolute; top: 1px; left: 3px; font-size: 10px; color: #bbb; z-index: 2;
+    text-shadow: 0 0 2px #000; }
+  .nwc-hl { font-size: 9px; color: #9aa0b5; padding: 0 2px; overflow: hidden; text-overflow: ellipsis; }
+  body.docked #stage { bottom: var(--nwc-dock-h, 150px); }
+  body.docked.nwc-dock-off #stage { bottom: 0; }
+  body.docked #brush-bar { bottom: calc(var(--nwc-dock-h, 150px) + 90px); }
+  body.docked.nwc-dock-off #brush-bar { bottom: calc(90px + env(safe-area-inset-bottom)); }
+  #nwc-dock-grip { display: none; height: 14px; flex: none; cursor: ns-resize; touch-action: none; position: relative; }
+  #nwc-dock-grip::after { content: ""; position: absolute; left: 50%; top: 5px; width: 44px; height: 4px;
+    margin-left: -22px; border-radius: 2px; background: #666; }
+  body.docked #nwc-palette-dock:not(.nwc-collapsed) #nwc-dock-grip { display: block; }
+  #nwc-float-grip { display: none; position: absolute; right: 0; bottom: 0; width: 28px; height: 28px;
+    cursor: nwse-resize; touch-action: none; z-index: 2;
+    background: linear-gradient(135deg, transparent 50%, #7a8099 50%, #7a8099 58%, transparent 58%, transparent 70%, #7a8099 70%, #7a8099 78%, transparent 78%); }
+  #nwc-palette.nwc-floating #nwc-float-grip { display: block; }
+  #nwc-palette.nwc-floating { min-width: 220px; }
+  #nwc-palette.nwc-floating #nwc-palette-body { resize: none; max-height: none; flex: 1; min-height: 0; }
   .tray-head { font-size: 14px; font-weight: 600; margin-bottom: 10px; color: #ccc; }
   .tray-hint { font-weight: normal; color: #777; font-size: 13px; margin-left: 6px; }  /* v5.57 (A-4) */
   #tray-left .seg { margin-bottom: 10px; }
@@ -1013,6 +1064,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     padding: 0 12px calc(10px + env(safe-area-inset-bottom));
     transition: transform .22s ease-out; overscroll-behavior: contain;
     box-shadow: 0 -6px 24px rgba(0,0,0,.5); }
+  #hud-sheet { display: none !important; }   /* retired: the palette bar replaces the bottom panel */
   #hud-sheet.peek { transform: translateY(calc(100% - 64px)); }
   #hud-sheet.half { transform: translateY(calc(100% - 45dvh)); }
   #hud-sheet.full { transform: translateY(calc(100% - 82dvh)); }
@@ -4002,13 +4054,16 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
      Shell only: it never owns editor state, it is purely a control surface.
      Stage 2 wires live tiles/tools into it. -->
 <div id="nwc-palette-dock">
+  <div id="nwc-dock-grip" title="drag to resize the palette bar"></div>
   <div id="nwc-palette" class="nwc-docked">
   <div id="nwc-palette-head"><span class="nwc-grip">⠿⠿</span><span id="nwc-palette-title">Palette</span><button id="nwc-palette-dockbtn" title="dock palette">⇲</button><button id="nwc-palette-hide" title="hide (Esc)">×</button></div>
     <div id="nwc-palette-body"></div>
     <div id="nwc-detail" hidden></div>
+    <div id="nwc-float-grip" title="drag to resize"></div>
   </div>
 </div>
 <button id="nwc-palette-fab" hidden>🎨 Palette</button>
+<div id="nwc-hotbar" aria-label="Hotbar — selected tile slots"></div>
 <div id="sheet-inspect" class="sheet">
   <div class="grab"></div>
   <div class="tray-head">Inspect <span id="inspect-xy" class="tray-hint"></span></div>
@@ -4666,8 +4721,8 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   <div class="prow">
     <label>Panel layout</label>
     <div id="layout-seg" role="group" aria-label="Panel layout">
+      <button type="button" data-layout="docked" title="Palette left, tools right, map in the middle (wide screens)">&#9707; Docked</button>
       <button type="button" data-layout="trays" title="Panels slide in from the screen sides">&#9664;&#9654; Sides</button>
-      <button type="button" data-layout="sheet" title="One panel slides up from the bottom">&#9650; Bottom</button>
     </div>
   </div>
   <div class="prow">
@@ -7434,10 +7489,14 @@ function render() {
       ctx.strokeText("×" + c[3], lx, ly); ctx.fillText("×" + c[3], lx, ly);
     }
   });
+  const _nv = visibleTiles();   // cull off-screen folks
+  const _labels = tilePx >= 36;   // names only when zoomed in enough to read; 500+ folks otherwise bury the map
   npcsReal.forEach(n => {
+    if (n.x < _nv.x0 || n.x > _nv.x1 || n.y < _nv.y0 || n.y > _nv.y1) return;
     // v5.61.0: rig-aware — placed characters show their idle/down clip
     const im = rigTileImage(n.tile_id, "idle", "down"); if (!im) return;
     drawFxTile(ctx, n.tile_id, im, n.x * tilePx, n.y * tilePx, tilePx, tilePx);
+    if (!_labels) return;
     ctx.font = `${Math.max(10, Math.round(tilePx * 0.26))}px sans-serif`;
     const w = ctx.measureText(n.name).width, nx = n.x * tilePx + tilePx / 2 - w / 2 - 3;
     ctx.fillStyle = "rgba(0,0,0,0.55)";
@@ -7753,6 +7812,7 @@ function commitStrokeCells(s) {
     let x0 = W, y0 = H, x1 = -1, y1 = -1;
     for (const c of s.cells.values()) {
       if (c.x < 0 || c.y < 0 || c.x >= W || c.y >= H) continue;
+      if (!coll[c.y]) continue;
       coll[c.y][c.x] = bh[0];
       if (hazGrid.length === H && hazGrid[c.y]) hazGrid[c.y][c.x] = bh[1];
       if (c.x < x0) x0 = c.x; if (c.y < y0) y0 = c.y;
@@ -7769,6 +7829,7 @@ function commitStrokeCells(s) {
   let x0 = W, y0 = H, x1 = -1, y1 = -1;
   for (const c of s.cells.values()) {
     if (c.x < 0 || c.y < 0 || c.x >= W || c.y >= H) continue;
+    if (!g[c.y]) continue;   // grid shorter than the map (resize/partial load) — skip, don't throw away the stroke
     g[c.y][c.x] = c.pv;
     // v5.46: optimistic tag grid for meaning strokes — the server echo
     // reconciles tiles, collision, hazard, and decor right after.
@@ -7782,6 +7843,7 @@ function commitStrokeCells(s) {
   }
   for (const lc of s.linkCells.values()) {
     if (lc.x < 0 || lc.y < 0 || lc.x >= W || lc.y >= H) continue;
+    if (!coll[lc.y]) continue;
     coll[lc.y][lc.x] = (lc.pv != null) ? lc.pv : lc.tile_id;
   }
   if (x1 >= x0) markBaseDirty(x0 - 1, y0 - 1, x1 + 1, y1 + 1);  // v5.41: dirty-rect
@@ -12436,7 +12498,7 @@ function buildPalette() {
       sw(t.id === selTile, (t.display || t.name) + " (#" + t.id + " · " + t.type + ")" +
          (t.flavor ? " · " + t.flavor : ""),
          fchip +
-         '<div class="chip"><img src="/api/thumb/' + t.id + '" alt="" onerror="thumbImgFail(this)"></div>' +
+         '<div class="chip"><img loading="lazy" decoding="async" src="/api/thumb/' + t.id + '" alt="" onerror="thumbImgFail(this)"></div>' +
          '<div class="lbl">' + esc(t.display || t.name) + "</div>",
          () => selectTile(t.id));
     });
@@ -15176,13 +15238,19 @@ function closeOverlays() {
     .forEach(el => el.classList.remove("open"));
   document.body.classList.remove("panel-open");  // v5.61.0: zoom cluster back
   $("scrim").classList.remove("on");
+  dockTrays();     // docked layout: the side panels never close
   dodgeMelFab();   // v5.50: a closed tray hands the Mel button back its park
   dodgePlayFab();  // v5.50.8: same for the draggable Play button
+}
+function dockTrays() {
+  if (!document.body.classList.contains("docked")) return;
+  ["tray-left", "tray-right"].forEach(id => $(id).classList.add("open"));
 }
 function toggleOverlay(id) {
   const el = $(id);
   const wasOpen = el.classList.contains("open");
   closeOverlays();
+  if (document.body.classList.contains("docked") && id.startsWith("tray-")) return;
   if (!wasOpen) {
     el.classList.add("open"); $("scrim").classList.add("on");
     // v5.57 (A-7): move focus into the opened sheet so keyboard and screen-
@@ -16864,6 +16932,34 @@ function melodyWorld() {
     } catch (e) {}
     const snap = { w: W, h: H, npcs: npcs,
       counts: { patrols: (patrols || []).length } };
+    // her eyes on the map itself: what's painted, where, and the walk routes
+    try {
+      const freq = {};
+      let blocked = 0, bx0 = W, by0 = H, bx1 = -1, by1 = -1, painted = 0;
+      for (let y = 0; y < H; y++) {
+        const row = tiles[y], crow = coll[y];
+        if (!row) continue;
+        for (let x = 0; x < W; x++) {
+          const t = row[x];
+          if (t != null) {
+            painted++;
+            freq[t] = (freq[t] || 0) + 1;
+            if (x < bx0) bx0 = x; if (x > bx1) bx1 = x;
+            if (y < by0) by0 = y; if (y > by1) by1 = y;
+          }
+          if (crow && crow[x] === 1) blocked++;
+        }
+      }
+      snap.counts.painted_cells = painted;
+      snap.counts.blocked_cells = blocked;
+      snap.tiles = Object.keys(freq).sort((a, b) => freq[b] - freq[a]).slice(0, 8)
+        .map(k => ({ id: String(k).slice(0, 32), n: freq[k] }));
+      if (painted) snap.bounds = { x0: bx0, y0: by0, x1: bx1, y1: by1 };
+      snap.patrols = (patrols || []).slice(0, 8).map(p => {
+        const pts = p.points || [];
+        return { stops: pts.length, x: pts[0] ? pts[0][0] : -1, y: pts[0] ? pts[0][1] : -1 };
+      });
+    } catch (e) {}
     if (sel) snap.sel = sel;
     try { if (typeof sheetView !== "undefined" && sheetView) snap.tool = sheetView; } catch (e) {}
     if (budget) snap.budget = budget;
@@ -17557,7 +17653,7 @@ const TrayRenderer = {
     if (!m) return;
     trayTab[m.tray] = view;
     const tray = $("tray-" + m.tray);
-    if (tray.classList.contains("open")) this.render();
+    if (tray.classList.contains("open") || document.body.classList.contains("docked")) this.render();
     else toggleOverlay(tray.id);
     dodgeMelFab();
   },
@@ -17651,10 +17747,10 @@ function renderTrayTabs() {
 // renderer directly. openSheet/setSheetView stay as aliases: the old names
 // stuck around in a few call sites and both still work.
 const PanelSys = {
-  layout: "trays",   // Lloyd's pick; saved per player on this device
+  layout: "trays",   // "trays" | "docked" | "sheet"; saved per player on this device
   hist: [],          // v5.55: view history — back/forward across trays+sheet
   hix: -1,
-  renderer() { return this.layout === "trays" ? TrayRenderer : SheetRenderer; },
+  renderer() { return this.layout === "sheet" ? SheetRenderer : TrayRenderer; },
   setView(v, opts) {
     if (!PANEL_MODULES.some(m => m.id === v)) return;
     sheetView = v;
@@ -17885,18 +17981,26 @@ function syncSheetViewToLayer() {
   if (typeof renderSheet === "function") renderSheet();
 }
 
+const DOCK_MIN_WIDTH = 900;
 function setPanelLayout(which, opts) {
   opts = opts || {};
-  which = (which === "sheet") ? "sheet" : "trays";
+  // the bottom sheet is retired — the palette bar is the bottom surface now
+  which = which === "trays" ? "trays" : "docked";
   document.querySelectorAll("#layout-seg button").forEach(b =>
     b.classList.toggle("on", b.dataset.layout === which));
-  if (PanelSys.layout === which && !opts.first) return;
+  // docked needs room for two 300px columns; narrower screens fall back to sliding trays
+  const dockedNow = which === "docked" && window.innerWidth >= DOCK_MIN_WIDTH;
+  const wasDocked = document.body.classList.contains("docked");
+  if (PanelSys.layout === which && dockedNow === wasDocked && !opts.first) return;
   PanelSys.layout = which;
   closeOverlays();            // a half-open tray doesn't survive the switch
+  document.body.classList.toggle("docked", dockedNow);
   PanelSys.renderer().mount();
+  dockTrays();
+  try { fitTiles(); clampPan(); render(); } catch (e) {}
   if (!opts.first) {
     saveUiPrefs();
-    toast(which === "trays" ? "panels: sides ◀▶" : "panels: bottom ▲");
+    toast(which === "docked" ? "panels: docked ◫" : which === "trays" ? "panels: sides ◀▶" : "panels: bottom ▲");
   }
 }
 
@@ -17921,8 +18025,8 @@ function initPanelSystem() {
   initSheetBackButtons();
   // the saved layout (read directly — loadUiPrefs runs later in boot)
   const p = readUiPrefs();
-  if (p.panelLayout === "sheet" || p.panelLayout === "trays")
-    PanelSys.layout = p.panelLayout;
+  if (p.panelLayout === "trays") PanelSys.layout = "trays";
+  else PanelSys.layout = "docked";   // saved "sheet" prefs migrate to docked
   initSheetGrab();    // sheet chrome never moves — wire once, not per mount
   initWheel();        // v5.61.0: color wheel popup
   initMinimap();      // v5.61.0: dynamic minimap with static toggle
@@ -17934,6 +18038,11 @@ function initPanelSystem() {
     b.onclick = () => setPanelLayout(b.dataset.layout);
   });
   setPanelLayout(PanelSys.layout, { first: true });
+  window.addEventListener("resize", () => {
+    if (PanelSys.layout === "docked" &&
+        (window.innerWidth >= DOCK_MIN_WIDTH) !== document.body.classList.contains("docked"))
+      setPanelLayout("docked", { first: true });
+  });
 }
 
 // -- the budget strip ---------------------------------------------------------
@@ -18082,10 +18191,12 @@ function drawPatrolRoutes() {
     // the numbered pins — fat-finger targets, tappable
     pts.forEach((pt, i) => {
       const X = (pt[0] + 0.5) * s, Y = (pt[1] + 0.5) * s;
-      const r = Math.max(8, s * (sel ? 0.30 : 0.22));
+      const r = sel ? Math.max(8, s * 0.30) : Math.max(3, s * 0.09);
       ctx.beginPath(); ctx.arc(X, Y, r, 0, Math.PI * 2);
       ctx.fillStyle = sel ? "#8a6dd7" : "rgba(110,100,170,0.7)";
       ctx.fill();
+      // unselected routes stay quiet small dots; only the open route is numbered
+      if (!sel) return;
       ctx.lineWidth = 2; ctx.strokeStyle = "#fff"; ctx.stroke();
       ctx.fillStyle = "#fff";
       ctx.font = "700 " + Math.max(10, Math.round(s * 0.26)) + "px system-ui";
@@ -19225,7 +19336,7 @@ function shellWorldStatus(mp) {
     '<span aria-hidden="true">\u26A0</span> Needs Attention</span>';
 }
 function shellPreviewImg(file) {
-  return '<img class="sh-preview" alt="" src="/api/map/thumb?file=' +
+  return '<img loading="lazy" decoding="async" class="sh-preview" alt="" src="/api/map/thumb?file=' +
     encodeURIComponent(file) + '" ' +
     'onerror="this.hidden=true;this.nextElementSibling.hidden=false">' +
     '<div class="sh-preview-fallback" hidden>' +
@@ -22227,9 +22338,10 @@ async function deleteMission(id) {
 <div id="melody-dock" hidden>
   <div id="melody-head">
     <!-- v5.61: her true form — confirmed portrait in the talk dialog -->
-    <img id="melody-portrait" src="/api/melody-trueform/melody_trueform_portrait.png" alt="Melody" title="Melody">
+    <img id="melody-portrait" loading="lazy" decoding="async" src="/api/melody-trueform/melody_trueform_portrait.png" alt="Melody" title="Melody">
     <span id="melody-dot" title="Melody is getting ready&#8230;">&#128993;</span>
     <span id="melody-title">Melody</span>
+    <span id="melody-mode" title="Melody's mode: brain = AI answering, guide = built-in guide only" style="font-size:11px;opacity:.8;padding:1px 6px;border-radius:8px;background:rgba(255,255,255,.12)"></span>
     <span id="melody-quota"></span>
     <button id="melody-speaker" title="Melody's voice">&#128266;</button>
     <button id="melody-status" title="Private Melody server status">&#9432;</button>
@@ -22633,11 +22745,16 @@ function markOn(sel,el,id){
   var ns=el.querySelectorAll(sel),i;
   for(i=0;i<ns.length;i++){ns[i].classList.toggle("on",ns[i].getAttribute("data-id")===id);}
 }
+function syncDockState(){
+  document.body.classList.toggle("nwc-dock-off",dockEl.classList.contains("nwc-collapsed"));
+  try{fitTiles();clampPan();render();}catch(err){}
+}
 function dockPalette(){
   pal.classList.remove("nwc-floating");pal.classList.add("nwc-docked");
-  dockEl.appendChild(pal);pal.style.left="";pal.style.top="";
+  dockEl.appendChild(pal);pal.style.left="";pal.style.top="";pal.style.width="";pal.style.height="";pal.style.maxHeight="";
   dockEl.classList.remove("nwc-collapsed");
   dockBtn.hidden=true;dockBtn.textContent="⤢";dockBtn.title="drag the handle to float";
+  syncDockState();
 }
 function floatPalette(x,y){
   document.body.appendChild(pal);
@@ -22645,9 +22762,44 @@ function floatPalette(x,y){
   dockEl.classList.add("nwc-collapsed");
   if(x!==undefined){pal.style.left=x+"px";pal.style.top=Math.max(0,y)+"px";}
   dockBtn.hidden=false;dockBtn.textContent="⇲";dockBtn.title="dock the palette";
+  syncDockState();
 }
-function openPalette(){pal.hidden=false;if(pal.classList.contains("nwc-docked")){dockEl.classList.remove("nwc-collapsed");}fab.hidden=true;}
-function hidePalette(){pal.hidden=true;dockEl.classList.add("nwc-collapsed");fab.hidden=false;}
+function openPalette(){pal.hidden=false;if(pal.classList.contains("nwc-docked")){dockEl.classList.remove("nwc-collapsed");}fab.hidden=true;syncDockState();}
+function hidePalette(){pal.hidden=true;dockEl.classList.add("nwc-collapsed");fab.hidden=false;syncDockState();}
+/* resize the floating palette from its bottom-right grip (touch + mouse) */
+(function(){
+  var g=document.getElementById("nwc-float-grip");
+  g.addEventListener("pointerdown",function(e){
+    var sx=e.clientX,sy=e.clientY,r=pal.getBoundingClientRect(),sw=r.width,sh=r.height;
+    try{g.setPointerCapture(e.pointerId);}catch(err){}
+    function mv(ev){
+      var w=Math.max(220,Math.min(window.innerWidth-r.left,sw+ev.clientX-sx));
+      var h=Math.max(160,Math.min(window.innerHeight-r.top,sh+ev.clientY-sy));
+      pal.style.width=w+"px";pal.style.height=h+"px";pal.style.maxHeight="none";ev.preventDefault();
+    }
+    function up(){g.removeEventListener("pointermove",mv);g.removeEventListener("pointerup",up);g.removeEventListener("pointercancel",up);}
+    g.addEventListener("pointermove",mv);g.addEventListener("pointerup",up);g.addEventListener("pointercancel",up);
+  });
+})();
+/* resize the docked bar from its top-edge grip; height persists per device */
+(function(){
+  var grip=document.getElementById("nwc-dock-grip"),root=document.documentElement;
+  try{var h=+localStorage.getItem("nwcDockH");if(h>=90){root.style.setProperty("--nwc-dock-h",h+"px");}}catch(err){}
+  grip.addEventListener("pointerdown",function(e){
+    var sy=e.clientY,sh=dockEl.getBoundingClientRect().height;
+    try{grip.setPointerCapture(e.pointerId);}catch(err){}
+    function mv(ev){
+      var h=Math.max(90,Math.min(window.innerHeight*0.6,sh+sy-ev.clientY));
+      root.style.setProperty("--nwc-dock-h",Math.round(h)+"px");ev.preventDefault();
+    }
+    function up(){
+      grip.removeEventListener("pointermove",mv);grip.removeEventListener("pointerup",up);grip.removeEventListener("pointercancel",up);
+      try{localStorage.setItem("nwcDockH",Math.round(dockEl.getBoundingClientRect().height));}catch(err){}
+      syncDockState();
+    }
+    grip.addEventListener("pointermove",mv);grip.addEventListener("pointerup",up);grip.addEventListener("pointercancel",up);
+  });
+})();
 document.getElementById("nwc-palette-hide").onclick=hidePalette;
 dockBtn.onclick=function(){
   if(!pal.classList.contains("nwc-docked")){dockPalette();}
@@ -22934,6 +23086,105 @@ function refreshDetail(){
       if(n){new MutationObserver(refreshDetail).observe(n,{attributes:true,attributeFilter:["hidden"]});}
     });
   }
+})();
+/* Hotbar: 7 slots that mirror the live selection. Picking a tile fills the
+   active slot; tapping a slot re-selects its tile (and layer/brush), so the
+   active slot is always what the painter is painting with. */
+/* Mel mode badge: brain vs built-in guide. Polls /api/health only while the
+   dock is open and the tab is visible, so it costs nothing otherwise. */
+(function melMode(){
+  var dock=document.getElementById("melody-dock"),badge=document.getElementById("melody-mode");
+  if(!dock||!badge){return;}
+  function poll(){
+    if(dock.hidden||document.hidden){return;}
+    fetch("/api/health",{cache:"no-store"}).then(function(r){return r.json();}).then(function(h){
+      var brain=h&&h.mel_mode==="brain";
+      badge.textContent=brain?"\uD83E\uDDE0 brain":"\uD83D\uDCD6 guide";
+      badge.title=brain?"AI brain is answering":"Using the built-in guide (the brain retries when you ask again)";
+    }).catch(function(){});
+  }
+  new MutationObserver(poll).observe(dock,{attributes:true,attributeFilter:["hidden"]});
+  setInterval(poll,45000);
+  /* refresh right after each answer lands */
+  var log=document.getElementById("melody-log");
+  if(log){new MutationObserver(function(){setTimeout(poll,800);}).observe(log,{childList:true});}
+})();
+(function hotbar(){
+  var bar=document.getElementById("nwc-hotbar");if(!bar){return;}
+  var N=7,KEY="nwcHotbar",slots=[],active=0,i;
+  try{slots=JSON.parse(localStorage.getItem(KEY)||"[]");}catch(e){slots=[];}
+  if(!Array.isArray(slots)){slots=[];}
+  slots.length=N;
+  try{var a=+localStorage.getItem(KEY+"Active");if(a>=0&&a<N){active=a;}}catch(e){}
+  function save(){try{localStorage.setItem(KEY,JSON.stringify(slots));localStorage.setItem(KEY+"Active",active);}catch(e){}}
+  /* canvases don't survive cloneNode — copy their pixels across */
+  function cloneThumb(src){
+    var c=src.cloneNode(true),a=src.querySelectorAll("canvas"),b=c.querySelectorAll("canvas"),k;
+    for(k=0;k<a.length&&k<b.length;k++){try{b[k].getContext("2d").drawImage(a[k],0,0);}catch(e){}}
+    c.removeAttribute("id");c.classList.remove("sel","nwc-ptile");c.onclick=null;
+    return c;
+  }
+  var thumbs=[];
+  function render(){
+    var k,el,s;
+    for(k=0;k<N;k++){
+      el=bar.children[k];s=slots[k];
+      el.classList.toggle("on",k===active);
+      el.classList.toggle("filled",!!s);
+      el.innerHTML='<span class="nwc-hk">'+(k+1)+'</span>';
+      if(s&&thumbs[k]){el.appendChild(thumbs[k]);}
+      else if(s){var t=document.createElement("span");t.className="nwc-hl";t.textContent=s.name||s.tile;el.appendChild(t);}
+      el.title=s?("slot "+(k+1)+": "+(s.name||s.tile)+" — right-click to clear"):("slot "+(k+1)+" — empty, pick a tile to fill it");
+    }
+  }
+  function capture(){
+    if(typeof selTile==="undefined"||selTile===null){return;}
+    var sw=document.querySelector("#paint-strip .sw.sel");
+    var tile=(typeof palette!=="undefined"&&palette.find(function(t){return t.id===selTile;}))||null;
+    slots[active]={tile:selTile,layer:layer,tool:(typeof brushTool!=="undefined"?brushTool:null),name:tile&&tile.name?shortName(tile.name):String(selTile)};
+    thumbs[active]=sw?cloneThumb(sw):null;
+    save();render();
+  }
+  function choose(k){
+    active=k;save();
+    var s=slots[k];
+    if(s){
+      var lb=document.querySelector('#layer-seg button[data-layer="'+s.layer+'"]');
+      if(lb&&typeof layer!=="undefined"&&layer!==s.layer){lb.click();}
+      selectTile(s.tile);
+      if(s.tool&&s.tool!=="erase"&&window.setBrushTool){try{window.setBrushTool(s.tool,true);}catch(e){}}
+      var sw=document.querySelector("#paint-strip .sw.sel");
+      if(sw){thumbs[k]=cloneThumb(sw);}
+    }
+    render();
+  }
+  for(i=0;i<N;i++){
+    (function(k){
+      var b=document.createElement("button");b.type="button";b.className="nwc-hslot";
+      b.onclick=function(){choose(k);};
+      b.oncontextmenu=function(e){e.preventDefault();slots[k]=null;thumbs[k]=null;save();render();};
+      bar.appendChild(b);
+    })(i);
+  }
+  if(typeof window.selectTile==="function"){
+    var orig=window.selectTile;
+    window.selectTile=function(id){var r=orig.apply(this,arguments);try{if(!(typeof scatterArming!=="undefined"&&scatterArming)){capture();}}catch(e){}return r;};
+  }
+  if(typeof window.setBrushTool==="function"){
+    var origBrush=window.setBrushTool;
+    window.setBrushTool=function(t){
+      var r=origBrush.apply(this,arguments);
+      /* the active slot remembers the brush: slot = tile + layer + brush */
+      if(slots[active]&&t&&t!=="erase"&&t!=="select"&&t!=="eyedropper"&&slots[active].tool!==t){slots[active].tool=t;save();render();}
+      return r;
+    };
+  }
+  document.addEventListener("keydown",function(e){
+    if(!document.body.classList.contains("docked")||e.ctrlKey||e.metaKey||e.altKey){return;}
+    var t=e.target&&e.target.tagName;if(t==="INPUT"||t==="TEXTAREA"||t==="SELECT"){return;}
+    if(e.key>="1"&&e.key<="7"){choose(+e.key-1);}
+  });
+  render();
 })();
 })();
 </script>

@@ -1737,6 +1737,30 @@ def _post_json(url, payload, key, timeout=_BRAIN_TIMEOUT):
         return json.load(resp)
 
 
+# Circuit breaker: after 3 straight failures a backend is skipped for 20s so
+# chat answers instantly from the built-in guide instead of making every
+# player wait on a dead brain. The next call after the pause probes again.
+_BREAKER = {}
+_BREAKER_LOCK = threading.Lock()
+
+
+def _breaker_open(label):
+    with _BREAKER_LOCK:
+        st = _BREAKER.get(label)
+        return bool(st and st["fails"] >= 3 and time.monotonic() < st["until"])
+
+
+def _breaker_note(label, ok):
+    with _BREAKER_LOCK:
+        st = _BREAKER.setdefault(label, {"fails": 0, "until": 0.0})
+        if ok:
+            st["fails"] = 0
+        else:
+            st["fails"] += 1
+            if st["fails"] >= 3:
+                st["until"] = time.monotonic() + 20
+
+
 def brain_chat(messages, tools=None):
     """-> (reply_text, tool_calls, backend_label). Raises RuntimeError if no brain."""
     started = time.monotonic()
@@ -1752,15 +1776,27 @@ def brain_chat(messages, tools=None):
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
-        try:
-            data = _post_json(url, payload, key)
-            msg = data["choices"][0]["message"]
-            _record_brain_call("success", started, label, model,
-                               fallback_used=index > 0)
-            return (msg.get("content") or "",
-                    msg.get("tool_calls") or [], label)
-        except Exception as exc:  # network, auth, bad payload — try next
-            last_error_type = type(exc).__name__[:60]
+        if _breaker_open(label):
+            last_error_type = "CircuitOpen"
+            continue
+        # One quick retry for transient connection blips (proxy restarting).
+        for attempt in (0, 1):
+            try:
+                data = _post_json(url, payload, key)
+                msg = data["choices"][0]["message"]
+                _breaker_note(label, True)
+                _record_brain_call("success", started, label, model,
+                                   fallback_used=index > 0)
+                return (msg.get("content") or "",
+                        msg.get("tool_calls") or [], label)
+            except Exception as exc:  # network, auth, bad payload — try next
+                last_error_type = type(exc).__name__[:60]
+                transient = isinstance(exc, (urllib.error.URLError, ConnectionError))
+                if attempt == 0 and transient and not isinstance(exc, urllib.error.HTTPError):
+                    time.sleep(0.6)
+                    continue
+                _breaker_note(label, False)
+                break
     _record_brain_call("failed", started, backs[0][0], backs[0][3],
                        error_type=last_error_type)
     # Do not include provider exception text: it can contain request details.
@@ -1996,7 +2032,8 @@ Rules you never break:
 # is injected into her context labeled as data — it can never override the
 # system prompt, the Charter, or Law 18 (research: treat tool results and
 # fetched content as hostile data).
-_WORLD_KEYS = {"w", "h", "sel", "tool", "budget", "npcs", "counts"}
+_WORLD_KEYS = {"w", "h", "sel", "tool", "budget", "npcs", "counts",
+               "tiles", "bounds", "patrols"}
 
 
 def _clean_world(world):
@@ -2051,6 +2088,40 @@ def _clean_world(world):
                 clean_npcs.append({"id": nid, "x": nx, "y": ny})
         if clean_npcs:
             out["npcs"] = clean_npcs
+    tl = world.get("tiles")
+    if isinstance(tl, list):
+        clean_t = []
+        for t in tl[:8]:
+            if not isinstance(t, dict):
+                continue
+            try:
+                clean_t.append({"id": re.sub(r"[^\w.\- ]", "", str(t.get("id", "")))[:32],
+                                "n": int(t.get("n", 0))})
+            except (TypeError, ValueError):
+                continue
+        if clean_t:
+            out["tiles"] = clean_t
+    bd = world.get("bounds")
+    if isinstance(bd, dict):
+        try:
+            b = {k: int(bd.get(k)) for k in ("x0", "y0", "x1", "y1")}
+            if all(0 <= b[k] < (w if k[0] == "x" else h) for k in b):
+                out["bounds"] = b
+        except (TypeError, ValueError):
+            pass
+    pt = world.get("patrols")
+    if isinstance(pt, list):
+        clean_p = []
+        for p in pt[:8]:
+            if not isinstance(p, dict):
+                continue
+            try:
+                clean_p.append({"stops": int(p.get("stops", 0)),
+                                "x": int(p.get("x", -1)), "y": int(p.get("y", -1))})
+            except (TypeError, ValueError):
+                continue
+        if clean_p:
+            out["patrols"] = clean_p
     return out or None
 
 
@@ -2072,6 +2143,15 @@ def _world_text(snap):
     if "npcs" in snap:
         lines.append("placed characters: " + ", ".join(
             f"#{n['id']} at {n['x']},{n['y']}" for n in snap["npcs"]))
+    if "tiles" in snap:
+        lines.append("most-used tiles: " + ", ".join(
+            f"{t['id']} x{t['n']}" for t in snap["tiles"]))
+    if "bounds" in snap:
+        b = snap["bounds"]
+        lines.append(f"painted area: {b['x0']},{b['y0']} to {b['x1']},{b['y1']}")
+    if "patrols" in snap:
+        lines.append("patrol routes: " + "; ".join(
+            f"{p['stops']} stops starting {p['x']},{p['y']}" for p in snap["patrols"]))
     return "\n".join(lines)
 
 

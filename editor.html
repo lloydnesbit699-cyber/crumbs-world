@@ -13336,6 +13336,11 @@ function openMelDock() {
   const dock = $("melody-dock");
   dock.hidden = false;
   MELODY.open = true;
+  // item 23: the parked spot is applied raw at load (placeMelDock) and
+  // clampMelDock no-ops while the dock is hidden — a spot parked on a wider
+  // screen, or before a rotation, would open off-view and every tap would
+  // just toggle an invisible dock. Now that it's visible, pull it back in.
+  clampMelDock();
   melTtsUnlock();  // v5.29.1: real tap — prime her voice (iOS needs this first)
   // v5.29.1: on touch screens don't yank the keyboard up — the tap already
   // opened the panel, and iOS can shove a bottom-fixed panel behind the keyboard
@@ -18307,6 +18312,10 @@ function melDockDragInit() {
 window.addEventListener("resize", () => { try { clampMelDock(); } catch (_) {} });
   $("melody-fab").addEventListener("pointerdown", e => {
     e.preventDefault();
+    melFabMoved = false;  // item 23: a new press is a new gesture. The flag
+    // exists to eat the click that follows THIS gesture's drag — if that
+    // click never arrives (a browser may suppress click after real movement),
+    // a stale flag must not survive to eat the next tap instead.
     const fab = $("melody-fab");
     try { fab.setPointerCapture(e.pointerId); } catch (_) {}
     const sx = e.clientX, sy = e.clientY;

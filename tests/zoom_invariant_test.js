@@ -120,8 +120,9 @@ check("hero anchors at the drawn (gliding) position * tilePx",
   /const hx = _hd\.x \* tilePx, hy = _hd\.y \* tilePx/.test(html));
 check("hero draw position comes from heroDrawPos (the glide)",
   /const _hd = heroDrawPos\(performance\.now\(\)\)/.test(html));
-check("hero sprite keeps build size relative to tilePx",
-  /const _hw = tilePx \* playHeroSize, _hh = tilePx \* playHeroSize/.test(html));
+check("hero sprite keeps build size relative to tilePx (via heroDrawScale, §16.3 Stage 7)",
+  /const _hsz = heroDrawScale\(pcTid\);[\s\S]{0,80}const _hw = tilePx \* _hsz, _hh = tilePx \* _hsz/.test(html) &&
+  /function heroDrawScale\(tid\) \{\s*if \(playHeroSize && playHeroSize !== 1\) return playHeroSize/.test(html));
 
 console.log("== v5.51.2 page-zoom hint (stub window) ==");
 const pzDriver = `

@@ -51,7 +51,7 @@ check("lens work is attached to render()", /paintLens\(\);\s*\/\/ v6\.1/.test(ht
 check("render queue remains the only lens scheduler", !/setInterval|setTimeout|requestAnimationFrame/.test(paint));
 check("lens failure is isolated from the main renderer", /catch \(err\)[\s\S]*worldLens\.on = false[\s\S]*lens unavailable/.test(paint));
 check("lens detail is fixed at 20px in v1", /worldLens\.px = 20; \/\/ fixed readable detail in v1/.test(html));
-check("hero renders at its selected size in the lens", /drawPerson\(hero\.x, hero\.y,[\s\S]*playHeroSize/.test(paint));
+check("hero renders at its selected size in the lens (via heroDrawScale, §16.3 Stage 7)", /drawPerson\(hero\.x, hero\.y,[\s\S]*?heroDrawScale\(pcId\)/.test(paint));
 check("lens position and size persist per device", /crumbs_world_lens/.test(html) && /localStorage\.setItem\(WORLD_LENS_PREF_KEY/.test(html));
 check("build focus follows hero/selection, never the pointer (§17 item 15)", !/worldLens\.pointer/.test(html) && /function updateWorldLensFocus/.test(html));
 check("lens passes Ctrl-wheel through to the main zoom handler", /panel\.addEventListener\("wheel", onCanvasWheel/.test(html));

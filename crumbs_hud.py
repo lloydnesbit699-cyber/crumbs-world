@@ -159,7 +159,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "6.4.7"
+APP_VERSION = "6.4.8"
 # v5.62: mobile launcher versions. The Android/iOS wrappers check
 # /api/launcher-version on every launch and self-update when these bump.
 # Set CRUMBS_LAUNCHER_APK_URL to the public URL of crumbs-world-launcher.apk

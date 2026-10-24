@@ -7682,6 +7682,153 @@ function objSize(c) {
   const a = objA(c);
   return Math.min(3, Math.max(0.25, +a.size || 1));
 }
+// ---- Stage 7 (§16.3, Ball Room item 14): presence — believable scale ------
+// Lloyd: "creatures sized to what they are vs the hero (a spider =
+// spider-size; a giant spider = explicitly giant), and tall things get
+// vertical presence — a tree is a trunk + a canopy you can walk under,
+// with a soft shadow — not floor paint." Until now everything drew at
+// ~one tile regardless of what it is; this table is the single source of
+// truth for how big a kind IS, relative to the hero (hero = 1.0). A row
+// matches whole name tokens (the same token language the server's
+// taxonomy guesser speaks); adding a species later = adding a row.
+// FIRST match wins, so the table runs small-to-huge within each family.
+// An explicit per-instance build size (objA.size !== 1) still wins over
+// the table — the table is the DEFAULT for everything never hand-sized.
+const KIND_RULES = [
+  // tall naturals + vertical props — base on the ground, top in the canopy pass
+  { toks: ["tree", "oak", "pine", "palm", "willow", "birch", "maple", "cedar", "redwood", "baobab", "elm", "poplar"], s: 1.8, tall: true },
+  { toks: ["cactus"], s: 1.25, tall: true, spread: 1.0 },
+  { toks: ["pillar", "column", "obelisk", "totem"], s: 1.6, tall: true, spread: 1.05 },
+  { toks: ["statue"], s: 1.5, tall: true, spread: 1.05 },
+  // real-world critters (server ANIMAL_HINTS family)
+  { toks: ["ant"], s: 0.18 }, { toks: ["bee"], s: 0.2 }, { toks: ["butterfly"], s: 0.22 },
+  { toks: ["spider"], s: 0.3 }, { toks: ["mouse"], s: 0.3 },
+  { toks: ["frog", "toad"], s: 0.35 }, { toks: ["scorpion"], s: 0.35 },
+  { toks: ["rat"], s: 0.4 }, { toks: ["crab"], s: 0.4 }, { toks: ["bat"], s: 0.4 }, { toks: ["squirrel"], s: 0.4 },
+  { toks: ["fish"], s: 0.45 }, { toks: ["rabbit", "bunny"], s: 0.45 }, { toks: ["lizard"], s: 0.45 },
+  { toks: ["bird", "crow", "duck", "chicken", "parrot", "hawk", "owl"], s: 0.5 }, { toks: ["cat"], s: 0.5 },
+  { toks: ["snake", "serpent"], s: 0.55 }, { toks: ["turtle"], s: 0.55 },
+  { toks: ["dog"], s: 0.6 }, { toks: ["fox"], s: 0.6 }, { toks: ["penguin"], s: 0.6 },
+  { toks: ["pig"], s: 0.65 }, { toks: ["goat"], s: 0.7 },
+  { toks: ["hound"], s: 0.8 }, { toks: ["sheep"], s: 0.8 },
+  { toks: ["wolf"], s: 0.85 }, { toks: ["deer"], s: 0.95 },
+  { toks: ["cow"], s: 1.1 }, { toks: ["lion"], s: 1.1 }, { toks: ["horse"], s: 1.15 }, { toks: ["tiger"], s: 1.15 },
+  { toks: ["bear"], s: 1.25 }, { toks: ["shark"], s: 1.3 },
+  { toks: ["beast", "critter", "pet", "animal"], s: 0.7 },
+  // fantasy creatures (server CREATURE_HINTS family)
+  { toks: ["pixie", "fairy"], s: 0.4 }, { toks: ["imp"], s: 0.55 }, { toks: ["slime"], s: 0.6 },
+  { toks: ["goblin"], s: 0.75 },
+  { toks: ["skeleton", "zombie", "orc", "ghost", "wraith", "demon", "mermaid", "unicorn", "lich"], s: 1.0 },
+  { toks: ["monster"], s: 1.3 },
+  { toks: ["ogre"], s: 1.45 }, { toks: ["minotaur"], s: 1.4 }, { toks: ["yeti"], s: 1.4 },
+  { toks: ["troll"], s: 1.5 }, { toks: ["basilisk"], s: 1.5 }, { toks: ["griffin"], s: 1.5 },
+  { toks: ["golem"], s: 1.6 }, { toks: ["cyclops"], s: 1.6 }, { toks: ["phoenix"], s: 1.6 },
+  { toks: ["hydra"], s: 1.9 }, { toks: ["dragon"], s: 2.0 }, { toks: ["kraken"], s: 2.2 },
+  // ground nature that is not tall
+  { toks: ["bush", "shrub"], s: 0.7 }, { toks: ["mushroom"], s: 0.5 },
+  { toks: ["flower"], s: 0.45 }, { toks: ["boulder"], s: 1.1 }, { toks: ["rock"], s: 0.8 },
+];
+// fallback when no name token matches: the tile's own taxonomy home
+const KIND_SUB_FALLBACK = { animals: 0.6, creatures: 1.1, characters: 1.0, natural: 1.0 };
+const PRESENCE_MIN_PX = 10;    // below this tile size a trunk/canopy split is mush (WORLD/overview): kinds still scale, tall things draw whole
+const PRESENCE_TRUNK = 0.42;   // bottom fraction of a tall sprite that stays on the ground layer
+const PRESENCE_SPREAD = 1.45;  // default canopy width multiplier (a crown is wider than its trunk)
+const _kindCache = {};
+function kindDef(tid) {
+  if (tid == null) return null;
+  const d = tileDefById(tid);
+  if (d) return d;
+  if (typeof customById !== "undefined" && customById[tid]) return customById[tid];
+  if (typeof palette !== "undefined") { const p = palette.find(t => t.id === tid); if (p) return p; }
+  return null;
+}
+function kindInfo(tid) {
+  const def = kindDef(tid);
+  const name = def ? String(def.display || def.name || "") : "";
+  const key = tid + "|" + name;
+  if (_kindCache[key]) return _kindCache[key];
+  const toks = new Set(name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
+  let scale = null, tall = false, spread = PRESENCE_SPREAD;
+  for (const r of KIND_RULES) {
+    if (r.toks.some(t => toks.has(t))) { scale = r.s; tall = !!r.tall; if (r.spread) spread = r.spread; break; }
+  }
+  if (scale == null) {
+    const sub = def && def.subcategory ? String(def.subcategory).toLowerCase() : "";
+    if (sub && KIND_SUB_FALLBACK[sub] != null) scale = KIND_SUB_FALLBACK[sub];
+    else if (def && def.preset === "character") scale = 1.0;
+    else scale = 1.0;   // a person-shaped unknown stands hero-size until Lloyd's table says otherwise
+  }
+  // Lloyd's word: a GIANT spider is explicitly giant — the modifier is
+  // part of the kind, not a garnish. Tiny/baby shrink the same way.
+  if (toks.has("giant")) scale = Math.max(scale * 3, 1.5);
+  else if (toks.has("tiny")) scale *= 0.5;
+  else if (toks.has("baby") || toks.has("young")) scale *= 0.6;
+  scale = Math.min(3, Math.max(0.15, scale));
+  return (_kindCache[key] = { scale, tall, spread });
+}
+function kindScale(tid) { return kindInfo(tid).scale; }
+function kindTall(tid) {
+  // a kind the table calls tall, or a tile whose own height data says so
+  return kindInfo(tid).tall || tileHt(tid) >= 1;
+}
+// the draw size of a placed instance: an explicit build size (set on
+// purpose in the inspector) wins; otherwise the kind table speaks.
+function objDrawSize(c) {
+  const a = objA(c);
+  if (a.size && +a.size !== 1) return objSize(c);
+  return kindScale(objTid(c));
+}
+// walkers (patrol NPCs): their patrol size wins when it was set on
+// purpose; Melody's record is hers alone — her size path is untouched.
+function walkerDrawScale(n) {
+  if (n.melody) return n.size || 1.0;
+  return (n.size && n.size !== 1) ? n.size : kindScale(n.tile_id);
+}
+// standing folks (npcsReal): no size exists on their records — the kind
+// table is the only voice. Melody's standing figure is untouched.
+function folkDrawScale(n) {
+  return (n.melody || n.id === "melody_prime") ? 1 : kindScale(n.tile_id);
+}
+// the PC: his flagged build size wins when set on purpose; otherwise he
+// is the size of what he IS (a humanoid hero = the 1.0 reference).
+function heroDrawScale(tid) {
+  if (playHeroSize && playHeroSize !== 1) return playHeroSize;
+  return tid != null ? kindScale(tid) : 1;
+}
+// Stage 7: tall geometry — pure math, feet-anchored (bottom-center of the
+// tile) exactly like every other draw in the renderer, so the base, the
+// canopy and the shadow stay registered to the same anchor at any zoom.
+// syFrac/shFrac are SOURCE fractions of the sprite (top = canopy).
+function tallParts(px, py, tp, sz, spread) {
+  const dw = tp * sz, dh = tp * sz, bottom = py + tp;
+  const baseH = dh * PRESENCE_TRUNK, canH = dh - baseH;
+  const canW = dw * (spread || PRESENCE_SPREAD);
+  return {
+    shadow: { cx: px + tp / 2 + tp * 0.16, cy: bottom - tp * 0.05, rx: dw * 0.52, ry: tp * 0.16 },
+    base:   { dx: px + (tp - dw) / 2, dy: bottom - baseH, dw, dh: baseH, syFrac: 1 - PRESENCE_TRUNK, shFrac: PRESENCE_TRUNK },
+    canopy: { dx: px + tp / 2 - canW / 2, dy: bottom - baseH - canH, dw: canW, dh: canH, syFrac: 0, shFrac: 1 - PRESENCE_TRUNK },
+  };
+}
+function drawTallSlice(g, im, part) {
+  const iw = im.naturalWidth || im.width, ih = im.naturalHeight || im.height;
+  if (!iw || !ih) return;
+  g.drawImage(im, 0, ih * part.syFrac, iw, ih * part.shFrac, part.dx, part.dy, part.dw, part.dh);
+}
+function drawSoftShadow(g, cx, cy, rx, ry, alpha) {
+  // a soft blob: a radial gradient squashed into an ellipse, fading to
+  // nothing at the rim — not the hard 0.30 disc ordinary objects keep.
+  if (!(rx > 0) || !(ry > 0)) return;
+  const a = alpha == null ? 0.34 : alpha;
+  g.save();
+  g.translate(cx, cy); g.scale(1, ry / rx);
+  const gr = g.createRadialGradient(0, 0, 0, 0, 0, rx);
+  gr.addColorStop(0, "rgba(0,0,0," + a + ")");
+  gr.addColorStop(0.7, "rgba(0,0,0," + (a * 0.55).toFixed(3) + ")");
+  gr.addColorStop(1, "rgba(0,0,0,0)");
+  g.fillStyle = gr;
+  g.beginPath(); g.arc(0, 0, rx, 0, Math.PI * 2); g.fill();
+  g.restore();
+}
 let _heroesCache = null;
 function invalidateHeroes() { _heroesCache = null; }  // v5.41: call whenever the objects grid changes
 function flagHeroes() {
@@ -7943,7 +8090,7 @@ function paintLens() {
       for (let x = win.x0; x <= win.x1; x++) {
         const cell = row[x], id = objTid(cell); if (id == null) continue;
         if (playMode && walkingAnchors.has(x + "," + y)) continue;
-        const p = lensCellXY(x, y, win, ox, oy), size = objSize(cell), im = tileFrameImage(id);
+        const p = lensCellXY(x, y, win, ox, oy), size = objDrawSize(cell), im = tileFrameImage(id);
         if (im) {
           c.fillStyle = "rgba(0,0,0,.30)"; c.beginPath();
           c.ellipse(p.x + S / 2, p.y + S * .88, S * .34 * size, S * .13 * size, 0, 0, Math.PI * 2); c.fill();
@@ -7971,15 +8118,17 @@ function paintLens() {
     };
     if (playMode && hero) {
       const pcId = playHeroTid != null ? playHeroTid : primaryHeroTile();
-      drawPerson(hero.x, hero.y, pcId, "idle", "down", false, playHeroSize,
+      drawPerson(hero.x, hero.y, pcId, "idle", "down", false, heroDrawScale(pcId),
         pcId != null ? tileFrameImage(pcId) : null);
     }
     npcsReal.forEach(n => {
       if (playMode && walkingAnchors.has(n.x + "," + n.y)) return;
-      drawPerson(n.x, n.y, n.tile_id, "idle", "down", !!n.melody);
+      // Stage 7 (§16.3): folks read at their kind size in the lens too
+      // (folkDrawScale keeps Melody at her own 1).
+      drawPerson(n.x, n.y, n.tile_id, "idle", "down", !!n.melody, folkDrawScale(n));
     });
     if (playMode) npcs.forEach(n => drawPerson(n.x, n.y, n.tile_id,
-      "idle", rigDirFor(n), !!n.melody));
+      "idle", rigDirFor(n), !!n.melody, n.melody ? undefined : walkerDrawScale(n)));
     if (!playMode && stroke && stroke.cells) stroke.cells.forEach(cell => {
       if (cell.x < win.x0 || cell.y < win.y0 || cell.x > win.x1 || cell.y > win.y1) return;
       const p = lensCellXY(cell.x, cell.y, win, ox, oy);
@@ -8517,8 +8666,11 @@ function render() {
     const _hAct = heroActionFor(heroSwimming, heroInDeep, runMode, heroStepT ? performance.now() - heroStepT : -1);
     const him = pcTid != null ? rigTileImage(pcTid, _hAct, rigDirFromFacing(playFacing), performance.now()) : null;
     if (him) {
-      // v5.29: the PC keeps his build size — a mouse hero stays mouse-sized
-      const _hw = tilePx * playHeroSize, _hh = tilePx * playHeroSize;
+      // v5.29: the PC keeps his build size — a mouse hero stays mouse-sized.
+      // Stage 7 (§16.3): when no build size was set on purpose, the PC is
+      // the size of what he IS — heroDrawScale reads the kind table.
+      const _hsz = heroDrawScale(pcTid);
+      const _hw = tilePx * _hsz, _hh = tilePx * _hsz;
       drawFxTile(ctx, pcTid, him, hx + (tilePx - _hw) / 2, hy + tilePx - _hh, _hw, _hh);
     } else {
       const cx = _hd.x * tilePx + tilePx / 2, cy = _hd.y * tilePx + tilePx / 2, r = tilePx * 0.32;
@@ -8559,7 +8711,10 @@ function render() {
     if (n.x < _nv.x0 || n.x > _nv.x1 || n.y < _nv.y0 || n.y > _nv.y1) return;
     // v5.61.0: rig-aware — placed characters show their idle/down clip
     const im = rigTileImage(n.tile_id, "idle", "down"); if (!im) return;
-    drawFxTile(ctx, n.tile_id, im, n.x * tilePx, n.y * tilePx, tilePx, tilePx);
+    // Stage 7 (§16.3): a placed fellow is the size of what he IS — feet on
+    // his tile's ground line, like every other draw. Melody is exempt.
+    const _fsz = folkDrawScale(n), _fdw = tilePx * _fsz, _fdh = tilePx * _fsz;
+    drawFxTile(ctx, n.tile_id, im, n.x * tilePx + (tilePx - _fdw) / 2, n.y * tilePx + tilePx - _fdh, _fdw, _fdh);
     if (!_labels) return;
     ctx.font = `${Math.max(10, Math.round(tilePx * 0.26))}px sans-serif`;
     const w = ctx.measureText(n.name).width, nx = n.x * tilePx + tilePx / 2 - w / 2 - 3;
@@ -8624,6 +8779,7 @@ function render() {
   // hero flags, insert roles, interactive + flavor badges.
   const _fh = flagHeroes();   // hero-flagged instances, scan order
   const _pcKey = (_fh.length && playMode) ? _fh[0].x + "," + _fh[0].y : null;
+  const _canopies = [];   // Stage 7 (§16.3): tall instances met in scan order; their tops draw in the above-hero pass below
   const ov = visibleTiles();   // v5.41: cull off-screen cells
   for (let y = ov.y0; y <= ov.y1; y++) for (let x = ov.x0; x <= ov.x1; x++) {
     const ocell = objects[y][x];
@@ -8635,18 +8791,31 @@ function render() {
       else if (primaryHeroTile() != null && oid === primaryHeroTile()) continue;  // v5.29: designated hero walks himself too
       if (walkingAnchors.has(x + "," + y)) continue;   // v5.0: he's walking his patrol — the npc draws him, no twin at the anchor
     }
-    const sz = objSize(ocell);
+    const sz = objDrawSize(ocell);   // Stage 7 (§16.3): the kind's presence — an explicit build size still wins
     const oim = tileFrameImage(oid);   // v3.0: custom tiles work as objects too
     if (oim) {
-      ctx.fillStyle = "rgba(0,0,0,0.30)";   // v3.1: shadow under art objects
-      ctx.beginPath();
-      ctx.ellipse(x * tilePx + tilePx / 2, y * tilePx + tilePx * 0.88,
-                  tilePx * 0.34 * sz, tilePx * 0.13 * sz, 0, 0, Math.PI * 2);
-      ctx.fill();
-      // v5.29: scale about the cell's bottom-center — big things grow up,
-      // small things shrink to the ground
-      const _w = tilePx * sz, _h = tilePx * sz;
-      drawFxTile(ctx, oid, oim, x * tilePx + (tilePx - _w) / 2, y * tilePx + tilePx - _h, _w, _h);
+      // Stage 7 (§16.3): a tall kind draws in two parts — soft shadow +
+      // trunk here on the ground pass, canopy deferred to the above-hero
+      // pass after this loop. FX/animated tall tiles keep today's whole
+      // draw (their motion is one image; slicing it is a follow-up).
+      const _tall = tilePx >= PRESENCE_MIN_PX && kindTall(oid) &&
+                    !tileFx(oid) && !(customById[oid] && customById[oid].anim);
+      if (_tall) {
+        const P = tallParts(x * tilePx, y * tilePx, tilePx, sz, kindInfo(oid).spread);
+        drawSoftShadow(ctx, P.shadow.cx, P.shadow.cy, P.shadow.rx, P.shadow.ry);
+        drawTallSlice(ctx, oim, P.base);
+        _canopies.push({ im: oim, P });
+      } else {
+        ctx.fillStyle = "rgba(0,0,0,0.30)";   // v3.1: shadow under art objects
+        ctx.beginPath();
+        ctx.ellipse(x * tilePx + tilePx / 2, y * tilePx + tilePx * 0.88,
+                    tilePx * 0.34 * sz, tilePx * 0.13 * sz, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // v5.29: scale about the cell's bottom-center — big things grow up,
+        // small things shrink to the ground
+        const _w = tilePx * sz, _h = tilePx * sz;
+        drawFxTile(ctx, oid, oim, x * tilePx + (tilePx - _w) / 2, y * tilePx + tilePx - _h, _w, _h);
+      }
     } else {
       const cx = x * tilePx + tilePx / 2, cy = y * tilePx + tilePx / 2, r = tilePx * 0.28 * sz;
       ctx.fillStyle = colorOf[oid] || "#fff";
@@ -8678,6 +8847,13 @@ function render() {
     else if (oa.role === "mentor") ctx.fillText("🛡", _bx + tilePx * 0.82, _by + tilePx * 0.80);
     if (!oa.interactive) ctx.fillText("🚫", _bx + tilePx * 0.18, _by + tilePx * 0.80);
   }
+  // Stage 7 (§16.3): the above-hero pass — the canopies of tall things,
+  // collected in scan order by the objects loop, draw AFTER the hero and
+  // every walker, so the hero passes UNDER a tree instead of over its
+  // crown. Scan order keeps southern canopies overlapping northern ones;
+  // the lighting + sight washes below still fall over the canopy (it is
+  // in the world, not above it). Climbing is a mechanic, not this stage.
+  for (const c of _canopies) drawTallSlice(ctx, c.im, c.P.canopy);
   // v5.3: grid lines live in the base layer now — pre-rendered, not rebuilt.
   // v3.1: fog/lighting — darkness over the map with a pool of light around
   // the hero, so dungeons feel like dungeons.
@@ -13317,7 +13493,7 @@ function drawNpc(n) {
     return;
   }
   if (!im) return;
-  const sz = n.size || 1.0;   // v5.29: walkers keep their build size
+  const sz = walkerDrawScale(n);   // v5.29: walkers keep their build size — Stage 7 (§16.3): else the kind table sizes him
   const dw = tilePx * sz, dh = tilePx * sz;
   const dx = px + (tilePx - dw) / 2, dy = py + tilePx - dh;
   ctx.fillStyle = "rgba(0,0,0,0.30)";

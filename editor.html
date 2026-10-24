@@ -3726,6 +3726,35 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   #shell-root .sh-begin-card .sh-pc-check {
     margin-left: auto; color: #c9973f; font-size: 22px; font-weight: 700; flex: none;
   }
+  /* Stage 8: the starter-roster hero pick on Create step 2 */
+  #shell-root .sh-hero-h {
+    font-size: 17px; font-weight: 700; color: #f3ead6; margin: 14px 0 2px;
+  }
+  #shell-root .sh-hero-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 8px 0 12px;
+  }
+  #shell-root .sh-hero-card {
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 10px 4px 8px; background: #26241f; border: 3px solid #c9973f;
+    border-radius: 12px; box-shadow: 0 0 0 1px #c9973f; color: #f3ead6;
+    cursor: pointer; min-height: 96px;
+  }
+  #shell-root .sh-hero-card[aria-pressed="false"] { opacity: .72; }
+  #shell-root .sh-hero-card img {
+    width: 40px; height: 40px; image-rendering: pixelated; pointer-events: none;
+  }
+  #shell-root .sh-hero-card .sh-hero-dot {
+    width: 40px; height: 40px; border-radius: 50%; background: #ffd75f;
+    border: 2px solid #000; pointer-events: none;
+  }
+  #shell-root .sh-hero-card .sh-hero-ico { font-size: 34px; line-height: 40px; pointer-events: none; }
+  #shell-root .sh-hero-card b { font-size: 14px; text-align: center; }
+  #shell-root .sh-hero-card small { font-size: 12px; color: #cfc6b0; text-align: center; }
+  html.sh-light #shell-root .sh-hero-h { color: #2b2517; }
+  html.sh-light #shell-root .sh-hero-card {
+    background: #fffdf8; border-color: #8a6520; box-shadow: 0 0 0 1px #8a6520; color: #2b2517;
+  }
+  html.sh-light #shell-root .sh-hero-card small { color: #5c5344; }
   #shell-root .sh-world-line {
     font-size: 16px; color: #f3ead6; text-align: center; margin: 10px 0 14px;
   }
@@ -21368,6 +21397,36 @@ var _createReturnTo = "home"; // "home" | "worlds"
 var _createName = "";
 var _createBeginning = "blank";
 var _createEsc = null;
+// Stage 8 (Ball Room item 22, Lloyd's ruling): the starter roster. At
+// world creation the player picks one of these as their hero — the pick
+// becomes the world's hero_tiles[0] through the ordinary designation, so
+// the Stage 7 kind table sizes it (a spider hero is spider-sized).
+// Every row maps to a REAL character tile that exists in the shared
+// starter pack; species with no art yet (goat, gargoyle, giant spider,
+// gendered humans) are NOT faked in — add a row when the art lands.
+// starter:false rows are reserved (e.g. to sell later): they ship in the
+// data but are never offered at creation. Adding a creature = one row.
+const STARTER_ROSTER = [
+  { name: "Knight",        species: "Human",    tid: 70074, starter: true },
+  { name: "Wizard",        species: "Human",    tid: 70075, starter: true },
+  { name: "Angel Warrior", species: "Celestial", tid: 70076, starter: true },
+  { name: "Merfolk",       species: "Merfolk",  tid: 70081, starter: true },
+  { name: "Goblin",        species: "Goblin",   tid: 70068, starter: true },
+  { name: "Orc Warrior",   species: "Orc",      tid: 70069, starter: true },
+  { name: "Skeleton",      species: "Undead",   tid: 70073, starter: true },
+  { name: "Hydra",         species: "Hydra",    tid: 70071, starter: true },
+  { name: "Spider",        species: "Spider",   tid: 70064, starter: true },
+  { name: "Hound",         species: "Hound",    tid: 70063, starter: true },
+  { name: "Red Guard",     species: "Human",    tid: 70078, starter: false },
+  { name: "Treant",        species: "Treant",   tid: 70072, starter: false },
+];
+function starterRosterOffered() { return STARTER_ROSTER.filter(r => r.starter); }
+function starterRosterEntry(tid) {
+  for (const r of STARTER_ROSTER) if (r.tid === tid) return r;
+  return null;
+}
+var _createHero = null;      // Stage 8: roster/import tid picked at creation
+var _createHeroName = "";    // its display name (roster or imported tile)
 var _createSugg = ["My First World", "Pixel Hollow", "The Quiet Dungeon", "Ember Isles", "Mossy Depths"];
 var _createSuggIdx = 0;
 function shellCreateEscName(s) {
@@ -21440,6 +21499,7 @@ function shellShowCreate(returnTo) {
   window.CrumbsShell.state.destination = "create";
   _createName = _createSugg[_createSuggIdx % _createSugg.length];
   _createBeginning = "blank";
+  _createHero = null; _createHeroName = "";   // Stage 8: no hero pick yet
   shellShowCreateStep1();
 }
 function shellShowCreateStep2() {
@@ -21456,6 +21516,10 @@ function shellShowCreateStep2() {
     shellCreateBeginningCard("dungeon", "\uD83D\uDD25", "Ember Dungeon", "A shadowy maze of rooms and secrets.") +
     shellCreateBeginningCard("maze", "\uD83E\uDDED", "Stone Maze", "A winding stone labyrinth to get lost in.") +
     '</div>' +
+    '<h3 class="sh-hero-h">Choose your hero</h3>' +
+    '<p class="sh-sub">Optional \u2014 your pick walks this world as you, sized as what it is. No pick keeps the classic gold circle.</p>' +
+    '<div class="sh-hero-grid" role="group" aria-label="Choose your hero" id="sh-cr-heroes"></div>' +
+    '<input type="file" id="sh-cr-file" accept="image/*" hidden>' +
     '<div class="sh-err" id="sh-cr-err" role="alert" hidden>' +
       '<span class="sh-err-icon" aria-hidden="true">\u26A0</span><span></span></div>' +
     '<button class="sh-btn-primary" id="sh-cr-make">Create World</button>' +
@@ -21479,9 +21543,98 @@ function shellShowCreateStep2() {
       });
     };
   });
+  shellCreatePaintHeroes();
+  $("sh-cr-file").addEventListener("change", function () {
+    var f = this.files && this.files[0];
+    this.value = "";
+    if (f) shellCreateImportHero(f);
+  });
   $("sh-cr-make").onclick = shellCreateDo;
   document.addEventListener("keydown", shellCreateKeys);
   $("sh-cr-make").focus();
+}
+// Stage 8: paint the hero pick — the Classic default (no pick), one card
+// per OFFERED roster row (reserved rows never render), and the import
+// card. Selection lives in _createHero/_createHeroName, so a re-paint
+// (after an import lands) keeps the pick.
+function shellCreatePaintHeroes() {
+  var grid = $("sh-cr-heroes");
+  if (!grid) return;
+  grid.innerHTML = "";
+  var mk = function (opts) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "sh-hero-card";
+    b.setAttribute("aria-pressed", opts.selected ? "true" : "false");
+    b.setAttribute("aria-label", opts.label);
+    if (opts.img) {
+      var im = document.createElement("img");
+      im.src = opts.img; im.alt = "";
+      b.appendChild(im);
+    } else if (opts.dot) {
+      var d = document.createElement("span");
+      d.className = "sh-hero-dot"; d.setAttribute("aria-hidden", "true");
+      b.appendChild(d);
+    } else {
+      var s = document.createElement("span");
+      s.className = "sh-hero-ico"; s.setAttribute("aria-hidden", "true");
+      s.textContent = opts.icon || "";
+      b.appendChild(s);
+    }
+    var nm = document.createElement("b"); nm.textContent = opts.name; b.appendChild(nm);
+    var sp = document.createElement("small"); sp.textContent = opts.sub || ""; b.appendChild(sp);
+    b.onclick = opts.onclick;
+    grid.appendChild(b);
+  };
+  mk({ name: "Classic", sub: "Gold circle", dot: true, selected: _createHero == null,
+    label: "Classic hero, the gold circle" + (_createHero == null ? ", selected" : ""),
+    onclick: function () { _createHero = null; _createHeroName = ""; shellCreatePaintHeroes(); } });
+  starterRosterOffered().forEach(function (r) {
+    mk({ name: r.name, sub: r.species, img: "/api/thumb/" + r.tid + "?frame=0",
+      selected: _createHero === r.tid,
+      label: r.name + ", " + r.species + (_createHero === r.tid ? ", selected" : ""),
+      onclick: function () { _createHero = r.tid; _createHeroName = r.name; shellCreatePaintHeroes(); } });
+  });
+  var imported = _createHero != null && !starterRosterEntry(_createHero);
+  mk({ name: imported ? _createHeroName : "Import", sub: imported ? "Your own hero" : "Your own picture",
+    img: imported ? "/api/thumb/" + _createHero + "?frame=0" : null,
+    icon: imported ? null : "\uD83D\uDDBC\uFE0F",
+    selected: imported,
+    label: "Import your own hero picture" + (imported ? ", selected: " + _createHeroName : ""),
+    onclick: function () { var f = $("sh-cr-file"); if (f) f.click(); } });
+}
+// Stage 8: "import your own/main character" rides the editor's existing
+// custom-tile import (POST /api/custom-tiles, preset "character") — the
+// picture becomes a tile in the player's own vault and its id is the pick.
+// Any failure leaves the current pick untouched.
+async function shellCreateImportHero(file) {
+  var err = $("sh-cr-err");
+  var showErr = function (msg) {
+    if (!err) return;
+    err.hidden = false;
+    var span = err.querySelector("span:last-child");
+    if (span) span.textContent = msg;
+  };
+  try {
+    var dataUrl = await new Promise(function (res, rej) {
+      var rd = new FileReader();
+      rd.onload = function () { res(rd.result); };
+      rd.onerror = rej;
+      rd.readAsDataURL(file);
+    });
+    var nm = String(file.name || "My Hero").replace(/\.[a-z0-9]+$/i, "").slice(0, 24) || "My Hero";
+    var r = await shellApi("/api/custom-tiles", { name: nm, preset: "character", frame_ms: 400, frames: [dataUrl] });
+    if (r && r.ok && r.tile && r.tile.id != null) {
+      _createHero = r.tile.id; _createHeroName = r.tile.name || nm;
+      if (err) err.hidden = true;
+      shellCreatePaintHeroes();
+      shellToast("Your hero is ready: " + _createHeroName);
+    } else {
+      showErr("That picture couldn't become a hero \u2014 " + String((r && r.error) || "try another image.") + " Your pick is unchanged.");
+    }
+  } catch (e) {
+    showErr("That picture couldn't be read \u2014 your pick is unchanged.");
+  }
 }
 function shellCreateBeginningCard(id, icon, title, description) {
   var selected = id === _createBeginning;
@@ -21505,7 +21658,9 @@ async function shellCreateDo() {
     btn.focus();
   };
   try {
-    var r = await shellApi("/api/maps/create", { name: _createName, width: 25, height: 15, beginning: _createBeginning });
+    var body = { name: _createName, width: 25, height: 15, beginning: _createBeginning };
+    if (_createHero != null) body.hero_tile = _createHero;   // Stage 8: roster/import pick
+    var r = await shellApi("/api/maps/create", body);
     if (r && r.ok && r.file) { shellShowCreateStep3(r.file); return; }
     var msg = String((r && r.error) || "Couldn't create your world.");
     fail(/name taken|already (exists|used)/i.test(msg)
@@ -21524,6 +21679,7 @@ function shellShowCreateStep3(file) {
     '<h2 class="sh-h2">Your world is ready.</h2>' +
     shellPreviewImg(file) +
     '<p class="sh-world-line">' + shellCreateEscName(_createName) + "</p>" +
+    (_createHero != null ? '<p class="sh-world-line">Your hero: ' + shellCreateEscName(_createHeroName) + "</p>" : "") +
     '<button class="sh-btn-primary" id="sh-cr-build">Start Building</button>' +
     '<button class="sh-btn-secondary" id="sh-cr-play">Play First</button>' +
     "</div></div></div></div>", "Your world is ready");

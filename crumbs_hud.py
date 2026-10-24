@@ -159,7 +159,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "6.4.8"
+APP_VERSION = "6.4.9"
 # v5.62: mobile launcher versions. The Android/iOS wrappers check
 # /api/launcher-version on every launch and self-update when these bump.
 # Set CRUMBS_LAUNCHER_APK_URL to the public URL of crumbs-world-launcher.apk
@@ -13025,6 +13025,12 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(beginning, str) or (beginning != "blank" and beginning not in starter_sources):
                 return self._send_json({"ok": False,
                                         "error": "unknown beginning"}, 400)
+            # Stage 8: optional starter-roster hero pick — sanitized by the
+            # same _valid_hero_list the /api/rules endpoint uses. A missing
+            # or invalid pick never fails creation: the world just starts
+            # heroless, exactly as before.
+            hero_pick = _valid_hero_list([body.get("hero_tile")])
+            hero_tile = hero_pick[0] if hero_pick else None
             if beginning != "blank":
                 source = starter_sources[beginning]
                 source_map = os.path.join(SCRIPT_DIR, "content", "maps", source + ".json")
@@ -13047,6 +13053,12 @@ class Handler(BaseHTTPRequestHandler):
                     meta.update({"kind": "overworld", "created": int(time.time()),
                                  "modified": int(time.time()), "description": ""})
                     starter_rules["meta"] = meta
+                    if hero_tile is not None:
+                        tweaks = starter_rules.get("tweaks")
+                        tweaks = dict(tweaks) if isinstance(tweaks, dict) else {}
+                        tweaks["hero_tiles"] = [hero_tile]
+                        tweaks["hero_tile"] = hero_tile
+                        starter_rules["tweaks"] = tweaks
                     with open(target_map, "x", encoding="utf-8") as f:
                         created_map = True
                         json.dump(starter_data, f)
@@ -13068,7 +13080,8 @@ class Handler(BaseHTTPRequestHandler):
                 _log_event(f"created map {name} from {beginning}")
                 return self._send_json({"ok": True, "file": name,
                                         "width": w, "height": h, "kind": "overworld",
-                                        "beginning": beginning})
+                                        "beginning": beginning,
+                                        "hero_tile": hero_tile})
             try:
                 # v5.61.0: Lloyd's call — starter maps default to 500x500.
                 # Big worlds from the first tap.
@@ -13086,9 +13099,13 @@ class Handler(BaseHTTPRequestHandler):
             if not blank.save(_vpath(name), schema=SCHEMA_VERSION):
                 return self._send_json({"ok": False,
                                         "error": "cannot write"}, 500)
+            blank_tweaks = dict(DEFAULT_RULES)
+            if hero_tile is not None:
+                blank_tweaks["hero_tiles"] = [hero_tile]
+                blank_tweaks["hero_tile"] = hero_tile
             try:
                 with open(_rules_path(name), "w") as f:
-                    json.dump(_stamp({"tweaks": dict(DEFAULT_RULES),
+                    json.dump(_stamp({"tweaks": blank_tweaks,
                                       "meta": {"kind": kind,
                                                "created": int(time.time()),
                                                "modified": int(time.time()),
@@ -13098,7 +13115,8 @@ class Handler(BaseHTTPRequestHandler):
                                         "error": "cannot write rules"}, 500)
             _log_event(f"created map {name} ({w}x{h}, {kind})")
             return self._send_json({"ok": True, "file": name,
-                                    "width": w, "height": h, "kind": kind})
+                                    "width": w, "height": h, "kind": kind,
+                                    "hero_tile": hero_tile})
 
         if path == "/api/maps/meta":
             # v5.6: author/description for a map (stored in its rules sidecar)

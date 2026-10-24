@@ -1414,6 +1414,7 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
   .melody-empty { color: #8d87a0; font-size: 12px; padding: 6px 2px; }
   #melody-missions { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; max-height: 30vh; overflow-y: auto; }
   #melody-tasks { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; max-height: 24vh; overflow-y: auto; }
+  #melody-locator { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; max-height: 24vh; overflow-y: auto; }
   #melody-task-details { width: 100%; margin: 4px 0; }
   .mrow { display: flex; align-items: center; gap: 6px; background: #221d33; border: 1px solid #4a4370;
     border-radius: 8px; padding: 6px 8px; }
@@ -4452,6 +4453,10 @@ window.CRUMBS_TESTER_SHELL = ("%%TESTER_SHELL%%" === "1");
     <button id="melody-design-build" class="widebtn" style="flex:0 0 auto">Build</button>
   </div>
   <div id="melody-design-status" class="melody-says" style="min-height:0"></div>
+  <!-- Stage 6 (§19): the build locator — commissioned builds only -->
+  <div class="tray-head" style="margin-top:12px">&#128205; Melody built <span class="tray-hint">builds you asked for — Go takes the view there</span></div>
+  <div id="melody-locator"></div>
+  <button id="melody-locator-clear" class="widebtn">Clear all pins</button>
 </div>
 
 <div id="sheet-items" class="sheet">
@@ -7909,7 +7914,7 @@ function paintLens() {
     if (!(cssW > 0 && cssH > 0)) return;
     const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
     const bw = Math.round(cssW * dpr), bh = Math.round(cssH * dpr);
-    const key = [lensWorldStamp, worldLens.fx, worldLens.fy, worldLens.px, bw, bh, dpr].join(":");
+    const key = [lensWorldStamp, locatorStamp, worldLens.fx, worldLens.fy, worldLens.px, bw, bh, dpr].join(":");
     if (key === worldLens.lastKey) return;
     if (cv.width !== bw || cv.height !== bh) { cv.width = bw; cv.height = bh; }
     const c = cv.getContext("2d");
@@ -7987,6 +7992,16 @@ function paintLens() {
         c.save(); c.strokeStyle = "#ffd75f"; c.lineWidth = Math.max(1, S * .08);
         c.setLineDash([S*.28, S*.16]); c.strokeRect(p.x+2, p.y+2, S-4, S-4); c.restore();
       }
+    }
+    // Stage 6 (§19): locator pins inside the lens window — the same violet
+    // diamond family as the main view, at lens scale.
+    for (const p of locatorForMap()) {
+      if (p.x < win.x0 || p.y < win.y0 || p.x > win.x1 || p.y > win.y1) continue;
+      const q = lensCellXY(p.x, p.y, win, ox, oy), hd = Math.max(2.5, S * 0.21);
+      c.save(); c.translate(q.x + S / 2, q.y + S / 2); c.rotate(Math.PI / 4);
+      c.fillStyle = "rgba(150,90,255,.95)"; c.strokeStyle = "#e9dcff"; c.lineWidth = 1;
+      c.fillRect(-hd, -hd, hd * 2, hd * 2); c.strokeRect(-hd, -hd, hd * 2, hd * 2);
+      c.restore();
     }
     worldLens.lastKey = key; worldLens.ready = true;
   } catch (err) {
@@ -8708,9 +8723,11 @@ function render() {
       if (!visGrid[y][x]) ctx.fillRect(x * tilePx, y * tilePx, tilePx, tilePx);
     }
   }
+  if (!rgActive) drawLocatorStage();   // Stage 6 (§19): the Build stage canvas carries the same pins, in map coords
   if (rgActive) ctx.setTransform(rgScale, 0, 0, rgScale, 0, 0);   // screen space for the sky + captions
   if (playMode && worldWeather !== "clear") drawWeather();  // v4.1: the sky performs
   if (rgActive && playFlight) drawFlightLines();
+  if (rgActive) drawLocatorMarkers();   // Stage 6 (§19): pins render at EVERY level — deliberately no shrine-style mode gate
   if (rgActive) drawShrines();
   if (rgActive) drawWaypointRing();
   updateCompass();
@@ -20273,6 +20290,10 @@ async function acceptSuggestion() {
     toast("that kind isn't paintable yet");
     return;
   }
+  // Stage 6 (§19): an accepted ghost is a commissioned build completing —
+  // pin where it landed so Lloyd can find it from any view level.
+  const pinAt = locatorSuggestionSpot(g);
+  if (pinAt) locatorAdd({ label: (g.label || "Melody build").replace(/\?\s*$/, ""), x: pinAt[0], y: pinAt[1], kind: "suggestion-" + g.kind, commissioned: true });
   const cleared = await declineSuggestion("accepted");
   toast(!cleared
     ? "painted — but the approval didn't clear, tap ✅ again to retry"
@@ -23518,6 +23539,7 @@ async function openMelody() {
   $("melody-new").hidden = false; melodyPick = null;
   await loadMelodyMissions();
   await loadMelodyTasks();
+  locatorPaint();   // Stage 6 (§19): the pin list lives in the workshop
   } catch (e) { toast("workshop hit a snag — " + (e && e.message || e)); }
 }
 async function loadMelodyTasks() {
@@ -23586,6 +23608,192 @@ $("melody-task-add").onclick = createMelodyTask;
 $("melody-task-title").onkeydown = e => {
   if (e.key === "Enter") createMelodyTask();
 };
+// ---- Stage 6 (§19): Melody-build locator -----------------------------------
+// Lloyd's ruling: when Melody finishes a build HE commissioned, he must be
+// able to locate it immediately from ANY view level. A pin is a temporary
+// EVENT marker — deliberately unlike the shrine fixtures (permanent,
+// WORLD-only): it renders at GROUND/FIRST/SURVEY/WORLD, in the Build stage
+// and both lenses, and offers a jump that takes the VIEW to it.
+// The split is load-bearing: COMMISSIONED builds only. Her autonomous
+// builds (Stage 9 roaming) are unmarked finds and must never be pinned —
+// every producer below passes commissioned explicitly, and locatorAdd
+// refuses anything else. Pins persist (localStorage, per map size) until
+// dismissed; they are NOT saved into the map file.
+// Feed note: today the producers are the client-side completion points —
+// the designer endpoints, the suggestion-accept path and mission apply —
+// because those are where the anchor coords already exist client-side.
+// Stage 9's server journal (every tool dispatch journaled with location)
+// is the future authoritative feed and can create pins through this same
+// locatorAdd (commissioned flag rides the journal entry).
+const LOCATOR_CAP = 12;          // pins kept; the oldest drops first
+const LOCATOR_MARKER_PX = 18;    // fixed screen size (cf. shrine badge 20) — a violet diamond, never the shrine treatment
+let locatorPins = [];            // newest first
+let locatorStamp = 0;            // bumped on any pin change; the small lens keys its repaint on this
+try {
+  const savedPins = JSON.parse(localStorage.getItem("crumbs_locator") || "[]");
+  if (Array.isArray(savedPins)) locatorPins = savedPins.filter(p => p && p.commissioned === true);
+} catch (e) { locatorPins = []; }
+function locatorSave() {
+  try { localStorage.setItem("crumbs_locator", JSON.stringify(locatorPins.slice(0, LOCATOR_CAP))); } catch (e) {}
+}
+function locatorForMap() {
+  return locatorPins.filter(p => p && p.w === W && p.h === H);
+}
+function locatorAdd(e) {
+  if (!e || e.commissioned !== true) return false;   // §19 split: no commission, no pin
+  const x = Math.round(+e.x), y = Math.round(+e.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !W || !H) return false;
+  locatorPins.unshift({
+    id: "loc" + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36),
+    label: String(e.label || "Melody build").slice(0, 80),
+    x, y, at: Date.now(), kind: String(e.kind || "build"),
+    commissioned: true, w: W, h: H,
+  });
+  if (locatorPins.length > LOCATOR_CAP) locatorPins.length = LOCATOR_CAP;
+  locatorSave(); locatorStamp++; locatorPaint();
+  if (typeof queueRender === "function") queueRender();
+  return true;
+}
+function locatorDismiss(id) {
+  const n = locatorPins.length;
+  locatorPins = locatorPins.filter(p => p.id !== id);
+  if (locatorPins.length === n) return;
+  locatorSave(); locatorStamp++; locatorPaint();
+  if (typeof queueRender === "function") queueRender();
+}
+function locatorClear() {
+  // clears the pins on THIS map (the list only ever shows this map's pins)
+  locatorPins = locatorPins.filter(p => !(p.w === W && p.h === H));
+  locatorSave(); locatorStamp++; locatorPaint();
+  if (typeof queueRender === "function") queueRender();
+}
+function locatorPaint() {
+  const box = document.getElementById("melody-locator");
+  if (!box) return;
+  const pins = locatorForMap();
+  box.textContent = "";
+  if (!pins.length) {
+    const d = document.createElement("div");
+    d.className = "melody-empty";
+    d.textContent = "no pins right now — when Melody finishes a build you asked for, it lands here";
+    box.appendChild(d);
+    return;
+  }
+  for (const p of pins) {
+    const row = document.createElement("div"); row.className = "mrow on";
+    const main = document.createElement("div"); main.className = "mrow-main";
+    const b = document.createElement("b"); b.textContent = "\u{1F4CD} " + p.label; main.appendChild(b);
+    const sub = document.createElement("span"); sub.className = "mrow-sub";
+    let s = "(" + p.x + ", " + p.y + ") · " +
+      new Date(p.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    if (playMode && hero) s += " · " + waypointInfo(hero, p).dist + " tiles away";
+    sub.textContent = s; main.appendChild(sub);
+    row.appendChild(main);
+    const go = document.createElement("button"); go.textContent = "Go";
+    go.title = "take the view to it";
+    go.onclick = () => locatorJump(p.id);
+    const x = document.createElement("button"); x.textContent = "✕";
+    x.title = "dismiss this pin";
+    x.onclick = () => locatorDismiss(p.id);
+    row.appendChild(go); row.appendChild(x);
+    box.appendChild(row);
+  }
+}
+function locatorJump(id) {
+  const p = locatorPins.find(q => q.id === id);
+  if (!p) return;
+  if (playRegionOn()) {
+    // Play: the hero NEVER teleports (travel is shrines-only) — the view
+    // pops up the ladder to WORLD so the pin is on screen, and the
+    // waypoint + compass (the sanctioned guidance shrines use) lead the
+    // walk. Flagged design fork, Stage 6.
+    playWaypoint = { x: p.x, y: p.y, locator: p.id };
+    playGoMode("world");
+    if (typeof skyPaint === "function") skyPaint();
+    queueRender();
+    toast("\u{1F4CD} " + p.label + " — waypoint set; follow the compass");
+    return;
+  }
+  if (lensRegionOn()) {
+    lensCam = lensClampCam({ x: p.x + 0.5, y: p.y + 0.5 }, W, H);
+  } else {
+    panX = (W / 2 - (p.x + 0.5)) * tilePx;
+    panY = (H / 2 - (p.y + 0.5)) * tilePx;
+    clampPan();
+  }
+  render();
+  toast("\u{1F4CD} " + p.label + " (" + p.x + ", " + p.y + ")");
+}
+// One diamond, two coordinate worlds: screen space (region views) and map
+// space (the Build stage). Violet diamond + white heart-dot — an event pin,
+// visually distinct from the round shrine badges on purpose.
+function locatorDiamond(cx, cy, s, lw) {
+  ctx.save();
+  ctx.translate(cx, cy); ctx.rotate(Math.PI / 4);
+  ctx.fillStyle = "rgba(120,60,220,.92)";
+  ctx.strokeStyle = "#e9dcff"; ctx.lineWidth = lw;
+  ctx.fillRect(-s * 0.36, -s * 0.36, s * 0.72, s * 0.72);
+  ctx.strokeRect(-s * 0.36, -s * 0.36, s * 0.72, s * 0.72);
+  ctx.restore();
+  ctx.fillStyle = "#fff";
+  ctx.beginPath(); ctx.arc(cx, cy, Math.max(1.4, s * 0.10), 0, Math.PI * 2); ctx.fill();
+}
+function drawLocatorMarkers() {
+  // Region views (Play GROUND/FIRST/SURVEY/WORLD + the full-screen lens):
+  // screen-space math mirrors drawShrines, but there is NO mode gate —
+  // §19 pins show at every level. Static marker: it does not pulse, so it
+  // needs no render-loop hook (the animated-but-still trap).
+  if (!rgActive) return;
+  const pins = locatorForMap();
+  if (!pins.length) return;
+  const k = rgScale;
+  ctx.save();
+  for (const p of pins) {
+    const px = (p.x + 0.5 - rgOx) * tilePx * k, py = (p.y + 0.5 - rgOy) * tilePx * k;
+    if (px < -30 || py < -30 || px > canvas.width + 30 || py > canvas.height + 30) continue;
+    locatorDiamond(px, py, LOCATOR_MARKER_PX * k, Math.max(1, 1.5 * k));
+    if (tilePx * k >= 26) {   // close up: ring the exact cell too
+      ctx.strokeStyle = "rgba(190,140,255,.85)"; ctx.lineWidth = 2 * k;
+      ctx.strokeRect(px - tilePx * k / 2 + 1, py - tilePx * k / 2 + 1, tilePx * k - 2, tilePx * k - 2);
+    }
+  }
+  ctx.restore();
+}
+function drawLocatorStage() {
+  // The Build stage canvas (non-region path): same pins in map coords.
+  const pins = locatorForMap();
+  if (!pins.length) return;
+  ctx.save();
+  for (const p of pins) {
+    locatorDiamond((p.x + 0.5) * tilePx, (p.y + 0.5) * tilePx,
+                   Math.max(10, tilePx * 0.62), Math.max(1, tilePx * 0.05));
+    ctx.strokeStyle = "rgba(190,140,255,.85)"; ctx.lineWidth = Math.max(1.5, tilePx * 0.05);
+    ctx.strokeRect(p.x * tilePx + 1, p.y * tilePx + 1, tilePx - 2, tilePx - 2);
+  }
+  ctx.restore();
+}
+function locatorCentroid(pts) {
+  let sx = 0, sy = 0;
+  for (const p of pts) { sx += Array.isArray(p) ? p[0] : p.x; sy += Array.isArray(p) ? p[1] : p.y; }
+  return [Math.round(sx / pts.length), Math.round(sy / pts.length)];
+}
+function locatorSuggestionSpot(g) {
+  // Where an accepted ghost actually landed — mirrors acceptSuggestion's
+  // own branches. animation_preset returns null on purpose: it retunes a
+  // tile TYPE's motion, so there is no single tile to pin.
+  if (!g) return null;
+  if (g.kind === "patrol_draft" && Array.isArray(g.anchor_xy)) return g.anchor_xy;
+  if (g.kind === "room_draft") {
+    const cells = suggestRoomCells(g);
+    if (cells.length) return locatorCentroid(cells);
+  }
+  if (g.kind === "wall_ring" && Array.isArray(g.cells) && g.cells.length)
+    return locatorCentroid(g.cells);
+  if (g.kind === "connect_patrols" && Array.isArray(g.points) && g.points.length)
+    return locatorCentroid(g.points);
+  return null;
+}
+
 // ---- v5.61: Melody's designer — keyword prompt to build -------------------
 // She was always meant to be a designer and player, not just a suggester.
 // v1 uses keyword matching; full NLP is out of scope.
@@ -23645,6 +23853,7 @@ $("melody-design-build").onclick = async () => {
       });
       if (!r.ok) throw new Error(r.error || "build failed");
       melodyDesignStatus(`Built ${roomStyle} (${r.placed} tiles).`);
+      locatorAdd({ label: roomStyle + " room", x: x + Math.floor(w / 2), y: y + Math.floor(h / 2), kind: "design-room", commissioned: true });   // Stage 6 (§19)
       await refresh();
       toast(`Melody built a ${roomStyle}`);
       return;
@@ -23663,6 +23872,7 @@ $("melody-design-build").onclick = async () => {
       });
       if (!r.ok) throw new Error(r.error || "populate failed");
       melodyDesignStatus(`Placed ${r.trees} trees, ${r.movers} movers.`);
+      locatorAdd({ label: "populated area", x: cx, y: cy, kind: "design-populate", commissioned: true });   // Stage 6 (§19)
       await refresh();
       toast("Melody populated the area");
       return;
@@ -23677,6 +23887,7 @@ $("melody-design-build").onclick = async () => {
 $("melody-design-prompt").onkeydown = e => {
   if (e.key === "Enter") $("melody-design-build").click();
 };
+$("melody-locator-clear").onclick = () => locatorClear();   // Stage 6 (§19)
 function diffLabel(n) {
   const d = melodyDiffs.find(d => d.n === n);
   return d ? `${d.label} — ${d.hazards} hazard patrol${d.hazards === 1 ? "" : "s"}` : "";
@@ -23859,6 +24070,12 @@ async function applyMission(id) {
   const r = await api("/api/missions/apply", { id });
   if (!r.ok) { toast(r.error || "build failed"); return; }
   melodySay(r.melody_says + (r.issues && r.issues.length ? " Problem: " + r.issues.join(" ") : ""));
+  // Stage 6 (§19): she just built this mission's flows around its first
+  // objective — pin it. (A hidden-cache-only mission exposes no anchor in
+  // the public copy by design; Stage 9's journal feed will cover those.)
+  const mObj = (r.mission && Array.isArray(r.mission.objectives))
+    ? r.mission.objectives.find(o => o && Number.isFinite(+o.x) && Number.isFinite(+o.y)) : null;
+  if (mObj) locatorAdd({ label: r.mission.name || "mission", x: +mObj.x, y: +mObj.y, kind: "mission", commissioned: true });
   await loadPatrols(); await loadMelodyMissions();
   render();
   } catch (e) { toast("build hit a snag — " + (e && e.message || e)); }

@@ -3,6 +3,10 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v6.4.10 — 2026-10-23
+
+**Hotfix: the Forgot buttons work in the public login.** On the shell (public) sign-in screen, **Forgot username? / Forgot password?** looked dead: they flipped the recovery pane inside the classic login overlay, which the shell deliberately keeps hidden — the click landed and nothing appeared. (In the classic overlay itself the same buttons worked, which is why it read as “broken in my instance.”) The shell buttons now cross the same bridge the 2FA fallback uses: the shell hides, the overlay opens on the recovery pane, and after a reset the Back button leads to sign-in, which routes back into the shell as usual. New suite recovery_bridge_test (11 checks) pins the bridge so the buttons can never silently die that way again.
+
 ## v6.4.9 — 2026-10-23
 
 **Stage 8: the starter roster.** New worlds are no longer born heroless. World creation gains a **“Choose your hero”** step: pick from ten starters with real art — Knight, Wizard, Angel Warrior, Merfolk, Goblin, Orc Warrior, Skeleton, Hydra, Spider, Hound — **import your own picture** as your character (through the editor's own image import), or keep the Classic gold-circle hero. The pick is stamped as the world's hero designation at creation, so it is the PC by the game's own rules, and Stage 7's sizes compose for free: a Spider hero is spider-sized (0.30), a Hydra hero is 1.9. Red Guard and Treant ship in the roster data as **reserved** — present in the schema, never offered. Honest gaps, flagged rather than faked: there is no giant-spider, goat, or gargoyle art in the game yet, and no gendered human tiles — those rows join the roster the day their art lands. A missing or invalid pick can never fail creation; existing worlds are untouched. Verified: stage8 suites 32/32 (client) + 48/48 (server); full JS suite green; Python suites green.

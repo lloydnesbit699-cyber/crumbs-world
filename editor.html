@@ -20732,8 +20732,8 @@ function shellShowAccount() {
   $("sh-tab-login").onclick = function () { shellAuthTab("login"); };
   $("sh-su-go").onclick = function () { shellSubmitAuth("signup"); };
   $("sh-login-go").onclick = function () { shellSubmitAuth("login"); };
-  $("sh-forgot-user").onclick = function () { openLoginRecovery("username"); };
-  $("sh-forgot-password").onclick = function () { openLoginRecovery("password"); };
+  $("sh-forgot-user").onclick = function () { shellOpenRecovery("username"); };
+  $("sh-forgot-password").onclick = function () { shellOpenRecovery("password"); };
   var enterSubmits = function (kind) {
     return function (e) { if (e.key === "Enter") { e.preventDefault(); shellSubmitAuth(kind); } };
   };
@@ -20835,6 +20835,23 @@ function shellShowClassicLogin(isNew) {
     shellAuthComplete(isNew);
   };
   $("login-overlay").classList.add("show");
+}
+// Recovery bridge: the shell's Forgot buttons reuse the classic overlay's
+// recovery pane, so they cross the same bridge as the 2FA fallback. Calling
+// openLoginRecovery directly flipped panes inside the HIDDEN overlay — the
+// buttons looked dead in the shell (public) login. After a reset, Back leads
+// to the classic sign-in; loginComplete() fires _loginResolve and routes
+// back into the shell flow.
+function shellOpenRecovery(kind) {
+  var root = document.getElementById("shell-root");
+  if (root) root.style.display = "none";
+  window._loginResolve = function () {
+    window._loginResolve = null;
+    $("login-overlay").classList.remove("show");
+    shellAuthComplete(false);
+  };
+  $("login-overlay").classList.add("show");
+  openLoginRecovery(kind);
 }
 function shellAuthComplete(isNew) {
   // ME was set by the existing loginComplete(); the shell only routes.

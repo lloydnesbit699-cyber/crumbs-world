@@ -159,7 +159,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "6.4.10"
+APP_VERSION = "6.4.11"
 # v5.62: mobile launcher versions. The Android/iOS wrappers check
 # /api/launcher-version on every launch and self-update when these bump.
 # Set CRUMBS_LAUNCHER_APK_URL to the public URL of crumbs-world-launcher.apk
@@ -13584,6 +13584,26 @@ class Handler(BaseHTTPRequestHandler):
                 src = str(body.get("src", ""))[:120]
                 line = body.get("line", "?")
                 print(f"[js] {msg} @ {src}:{line}")
+                # v6.4.11 telemetry: also append to a local Harley log so
+                # errors survive the terminal scroll and can be pushed to
+                # GitHub Issues later. Never fails the page.
+                try:
+                    import json as _json, hashlib as _hashlib, os as _os
+                    from datetime import datetime as _dt
+                    _rec = {"ts": _dt.utcnow().isoformat() + "Z",
+                            "version": APP_VERSION,
+                            "msg": msg, "src": src, "line": line,
+                            "col": body.get("col", 0),
+                            "stack": str(body.get("stack", ""))[:500],
+                            "player": str(body.get("player", ""))[:64],
+                            "world": str(body.get("world", ""))[:64]}
+                    _sig = (str(msg) + "|" + str(src) + "|" + str(line)).encode("utf-8", "ignore")
+                    _rec["signature"] = _hashlib.sha256(_sig).hexdigest()[:12]
+                    _os.makedirs("logs", exist_ok=True)
+                    with open("logs/client-errors.jsonl", "a", encoding="utf-8") as _f:
+                        _f.write(_json.dumps(_rec, ensure_ascii=False) + "\n")
+                except Exception:
+                    pass
             except Exception:
                 pass
             return self._send_json({"ok": True})

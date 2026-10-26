@@ -3,6 +3,10 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v6.4.11 — 2026-10-26
+
+**In-game error telemetry (Harley + GitHub, both).** Testers and future players no longer see error text on-page: non-owners get only a generic "Something went wrong — reported" line, with no message, file, line, or stack, while the owner still sees the full error. Every in-game error is posted to Harley and appended to `logs/client-errors.jsonl` with version, player, world, message, source, line, and a short signature hash, queued on the device and retried if Harley is unreachable, so a bad link never loses a report. A new pusher, `tools/client-error-pusher.py`, groups that log by signature and, once a GitHub token is set on Harley, opens or updates one GitHub Issue per signature with a sanitized body (no player names, no keys, no full stack) — Harley stays the source of truth, GitHub Issues are the phone notification channel. Dry-run is the default; live pushing needs the token and is not yet enabled.
+
 ## v6.4.10 — 2026-10-23
 
 **Hotfix: the Forgot buttons work in the public login.** On the shell (public) sign-in screen, **Forgot username? / Forgot password?** looked dead: they flipped the recovery pane inside the classic login overlay, which the shell deliberately keeps hidden — the click landed and nothing appeared. (In the classic overlay itself the same buttons worked, which is why it read as “broken in my instance.”) The shell buttons now cross the same bridge the 2FA fallback uses: the shell hides, the overlay opens on the recovery pane, and after a reset the Back button leads to sign-in, which routes back into the shell as usual. New suite recovery_bridge_test (11 checks) pins the bridge so the buttons can never silently die that way again.

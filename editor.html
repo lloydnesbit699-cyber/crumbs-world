@@ -5058,25 +5058,56 @@ if (WRITE_KEY && window.history && window.history.replaceState) {
   }
   function report(msg, src, line, col, stack) {
     if (isExtNoise(msg, stack)) return;   // v5.21.4: extension noise, not ours
-    // v5.50.3: the on-page panel now carries the first stack frames, so a
-    // phone screenshot identifies the throwing line — not just the message.
-    let at = "";
+    // v6.4.11 telemetry: owners still see the full error on-page.
+    // Non-owners see only a generic line, never a message, file, line,
+    // or stack. The full error always goes to Harley, queued locally
+    // if the server is unreachable, so it is never lost on a bad link.
+    let isOwner = false, player = "", world = "";
+    try { isOwner = !!(ME && ME.is_owner); } catch (_) { isOwner = false; }
     try {
-      at = String(stack || "").split("\n").slice(0, 3).join(" ")
-        .replace(/\s+/g, " ").slice(0, 160);
-    } catch (_) {}
-    show(String(msg).slice(0, 200) + " @ " + (src || "") + ":" + (line || "?") +
-      (at ? "\n" + at : ""));
-    try {
+      player = (ME && ME.username) ? String(ME.username) : "";
+      world = (ME && ME.world) ? String(ME.world) : "";
+    } catch (_) { player = ""; world = ""; }
+    if (isOwner) {
+      let at = "";
+      try {
+        at = String(stack || "").split("\n").slice(0, 3).join(" ")
+          .replace(/\s+/g, " ").slice(0, 160);
+      } catch (_) {}
+      show(String(msg).slice(0, 200) + " @ " + (src || "") + ":" + (line || "?") +
+        (at ? "\n" + at : ""));
+    } else {
+      show("Something went wrong \u2014 reported. (tap to hide)");
+    }
+    const payload = { msg: String(msg).slice(0, 300),
+      src: String(src || "").slice(0, 120), line: line || 0,
+      col: col || 0, stack: String(stack || "").slice(0, 500),
+      player: player, world: world };
+    function sendOne(p) {
       const headers = { "Content-Type": "application/json" };
       if (WRITE_KEY) headers["X-Crumbs-Key"] = WRITE_KEY;
-      fetch("/api/jslog", {
-        method: "POST", headers,
-        body: JSON.stringify({ msg: String(msg).slice(0, 300),
-          src: String(src || "").slice(0, 120), line: line || 0,
-          col: col || 0, stack: String(stack || "").slice(0, 500) })
-      }).catch(function () { /* server unreachable — on-page panel still shows it */ });
-    } catch (e) { /* sync failure — on-page panel still shows it */ }
+      return fetch("/api/jslog", { method: "POST", headers,
+        body: JSON.stringify(p) });
+    }
+    try {
+      let queued = [];
+      try { queued = JSON.parse(localStorage.getItem("crumbs-error-queue") || "[]"); } catch (_) { queued = []; }
+      if (!Array.isArray(queued)) queued = [];
+      const all = queued.concat([payload]).slice(-20);
+      sendOne(payload).then(function () {
+        // Flush any queued errors after the live one lands.
+        let rest = all.slice(0, -1);
+        let chain = Promise.resolve();
+        rest.forEach(function (p) { chain = chain.then(function () { return sendOne(p); }); });
+        chain.then(function () {
+          try { localStorage.removeItem("crumbs-error-queue"); } catch (_) {}
+        }).catch(function () {
+          try { localStorage.setItem("crumbs-error-queue", JSON.stringify(all)); } catch (_) {}
+        });
+      }).catch(function () {
+        try { localStorage.setItem("crumbs-error-queue", JSON.stringify(all)); } catch (_) {}
+      });
+    } catch (e) { /* telemetry must never break the page */ }
   }
   window.onerror = (msg, src, line, col, err) =>
     report(msg, src, line, col, err && err.stack);

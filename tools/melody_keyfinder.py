@@ -38,7 +38,7 @@ if os.name == "nt":  # Windows (Harley): same idea, local paths.
     SEARCH_PATHS = [
         # The owner keeps the credential in an extensionless file inside the
         # active Desktop checkout. Search contents, not the filename.
-        os.path.join(_windir, "OneDrive", "Desktop", "crumbs-world",
+        os.path.join(_windir, "Desktop", "crumbs-world",
                      "melody", "not_trash"),
         # The owner's exported key file has also lived directly in the
         # repo's melody/ folder (including this checkout's Vault location).

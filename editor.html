@@ -24766,9 +24766,16 @@ async function bugSubmit() {
   $("bug-err").textContent = "Sending…";
   try {
     var clipB64 = null;
+    var clipRendered = false;
+    var clipBytes = 0;
     if ($("bug-clip").checked && bugClipChunks.length) {
       var blob = new Blob(bugClipChunks.map(function (c) { return c.blob; }), { type: "video/webm" });
+      clipBytes = blob.size;
       if (blob.size <= 8 * 1024 * 1024) clipB64 = await bugBlobToB64(blob);
+      try {
+        var head = new Uint8Array(await blob.slice(0, 4).arrayBuffer());
+        clipRendered = blob.size > 0 && head.length === 4 && head[0] === 0x1A && head[1] === 0x45 && head[2] === 0xDF && head[3] === 0xA3;
+      } catch (e) { clipRendered = false; }
     }
     var meta = {
       version: "%%CRUMBS_VERSION%%",
@@ -24788,7 +24795,9 @@ async function bugSubmit() {
         improve: improve,
         priority: $("bug-priority").value,
         meta: meta,
-        clip_b64: clipB64
+        clip_b64: clipB64,
+        clip_rendered: clipRendered,
+        clip_bytes: clipBytes
       })
     });
     var j = await r.json();

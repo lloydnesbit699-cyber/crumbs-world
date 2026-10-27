@@ -3,6 +3,10 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v6.4.14 — 2026-10-27
+
+- Telemetry hardening: error records now carry a server-stamped player_id (session username, or "local" with no session) plus player_id_source, so records are attributable without trusting the page-supplied player name; the pusher still posts no player names or ids to GitHub. Feedback reports now carry clip_rendered, clip_bytes, and clip_sent: the export checks the clip for a real EBML header and size, and the server marks a clip sent only after the clip file is stored. A headerless clip is flagged by these fields, not fixed here; the header fix itself remains separate, unbuilt work.
+
 ## v6.4.13 — 2026-10-27
 
 - Guarded the Stage 6 locator call in render(): if drawLocatorStage is not yet defined (page still loading), render skips the locator pins instead of throwing and aborting the draw, which was dropping the zoom offset and snapping the view to the top-left (telemetry signature 228cc508baea, GitHub issue #4).

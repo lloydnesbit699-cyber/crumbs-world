@@ -159,7 +159,7 @@ except ImportError:
     RECOVERY_UNSAFE = "RECOVERY_UNSAFE"
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", 8778))  # v1.9: $PORT for cloud hosts
-APP_VERSION = "6.4.13"
+APP_VERSION = "6.4.14"
 # v5.62: mobile launcher versions. The Android/iOS wrappers check
 # /api/launcher-version on every launch and self-update when these bump.
 # Set CRUMBS_LAUNCHER_APK_URL to the public URL of crumbs-world-launcher.apk
@@ -10196,6 +10196,11 @@ class Handler(BaseHTTPRequestHandler):
                 priority = None
             meta = body.get("meta") if isinstance(body.get("meta"), dict) else {}
             clip_b64 = body.get("clip_b64") or ""
+            clip_rendered_claim = bool(body.get("clip_rendered"))
+            try:
+                clip_bytes_claim = int(body.get("clip_bytes") or 0)
+            except (TypeError, ValueError):
+                clip_bytes_claim = 0
             clip_bytes = b""
             if clip_b64:
                 try:
@@ -10230,6 +10235,9 @@ class Handler(BaseHTTPRequestHandler):
                     "priority": priority, "text": text, "context": context,
                     "keep": keep, "improve": improve,
                     "meta": meta, "has_clip": bool(clip_bytes),
+                    "clip_rendered": (clip_bytes[:4] == bytes((0x1A, 0x45, 0xDF, 0xA3)) if clip_bytes else clip_rendered_claim),
+                    "clip_bytes": len(clip_bytes) if clip_bytes else clip_bytes_claim,
+                    "clip_sent": False,
                     "clip_ext": clip_ext, "client_token": client_token,
                     "version": APP_VERSION, "owner_seen": False,
                     "replies": [], "player_seen": True,
@@ -10240,6 +10248,8 @@ class Handler(BaseHTTPRequestHandler):
                     with open(clip_path, "wb") as f:
                         f.write(clip_bytes)
                     _protect_private_file(clip_path)
+                    report["clip_sent"] = True
+                    _save_feedback_report(report)
                 # retention: prune reports older than 30 days (best effort)
                 try:
                     cutoff = time.time() - BUG_REPORT_RETENTION_DAYS * 86400
@@ -13590,13 +13600,16 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     import json as _json, hashlib as _hashlib, os as _os
                     from datetime import datetime as _dt
+                    _sid_user = self._session_user()
                     _rec = {"ts": _dt.utcnow().isoformat() + "Z",
                             "version": APP_VERSION,
                             "msg": msg, "src": src, "line": line,
                             "col": body.get("col", 0),
                             "stack": str(body.get("stack", ""))[:500],
                             "player": str(body.get("player", ""))[:64],
-                            "world": str(body.get("world", ""))[:64]}
+                            "world": str(body.get("world", ""))[:64],
+                            "player_id": _sid_user or "local",
+                            "player_id_source": "session" if _sid_user else "local"}
                     _sig = (str(msg) + "|" + str(src) + "|" + str(line)).encode("utf-8", "ignore")
                     _rec["signature"] = _hashlib.sha256(_sig).hexdigest()[:12]
                     _os.makedirs("logs", exist_ok=True)

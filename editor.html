@@ -8959,7 +8959,7 @@ function render() {
       if (!visGrid[y][x]) ctx.fillRect(x * tilePx, y * tilePx, tilePx, tilePx);
     }
   }
-  if (!rgActive) drawLocatorStage();   // Stage 6 (§19): the Build stage canvas carries the same pins, in map coords
+  if (!rgActive && typeof drawLocatorStage === "function") drawLocatorStage();   // Stage 6 (§19): the Build stage canvas carries the same pins, in map coords
   if (rgActive) ctx.setTransform(rgScale, 0, 0, rgScale, 0, 0);   // screen space for the sky + captions
   if (playMode && worldWeather !== "clear") drawWeather();  // v4.1: the sky performs
   if (rgActive && playFlight) drawFlightLines();

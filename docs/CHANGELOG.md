@@ -3,6 +3,10 @@
 All notable changes, newest first. Phone-verified means Lloyd ran it on
 his iPhone; anything else is verified on desktop/server only.
 
+## v6.4.13 — 2026-10-27
+
+- Guarded the Stage 6 locator call in render(): if drawLocatorStage is not yet defined (page still loading), render skips the locator pins instead of throwing and aborting the draw, which was dropping the zoom offset and snapping the view to the top-left (telemetry signature 228cc508baea, GitHub issue #4).
+
 ## v6.4.12 — 2026-10-27
 
 - Palette pill row moves to a horizontal bar across the bottom of the screen,
